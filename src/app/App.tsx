@@ -4,13 +4,11 @@ import {
   Menu, User, Home, Grid, Heart, ShoppingCart, Award, Leaf, Pizza, Soup, Sandwich, 
   Star, ChevronDown, Search, Mic, Briefcase, MapPin, ChevronLeft, CreditCard, 
   Settings, LogOut, ShoppingBag, Store, ChevronRight, Navigation, Plus, Minus,
-  X, AlertCircle, ArrowLeft, Trash2, Clock, CheckCircle, Ticket, Contact, Phone,
+  X, AlertCircle, ArrowLeft, ArrowRight, Trash2, Clock, CheckCircle, Ticket, Contact, Phone,
   Compass, Utensils, Calendar, Users, Smartphone, Pill, Fish, BookOpen, Gift, Dog, 
   Shirt, Coffee, Cake, Sparkles, Map
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
 import Slider from "react-slick";
 import "slick-carousel/slick/slick.css";
 import "slick-carousel/slick/slick-theme.css";
@@ -18,261 +16,18 @@ import { Toaster, toast } from "sonner";
 
 import homeIconBrand from "figma:asset/40920964cf6778c9bdd703d36bbe4d6f342b4705.png";
 
-// --- Utilities ---
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
-
-// --- Image Pools ---
-const IMAGE_POOLS: Record<string, string[]> = {
-  food: [
-    "https://images.unsplash.com/photo-1589778655375-3e622a9fc91c?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1565557623262-b51c2513a641?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1585937421612-70a008356f36?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1601050690597-df0568f70950?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1505253758473-96b7015fcd40?auto=format&fit=crop&w=800&q=80", 
-  ],
-  grocery: [
-    "https://images.unsplash.com/photo-1734076459124-308d638c5d92?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1583258292688-d0213dc5a3a8?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1604719312566-b7cb96634836?auto=format&fit=crop&w=800&q=80", 
-  ],
-  fashion: [
-    "https://images.unsplash.com/photo-1760287364328-e30221615f2e?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1445205170230-053b83016050?auto=format&fit=crop&w=800&q=80", 
-  ],
-  electronics: [
-    "https://images.unsplash.com/photo-1740803292814-13d2e35924c3?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1496181133206-80ce9b88a853?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1550009158-9ebf69173e03?auto=format&fit=crop&w=800&q=80", 
-  ],
-  pharmacy: [
-    "https://images.unsplash.com/photo-1742797357718-b339de52c89b?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1585435557343-3b092031a831?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1631549916768-4119b2e5f926?auto=format&fit=crop&w=800&q=80", 
-  ],
-  bakery: [
-    "https://images.unsplash.com/photo-1645597454210-c97f9701257a?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1555507036-ab1f4038808a?auto=format&fit=crop&w=800&q=80", 
-  ],
-  meat: [
-    "https://images.unsplash.com/photo-1648644719068-3d960312be2e?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1607623814075-e51df1bdc82f?auto=format&fit=crop&w=800&q=80", 
-  ],
-  stationery: [
-    "https://images.unsplash.com/photo-1591203930900-5cb0eec7cc30?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80", 
-  ],
-  home: [
-    "https://images.unsplash.com/photo-1669964173893-8495e760f154?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1583847268964-b28dc8f51f92?auto=format&fit=crop&w=800&q=80", 
-  ],
-  pet: [
-    "https://images.unsplash.com/photo-1565946802444-b5ac048a1e04?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1583337130417-3346a1be7dee?auto=format&fit=crop&w=800&q=80", 
-  ],
-  beauty: [
-    "https://images.unsplash.com/photo-1596462502278-27bfdd403348?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1571781926291-280553131573?auto=format&fit=crop&w=800&q=80", 
-  ],
-  restaurant_cover: [
-    "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=800&q=80", 
-    "https://images.unsplash.com/photo-1559339352-11d035aa65de?auto=format&fit=crop&w=800&q=80", 
-  ]
-};
-
-const getImage = (category: string, seed: number) => {
-  const pool = IMAGE_POOLS[category] || IMAGE_POOLS['food'];
-  return pool[seed % pool.length];
-};
-
-// --- Data Generators ---
-
-const INDIAN_CITIES = ["Chennai", "Bangalore", "Mumbai", "Delhi", "Hyderabad", "Pune"];
-const AREAS = ["Indiranagar", "Koramangala", "Jayanagar", "Whitefield", "HSR Layout", "Anna Nagar", "T. Nagar", "Velachery", "Bandra", "Andheri", "Connaught Place"];
-
-const STORE_CATEGORIES = [
-  { id: "grocery", name: "Grocery", sub: "Daily Needs", icon: ShoppingBag, color: "bg-green-100 text-green-700" },
-  { id: "fashion", name: "Fashion", sub: "Lifestyle", icon: Shirt, color: "bg-purple-100 text-purple-700" },
-  { id: "electronics", name: "Mobiles", sub: "Electronics", icon: Smartphone, color: "bg-blue-100 text-blue-700" },
-  { id: "pharmacy", name: "Pharmacy", sub: "Wellness", icon: Pill, color: "bg-teal-100 text-teal-700" },
-  { id: "bakery", name: "Bakery", sub: "Sweets", icon: Cake, color: "bg-orange-100 text-orange-700" },
-  { id: "meat", name: "Meat", sub: "Fresh", icon: Fish, color: "bg-red-100 text-red-700" },
-  { id: "stationery", name: "Books", sub: "Stationery", icon: BookOpen, color: "bg-yellow-100 text-yellow-700" },
-  { id: "home", name: "Home", sub: "Decor", icon: Gift, color: "bg-pink-100 text-pink-700" },
-  { id: "pet", name: "Pet Care", sub: "Supplies", icon: Dog, color: "bg-amber-100 text-amber-700" },
-  { id: "beauty", name: "Beauty", sub: "Personal", icon: Sparkles, color: "bg-rose-100 text-rose-700" },
-];
-
-const generateProducts = (category: string, count: number, startId: number) => {
-  const products = [];
-  
-  const packagedFood = ["Maggi Noodles", "Lays Chips", "Good Day Biscuits", "Kissan Jam", "Kelloggs Cornflakes", "Cadbury Dairy Milk", "Haldiram Bhujia", "Britannia Rusk"];
-  const beverages = ["Coca-Cola", "Tropicana Juice", "Bisleri Water", "Red Bull", "Amul Kool", "Maaza", "Sprite", "Thums Up"];
-  const packagedDairy = ["Amul Butter", "Amul Taaza Milk", "Yakult", "Modern Bread", "Amul Cheese Slices", "Milky Mist Paneer", "Nestle Curd"];
-  const personalCare = ["Dove Soap", "Colgate Toothpaste", "Dettol Handwash", "Nivea Cream", "Pantene Shampoo", "Gillette Foam", "Himalaya Face Wash"];
-  const household = ["Vim Bar", "Duracell AA", "Surf Excel", "Harpic", "Odonil", "Scotch Brite"];
-  const electronics = ["iPhone 15", "Samsung S24", "boAt Airdopes", "JBL Speaker", "OnePlus Nord", "Dell Laptop", "Logitech Mouse", "USB Cable", "Power Bank", "Smart Watch"];
-  
-  const freshVeg = ["Onions", "Tomatoes", "Potatoes", "Ladies Finger", "Green Chilies", "Carrots", "Cauliflower", "Spinach", "Capsicum"];
-  const freshFruit = ["Apples", "Grapes", "Watermelon", "Pomegranate", "Bananas", "Mangoes", "Papaya", "Oranges"];
-  const staples = ["Sona Masoori Rice", "Toor Dal", "Sugar", "Raw Peanuts", "Chana Dal", "Moong Dal", "Wheat Flour (Loose)"];
-  const meat = ["Chicken Curry Cut", "Mutton", "Rohu Fish", "Chicken Breast", "Prawns"];
-  const looseSweets = ["Mixed Mithai", "Motichoor Ladoo", "Fresh Paneer Block", "Kaju Katli", "Milk Cake", "Jalebi"];
-
-  let baseList: string[] = [];
-  let pricingType = 'unit'; 
-  let imgCategory = 'food';
-
-  if (category === "grocery") {
-      const r = Math.random();
-      if (r < 0.4) { baseList = [...packagedFood, ...beverages, ...packagedDairy, ...household]; pricingType = 'unit'; imgCategory = 'grocery'; }
-      else if (r < 0.6) { baseList = freshVeg; pricingType = 'weight'; imgCategory = 'grocery'; }
-      else if (r < 0.8) { baseList = freshFruit; pricingType = 'weight'; imgCategory = 'grocery'; }
-      else { baseList = staples; pricingType = 'weight'; imgCategory = 'grocery'; }
-  }
-  else if (category === "meat") { baseList = meat; pricingType = 'weight'; imgCategory = 'meat'; }
-  else if (category === "bakery") { 
-      if (Math.random() > 0.5) { baseList = ["Black Forest Cake", "Red Velvet Cake", "Croissant", "Pineapple Pastry"]; pricingType = 'unit'; imgCategory = 'bakery'; }
-      else { baseList = looseSweets; pricingType = 'weight'; imgCategory = 'food'; } 
-  }
-  else if (category === "electronics") { baseList = electronics; pricingType = 'unit'; imgCategory = 'electronics'; }
-  else if (category === "fashion") { baseList = ["Cotton Shirt", "Denim Jeans", "Kurta", "Saree", "T-Shirt", "Sneakers"]; pricingType = 'unit'; imgCategory = 'fashion'; }
-  else if (category === "pharmacy") { baseList = ["Dolo 650", "Crocin", "Vicks VapoRub", "Digene", "Vitamin C", "Thermometer", "Mask N95", "Sanitizer", "Band Aid"]; pricingType = 'unit'; imgCategory = 'pharmacy'; }
-  else if (category === "stationery") { baseList = ["Notebook", "Pen Pack", "Pencils", "A4 Paper", "Calculator", "Files"]; pricingType = 'unit'; imgCategory = 'stationery'; }
-  else if (category === "home") { baseList = ["Bed Sheet", "Cushion Cover", "Vase", "Wall Clock", "Curtains"]; pricingType = 'unit'; imgCategory = 'home'; }
-  else if (category === "pet") { baseList = ["Pedigree Dog Food", "Whiskas Cat Food", "Dog Chew", "Pet Shampoo"]; pricingType = 'unit'; imgCategory = 'pet'; }
-  else if (category === "beauty") { baseList = ["Lipstick", "Eyeliner", "Foundation", "Perfume", "Nail Polish"]; pricingType = 'unit'; imgCategory = 'beauty'; }
-  else {
-      baseList = ["Butter Chicken", "Paneer Tikka", "Biryani", "Naan", "Dosa"];
-      pricingType = 'unit';
-      imgCategory = 'food';
-  }
-
-  for (let i = 0; i < count; i++) {
-    if (category === "grocery") {
-        const r = Math.random();
-        if (r < 0.4) { baseList = [...packagedFood, ...beverages, ...packagedDairy, ...household]; pricingType = 'unit'; }
-        else if (r < 0.6) { baseList = freshVeg; pricingType = 'weight'; }
-        else if (r < 0.8) { baseList = freshFruit; pricingType = 'weight'; }
-        else { baseList = staples; pricingType = 'weight'; }
-    }
-
-    const baseName = baseList[Math.floor(Math.random() * baseList.length)];
-    const price = pricingType === 'weight' 
-        ? Math.floor(Math.random() * 200) + 40 
-        : Math.floor(Math.random() * 500) + 20;
-
-    const finalPrice = category === 'meat' ? price * 3 : price;
-
-    products.push({
-      id: startId + i,
-      name: `${baseName}`,
-      price: finalPrice,
-      category: category,
-      pricingType: pricingType, 
-      uom: pricingType === 'weight' ? 'per kg' : 'each',
-      image: getImage(imgCategory, startId + i),
-      description: pricingType === 'weight' 
-        ? `Fresh ${baseName.toLowerCase()}. Price shown is per kg.` 
-        : `Authentic ${baseName.toLowerCase()} sourced locally.`,
-      isFewLeft: Math.random() > 0.8
-    });
-  }
-  return products;
-};
-
-const RESTAURANTS = Array.from({ length: 25 }, (_, i) => {
-  const types = ["Fine Dining", "Cafe", "Dhaba", "Bistro", "Sweet Shop"];
-  const cuisines = ["North Indian", "South Indian", "Chinese", "Street Food", "Mughlai"];
-  const names = ["Spice Route", "Curry House", "Tandoor Tales", "Chai Point", "Dosa Plaza", "Punjabi Rasoi", "Urban Tadka", "Saffron Grill", "Olive Bistro", "Mainland China", "Empire", "Paradise Biryani", "Saravana Bhavan", "Cream Centre", "Haldiram's", "Bikanervala", "Chaayos", "Cafe Coffee Day", "Barbeque Nation", "Wow! Momo"];
-  
-  const name = `${names[i % names.length]} ${i + 1}`;
-  const area = AREAS[i % AREAS.length];
-  
-  return {
-    id: i + 1,
-    name: name,
-    type: types[i % types.length],
-    cuisine: cuisines[i % cuisines.length],
-    description: `Best ${cuisines[i % cuisines.length]} food in ${area}`,
-    image: getImage('restaurant_cover', i),
-    rating: (3.5 + Math.random() * 1.5).toFixed(1),
-    distance: `${(Math.random() * 5).toFixed(1)} km`,
-    address: `${Math.floor(Math.random() * 100)}, ${area} Main Road, ${INDIAN_CITIES[i % INDIAN_CITIES.length]}`,
-    branches: [`${area} (Main)`, `${AREAS[(i + 1) % AREAS.length]}`, `${AREAS[(i + 2) % AREAS.length]}`],
-    products: generateProducts("food", 40, 1000 + (i * 100))
-  };
-});
-
-const STORES = Array.from({ length: 50 }, (_, i) => {
-  const cat = STORE_CATEGORIES[i % STORE_CATEGORIES.length];
-  const names = ["Ratnadeep", "More Supermarket", "Reliance Digital", "Apollo Pharmacy", "Titan Eye", "FabIndia", "Vijaya Optics", "Sapna Book House", "Croma", "Lenskart", "Natures Basket", "Health & Glow"];
-  const area = AREAS[i % AREAS.length];
-
-  return {
-    id: 100 + i,
-    name: `${names[i % names.length]} - ${area}`,
-    category: cat.id,
-    description: `Your trusted ${cat.name} store in ${area}`,
-    image: getImage(cat.id, i), 
-    rating: (3.8 + Math.random() * 1.2).toFixed(1),
-    distance: `${(Math.random() * 8).toFixed(1)} km`,
-    address: `Shop No. ${i + 1}, ${area} Market, ${INDIAN_CITIES[i % INDIAN_CITIES.length]}`,
-    branches: [`${area}`],
-    products: generateProducts(cat.id, 50, 5000 + (i * 100))
-  };
-});
-
-const ALL_PRODUCTS = [
-    ...RESTAURANTS.flatMap(r => r.products.map(p => ({ ...p, storeId: r.id }))),
-    ...STORES.flatMap(s => s.products.map(p => ({ ...p, storeId: s.id })))
-];
-
-const LOCATIONS = [
-  { type: "Home", address: "103, Vimala Ramam Apts, Lakshmi Nagar, Chennai - 600041" },
-  { type: "Work", address: "Tech Park, Phase 2, OMR, Bangalore - 560100" }
-];
-
-const HERO_IMAGES = [
-  "https://images.unsplash.com/photo-1562178101-02e243762ffa?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxmcmVzaCUyMG9yZ2FuaWMlMjBncm9jZXJ5JTIwZm9vZCUyMGJhbm5lcnxlbnwxfHx8fDE3Njg2NTExODh8MA&ixlib=rb-4.1.0&q=80&w=1080",
-  "https://images.unsplash.com/photo-1748268263747-225c52414f81?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBzaG9wcGluZyUyMG1hbGwlMjByZXRhaWwlMjBiYW5uZXJ8ZW58MXx8fHwxNzY4NjUxMTg4fDA&ixlib=rb-4.1.0&q=80&w=1080",
-  "https://images.unsplash.com/photo-1578960281840-cb36759fb109?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxmaW5lJTIwZGluaW5nJTIwcmVzdGF1cmFudCUyMGZvb2QlMjBiYW5uZXJ8ZW58MXx8fHwxNzY4NjUxMTg4fDA&ixlib=rb-4.1.0&q=80&w=1080"
-];
-
-// --- Helpers for UOM Logic ---
-
-const formatQuantity = (qty: number, type: string) => {
-    if (type === 'weight') {
-        if (qty < 1000) return `${qty}g`;
-        return `${(qty / 1000).toFixed(1).replace('.0', '')}kg`;
-    }
-    return `${qty}`;
-}
-
-const calculateItemCost = (qty: number, price: number, type: string) => {
-    if (type === 'weight') {
-        return (qty / 1000) * price;
-    }
-    return qty * price;
-}
-
-const getIncrement = (type: string) => {
-    return type === 'weight' ? 250 : 1;
-}
+import { PickupView } from "@/app/components/PickupView";
+import { CategoryDetailView } from "@/app/components/CategoryDetailView";
+import { 
+    STORES, RESTAURANTS, HERO_IMAGES, STORE_CATEGORIES, ALL_PRODUCTS, LOCATIONS, OFFERS 
+} from "@/data";
+import { cn, formatQuantity, calculateItemCost, getIncrement } from "@/utils";
 
 // --- Main App Component ---
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("Home");
-  const [currentView, setCurrentView] = useState<"onboarding" | "login" | "otp" | "signup_details" | "location_permission" | "feed" | "explore" | "dining" | "profile" | "location" | "storefront" | "dining_menu" | "cart" | "checkout" | "dining_checkout" | "success" | "coupons" | "search">("onboarding");
+  const [currentView, setCurrentView] = useState<"onboarding" | "login" | "otp" | "signup_details" | "location_permission" | "feed" | "explore" | "pickup" | "dining" | "profile" | "location" | "storefront" | "dining_menu" | "cart" | "checkout" | "dining_checkout" | "success" | "coupons" | "search" | "category_detail">("onboarding");
   const [authDetails, setAuthDetails] = useState({ phone: "", otp: "", name: "", email: "" });
   const [selectedLocation, setSelectedLocation] = useState(LOCATIONS[0]);
   const [selectedStore, setSelectedStore] = useState<any>(RESTAURANTS[0]);
@@ -282,6 +37,7 @@ export default function App() {
   const [dineInCart, setDineInCart] = useState<Record<number, number>>({});
   const [appliedCoupon, setAppliedCoupon] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>("");
 
   const getProduct = (id: number) => ALL_PRODUCTS.find(p => p.id === id);
 
@@ -318,8 +74,13 @@ export default function App() {
     setActiveTab(tab);
     if (tab === "Cart") setCurrentView("cart");
     else if (tab === "Home") setCurrentView("feed");
-    else if (tab === "Explore") setCurrentView("explore");
+    else if (tab === "Pickup") setCurrentView("pickup");
     else if (tab === "Dining") setCurrentView("dining");
+  };
+
+  const handleSeeAllCategory = (categoryId: string) => {
+      setSelectedCategoryId(categoryId);
+      setCurrentView("category_detail");
   };
 
   const getCartSummary = (cartObj: Record<number, number>) => {
@@ -337,7 +98,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center font-sans text-[#262525]">
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center text-[#262525]">
       <Toaster position="top-center" />
       
       {/* Mobile Wrapper */}
@@ -411,14 +172,32 @@ export default function App() {
             />
           )}
 
-          {currentView === "explore" && (
-            <ExploreView 
-               key="explore"
+          {currentView === "pickup" && (
+            <PickupView 
+               key="pickup"
+               selectedLocation={selectedLocation}
+               onLocationClick={() => setCurrentView("location")}
+               onProfileClick={() => setCurrentView("profile")}
+               onStoreClick={handleOpenStore} 
+               onProductSourceClick={(product: any) => setSourcingProduct(product)}
                activeTab={activeTab}
                setActiveTab={handleTabChange}
-               onStoreClick={handleOpenStore}
+               cartSummary={getCartSummary(cart)}
+               onViewCart={() => setCurrentView("cart")}
+               onDiningClick={() => handleTabChange("Dining")}
                onSearch={handleSearch}
+               onSeeAllCategory={handleSeeAllCategory}
+               BottomNavComponent={BottomNavBar}
             />
+          )}
+
+          {currentView === "category_detail" && (
+              <CategoryDetailView 
+                 key="category_detail"
+                 categoryId={selectedCategoryId}
+                 onBack={() => setCurrentView("pickup")}
+                 onProductClick={(product: any) => setSourcingProduct(product)}
+              />
           )}
 
           {currentView === "search" && (
@@ -597,7 +376,7 @@ export default function App() {
 function BottomNavBar({ activeTab, setActiveTab }: { activeTab: string, setActiveTab: (t: string) => void }) {
   const tabs = [
     { name: "Home", icon: Home },
-    { name: "Explore", icon: Compass },
+    { name: "Pickup", icon: Store },
     { name: "Dining", icon: Utensils },
     { name: "Cart", icon: ShoppingCart }
   ];
@@ -653,19 +432,12 @@ function ViewCartBar({ summary, onClick, hasBottomNav = false, label = "View Car
   )
 }
 
-function FeedView({ selectedLocation, onLocationClick, onProfileClick, onStoreClick, onProductSourceClick, activeTab, setActiveTab, cartSummary, onViewCart, onDiningClick, onSearch }: any) {
+function FeedView({ selectedLocation, onLocationClick, onProfileClick, activeTab, setActiveTab, cartSummary, onViewCart, onSearch }: any) {
   const heroSettings = {
     dots: true, infinite: true, speed: 500, slidesToShow: 1, slidesToScroll: 1, autoplay: true, autoplaySpeed: 3000, arrows: false,
     customPaging: (i: number) => <div className="w-2 h-2 rounded-full bg-black/20 hover:bg-black transition-colors mt-4"></div>,
     appendDots: (dots: React.ReactNode) => <div style={{ bottom: "24px" }}><ul className="flex justify-center gap-2 m-0 p-0">{dots}</ul></div>
   };
-
-  const topSellers = useMemo(() => {
-     return STORES.slice(0, 8).map(store => {
-         const randomProduct = store.products[Math.floor(Math.random() * store.products.length)];
-         return { ...randomProduct, storeName: store.name };
-     });
-  }, []);
 
   return (
     <motion.div 
@@ -684,7 +456,7 @@ function FeedView({ selectedLocation, onLocationClick, onProfileClick, onStoreCl
               {selectedLocation.address}
             </p>
           </div>
-          <button onClick={onProfileClick} className="w-9 h-9 rounded-full bg-[#3d4149] flex items-center justify-center text-white shadow-sm hover:scale-105 transition-transform">
+          <button onClick={onProfileClick} className="w-9 h-9 rounded-xl bg-[#3d4149] flex items-center justify-center text-white shadow-sm hover:scale-105 transition-transform">
             <User className="w-5 h-5" />
           </button>
         </div>
@@ -709,112 +481,70 @@ function FeedView({ selectedLocation, onLocationClick, onProfileClick, onStoreCl
       <div className="flex-1 overflow-y-auto pb-32 no-scrollbar">
         <div className="h-4"></div>
         
+        <div className="px-6 mb-6">
+           {/* REDUCED HEIGHT: h-[300px] */}
+           <div className="grid grid-cols-2 gap-4 h-[300px]">
+              <div 
+                onClick={() => setActiveTab('Pickup')}
+                className="relative w-full h-full rounded-[30px] overflow-hidden cursor-pointer group border border-gray-100 shadow-sm"
+              >
+                 <img 
+                    src="https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=800&q=80" 
+                    className="w-full h-full object-cover grayscale contrast-125 group-hover:scale-105 transition-transform duration-700"
+                    alt="Pickup"
+                 />
+                 <div className="absolute inset-0 bg-black/40 group-hover:bg-black/50 transition-colors p-5 flex flex-col justify-end">
+                    <h2 className="text-3xl font-black text-white leading-none mb-1">Pickup</h2>
+                    <p className="text-xs text-white/90 font-medium">Groceries & Essentials</p>
+                    <div className="mt-4 w-10 h-10 rounded-full bg-white flex items-center justify-center">
+                       <ArrowRight className="w-5 h-5 text-black" />
+                    </div>
+                 </div>
+              </div>
+
+              <div 
+                onClick={() => setActiveTab('Dining')}
+                className="relative w-full h-full rounded-[30px] overflow-hidden cursor-pointer group border border-gray-100 shadow-sm"
+              >
+                 <img 
+                    src="https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=800&q=80" 
+                    className="w-full h-full object-cover grayscale contrast-125 group-hover:scale-105 transition-transform duration-700"
+                    alt="Dining"
+                 />
+                 <div className="absolute inset-0 bg-black/40 group-hover:bg-black/50 transition-colors p-5 flex flex-col justify-end">
+                    <h2 className="text-3xl font-black text-white leading-none mb-1">Dining</h2>
+                    <p className="text-xs text-white/90 font-medium">Book Tables & Pre-order</p>
+                    <div className="mt-4 w-10 h-10 rounded-full bg-white flex items-center justify-center">
+                       <ArrowRight className="w-5 h-5 text-black" />
+                    </div>
+                 </div>
+              </div>
+           </div>
+        </div>
+
         <div className="px-6 mb-8">
           <div className="relative w-full rounded-[30px] overflow-hidden shadow-sm bg-white border border-gray-100">
-            <div className="h-[360px] w-full">
+            <div className="h-[220px] w-full">
               <Slider {...heroSettings} className="hero-slider h-full">
                 {HERO_IMAGES.map((img, idx) => (
                   <div key={idx} className="outline-none h-full">
-                    <div className="h-[360px] w-full relative">
+                    <div className="h-[220px] w-full relative">
                         <img src={img} alt="Hero Banner" className="w-full h-full object-cover contrast-125 grayscale" />
+                        
+                        <div className="absolute top-6 left-6 px-3 py-1.5 bg-black/30 backdrop-blur-md rounded-xl border border-white/20">
+                          <span className="text-[10px] font-bold text-white tracking-wider uppercase">Featured</span>
+                        </div>
+
+                        <div className="absolute bottom-6 right-6">
+                           <button className="px-5 py-2.5 bg-white text-black font-bold text-xs rounded-xl shadow-lg hover:bg-gray-100 transition-colors flex items-center gap-2">
+                             Order Now <ChevronRight className="w-3 h-3" />
+                           </button>
+                        </div>
                     </div>
                   </div>
                 ))}
               </Slider>
             </div>
-          </div>
-        </div>
-
-        <div className="px-4 mb-8">
-          <div className="grid grid-cols-5 gap-y-6 gap-x-2">
-            {STORE_CATEGORIES.map((cat, i) => (
-              <div key={i} className="flex flex-col items-center gap-2 group cursor-pointer text-center">
-                <div className={cn(
-                  "w-14 h-14 rounded-[20px] flex items-center justify-center transition-all border border-gray-100 bg-white text-[#262525] shadow-sm group-hover:shadow-md group-hover:-translate-y-1"
-                )}>
-                  <cat.icon className="w-6 h-6" strokeWidth={1.5} />
-                </div>
-                <span className="text-[10px] font-semibold tracking-wide text-[#1c1b1f] leading-tight px-1">{cat.name}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="mb-8">
-           <div className="px-6 mb-4 flex justify-between items-end">
-              <h2 className="text-[20px] font-bold text-[#262525]">Top Sellers</h2>
-              <span className="text-xs font-bold text-gray-400">See All</span>
-           </div>
-           <div className="flex overflow-x-auto px-6 pb-6 gap-4 no-scrollbar snap-x">
-             {topSellers.map((item) => (
-                <div key={item.id} onClick={() => onProductSourceClick(item)} className="min-w-[140px] snap-start cursor-pointer group">
-                   <div className="h-[140px] w-full rounded-[20px] bg-white border border-gray-100 overflow-hidden mb-2 relative">
-                      <img src={item.image} className="w-full h-full object-cover mix-blend-multiply transition-transform duration-500 group-hover:scale-105" />
-                   </div>
-                   <h3 className="text-xs font-bold text-[#262525] leading-tight mb-0.5 line-clamp-2">{item.name}</h3>
-                   <p className="text-[10px] text-gray-400">Find Nearby</p>
-                </div>
-             ))}
-           </div>
-        </div>
-
-        <div className="px-6 mb-8">
-            <div 
-              onClick={onDiningClick}
-              className="w-full h-[180px] rounded-[30px] overflow-hidden relative cursor-pointer group"
-            >
-               <img 
-                 src="https://images.unsplash.com/photo-1559339352-11d035aa65de?auto=format&fit=crop&w=800&q=80" 
-                 className="w-full h-full object-cover grayscale contrast-125 group-hover:scale-105 transition-transform duration-700" 
-               />
-               <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent p-6 flex flex-col justify-end items-start text-white">
-                  <h3 className="text-2xl font-black mb-1">Reserve a Table</h3>
-                  <p className="text-sm font-medium opacity-90 mb-3">Skip the wait. Explore premium dining.</p>
-                  <button className="px-4 py-2 bg-white text-black rounded-lg text-xs font-bold">Explore Dining</button>
-               </div>
-            </div>
-        </div>
-
-        <div className="mb-8">
-          <div className="px-6 mb-4 flex justify-between items-end">
-             <h2 className="text-[20px] font-bold text-[#262525]">Stores Near You</h2>
-             <span className="text-xs font-bold text-gray-400">See All</span>
-          </div>
-          <div className="flex overflow-x-auto px-6 pb-6 gap-4 no-scrollbar snap-x">
-            {STORES.slice(0, 8).map((place) => (
-              <div key={place.id} onClick={() => onStoreClick(place)} className="min-w-[280px] snap-start cursor-pointer group">
-                <div className="h-[160px] w-full rounded-[25px] overflow-hidden mb-3 relative border border-gray-100">
-                  <img src={place.image} alt={place.name} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 contrast-125" />
-                  <div className="absolute top-3 right-3 bg-white px-2 py-1 rounded-lg text-[10px] font-bold shadow-sm flex items-center gap-1">
-                     <Star className="w-3 h-3 fill-black" /> {place.rating}
-                  </div>
-                </div>
-                <h3 className="text-[16px] font-bold text-[#262525]">{place.name}</h3>
-                <p className="text-sm font-light text-gray-500 line-clamp-1">{place.distance} • {place.address.split(',')[1]}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="mb-24">
-          <div className="px-6 mb-4 flex justify-between items-end">
-             <h2 className="text-[20px] font-bold text-[#262525]">New on PickAtStore</h2>
-             <span className="text-xs font-bold text-gray-400">Latest Additions</span>
-          </div>
-          <div className="flex overflow-x-auto px-6 pb-6 gap-4 no-scrollbar snap-x">
-             {STORES.slice(20, 26).map((store) => (
-                <div key={store.id} onClick={() => onStoreClick(store)} className="min-w-[160px] snap-start cursor-pointer">
-                   <div className="aspect-[3/4] w-full rounded-[25px] overflow-hidden mb-3 relative group">
-                      <img src={store.image} className="w-full h-full object-cover contrast-125 transition-transform duration-500 group-hover:scale-110 grayscale" />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60"></div>
-                      <div className="absolute bottom-4 left-4 text-white">
-                         <p className="text-[10px] font-bold bg-white/20 backdrop-blur px-2 py-1 rounded mb-2 inline-block">NEW</p>
-                      </div>
-                   </div>
-                   <h3 className="text-sm font-bold text-[#262525] leading-tight">{store.name}</h3>
-                   <p className="text-[10px] text-gray-400 mt-1">{store.category === 'fashion' ? 'Fashion' : 'Retail'}</p>
-                </div>
-             ))}
           </div>
         </div>
 
@@ -827,74 +557,6 @@ function FeedView({ selectedLocation, onLocationClick, onProfileClick, onStoreCl
       <BottomNavBar activeTab={activeTab} setActiveTab={setActiveTab} />
     </motion.div>
   );
-}
-
-function ExploreView({ activeTab, setActiveTab, onStoreClick, onSearch }: any) {
-  return (
-    <motion.div 
-      className="flex flex-col h-full bg-[#f8f8f8]"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-    >
-      <div className="px-6 pt-10 pb-4 bg-white sticky top-0 z-20 border-b border-gray-100">
-         <h1 className="text-2xl font-black text-[#262525] mb-4">Explore</h1>
-         <div className="relative w-full h-11 bg-gray-50 rounded-xl border border-gray-200 flex items-center px-4">
-            <Search className="w-4 h-4 text-gray-400" />
-            <input 
-              type="text" 
-              placeholder="Search categories, stores..." 
-              className="flex-1 ml-3 bg-transparent outline-none text-sm font-medium" 
-              onKeyDown={(e) => {
-                 if (e.key === 'Enter') {
-                    onSearch(e.currentTarget.value);
-                 }
-              }}
-            />
-         </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto pb-32 no-scrollbar p-6">
-         <div className="mb-8">
-            <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Shop By Category</h2>
-            <div className="grid grid-cols-2 gap-3">
-               {STORE_CATEGORIES.map((cat) => (
-                  <div key={cat.id} className="bg-white p-4 rounded-2xl border border-gray-100 flex items-start gap-3 cursor-pointer hover:shadow-md transition-all">
-                     <div className={cn("w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0", cat.color)}>
-                        <cat.icon className="w-5 h-5" />
-                     </div>
-                     <div>
-                       <span className="font-bold text-[#262525] text-sm block leading-tight">{cat.name}</span>
-                       <span className="text-[10px] text-gray-400 mt-1 block leading-tight">{cat.sub}</span>
-                     </div>
-                  </div>
-               ))}
-            </div>
-         </div>
-
-         <div>
-            <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Discover Stores</h2>
-            <div className="space-y-4">
-               {STORES.slice(0, 10).map((store) => (
-                  <div key={store.id} onClick={() => onStoreClick(store)} className="bg-white rounded-2xl p-3 border border-gray-100 flex items-center gap-4 cursor-pointer hover:bg-gray-50 transition-colors">
-                     <div className="w-20 h-20 rounded-xl overflow-hidden bg-gray-200 flex-shrink-0">
-                        <img src={store.image} className="w-full h-full object-cover grayscale contrast-125" alt={store.name} />
-                     </div>
-                     <div className="flex-1">
-                        <h3 className="font-bold text-[#262525]">{store.name}</h3>
-                        <p className="text-xs text-gray-500 mb-2 line-clamp-1">{store.description}</p>
-                        <div className="flex items-center gap-1 text-[10px] font-bold">
-                           <Star className="w-3 h-3 text-[#262525] fill-[#262525]" /> {store.rating} • {store.distance}
-                        </div>
-                     </div>
-                     <ChevronRight className="w-5 h-5 text-gray-300" />
-                  </div>
-               ))}
-            </div>
-         </div>
-      </div>
-
-      <BottomNavBar activeTab={activeTab} setActiveTab={setActiveTab} />
-    </motion.div>
-  )
 }
 
 function DiningView({ activeTab, setActiveTab, onPreOrder }: any) {
@@ -1120,12 +782,14 @@ function ProductSourceSheet({ product, onClose, onVisitStore }: any) {
     );
 }
 
+// ... Additional components maintained in App.tsx (DiningMenuView, DiningCheckoutView, etc.)
+// Re-implementing them below to ensure full functionality
+
 function DiningMenuView({ store, onBack, onProductClick, cart, addToCart, onProceed }: any) {
    const [activeCategory, setActiveCategory] = useState("Main Course");
    const categories = ["Recommended", "Starters", "Main Course", "Breads", "Desserts", "Beverages"];
    
    const products = store.products;
-   
    const cartTotal = Object.keys(cart).length; 
 
    return (
@@ -1133,78 +797,144 @@ function DiningMenuView({ store, onBack, onProductClick, cart, addToCart, onProc
        className="flex flex-col h-full bg-white z-40"
        initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 25, stiffness: 200 }}
      >
-       <div className="bg-white border-b border-gray-100 shadow-sm z-20">
-         <div className="px-6 pt-10 pb-4">
-           <div className="flex items-center justify-between mb-4">
-             <button onClick={onBack} className="p-2 -ml-2 rounded-full hover:bg-gray-100"><ArrowLeft className="w-6 h-6" /></button>
-             <div className="flex items-center gap-2 px-3 py-1 bg-gray-50 rounded-full border border-gray-100">
-                <Utensils className="w-3.5 h-3.5" />
-                <span className="text-xs font-bold">Dine-in Menu</span>
+       <div className="flex-1 overflow-y-auto no-scrollbar bg-[#f8f8f8]">
+          <div className="h-[250px] w-full relative">
+             <img src={store.image} className="w-full h-full object-cover" alt="Cover" />
+             <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
+             <button onClick={onBack} className="absolute top-6 left-6 w-10 h-10 bg-white/20 backdrop-blur-md rounded-xl flex items-center justify-center text-white z-10 border border-white/20 hover:bg-white/30 transition-colors">
+                <ArrowLeft className="w-5 h-5" />
+             </button>
+          </div>
+          
+          <div className="relative -mt-10 rounded-t-[30px] bg-[#f8f8f8] flex flex-col z-20 min-h-[calc(100%-240px)]">
+             <div className="bg-white px-6 pb-5 pt-12 relative rounded-t-[30px] shadow-sm z-20">
+                <div className="absolute -top-8 left-1/2 -translate-x-1/2 w-16 h-16 bg-white rounded-full p-1 shadow-md flex items-center justify-center">
+                    <div className="w-full h-full rounded-full bg-gray-50 flex items-center justify-center overflow-hidden">
+                       <img src={store.image} className="w-full h-full object-cover" alt="Logo" />
+                    </div>
+                </div>
+                
+                <button className="absolute -top-6 right-8 w-12 h-12 bg-[#262525] rounded-xl flex items-center justify-center shadow-lg text-white hover:bg-black transition-colors">
+                   <Heart className="w-5 h-5 fill-white" />
+                </button>
+                
+                <div className="text-center mb-6">
+                   <h1 className="text-2xl font-extrabold text-[#262525] mb-1">{store.name}</h1>
+                   <p className="text-sm text-gray-500">{store.address}</p>
+                </div>
+                
+                <div className="flex items-center justify-center gap-6 border-b border-dashed border-gray-100 pb-6 mb-0">
+                   <div className="flex items-center gap-1.5">
+                      <Star className="w-4 h-4 fill-[#262525] text-[#262525]" />
+                      <span className="text-xs font-bold text-[#262525]">{store.rating}</span>
+                   </div>
+                   <div className="w-px h-8 bg-gray-100" />
+                   <div className="flex items-center gap-1.5">
+                      <Clock className="w-4 h-4 text-[#262525]" />
+                      <span className="text-xs font-bold text-[#262525]">30 mins</span>
+                   </div>
+                   <div className="w-px h-8 bg-gray-100" />
+                   <div className="flex items-center gap-1.5">
+                      <Utensils className="w-4 h-4 text-[#262525]" />
+                      <span className="text-xs font-bold text-[#262525]">Dine-in</span>
+                   </div>
+                </div>
              </div>
-           </div>
-           
-           <h1 className="text-2xl font-extrabold text-[#262525] mb-1">{store.name}</h1>
-           <p className="text-sm text-gray-500 mb-4">Pre-order to have food ready upon arrival.</p>
- 
-           <div className="flex gap-4 overflow-x-auto no-scrollbar pb-2">
-             {categories.map(cat => (
-               <button 
-                 key={cat}
-                 onClick={() => setActiveCategory(cat)}
-                 className={cn(
-                   "px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-colors border",
-                   activeCategory === cat ? "bg-[#262525] text-white border-[#262525]" : "bg-white text-gray-500 border-gray-200"
-                 )}
-               >
-                 {cat}
-               </button>
-             ))}
-           </div>
-         </div>
-       </div>
- 
-       <div className="flex-1 overflow-y-auto bg-[#f8f8f8] p-4">
-         <div className="grid grid-cols-2 gap-4 pb-24">
-           {products.map((product: any) => {
-             const count = cart[product.id] || 0;
-             const increment = getIncrement(product.pricingType);
              
-             return (
-               <div key={product.id} className="bg-white rounded-2xl p-3 border border-gray-100 shadow-sm flex flex-col h-full">
-                 <div 
-                   className="relative aspect-square rounded-xl overflow-hidden mb-3 bg-gray-50 cursor-pointer"
-                   onClick={() => onProductClick(product)}
-                 >
-                   <img src={product.image} alt={product.name} className="w-full h-full object-cover mix-blend-multiply hover:scale-105 transition-transform duration-500" />
-                 </div>
-                 
-                 <div onClick={() => onProductClick(product)} className="cursor-pointer mb-3">
-                   <h3 className="text-sm font-bold text-[#262525] leading-tight mb-1">{product.name}</h3>
-                   <p className="text-sm font-medium text-gray-500">
-                     ₹{product.price} <span className="text-[10px] text-gray-400 font-normal">/{product.pricingType === 'weight' ? 'kg' : 'ea'}</span>
-                   </p>
-                 </div>
- 
-                 <div className="mt-auto">
-                   {count === 0 ? (
-                     <button 
-                       onClick={() => addToCart(product.id, increment)}
-                       className="w-full h-9 rounded-lg border border-gray-200 font-bold text-xs hover:bg-black hover:text-white hover:border-black transition-all"
-                     >
-                       ADD
-                     </button>
-                   ) : (
-                     <div className="w-full h-9 rounded-lg bg-[#262525] flex items-center justify-between px-2 text-white shadow-md">
-                       <button onClick={() => addToCart(product.id, -increment)} className="p-1"><Minus className="w-3 h-3" /></button>
-                       <span className="text-xs font-bold">{formatQuantity(count, product.pricingType)}</span>
-                       <button onClick={() => addToCart(product.id, increment)} className="p-1"><Plus className="w-3 h-3" /></button>
+             <div className="sticky top-0 z-50 bg-white px-6 pt-5 -mt-5 pb-4 shadow-sm">
+                <div className="space-y-4">
+                     <div className="relative w-full h-11 bg-gray-50 rounded-xl flex items-center px-4 border border-transparent focus-within:border-gray-200 focus-within:bg-white transition-all">
+                        <Search className="w-4 h-4 text-gray-400" />
+                        <input type="text" placeholder={`Search menu in ${store.name}`} className="flex-1 ml-3 bg-transparent outline-none text-sm font-medium" />
                      </div>
-                   )}
-                 </div>
-               </div>
-             );
-           })}
-         </div>
+                     <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                        {categories.map((cat) => (
+                           <button 
+                             key={cat}
+                             onClick={() => setActiveCategory(cat)}
+                             className={cn(
+                               "px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-colors border",
+                               activeCategory === cat ? "bg-[#262525] text-white border-[#262525]" : "bg-white text-gray-500 border-gray-200"
+                             )}
+                           >
+                             {cat}
+                           </button>
+                        ))}
+                     </div>
+                </div>
+             </div>
+ 
+             <div className="p-4 pb-32">
+                <div className="grid grid-cols-2 gap-4">
+                   {products.map((product: any) => {
+                     const count = cart[product.id] || 0;
+                     const increment = getIncrement(product.pricingType);
+                     
+                     return (
+                       <div key={product.id} className="bg-white rounded-2xl p-3 border border-gray-100 shadow-sm flex flex-col h-full relative">
+                         <div 
+                           className="relative aspect-square rounded-xl overflow-hidden mb-3 bg-gray-50 cursor-pointer group"
+                           onClick={() => onProductClick(product)}
+                         >
+                           <img src={product.image} alt={product.name} className="w-full h-full object-cover mix-blend-multiply group-hover:scale-105 transition-transform duration-500" />
+                           
+                           <div className="absolute top-2 left-2 flex flex-col gap-1 items-start">
+                               {product.isFewLeft && (
+                                 <div className="px-2 py-0.5 bg-red-50 text-red-600 text-[10px] font-bold rounded-lg border border-red-100 shadow-sm">
+                                   Few Left
+                                 </div>
+                               )}
+                               {product.isBestseller && (
+                                 <div className="px-2 py-0.5 bg-orange-50 text-orange-600 text-[10px] font-bold rounded-lg border border-orange-100 shadow-sm">
+                                   Bestseller
+                                 </div>
+                               )}
+                           </div>
+
+                            <div className="absolute bottom-2 left-2 px-1.5 py-0.5 bg-white/90 backdrop-blur-sm rounded-md shadow-sm flex items-center gap-1">
+                               <Star className="w-2.5 h-2.5 fill-black text-black" />
+                               <span className="text-[10px] font-bold">{product.rating}</span>
+                            </div>
+                         </div>
+                         
+                         <div onClick={() => onProductClick(product)} className="cursor-pointer mb-3">
+                           <h3 className="text-sm font-bold text-[#262525] leading-tight mb-1">{product.name}</h3>
+                           <p className="text-[10px] text-gray-400 line-clamp-2 mb-1.5 leading-snug h-[26px] overflow-hidden">{product.brief}</p>
+                           
+                           <div className="flex items-center gap-2">
+                               <p className="text-sm font-medium text-gray-500">
+                                  ₹{product.price} <span className="text-[10px] text-gray-400 font-normal">/{product.pricingType === 'weight' ? 'kg' : 'ea'}</span>
+                               </p>
+                               {product.discount > 0 && (
+                                   <span className="text-[10px] font-bold text-green-600 bg-green-50 px-1 rounded">
+                                       {product.discount}% OFF
+                                   </span>
+                               )}
+                           </div>
+                         </div>
+         
+                         <div className="mt-auto">
+                           {count === 0 ? (
+                             <button 
+                               onClick={() => addToCart(product.id, increment)}
+                               className="w-full h-9 rounded-lg border border-gray-200 font-bold text-xs hover:bg-black hover:text-white hover:border-black transition-all"
+                             >
+                               ADD
+                             </button>
+                           ) : (
+                             <div className="w-full h-9 rounded-lg bg-[#262525] flex items-center justify-between px-2 text-white shadow-md">
+                               <button onClick={() => addToCart(product.id, -increment)} className="p-1"><Minus className="w-3 h-3" /></button>
+                               <span className="text-xs font-bold">{formatQuantity(count, product.pricingType)}</span>
+                               <button onClick={() => addToCart(product.id, increment)} className="p-1"><Plus className="w-3 h-3" /></button>
+                             </div>
+                           )}
+                         </div>
+                       </div>
+                     );
+                   })}
+                </div>
+             </div>
+          </div>
        </div>
 
        {cartTotal > 0 && (
@@ -1221,6 +951,9 @@ function DiningMenuView({ store, onBack, onProductClick, cart, addToCart, onProc
      </motion.div>
    );
 }
+
+// ... Skipping repeating full code for StorefrontView, DiningCheckoutView, LocationView, CartView, CheckoutView, CouponsView, SuccessView, ProfileView, ProductDetailSheet, OnboardingView, LoginView, OtpView, SignupDetailsView, LocationPermissionView, SearchView to save space, but logically they should be here. 
+// I WILL WRITE THEM FULLY NOW TO ENSURE NO BREAKAGE.
 
 function DiningCheckoutView({ store, cart, onBack, onConfirm, getProduct }: any) {
     const items = Object.entries(cart).map(([id, qty]) => {
@@ -1384,105 +1117,189 @@ function StorefrontView({ store, onBack, onProductClick, cart, addToCart, cartSu
   const [activeCategory, setActiveCategory] = useState("All");
   
   const productCats = Array.from(new Set(store.products.map((p: any) => p.category)));
-  const categories = ["All", ...productCats];
   
-  const filteredProducts = activeCategory === "All" 
-    ? store.products 
-    : store.products.filter((p: any) => p.category === activeCategory);
+  const specialFilters = [
+      { id: "rated_4", label: "Rated 4.0+" },
+      { id: "offers", label: "On Offer" },
+      { id: "bestseller", label: "Bestseller" }
+  ];
+  
+  const categories = ["All", ...specialFilters.map(f => f.label), ...productCats];
+  
+  const filteredProducts = store.products.filter((p: any) => {
+      if (activeCategory === "All") return true;
+      if (activeCategory === "Rated 4.0+") return parseFloat(p.rating) >= 4.0;
+      if (activeCategory === "On Offer") return p.discount > 0;
+      if (activeCategory === "Bestseller") return p.isBestseller;
+      return p.category === activeCategory;
+  });
+
+  const offerSettings = {
+    dots: false, infinite: true, speed: 4000, slidesToShow: 2.2, slidesToScroll: 1, autoplay: true, arrows: false,
+    className: "center !mb-0", centerMode: false
+  };
 
   return (
     <motion.div 
-      className="flex flex-col h-full bg-white z-40"
+      className="h-full bg-white z-40 relative flex flex-col"
       initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 25, stiffness: 200 }}
     >
-      <div className="bg-white border-b border-gray-100 shadow-sm z-20">
-        <div className="px-6 pt-10 pb-4">
-          <div className="flex items-center justify-between mb-4">
-            <button onClick={onBack} className="p-2 -ml-2 rounded-full hover:bg-gray-100"><ArrowLeft className="w-6 h-6" /></button>
-            <div className="flex items-center gap-2 px-3 py-1 bg-gray-50 rounded-full border border-gray-100">
-               <Star className="w-3.5 h-3.5 fill-black text-black" />
-               <span className="text-xs font-bold">{store.rating}</span>
-            </div>
-          </div>
+      <div className="flex-1 overflow-y-auto no-scrollbar bg-[#f8f8f8] relative">
           
-          <h1 className="text-2xl font-extrabold text-[#262525] mb-1">{store.name}</h1>
-          <div className="flex items-center gap-2 text-sm text-gray-500 mb-4 cursor-pointer">
-            <span className="opacity-50">{store.distance}</span>
-            <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
-            <span className="font-medium text-[#262525] flex items-center gap-1">
-              {store.address.split(',')[1]} <ChevronDown className="w-3 h-3" />
-            </span>
+          <div className="relative w-full h-[280px]">
+             <img src={store.image} alt={store.name} className="w-full h-full object-cover" />
+             <div className="absolute inset-0 bg-black/10" />
+             
+             <button 
+                onClick={onBack} 
+                className="absolute top-10 left-6 w-10 h-10 bg-white/90 backdrop-blur-md rounded-xl flex items-center justify-center shadow-sm z-30 hover:bg-white transition-colors"
+             >
+                <ChevronLeft className="w-6 h-6 text-[#262525]" />
+             </button>
           </div>
 
-          <div className="relative w-full h-10 bg-gray-50 rounded-xl flex items-center px-4 mb-4 border border-transparent focus-within:border-gray-200 focus-within:bg-white transition-all">
-             <Search className="w-4 h-4 text-gray-400" />
-             <input type="text" placeholder={`Search inside ${store.name}`} className="flex-1 ml-3 bg-transparent outline-none text-sm font-medium" />
-          </div>
+          <div className="relative -mt-10 rounded-t-[30px] bg-[#f8f8f8] flex flex-col z-20 min-h-[calc(100%-240px)]">
+             
+             <div className="bg-white px-6 pb-5 pt-12 relative rounded-t-[30px] shadow-sm z-20">
+                <div className="absolute -top-8 left-1/2 -translate-x-1/2 w-16 h-16 bg-white rounded-full p-1 shadow-md flex items-center justify-center">
+                   <img src={store.image} alt="Logo" className="w-full h-full rounded-full object-cover" />
+                </div>
 
-          <div className="flex gap-4 overflow-x-auto no-scrollbar pb-2">
-            {categories.map((cat: any) => (
-              <button 
-                key={cat}
-                onClick={() => setActiveCategory(cat)}
-                className={cn(
-                  "px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-colors border",
-                  activeCategory === cat ? "bg-[#262525] text-white border-[#262525]" : "bg-white text-gray-500 border-gray-200"
-                )}
-              >
-                {cat.charAt(0).toUpperCase() + cat.slice(1)}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+                <button className="absolute -top-6 right-8 w-12 h-12 bg-[#262525] rounded-xl flex items-center justify-center shadow-lg text-white hover:bg-black transition-colors">
+                   <Heart className="w-5 h-5 fill-white" />
+                </button>
 
-      <div className="flex-1 overflow-y-auto bg-[#f8f8f8] p-4">
-        <div className="grid grid-cols-2 gap-4 pb-24">
-          {filteredProducts.map((product: any) => {
-            const count = cart[product.id] || 0;
-            const increment = getIncrement(product.pricingType);
-            
-            return (
-              <div key={product.id} className="bg-white rounded-2xl p-3 border border-gray-100 shadow-sm flex flex-col h-full">
-                <div 
-                  className="relative aspect-square rounded-xl overflow-hidden mb-3 bg-gray-50 cursor-pointer"
-                  onClick={() => onProductClick(product)}
-                >
-                  <img src={product.image} alt={product.name} className="w-full h-full object-cover mix-blend-multiply hover:scale-105 transition-transform duration-500" />
-                  {product.isFewLeft && (
-                    <div className="absolute top-2 left-2 px-2 py-0.5 bg-red-50 text-red-600 text-[10px] font-bold rounded-full border border-red-100">
-                      Few Left
+                <div className="text-center mb-6">
+                   <h1 className="text-2xl font-extrabold text-[#262525] mb-1">{store.name}</h1>
+                   <p className="text-sm text-gray-500">{store.address.split(',').slice(0, 2).join(',')}</p>
+                </div>
+
+                <div className="flex items-center justify-center gap-6 border-b border-dashed border-gray-100 pb-6 mb-6">
+                   <div className="flex items-center gap-1.5">
+                      <Star className="w-4 h-4 fill-[#262525] text-[#262525]" />
+                      <span className="text-xs font-bold text-[#262525]">{store.rating} <span className="font-normal text-gray-400">(1k+)</span></span>
+                   </div>
+                   <div className="w-px h-8 bg-gray-100" />
+                   <div className="flex items-center gap-1.5">
+                      <Clock className="w-4 h-4 text-[#262525]" />
+                      <span className="text-xs font-bold text-[#262525]">25 mins</span>
+                   </div>
+                   <div className="w-px h-8 bg-gray-100" />
+                   <div className="flex items-center gap-1.5">
+                      <ShoppingBag className="w-4 h-4 text-[#262525]" />
+                      <span className="text-xs font-bold text-[#262525]">Store Pickup</span>
+                   </div>
+                </div>
+
+                <div className="mb-0">
+                    <Slider {...offerSettings}>
+                        {OFFERS.map((offer) => (
+                            <div key={offer.id} className="px-1 outline-none">
+                                <div className={`h-[70px] rounded-xl ${offer.color} p-3 flex flex-col justify-center`}>
+                                    <h3 className="text-sm font-extrabold leading-none mb-1">{offer.title}</h3>
+                                    <p className="text-[10px] font-medium opacity-80 leading-tight">{offer.subtitle}</p>
+                                </div>
+                            </div>
+                        ))}
+                    </Slider>
+                </div>
+             </div>
+
+             <div className="sticky top-0 z-50 bg-white px-6 pt-5 -mt-5 pb-4 shadow-sm">
+                <div className="space-y-4">
+                    <div className="relative w-full h-11 bg-gray-50 rounded-xl flex items-center px-4 border border-transparent focus-within:border-gray-200 focus-within:bg-white transition-all">
+                       <Search className="w-4 h-4 text-gray-400" />
+                       <input type="text" placeholder={`Search inside ${store.name}`} className="flex-1 ml-3 bg-transparent outline-none text-sm font-medium" />
                     </div>
-                  )}
-                </div>
-                
-                <div onClick={() => onProductClick(product)} className="cursor-pointer mb-3">
-                  <h3 className="text-sm font-bold text-[#262525] leading-tight mb-1">{product.name}</h3>
-                  <p className="text-sm font-medium text-gray-500">
-                     ₹{product.price} <span className="text-[10px] text-gray-400 font-normal">/{product.pricingType === 'weight' ? 'kg' : 'ea'}</span>
-                  </p>
-                </div>
 
-                <div className="mt-auto">
-                  {count === 0 ? (
-                    <button 
-                      onClick={() => addToCart(product.id, increment)}
-                      className="w-full h-9 rounded-lg border border-gray-200 font-bold text-xs hover:bg-black hover:text-white hover:border-black transition-all"
-                    >
-                      ADD
-                    </button>
-                  ) : (
-                    <div className="w-full h-9 rounded-lg bg-[#262525] flex items-center justify-between px-2 text-white shadow-md">
-                      <button onClick={() => addToCart(product.id, -increment)} className="p-1"><Minus className="w-3 h-3" /></button>
-                      <span className="text-xs font-bold">{formatQuantity(count, product.pricingType)}</span>
-                      <button onClick={() => addToCart(product.id, increment)} className="p-1"><Plus className="w-3 h-3" /></button>
+                    <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                       {categories.map((cat: any) => (
+                          <button 
+                            key={cat}
+                            onClick={() => setActiveCategory(cat)}
+                            className={cn(
+                              "px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-colors border",
+                              activeCategory === cat ? "bg-[#262525] text-white border-[#262525]" : "bg-white text-gray-500 border-gray-200"
+                            )}
+                          >
+                            {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                          </button>
+                       ))}
                     </div>
-                  )}
                 </div>
-              </div>
-            );
-          })}
-        </div>
+             </div>
+
+             <div className="p-4 pb-32">
+                <div className="grid grid-cols-2 gap-4">
+                  {filteredProducts.map((product: any) => {
+                    const count = cart[product.id] || 0;
+                    const increment = getIncrement(product.pricingType);
+                    
+                    return (
+                      <div key={product.id} className="bg-white rounded-2xl p-3 border border-gray-100 shadow-sm flex flex-col h-full relative">
+                        <div 
+                          className="relative aspect-square rounded-xl overflow-hidden mb-3 bg-gray-50 cursor-pointer group"
+                          onClick={() => onProductClick(product)}
+                        >
+                          <img src={product.image} alt={product.name} className="w-full h-full object-cover mix-blend-multiply group-hover:scale-105 transition-transform duration-500" />
+                          
+                          <div className="absolute top-2 left-2 flex flex-col gap-1 items-start">
+                              {product.isFewLeft && (
+                                <div className="px-2 py-0.5 bg-red-50 text-red-600 text-[10px] font-bold rounded-lg border border-red-100 shadow-sm">
+                                  Few Left
+                                </div>
+                              )}
+                              {product.isBestseller && (
+                                <div className="px-2 py-0.5 bg-orange-50 text-orange-600 text-[10px] font-bold rounded-lg border border-orange-100 shadow-sm">
+                                  Bestseller
+                                </div>
+                              )}
+                          </div>
+
+                           <div className="absolute bottom-2 left-2 px-1.5 py-0.5 bg-white/90 backdrop-blur-sm rounded-md shadow-sm flex items-center gap-1">
+                              <Star className="w-2.5 h-2.5 fill-black text-black" />
+                              <span className="text-[10px] font-bold">{product.rating}</span>
+                           </div>
+                        </div>
+                        
+                        <div onClick={() => onProductClick(product)} className="cursor-pointer mb-3">
+                          <h3 className="text-sm font-bold text-[#262525] leading-tight mb-1">{product.name}</h3>
+                          <p className="text-[10px] text-gray-400 line-clamp-2 mb-1.5 leading-snug h-[26px] overflow-hidden">{product.brief}</p>
+                          
+                          <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium text-gray-500">
+                                 ₹{product.price} <span className="text-[10px] text-gray-400 font-normal">/{product.pricingType === 'weight' ? 'kg' : 'ea'}</span>
+                              </p>
+                              {product.discount > 0 && (
+                                  <span className="text-[10px] font-bold text-green-600 bg-green-50 px-1 rounded">
+                                      {product.discount}% OFF
+                                  </span>
+                              )}
+                          </div>
+                        </div>
+
+                        <div className="mt-auto">
+                          {count === 0 ? (
+                            <button 
+                              onClick={() => addToCart(product.id, increment)}
+                              className="w-full h-9 rounded-lg border border-gray-200 font-bold text-xs hover:bg-black hover:text-white hover:border-black transition-all"
+                            >
+                              ADD
+                            </button>
+                          ) : (
+                            <div className="w-full h-9 rounded-lg bg-[#262525] flex items-center justify-between px-2 text-white shadow-md">
+                              <button onClick={() => addToCart(product.id, -increment)} className="p-1"><Minus className="w-3 h-3" /></button>
+                              <span className="text-xs font-bold">{formatQuantity(count, product.pricingType)}</span>
+                              <button onClick={() => addToCart(product.id, increment)} className="p-1"><Plus className="w-3 h-3" /></button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+             </div>
+          </div>
       </div>
 
        <AnimatePresence>
@@ -1522,7 +1339,7 @@ function CartView({ cart, onBack, onUpdateQuantity, onCheckout, onApplyCoupon, a
     >
       <div className="px-6 pt-10 pb-4 bg-white border-b border-gray-100 flex items-center justify-between sticky top-0 z-10">
         <div className="flex items-center gap-4">
-          <button onClick={onBack} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+          <button onClick={onBack} className="p-2 -ml-2 rounded-xl hover:bg-gray-100">
             <ChevronLeft className="w-6 h-6 text-[#262525]" />
           </button>
           <h1 className="text-lg font-bold text-[#262525]">My Cart</h1>
@@ -1930,7 +1747,6 @@ function TimeSelectorSheet({ onClose, onSelect, selected }: any) {
 }
 
 function SuccessView({ cart, onHome }: any) {
-  // Identify unique stores involved in the order
   const storeIds = useMemo(() => {
     if (!cart) return [];
     const ids = new Set<number>();
@@ -1956,7 +1772,6 @@ function SuccessView({ cart, onHome }: any) {
       <div className="w-full space-y-4 mb-10 max-h-[300px] overflow-y-auto no-scrollbar">
          {storeIds.map(storeId => {
            const store = RESTAURANTS.find(r => r.id === storeId) || STORES.find(s => s.id === storeId);
-           // Generate a deterministic but random-looking OTP based on storeId
            const otp = Math.floor(1000 + (storeId * 123) % 9000); 
            
            return (
@@ -2038,6 +1853,23 @@ function ProfileView({ onBack }: any) {
   );
 }
 
+function ProfileMenuItem({ icon: Icon, label, subLabel, isDestructive = false }: { icon: any, label: string, subLabel?: string, isDestructive?: boolean }) {
+  return (
+    <button className="w-full flex items-center justify-between p-4 rounded-xl hover:bg-gray-50 transition-colors group">
+      <div className="flex items-center gap-4">
+         <div className={cn("w-10 h-10 rounded-full flex items-center justify-center", isDestructive ? "bg-red-50 text-red-500" : "bg-white border border-gray-100 text-[#262525]")}>
+            <Icon className="w-5 h-5" strokeWidth={1.5} />
+         </div>
+         <div className="flex flex-col items-start">
+            <span className={cn("text-sm font-semibold", isDestructive ? "text-red-500" : "text-[#262525]")}>{label}</span>
+            {subLabel && <span className="text-[11px] text-gray-400">{subLabel}</span>}
+         </div>
+      </div>
+      {!isDestructive && <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-gray-500 transition-colors" />}
+    </button>
+  )
+}
+
 function ProductDetailSheet({ product, onClose, cartCount, onAdd }: any) {
   const increment = getIncrement(product.pricingType);
   return (
@@ -2115,23 +1947,6 @@ function ProductDetailSheet({ product, onClose, cartCount, onAdd }: any) {
       </motion.div>
     </motion.div>
   );
-}
-
-function ProfileMenuItem({ icon: Icon, label, subLabel, isDestructive = false }: { icon: any, label: string, subLabel?: string, isDestructive?: boolean }) {
-  return (
-    <button className="w-full flex items-center justify-between p-4 rounded-xl hover:bg-gray-50 transition-colors group">
-      <div className="flex items-center gap-4">
-         <div className={cn("w-10 h-10 rounded-full flex items-center justify-center", isDestructive ? "bg-red-50 text-red-500" : "bg-white border border-gray-100 text-[#262525]")}>
-            <Icon className="w-5 h-5" strokeWidth={1.5} />
-         </div>
-         <div className="flex flex-col items-start">
-            <span className={cn("text-sm font-semibold", isDestructive ? "text-red-500" : "text-[#262525]")}>{label}</span>
-            {subLabel && <span className="text-[11px] text-gray-400">{subLabel}</span>}
-         </div>
-      </div>
-      {!isDestructive && <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-gray-500 transition-colors" />}
-    </button>
-  )
 }
 
 function OnboardingView({ onComplete }: any) {
@@ -2484,15 +2299,15 @@ function SearchView({ query, onSearch, onBack, onStoreClick, onProductClick }: a
                          <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 px-1">Stores & Restaurants</h2>
                          <div className="space-y-3">
                              {results.stores.map((store: any) => (
-                                 <div key={store.id} onClick={() => onStoreClick(store)} className="bg-white p-3 rounded-xl border border-gray-100 flex items-center gap-3 cursor-pointer hover:bg-gray-50 transition-colors">
-                                     <div className="w-14 h-14 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
-                                         <img src={store.image} className="w-full h-full object-cover grayscale contrast-125" />
-                                     </div>
-                                     <div className="flex-1">
-                                         <h3 className="font-bold text-[#262525] text-sm">{store.name}</h3>
-                                         <p className="text-[10px] text-gray-500 line-clamp-1">{store.description || store.address}</p>
-                                     </div>
-                                     <ChevronRight className="w-4 h-4 text-gray-300" />
+                                 <div key={store.id} onClick={() => onStoreClick(store)} className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex items-center gap-4 cursor-pointer">
+                                    <div className="w-16 h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
+                                        <img src={store.image} className="w-full h-full object-cover grayscale" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <h3 className="font-bold text-[#262525]">{store.name}</h3>
+                                        <p className="text-xs text-gray-500">{store.address.split(',')[1]}</p>
+                                    </div>
+                                    <ChevronRight className="w-4 h-4 text-gray-300" />
                                  </div>
                              ))}
                          </div>
@@ -2502,25 +2317,24 @@ function SearchView({ query, onSearch, onBack, onStoreClick, onProductClick }: a
                  {results.products.length > 0 && (
                      <div>
                          <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 px-1">Products</h2>
-                         <div className="grid grid-cols-2 gap-3">
-                             {results.products.map((product: any) => (
-                                 <div key={product.id} onClick={() => onProductClick(product)} className="bg-white p-3 rounded-xl border border-gray-100 cursor-pointer hover:shadow-md transition-all">
-                                     <div className="aspect-square bg-gray-50 rounded-lg overflow-hidden mb-2">
-                                         <img src={product.image} className="w-full h-full object-cover mix-blend-multiply" />
-                                     </div>
-                                     <h3 className="font-bold text-[#262525] text-xs line-clamp-1 mb-1">{product.name}</h3>
-                                     <p className="text-xs text-gray-500">₹{product.price}</p>
+                         <div className="space-y-3">
+                             {results.products.map((item: any) => (
+                                 <div key={item.id} onClick={() => onProductClick(item)} className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex items-center gap-4 cursor-pointer">
+                                    <div className="w-14 h-14 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
+                                        <img src={item.image} className="w-full h-full object-cover mix-blend-multiply" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <h3 className="font-bold text-[#262525]">{item.name}</h3>
+                                        <p className="text-xs text-gray-500">
+                                            ₹{item.price} <span className="text-[10px] text-gray-400">/{item.pricingType === 'weight' ? 'kg' : 'ea'}</span>
+                                        </p>
+                                    </div>
+                                    <button className="px-3 py-1 bg-gray-50 text-xs font-bold rounded-lg border border-gray-200">VIEW</button>
                                  </div>
                              ))}
                          </div>
                      </div>
                  )}
-             </div>
-         )}
-         
-         {localQuery.length > 0 && results.stores.length === 0 && results.products.length === 0 && (
-             <div className="text-center mt-20 opacity-50">
-                 <p className="font-bold text-gray-400">No results found for "{localQuery}"</p>
              </div>
          )}
       </div>
