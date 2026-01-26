@@ -1,11 +1,46 @@
+import { useState } from 'react';
+import { Search, Star, LogIn } from 'lucide-react';
+import { Input } from '../../ui/input';
+import { Button } from '../../ui/button';
+import { Badge } from '../../ui/badge';
+import { Switch } from '../../ui/switch';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../../ui/table';
+import { toast } from 'sonner';
 import { AddMerchantSheet } from './AddMerchantSheet';
 
-// ... (existing imports)
+const merchants = [
+  { id: 1, name: 'Ratnadeep Supermarket', branch: 'Banjara Hills', owner: 'Vikram Reddy', phone: '+91 98765 43210', city: 'Hyderabad', status: true, rating: 4.5 },
+  { id: 2, name: 'Vijetha Supermarkets', branch: 'Gachibowli', owner: 'Suresh Kumar', phone: '+91 98765 12345', city: 'Hyderabad', status: true, rating: 4.2 },
+  { id: 3, name: 'Balaji Kirana', branch: 'Koramangala', owner: 'Ramesh Gupta', phone: '+91 98765 67890', city: 'Bangalore', status: true, rating: 3.8 },
+  { id: 4, name: 'Fresh Mart', branch: 'Indiranagar', owner: 'Anita Desai', phone: '+91 98765 11223', city: 'Bangalore', status: false, rating: 2.5 },
+  { id: 5, name: 'Daily Needs', branch: 'Hitech City', owner: 'Karan Singh', phone: '+91 98765 44556', city: 'Hyderabad', status: true, rating: 4.8 },
+];
 
 export function MerchantDirectory() {
-  // ... (existing state)
+  const [searchTerm, setSearchTerm] = useState('');
 
-  // ... (existing handlers)
+  const handleImpersonate = (merchantName: string) => {
+    toast.warning(`Impersonating ${merchantName}`, {
+      description: "You are now viewing the dashboard as this merchant.",
+      action: {
+        label: "Exit",
+        onClick: () => toast.info("Exited impersonation mode")
+      }
+    });
+  };
+
+  const filteredMerchants = merchants.filter(m =>
+    m.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    m.owner.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    m.phone.includes(searchTerm)
+  );
 
   return (
     <div className="space-y-4">
