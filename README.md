@@ -11,8 +11,8 @@
 - [x] **Master Catalog**: Full CRUD for Global Products.
 - [x] **Advanced UI**: Custom "Card" Modals, Horizontal Image Galleries, Numeric Type Safety.
 - [x] **Data Logic**: 
-    - **Bulk Import**: Excel/CSV ingestion with error handling.
-    - **Persistance**: Robust 2-Step Image Upload flow (File -> Storage -> DB Sync).
+    - **Bulk Import**: Excel/CSV ingestion with **Error Reporting** & **Dropdown Validation**.
+    - **Persistence**: robust Image Upload flow (Direct to Supabase Storage) with Policy guidance.
     - **Export**: Generates Spreadsheets on demand.
 - [x] **Infrastructure**: 
     - **Supabase Storage**: Integrated via AWS S3 standard wrapper.

@@ -60,21 +60,80 @@ app.get('/products', async (req, res) => {
         });
         res.json(products);
     } catch (error) {
+        console.error('Products API Error:', error);
         res.status(500).json({ error: 'Failed to fetch products' });
     }
 });
 
 // Excel Template Download
-app.get('/products/template', (req, res) => {
-    const headers = [['name', 'mrp', 'category', 'brand', 'ean', 'image']];
-    const wb = xlsx.utils.book_new();
-    const ws = xlsx.utils.aoa_to_sheet(headers);
-    xlsx.utils.book_append_sheet(wb, ws, 'Template');
-    const buffer = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
+app.get('/products/template', async (req, res) => {
+    try {
+        const ExcelJS = require('exceljs');
+        const workbook = new ExcelJS.Workbook();
 
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename=product_import_template.xlsx');
-    res.send(buffer);
+        // 1. Create Data Sheet
+        const worksheet = workbook.addWorksheet('Template');
+        worksheet.columns = [
+            { header: 'name', key: 'name', width: 30 },
+            { header: 'mrp', key: 'mrp', width: 15 },
+            { header: 'category', key: 'category', width: 20 },
+            { header: 'brand', key: 'brand', width: 20 },
+            { header: 'ean', key: 'ean', width: 20 },
+            { header: 'image', key: 'image', width: 40 }
+        ];
+
+        // 2. Create Reference Sheet (Hidden)
+        const refSheet = workbook.addWorksheet('RefData');
+        refSheet.state = 'hidden';
+        const categories = [
+            'Dairy',
+            'Bakery',
+            'Snacks',
+            'Staples',
+            'Condiments',
+            'Confectionery',
+            'Grocery'
+        ];
+        // Write categories to column A of RefData
+        categories.forEach((cat, index) => {
+            refSheet.getCell(`A${index + 1}`).value = cat;
+        });
+
+        // 3. Add Data Validation to "Category" Column (Column C is index 3)
+        // We apply it to rows 2-1000 to cover reasonable usage
+        for (let i = 2; i <= 1000; i++) {
+            const cell = worksheet.getCell(`C${i}`);
+            cell.dataValidation = {
+                type: 'list',
+                allowBlank: true,
+                formulae: [`'RefData'!$A$1:$A$${categories.length}`],
+                showErrorMessage: true,
+                errorStyle: 'stop',
+                errorTitle: 'Invalid Category',
+                error: 'Please select a valid category from the list.'
+            };
+        }
+
+        // 4. Add Sample Row
+        worksheet.addRow({
+            name: 'Sample Product',
+            mrp: 100,
+            category: 'Snacks',
+            brand: 'Generic',
+            ean: '123456789',
+            image: ''
+        });
+
+        // Response
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename=product_import_template.xlsx');
+
+        await workbook.xlsx.write(res);
+        res.end();
+    } catch (error) {
+        console.error('Template generation failed:', error);
+        res.status(500).json({ error: 'Failed to generate template' });
+    }
 });
 
 // Export Products
@@ -117,8 +176,14 @@ app.post('/products/upload-image', upload.single('file'), async (req, res) => {
         const safeName = req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
         const fileName = `${Date.now()}-${safeName}`;
 
+        const BUCKET_NAME = 'products';
+
+        // DIRECT UPLOAD STRATEGY
+        // We skip checking listBuckets() because RLS policies often hide buckets from the Anon Key.
+        // We assume the bucket 'products' exists (as verified by user).
+
         const { data, error } = await supabase.storage
-            .from('products')
+            .from(BUCKET_NAME)
             .upload(fileName, fileContent, {
                 contentType: req.file.mimetype,
                 upsert: false
@@ -129,11 +194,23 @@ app.post('/products/upload-image', upload.single('file'), async (req, res) => {
 
         if (error) {
             console.error('Supabase upload error:', error);
+            const err = error as any;
+            // Help the user debug specific policy errors
+            if (err.statusCode === '403' || err.error === 'Unauthorized') {
+                return res.status(500).json({
+                    error: `Upload failed (Access Denied). Please check your Supabase Storage Policies for the '${BUCKET_NAME}' bucket.`
+                });
+            }
+            if (err.statusCode === '404' || err.error === 'Bucket not found') {
+                return res.status(500).json({
+                    error: `Bucket '${BUCKET_NAME}' not found. Please ensure it exists and is Public.`
+                });
+            }
             return res.status(500).json({ error: 'Supabase upload failed', details: error.message });
         }
 
         const { data: { publicUrl } } = supabase.storage
-            .from('products')
+            .from(BUCKET_NAME)
             .getPublicUrl(fileName);
 
         res.json({ url: publicUrl });
@@ -158,40 +235,65 @@ app.post('/products/bulk', upload.single('file'), async (req, res) => {
         const data = xlsx.utils.sheet_to_json(sheet);
 
         const created = [];
-        const skipped = [];
+        const skipped = []; // { row: number, name: string, reason: string }
+
+        let rowNumber = 1; // 1-based index for user friendliness (Header is 1, data starts 2)
 
         for (const row of data as any[]) {
-            if (!row.name || !row.mrp || !row.category) continue;
+            rowNumber++;
 
-            // Check Duplicate EAN
+            // 1. Validate Mandatory Fields
+            if (!row.name || !row.mrp || !row.category) {
+                skipped.push({
+                    row: rowNumber,
+                    name: row.name || 'Unknown',
+                    reason: `Missing mandatory fields: ${!row.name ? 'Name ' : ''}${!row.mrp ? 'MRP ' : ''}${!row.category ? 'Category' : ''}`
+                });
+                continue;
+            }
+
+            // 2. Validate Data Types
+            const mrp = parseFloat(row.mrp);
+            if (isNaN(mrp)) {
+                skipped.push({ row: rowNumber, name: row.name, reason: 'Invalid MRP (Not a number)' });
+                continue;
+            }
+
+            // 3. Check Duplicate EAN (if provided)
             if (row.ean) {
                 const existing = await prisma.product.findFirst({ where: { ean: String(row.ean) } });
                 if (existing) {
-                    skipped.push({ name: row.name, reason: 'Duplicate EAN' });
+                    skipped.push({ row: rowNumber, name: row.name, reason: `Duplicate EAN: ${row.ean}` });
                     continue;
                 }
             }
 
-            const product = await prisma.product.create({
-                data: {
-                    name: row.name,
-                    mrp: parseFloat(row.mrp),
-                    category: row.category,
-                    brand: row.brand || null,
-                    ean: row.ean ? String(row.ean) : null,
-                    image: row.image || null,
-                }
-            });
-            await logAudit(product.id, 'CREATE', null, null, null, 'Bulk Import');
-            created.push(product);
+            try {
+                const product = await prisma.product.create({
+                    data: {
+                        name: row.name,
+                        mrp: mrp,
+                        category: row.category,
+                        brand: row.brand || null,
+                        ean: row.ean ? String(row.ean) : null,
+                        image: row.image || null,
+                    }
+                });
+                await logAudit(product.id, 'CREATE', null, null, null, 'Bulk Import');
+                created.push(product);
+            } catch (dbError) {
+                console.error('Row Import Error:', dbError);
+                skipped.push({ row: rowNumber, name: row.name, reason: 'Database Error' });
+            }
         }
 
         fs.unlinkSync(req.file.path);
 
         res.json({
-            message: `Imported ${created.length} products. Skipped ${skipped.length}.`,
-            count: created.length,
-            skipped
+            message: `Processed. Imported: ${created.length}, Skipped: ${skipped.length}`,
+            importedCount: created.length,
+            skippedCount: skipped.length,
+            skipped // Return the details
         });
     } catch (error) {
         console.error('Bulk import failed:', error);

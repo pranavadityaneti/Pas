@@ -82,6 +82,7 @@ export function MasterCatalog() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [importReport, setImportReport] = useState<{ imported: number, skipped: any[] } | null>(null);
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -156,6 +157,13 @@ export function MasterCatalog() {
       loading: 'Importing products...',
       success: (response) => {
         fetchProducts();
+        if (response.data.skippedCount > 0) {
+          setImportReport({
+            imported: response.data.importedCount,
+            skipped: response.data.skipped
+          });
+          return `Imported ${response.data.importedCount} items. ${response.data.skippedCount} skipped.`;
+        }
         return response.data.message;
       },
       error: 'Failed to import products'
@@ -227,7 +235,7 @@ export function MasterCatalog() {
       const updateState = (prevProduct: Product) => {
         const updatedImages = prevProduct.images?.filter(img => img.id !== imageId) || [];
         const newMainImage = updatedImages.length > 0 ? updatedImages[0].url : null;
-        return { ...prev, images: updatedImages, image: (updatedImages.length > 0 && prevProduct.image) ? prevProduct.image : newMainImage };
+        return { ...prevProduct, images: updatedImages, image: (updatedImages.length > 0 && prevProduct.image) ? prevProduct.image : newMainImage };
       };
 
       setEditingProduct(prev => prev ? updateState(prev) : null);
@@ -413,7 +421,7 @@ export function MasterCatalog() {
                     </TableCell>
                     <TableCell>
                       <Select
-                        defaultValue={product.category}
+                        value={product.category}
                         onValueChange={(value) => handleUpdateProduct(product.id, 'category', value)}
                       >
                         <SelectTrigger className="w-full h-8 text-xs">
@@ -433,8 +441,12 @@ export function MasterCatalog() {
                     <TableCell>
                       <Input
                         type="number"
-                        defaultValue={product.mrp}
+                        value={product.mrp}
                         className="h-8 w-24 text-right font-medium"
+                        onChange={(e) => {
+                          const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                          setProducts(prev => prev.map(p => p.id === product.id ? { ...p, mrp: val } : p));
+                        }}
                         onBlur={(e) => handleUpdateProduct(product.id, 'mrp', e.target.value)}
                       />
                     </TableCell>
@@ -615,6 +627,45 @@ export function MasterCatalog() {
 
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* --- Import Report Dialog --- */}
+      <Dialog open={!!importReport} onOpenChange={(open) => !open && setImportReport(null)}>
+        <DialogContent className="sm:max-w-md bg-white">
+          <DialogTitle className="text-red-600">Import Issues Found</DialogTitle>
+          <div className="space-y-4">
+            <div className="bg-red-50 p-4 rounded-lg border border-red-100">
+              <p className="text-sm text-red-800">
+                Successfully imported <strong>{importReport?.imported}</strong> products.
+                <br />
+                However, <strong>{importReport?.skipped.length}</strong> items were skipped due to errors.
+              </p>
+            </div>
+            <div className="max-h-60 overflow-y-auto border rounded-md">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Row</TableHead>
+                    <TableHead>Product</TableHead>
+                    <TableHead>Reason</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {importReport?.skipped.map((skip, idx) => (
+                    <TableRow key={idx}>
+                      <TableCell>{skip.row}</TableCell>
+                      <TableCell>{skip.name}</TableCell>
+                      <TableCell className="text-red-600 font-medium text-xs">{skip.reason}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={() => setImportReport(null)}>Close</Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
