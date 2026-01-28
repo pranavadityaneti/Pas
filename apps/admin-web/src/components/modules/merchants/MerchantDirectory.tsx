@@ -181,7 +181,7 @@ export function MerchantDirectory() {
             />
             <AddMerchantSheet
               trigger={
-                <Button className="gap-2 bg-black text-white hover:bg-gray-800">
+                <Button className="gap-2 bg-gray-900 text-white hover:bg-gray-800">
                   <Plus className="w-4 h-4" />
                   Add Merchant
                 </Button>
