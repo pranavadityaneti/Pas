@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Label } from "../../../ui/label";
 import { Input } from "../../../ui/input";
 import {
@@ -8,7 +8,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "../../../ui/select";
-import { Upload, FileText, CreditCard, Building2, BadgeCheck } from 'lucide-react';
+import { Upload, FileText, CreditCard, Building2, BadgeCheck, X } from 'lucide-react';
 
 export interface KYCData {
     panNumber: string;
@@ -34,14 +34,10 @@ interface FileUploadProps {
 }
 
 function FileUpload({ label, accept = "image/*,.pdf", file, onFileChange }: FileUploadProps) {
-    const inputRef = React.useRef<HTMLInputElement>(null);
+    const inputRef = useRef<HTMLInputElement>(null);
 
     return (
-        <div
-            onClick={() => inputRef.current?.click()}
-            className="border-2 border-dashed border-gray-200 rounded-lg p-4 text-center cursor-pointer
-                       hover:border-blue-400 hover:bg-blue-50/50 transition-all duration-200 group"
-        >
+        <div className="relative">
             <input
                 ref={inputRef}
                 type="file"
@@ -49,16 +45,30 @@ function FileUpload({ label, accept = "image/*,.pdf", file, onFileChange }: File
                 className="hidden"
                 onChange={(e) => onFileChange(e.target.files?.[0] || null)}
             />
+
             {file ? (
-                <div className="flex items-center justify-center gap-2">
-                    <FileText className="w-5 h-5 text-green-600" />
-                    <span className="text-sm text-gray-700 truncate max-w-[120px]">{file.name}</span>
+                <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <FileText className="w-4 h-4 text-green-600 shrink-0" />
+                    <span className="text-sm text-gray-700 truncate flex-1">{file.name}</span>
+                    <button
+                        type="button"
+                        onClick={() => onFileChange(null)}
+                        className="p-1 hover:bg-green-100 rounded"
+                    >
+                        <X className="w-4 h-4 text-gray-500" />
+                    </button>
                 </div>
             ) : (
-                <>
-                    <Upload className="w-6 h-6 mx-auto text-gray-400 group-hover:text-blue-500 transition-colors" />
-                    <p className="text-xs text-gray-500 mt-1">{label}</p>
-                </>
+                <button
+                    type="button"
+                    onClick={() => inputRef.current?.click()}
+                    className="w-full p-4 border-2 border-dashed border-gray-300 rounded-lg text-center
+                               hover:border-blue-400 hover:bg-blue-50 transition-all duration-200 group"
+                >
+                    <Upload className="w-6 h-6 mx-auto text-gray-400 group-hover:text-blue-500 mb-2" />
+                    <p className="text-sm font-medium text-gray-600">{label}</p>
+                    <p className="text-xs text-gray-400 mt-1">Click to upload</p>
+                </button>
             )}
         </div>
     );
@@ -71,38 +81,45 @@ export function KYCForm({ data, onChange }: KYCFormProps) {
 
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-right-8 duration-300">
+
             {/* Identity Verification Section */}
-            <div className="bg-gray-50 rounded-xl p-5 border border-gray-100">
-                <div className="flex items-center gap-2 mb-4">
+            <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
+                <div className="flex items-center gap-2 mb-6">
                     <BadgeCheck className="w-5 h-5 text-blue-600" />
                     <h3 className="font-semibold text-gray-900">Identity Verification</h3>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                {/* Single column layout */}
+                <div className="space-y-5">
                     <div className="space-y-2">
-                        <Label className="text-gray-700">PAN Number <span className="text-red-500">*</span></Label>
+                        <Label className="text-gray-700 text-sm font-medium">
+                            PAN Number <span className="text-red-500">*</span>
+                        </Label>
                         <Input
                             value={data.panNumber}
                             onChange={(e) => handleChange('panNumber', e.target.value.toUpperCase())}
                             placeholder="ABCDE1234F"
-                            className="uppercase bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                            className="uppercase bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500 h-11"
                         />
                     </div>
+
                     <div className="space-y-2">
-                        <Label className="text-gray-700">Aadhar Number <span className="text-red-500">*</span></Label>
+                        <Label className="text-gray-700 text-sm font-medium">
+                            Aadhar Number <span className="text-red-500">*</span>
+                        </Label>
                         <Input
                             value={data.aadharNumber}
                             onChange={(e) => handleChange('aadharNumber', e.target.value)}
                             placeholder="1234 5678 9012"
-                            className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                            className="bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500 h-11"
                         />
                     </div>
                 </div>
 
                 {/* Document Uploads */}
-                <div className="mt-4">
-                    <Label className="text-gray-600 text-sm mb-2 block">Upload Documents</Label>
-                    <div className="grid grid-cols-3 gap-3">
+                <div className="mt-6 pt-5 border-t border-gray-200">
+                    <Label className="text-gray-600 text-sm font-medium mb-4 block">Upload Documents</Label>
+                    <div className="space-y-4">
                         <FileUpload
                             label="PAN Card"
                             file={data.panDocument}
@@ -123,48 +140,53 @@ export function KYCForm({ data, onChange }: KYCFormProps) {
             </div>
 
             {/* Banking Details Section */}
-            <div className="bg-gray-50 rounded-xl p-5 border border-gray-100">
-                <div className="flex items-center gap-2 mb-4">
+            <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
+                <div className="flex items-center gap-2 mb-6">
                     <Building2 className="w-5 h-5 text-blue-600" />
                     <h3 className="font-semibold text-gray-900">Banking Details</h3>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-5">
                     <div className="space-y-2">
-                        <Label className="text-gray-700">Bank Account Number <span className="text-red-500">*</span></Label>
+                        <Label className="text-gray-700 text-sm font-medium">
+                            Bank Account Number <span className="text-red-500">*</span>
+                        </Label>
                         <Input
                             value={data.bankAccount}
                             onChange={(e) => handleChange('bankAccount', e.target.value)}
-                            placeholder="Enter account number"
-                            className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                            placeholder="Enter your account number"
+                            className="bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500 h-11"
                         />
                     </div>
+
                     <div className="space-y-2">
-                        <Label className="text-gray-700">IFSC Code <span className="text-red-500">*</span></Label>
+                        <Label className="text-gray-700 text-sm font-medium">
+                            IFSC Code <span className="text-red-500">*</span>
+                        </Label>
                         <Input
                             value={data.ifsc}
                             onChange={(e) => handleChange('ifsc', e.target.value.toUpperCase())}
                             placeholder="SBIN0001234"
-                            className="uppercase bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                            className="uppercase bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500 h-11"
                         />
                     </div>
                 </div>
             </div>
 
             {/* Business Information Section */}
-            <div className="bg-gray-50 rounded-xl p-5 border border-gray-100">
-                <div className="flex items-center gap-2 mb-4">
+            <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
+                <div className="flex items-center gap-2 mb-6">
                     <CreditCard className="w-5 h-5 text-blue-600" />
                     <h3 className="font-semibold text-gray-900">Business Information</h3>
                 </div>
 
                 <div className="space-y-2">
-                    <Label className="text-gray-700">Annual Turnover Range</Label>
+                    <Label className="text-gray-700 text-sm font-medium">Annual Turnover Range</Label>
                     <Select
                         value={data.turnoverRange}
                         onValueChange={(val) => handleChange('turnoverRange', val)}
                     >
-                        <SelectTrigger className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500">
+                        <SelectTrigger className="bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500 h-11">
                             <SelectValue placeholder="Select Turnover Range" />
                         </SelectTrigger>
                         <SelectContent>
