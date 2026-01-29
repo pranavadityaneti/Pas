@@ -3,13 +3,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/app/components/ui/ta
 import { Card, CardContent, CardFooter, CardHeader } from '@/app/components/ui/card';
 import { Button } from '@/app/components/ui/button';
 import { Badge } from '@/app/components/ui/badge';
-import { Clock, Printer, CheckCircle2, XCircle, ShoppingBag } from 'lucide-react';
+import { Clock, Printer, CheckCircle2, XCircle, ShoppingBag, Settings, Volume2 } from 'lucide-react';
 import { Drawer } from 'vaul';
 import { Input } from '@/app/components/ui/input';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
+import { useNavigate } from 'react-router-dom';
 
 // Types aligning with DB
 type OrderStatus = 'pending' | 'processing' | 'ready' | 'completed' | 'cancelled';
@@ -18,23 +19,19 @@ interface OrderItem {
   id: string;
   menu_item_id: string; // or product_id
   quantity: number;
-  price: number;
-  product_name?: string; // If joined
-  // In real DB it might be joined, or we fetch simplistic
+  product_name?: string;
   name?: string; // Adapter for UI
 }
 
 interface Order {
   id: string;
   customer_name: string;
-  total_amount: number; // DB uses amount or total_amount
+  total_amount: number;
   status: OrderStatus;
   created_at: string;
   order_items: any[];
-  // Adapter props for UI
   items: { name: string; qty: number }[];
   total: number;
-  timeRemaining?: string;
 }
 
 export default function OrdersScreen() {
@@ -42,91 +39,102 @@ export default function OrdersScreen() {
   const [activeTab, setActiveTab] = useState('pending');
   const [pickupOtp, setPickupOtp] = useState('');
   const [selectedOrderForPickup, setSelectedOrderForPickup] = useState<Order | null>(null);
+  const [isRinging, setIsRinging] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
-    // Initialize Audio for Ringing
-    audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
     fetchOrders();
-    subscribeToOrders();
+    const sub = subscribeToOrders();
 
     return () => {
-      supabase.removeAllChannels();
+      stopRinging();
+      supabase.removeChannel(sub);
     };
   }, []);
+
+  const getSoundUrl = () => {
+    const saved = localStorage.getItem('merchant_notification_settings');
+    const profile = saved ? JSON.parse(saved).soundProfile : 'chime';
+    switch (profile) {
+      case 'alarm': return 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3';
+      case 'chime': return 'https://assets.mixkit.co/active_storage/sfx/2345/2345-preview.mp3';
+      case 'siren': return 'https://assets.mixkit.co/active_storage/sfx/999/999-preview.mp3';
+      default: return 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3';
+    }
+  };
+
+  const startRinging = () => {
+    const saved = localStorage.getItem('merchant_notification_settings');
+    if (saved && !JSON.parse(saved).enabled) return;
+
+    if (!audioRef.current) {
+      audioRef.current = new Audio(getSoundUrl());
+      audioRef.current.loop = true; // LOOP until acknowledged
+    }
+    audioRef.current.play().catch(e => console.log('Audio blocked', e));
+    setIsRinging(true);
+  };
+
+  const stopRinging = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    setIsRinging(false);
+  };
 
   const fetchOrders = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // Fetch orders for this store
-    // Note: In a real app we would join 'order_items' properly.
-    // For this prototype, we assume order_items is joined or we fetch simply.
-    // Supabase query:
     const { data, error } = await supabase
       .from('orders')
       .select(`
         *,
         order_items (
            *,
-           quantity,
-           price
-           -- If we had a product link we'd fetch name here, but let's assume raw or mock name for now if not in schema
+           quantity
         )
       `)
       .eq('store_id', user.id)
-      .neq('status', 'cancelled') // Don't show cancelled history here
+      .neq('status', 'cancelled')
       .order('created_at', { ascending: false });
 
     if (error) {
       console.error(error);
-      toast.error("Failed to load orders");
       return;
     }
 
-    // Adapt DB data to UI Model
     const adapted: Order[] = (data || []).map((o: any) => ({
       ...o,
       customerName: o.customer_name || 'Customer',
       status: o.status,
       total: o.amount || o.total_amount || 0,
       items: o.order_items?.map((i: any) => ({
-        name: i.product_name || `Item #${i.menu_item_id?.slice(0, 4)}`, // Fallback
+        name: i.product_name || `Item`,
         qty: i.quantity
-      })) || [],
-      timeRemaining: 'Now' // Calc difference if needed
+      })) || []
     }));
 
     setOrders(adapted);
   };
 
-  const subscribeToOrders = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    supabase
+  const subscribeToOrders = () => {
+    return supabase
       .channel('merchant-orders')
       .on(
         'postgres_changes',
-        {
-          event: '*', // Listen to INSERT (new) and UPDATE (status change)
-          schema: 'public',
-          table: 'orders',
-          filter: `store_id=eq.${user.id}`
-        },
-        async (payload) => {
-          console.log('Realtime Event:', payload);
-
+        { event: '*', schema: 'public', table: 'orders' },
+        (payload) => {
           if (payload.eventType === 'INSERT') {
-            // Play Sound
-            audioRef.current?.play().catch(() => console.log('Audio blocked'));
-            toast.message("New Order Received!", { description: `#${payload.new.id.slice(0, 8)}` });
-
-            // Ideally fetch full payload with items, but for now just refresh all for simplicity
-            // Optimisation: Just fetch this one order.
+            startRinging();
+            toast.message("New Order!", {
+              description: "Check Pending Tab",
+              action: { label: "Stop Ringing", onClick: stopRinging }
+            });
             fetchOrders();
           } else if (payload.eventType === 'UPDATE') {
-            // Update local state status
             setOrders(prev => prev.map(o => o.id === payload.new.id ? { ...o, ...payload.new } : o));
           }
         }
@@ -135,64 +143,65 @@ export default function OrdersScreen() {
   };
 
   const updateStatus = async (orderId: string, newStatus: OrderStatus) => {
-    // Optimistic Update
+    stopRinging(); // Acknowledge generic action
     setOrders(orders.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
-
-    const { error } = await supabase
-      .from('orders')
-      .update({ status: newStatus })
-      .eq('id', orderId);
-
-    if (error) {
-      toast.error("Failed to update status");
-      fetchOrders(); // Revert
-    } else {
-      toast.success(`Order marked as ${newStatus}`);
-    }
+    await supabase.from('orders').update({ status: newStatus }).eq('id', orderId);
   };
 
   const handleVerifyPickup = async () => {
     if (pickupOtp.length === 4 && selectedOrderForPickup) {
-      // In a real app, verify OTP against DB column.
-      // For MVP, we just assume if they enter any 4 digits, its verified (simulating manual check).
 
-      await updateStatus(selectedOrderForPickup.id, 'completed');
+      // Use RPC for Secure Verification
+      const { data: success, error } = await supabase.rpc('verify_pickup_code', {
+        order_id_input: selectedOrderForPickup.id,
+        code_input: pickupOtp
+      });
 
-      setPickupOtp('');
-      setSelectedOrderForPickup(null);
+      if (error) {
+        console.error(error);
+        toast.error("Verification System Error");
+        return;
+      }
+
+      if (success) {
+        toast.success("Code Verified! Handover Complete.");
+        // Update local UI immediately
+        setOrders(orders.map(o => o.id === selectedOrderForPickup.id ? { ...o, status: 'completed' } : o));
+        setPickupOtp('');
+        setSelectedOrderForPickup(null);
+      } else {
+        toast.error("Incorrect Code. Please ask customer to check app.");
+        // Shake effect could go here
+      }
     }
   };
 
   const pendingOrders = orders.filter(o => o.status === 'pending');
-  // We treat 'processing' as the kitchen phase.
   const processingOrders = orders.filter(o => o.status === 'processing');
-  // We treat 'ready' or 'completed' (if logic differs) here. 
-  // If backend only has 'completed', we might need an intermediate 'ready' state in DB or use metadata. 
-  // For now, let's assume we map 'processing' -> 'completed' directly for MVP, 
-  // OR if we added 'ready' to the enum:
   const readyOrders = orders.filter(o => o.status === 'completed' || o.status === 'ready');
-  // (Assuming completed means "Ready for Pickup" for the Merchant view until it disappears?)
-  // Actually usually 'completed' = Handed over.
-  // Let's stick to the UI logic: 
-  // Pending -> Processing -> Ready (Custom State?) -> Completed (History).
-  // If DB enum is limited, we might overload 'processing' with a local flag, but let's assume we added 'ready' to postgres enum just in case, or we use 'processing' for both.
-  // Correction based on Schema: schema usually is pending, processing, completed, cancelled. 
-  // Let's map: 
-  // Tab 1: Pending
-  // Tab 2: Processing (Kitchen)
-  // Tab 3: Completed (Past Orders / Ready to Pickup Logic skipped for MVP if schema strict)
-  // Wait, let's look at schema... likely just p/p/c. 
-  // So "Mark Ready" in P2 -> sets to 'completed'. 
-  // And "Ready" tab shows 'completed' orders for today? 
-  // Let's do: 
-  // processingOrders = status 'processing'
-  // readyOrders = status 'completed' (waiting for pickup/done)
 
   return (
-    <div className="flex flex-col h-full bg-gray-50">
+    <div className="flex flex-col h-full bg-gray-50 relative">
+      {/* Alert Banner */}
+      {isRinging && (
+        <div
+          className="bg-indigo-600 text-white p-3 px-6 flex justify-between items-center cursor-pointer animate-pulse"
+          onClick={stopRinging}
+        >
+          <div className="flex items-center gap-2 font-bold">
+            <Volume2 className="w-5 h-5 animate-bounce" />
+            New Order Ringing...
+          </div>
+          <Button size="sm" variant="secondary" onClick={stopRinging}>Dismiss</Button>
+        </div>
+      )}
+
       <div className="bg-white border-b sticky top-0 z-10 w-full">
-        <div className="px-6 py-4">
+        <div className="px-6 py-4 flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-900">Orders</h1>
+          <Button variant="ghost" size="icon" onClick={() => navigate('/settings/notifications')}>
+            <Settings className="w-5 h-5 text-gray-500" />
+          </Button>
         </div>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="w-full rounded-none h-12 bg-transparent p-0 border-b border-gray-100 grid grid-cols-3">
@@ -221,13 +230,7 @@ export default function OrdersScreen() {
       <div className="p-4 flex-1 overflow-y-auto w-full">
         <AnimatePresence mode="wait">
           {activeTab === 'pending' && (
-            <motion.div
-              key="pending"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="space-y-4"
-            >
+            <motion.div key="pending" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
               {pendingOrders.length === 0 && <EmptyState message="No pending orders" />}
               {pendingOrders.map(order => (
                 <OrderCard
@@ -241,38 +244,27 @@ export default function OrdersScreen() {
           )}
 
           {activeTab === 'processing' && (
-            <motion.div
-              key="processing"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="space-y-4"
-            >
+            <motion.div key="processing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
               {processingOrders.length === 0 && <EmptyState message="Kitchen is clear" />}
               {processingOrders.map(order => (
                 <OrderCard
                   key={order.id}
                   order={order}
-                  onMarkReady={() => updateStatus(order.id, 'completed')}
+                  onMarkReady={() => updateStatus(order.id, 'completed')} // Or 'ready' if added
                 />
               ))}
             </motion.div>
           )}
 
           {activeTab === 'ready' && (
-            <motion.div
-              key="ready"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="space-y-4"
-            >
+            <motion.div key="ready" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
               {readyOrders.length === 0 && <EmptyState message="No completed orders today" />}
               {readyOrders.map(order => (
                 <OrderCard
                   key={order.id}
                   order={order}
-                  readOnly
+                  onPickupClick={() => setSelectedOrderForPickup(order)}
+                  isCompleted={order.status === 'completed'} // Pass flag to differentiate logic if needed
                 />
               ))}
             </motion.div>
@@ -287,37 +279,40 @@ export default function OrdersScreen() {
       >
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 bg-black/40 z-50" />
-          <Drawer.Content className="bg-white flex flex-col rounded-t-[10px] h-[50vh] mt-24 fixed bottom-0 left-0 right-0 z-50 max-w-md mx-auto">
-            <div className="p-4 bg-white rounded-t-[10px] flex-1">
-              <div className="mx-auto w-12 h-1.5 flex-shrink-0 rounded-full bg-gray-300 mb-8" />
-              <div className="max-w-md mx-auto">
-                <Drawer.Title className="font-medium text-center text-xl mb-2">
-                  Verify Pickup
-                </Drawer.Title>
-                <Drawer.Description className="text-center text-gray-500 mb-8">
-                  Enter the 4-digit code from the customer for {selectedOrderForPickup?.id}
-                </Drawer.Description>
+          <Drawer.Content className="bg-white flex flex-col rounded-t-[10px] h-[55vh] mt-24 fixed bottom-0 left-0 right-0 z-50 max-w-md mx-auto">
+            <div className="p-6 bg-white rounded-t-[10px] flex-1 flex flex-col items-center">
+              <div className="w-12 h-1.5 flex-shrink-0 rounded-full bg-gray-300 mb-8" />
 
-                <div className="flex justify-center mb-8">
-                  <Input
-                    type="text"
-                    maxLength={4}
-                    value={pickupOtp}
-                    onChange={(e) => setPickupOtp(e.target.value.replace(/[^0-9]/g, ''))}
-                    className="w-48 text-center text-4xl tracking-[0.5em] font-bold h-16 border-b-2 border-x-0 border-t-0 rounded-none focus-visible:ring-0 px-0"
-                    placeholder="••••"
-                    autoFocus
-                  />
-                </div>
-
-                <Button
-                  className="w-full h-12 text-lg"
-                  onClick={handleVerifyPickup}
-                  disabled={pickupOtp.length !== 4}
-                >
-                  Verify Code
-                </Button>
+              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
+                <CheckCircle2 className="w-8 h-8 text-blue-600" />
               </div>
+
+              <Drawer.Title className="font-bold text-center text-2xl mb-2">
+                Verify Pickup
+              </Drawer.Title>
+              <Drawer.Description className="text-center text-gray-500 mb-8 max-w-xs">
+                Ask <strong>{selectedOrderForPickup?.customer_name}</strong> for the 4-digit code shown in their app.
+              </Drawer.Description>
+
+              <div className="flex justify-center mb-8 w-full">
+                <Input
+                  type="text"
+                  maxLength={4}
+                  value={pickupOtp}
+                  onChange={(e) => setPickupOtp(e.target.value.replace(/[^0-9]/g, ''))}
+                  className="w-full max-w-[200px] text-center text-5xl tracking-[0.2em] font-bold h-20 border-2 border-gray-200 rounded-xl focus-visible:ring-indigo-500 focus-visible:border-indigo-500 transition-all"
+                  placeholder="0000"
+                  autoFocus
+                />
+              </div>
+
+              <Button
+                className="w-full h-14 text-lg font-semibold bg-indigo-600 hover:bg-indigo-700"
+                onClick={handleVerifyPickup}
+                disabled={pickupOtp.length !== 4}
+              >
+                Verify & Handover
+              </Button>
             </div>
           </Drawer.Content>
         </Drawer.Portal>
@@ -332,44 +327,47 @@ function OrderCard({
   onReject,
   onMarkReady,
   onPickupClick,
-  readOnly = false
+  isCompleted = false
 }: {
   order: Order;
   onAccept?: () => void;
   onReject?: () => void;
   onMarkReady?: () => void;
   onPickupClick?: () => void;
-  readOnly?: boolean;
+  isCompleted?: boolean;
 }) {
   return (
-    <Card className={cn("overflow-hidden border-none shadow-sm",
-      order.status === 'completed' ? "bg-green-50/50 border border-green-100" : "bg-white"
+    <Card className={cn("overflow-hidden border-none shadow-sm transition-all",
+      order.status === 'completed' ? "bg-green-50 border border-green-100 opacity-80" : "bg-white"
     )}>
       <CardHeader className="p-4 pb-2 flex flex-row items-start justify-between space-y-0">
         <div>
           <div className="flex items-center gap-2">
-            <h3 className="font-bold text-lg text-gray-900">#{order.id.slice(0, 5)}...</h3>
+            <h3 className="font-bold text-lg text-gray-900">#{order.id.slice(0, 5)}</h3>
             {order.status === 'pending' && (
-              <Badge variant="outline" className="flex items-center gap-1 text-orange-600 border-orange-200 bg-orange-50">
-                <Clock className="w-3 h-3" /> New
+              <Badge variant="outline" className="text-orange-600 border-orange-200 bg-orange-50">
+                New
               </Badge>
             )}
           </div>
-          <p className="text-sm font-medium text-gray-600 mt-1">{order.customer_name || 'Walk-in'}</p>
+          <p className="text-sm font-medium text-gray-600 mt-1">{order.customer_name || 'Guest'}</p>
         </div>
         <p className="font-bold text-lg">₹{order.total}</p>
       </CardHeader>
       <CardContent className="p-4 pt-2">
-        <ul className="space-y-1">
+        <div className="space-y-1">
           {order.items.length > 0 ? order.items.map((item, idx) => (
-            <li key={idx} className="text-sm text-gray-600 flex justify-between">
-              <span>{item.qty} x {item.name}</span>
-            </li>
-          )) : <li className="text-sm text-gray-400 italic">No items (Legacy data)</li>}
-        </ul>
+            <div key={idx} className="text-sm text-gray-700 flex justify-between items-center">
+              <span className="flex items-center gap-2">
+                <span className="font-bold text-gray-900 w-6 h-6 flex items-center justify-center bg-gray-100 rounded text-xs">{item.qty}</span>
+                {item.name}
+              </span>
+            </div>
+          )) : <span className="text-sm text-gray-400 italic">No items</span>}
+        </div>
       </CardContent>
 
-      {!readOnly && (
+      {!isCompleted && (
         <CardFooter className="p-4 pt-0 gap-3">
           {order.status === 'pending' && (
             <>
@@ -384,33 +382,27 @@ function OrderCard({
                 className="flex-1 bg-green-600 hover:bg-green-700 text-white"
                 onClick={onAccept}
               >
-                Accept Order
+                Accept
               </Button>
             </>
           )}
 
           {order.status === 'processing' && (
-            <>
-              <Button variant="outline" size="icon">
-                <Printer className="w-4 h-4" />
-              </Button>
-              <Button
-                className="flex-1 bg-blue-600 hover:bg-blue-700"
-                onClick={onMarkReady}
-              >
-                Mark Ready
-              </Button>
-            </>
+            <Button
+              className="w-full bg-blue-600 hover:bg-blue-700"
+              onClick={onMarkReady}
+            >
+              Mark Ready
+            </Button>
           )}
-
-          {/* If we had a specific 'ready' state separate from completed, we'd show Pickup here */}
         </CardFooter>
       )}
 
-      {order.status === 'completed' && (
+      {/* Completed State Actions (e.g. if we want to re-verify for audit, but usually done) */}
+      {isCompleted && (
         <CardFooter className="p-4 pt-0">
-          <div className="w-full text-center text-xs text-green-600 font-medium flex items-center justify-center gap-1">
-            <CheckCircle2 className="w-4 h-4" /> Order Completed
+          <div className="w-full py-2 bg-green-100 text-green-700 rounded-md flex items-center justify-center gap-2 text-sm font-medium">
+            <CheckCircle2 className="w-4 h-4" /> Picked Up
           </div>
         </CardFooter>
       )}
@@ -428,4 +420,3 @@ function EmptyState({ message }: { message: string }) {
     </div>
   );
 }
-

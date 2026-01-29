@@ -4,6 +4,7 @@ import SignupWizard from './screens/Auth/SignupWizard';
 import PendingApproval from './screens/Auth/PendingApproval';
 import ApplicationRejected from './screens/Auth/ApplicationRejected';
 import HomeScreen from './screens/Dashboard/HomeScreen';
+import NotificationSettings from './screens/Settings/NotificationSettings';
 import { Toaster } from 'sonner';
 
 function App() {
@@ -24,6 +25,7 @@ function App() {
                 {/* Protected Dashboard (We assume LoginScreen checks for 'active' status before navigating here) */}
                 {/* In a fuller app, we'd wrap this in a <ProtectedRoute> component that re-verifies session */}
                 <Route path="/dashboard" element={<HomeScreen />} />
+                <Route path="/settings/notifications" element={<NotificationSettings />} />
             </Routes>
         </Router>
     );
