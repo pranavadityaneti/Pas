@@ -76,42 +76,44 @@ export default function LoginScreen() {
           <CardDescription>Manage your store, orders, and inventory</CardDescription>
         </CardHeader>
         <CardContent>
-          <Tabs defaultValue="login" className="w-full">
-            <TabsList className="grid w-full grid-cols-2 mb-6">
-              <TabsTrigger value="login">Login</TabsTrigger>
-              <TabsTrigger value="signup" onClick={() => navigate('/signup')}>Sign Up</TabsTrigger>
-            </TabsList>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="store@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
+            <Button className="w-full bg-indigo-600 hover:bg-indigo-700" type="submit" disabled={loading}>
+              {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Access Dashboard
+            </Button>
+          </form>
 
-            <TabsContent value="login">
-              <form onSubmit={handleLogin} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="store@example.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="password">Password</Label>
-                  <Input
-                    id="password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                  />
-                </div>
-                <Button className="w-full bg-indigo-600 hover:bg-indigo-700" type="submit" disabled={loading}>
-                  {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  Access Dashboard
-                </Button>
-              </form>
-            </TabsContent>
-          </Tabs>
+          <div className="mt-6 pt-6 border-t border-gray-100 text-center">
+            <p className="text-sm text-gray-500 mb-3">New to Pick At Store?</p>
+            <Button
+              variant="outline"
+              className="w-full border-indigo-200 text-indigo-600 hover:bg-indigo-50"
+              onClick={() => navigate('/signup')}
+            >
+              Apply as Merchant Partner
+            </Button>
+          </div>
         </CardContent>
         <CardFooter className="flex justify-center border-t p-4 bg-gray-50/50">
           <p className="text-xs text-center text-gray-500">
