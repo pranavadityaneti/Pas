@@ -90,6 +90,12 @@ model Product {
   category    String
   brand       String?
   ean         String?
+  
+  // Specs for Commerce
+  unitType    String?   // "ml", "L", "kg", "g", "pc"
+  unitValue   Float?    // 500
+  hsnCode     String?   // "0401"
+  gstRate     Float?    // 5.0
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -126,7 +132,7 @@ model StoreProduct {
   storeId     String
   store       Store    @relation(fields: [storeId], references: [id])
   productId   String
-  product     Product  @relation(fields: [productId], references: [id])
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   
   price       Float    // Selling Price
   stock       Int      @default(0)

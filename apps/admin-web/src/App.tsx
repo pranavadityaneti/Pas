@@ -8,7 +8,7 @@ import { Dashboard } from './components/Dashboard';
 import { OrderManager } from './components/modules/orders/OrderManager';
 import { MerchantNetwork } from './components/modules/merchants/MerchantNetwork';
 import { MasterCatalog } from './components/modules/catalog/MasterCatalog';
-import { ConsumerDatabase } from './components/modules/consumers/ConsumerDatabase';
+import { CustomerDatabase } from './components/modules/customers/CustomerDatabase';
 import { MarketingHub } from './components/modules/marketing/MarketingHub';
 import { EngagementHub } from './components/modules/engagement/EngagementHub';
 import { CityManager } from './components/modules/geography/CityManager';
@@ -30,7 +30,7 @@ export default function App() {
         <Route path="catalog" element={<MasterCatalog />} />
         <Route path="merchants" element={<MerchantNetwork />} />
         <Route path="orders" element={<OrderManager />} />
-        <Route path="consumers" element={<ConsumerDatabase />} />
+        <Route path="customers" element={<CustomerDatabase />} />
         <Route path="marketing" element={<MarketingHub />} />
         <Route path="engagement" element={<EngagementHub />} />
         <Route path="geography" element={<CityManager />} />

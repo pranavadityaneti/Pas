@@ -72,9 +72,8 @@ export function ActionQueue() {
             <div
               key={action.id}
               onClick={() => handleActionClick(action.title)}
-              className={`p-4 rounded-lg border-l-4 cursor-pointer hover:shadow-md transition-all active:scale-[0.98] ${
-                priorityColors[action.priority as keyof typeof priorityColors]
-              }`}
+              className={`p-4 rounded-lg border-l-4 cursor-pointer hover:shadow-md transition-all active:scale-[0.98] ${priorityColors[action.priority as keyof typeof priorityColors]
+                }`}
             >
               <div className="flex items-start gap-3">
                 <Icon className="w-5 h-5 flex-shrink-0 mt-0.5" />
@@ -93,9 +92,9 @@ export function ActionQueue() {
         })}
       </div>
 
-      <button 
+      <button
         onClick={handleViewAll}
-        className="mt-4 w-full py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors font-medium active:bg-blue-100"
+        className="mt-4 w-full py-2 text-sm text-primary hover:bg-primary/5 rounded-lg transition-colors font-medium active:bg-primary/10"
       >
         View All Tasks
       </button>

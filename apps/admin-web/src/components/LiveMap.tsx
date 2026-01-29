@@ -23,7 +23,7 @@ const stores = [
 export function LiveMap() {
   const [activeStoresCount] = useState(stores.filter(s => s.status === 'active').length);
   const [isResetting, setIsResetting] = useState(false);
-  
+
   const handleCenterView = () => {
     setIsResetting(true);
     toast.success("Map View Reset", {
@@ -53,9 +53,9 @@ export function LiveMap() {
             {activeStoresCount} Active / {stores.length} Total Stores
           </p>
         </div>
-        <button 
+        <button
           onClick={handleCenterView}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors active:scale-95 duration-150"
+          className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors active:scale-95 duration-150"
         >
           <Navigation className={`w-4 h-4 ${isResetting ? 'animate-spin' : ''}`} />
           Center View
@@ -63,7 +63,7 @@ export function LiveMap() {
       </div>
 
       {/* Map Container */}
-      <div className="flex-1 bg-gradient-to-br from-blue-50 to-green-50 rounded-lg relative overflow-hidden border border-gray-200 group">
+      <div className="flex-1 bg-gradient-to-br from-primary/5 to-secondary/30 rounded-lg relative overflow-hidden border border-gray-200 group">
         {/* Grid background */}
         <div className="absolute inset-0" style={{
           backgroundImage: 'linear-gradient(rgba(0,0,0,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.05) 1px, transparent 1px)',
@@ -82,28 +82,25 @@ export function LiveMap() {
               transform: 'translate(-50%, -100%)'
             }}
           >
-            <div className={`relative ${
-              store.status === 'active' ? 'animate-bounce' : ''
-            }`}>
+            <div className={`relative ${store.status === 'active' ? 'animate-bounce' : ''
+              }`}>
               <MapPin
-                className={`w-8 h-8 drop-shadow-md ${
-                  store.status === 'active' 
-                    ? 'text-green-500 fill-green-100' 
+                className={`w-8 h-8 drop-shadow-md ${store.status === 'active'
+                    ? 'text-green-500 fill-green-100'
                     : 'text-gray-400 fill-gray-100'
-                }`}
+                  }`}
               />
               {store.status === 'active' && (
                 <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3 h-3 bg-green-500 rounded-full animate-ping"></div>
               )}
             </div>
-            
+
             {/* Tooltip */}
             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 opacity-0 hover:opacity-100 transition-opacity z-10 pointer-events-none">
               <div className="bg-gray-900 text-white text-xs px-3 py-2 rounded-lg whitespace-nowrap shadow-lg">
                 {store.name}
-                <div className={`text-xs ${
-                  store.status === 'active' ? 'text-green-400' : 'text-gray-400'
-                }`}>
+                <div className={`text-xs ${store.status === 'active' ? 'text-green-400' : 'text-gray-400'
+                  }`}>
                   {store.status === 'active' ? '● Online' : '○ Offline'}
                 </div>
               </div>

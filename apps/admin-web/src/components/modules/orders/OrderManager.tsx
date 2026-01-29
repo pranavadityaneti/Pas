@@ -1,67 +1,71 @@
 import { useState } from 'react';
-import { 
-  Search, 
-  Filter, 
-  Download, 
-  MoreHorizontal, 
-  Clock, 
-  CheckCircle, 
-  AlertCircle, 
-  XCircle, 
-  ChevronRight,
-  Phone,
+import {
+  Filter,
+  Download,
+  MoreHorizontal,
+  Clock,
+  CheckCircle,
+  AlertCircle,
+  XCircle,
   User,
   MapPin,
   RefreshCcw,
-  ShieldAlert
+  ShieldAlert,
+  ShoppingCart
 } from 'lucide-react';
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
 } from '../../ui/table';
-import { 
-  Tabs, 
-  TabsContent, 
-  TabsList, 
-  TabsTrigger 
-} from '../../ui/tabs';
-import { 
-  Sheet, 
-  SheetContent, 
-  SheetHeader, 
-  SheetTitle, 
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
   SheetDescription,
   SheetFooter
 } from '../../ui/sheet';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
-import { Input } from '../../ui/input';
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuTrigger 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
 } from '../../ui/dropdown-menu';
 import { toast } from 'sonner';
 import { DisputeConsole } from './DisputeConsole';
+import { cn } from '../../ui/utils';
+import { CustomerDetailsSheet } from '../customers/CustomerDetailsSheet';
+import { MerchantDetailsSheet } from '../merchants/MerchantDetailsSheet';
+import { Customer } from '../../../hooks/useCustomers'; // We'll need to mock/fetch this or reconstruct partially
+import { Merchant } from '../../../hooks/useMerchants';
 
-// Dummy Data
-const orders = [
-  { id: 'RD-101', time: '10 mins ago', customer: 'Rahul K.', phone: '+91 98765 43210', store: 'Store A - Electronics', status: 'completed', amount: 450, sla: 10 },
-  { id: 'RD-102', time: '18 mins ago', customer: 'Priya S.', phone: '+91 98765 12345', store: 'Store B - Groceries', status: 'processing', amount: 1250, sla: 18 },
-  { id: 'RD-103', time: '5 mins ago', customer: 'Amit M.', phone: '+91 98765 67890', store: 'Store C - Fashion', status: 'processing', amount: 890, sla: 5 },
-  { id: 'RD-104', time: '45 mins ago', customer: 'Sneha R.', phone: '+91 98765 11223', store: 'Store A - Electronics', status: 'disputed', amount: 2500, sla: 45 },
-  { id: 'RD-105', time: '1 hour ago', customer: 'Vikram J.', phone: '+91 98765 44556', store: 'Store D - Home', status: 'cancelled', amount: 600, sla: 60 },
-  { id: 'RD-106', time: '2 mins ago', customer: 'Anjali D.', phone: '+91 98765 99887', store: 'Store B - Groceries', status: 'processing', amount: 350, sla: 2 },
-];
+import { useOrders, Order } from '../../../hooks/useOrders';
+
+const getTimeAgo = (dateStr: string) => {
+  if (!dateStr) return '';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins} mins ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hours ago`;
+  return '1 day+ ago';
+};
 
 export function OrderManager() {
-  const [selectedOrder, setSelectedOrder] = useState<typeof orders[0] | null>(null);
+  const { orders, loading, updateOrderStatus } = useOrders();
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isSheetOpen, setIsSheetOpen] = useState(false);
+
+  // Sheet States
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [selectedMerchant, setSelectedMerchant] = useState<Merchant | null>(null);
+
   const [activeTab, setActiveTab] = useState('all');
   const [showDisputeConsole, setShowDisputeConsole] = useState(false);
   const [selectedDisputeId, setSelectedDisputeId] = useState<string | null>(null);
@@ -92,69 +96,175 @@ export function OrderManager() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-gray-50 p-6 space-y-6">
+    <div className="h-full flex flex-col bg-gray-50 px-6 pt-10 pb-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Global Order Manager</h1>
-          <p className="text-sm text-gray-500">Monitor and manage all network orders in real-time.</p>
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center shadow-lg">
+            <ShoppingCart className="w-7 h-7 text-white" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Global Order Manager</h1>
+            <p className="text-sm text-gray-500 font-medium">Monitor and manage all network orders in real-time.</p>
+          </div>
         </div>
+
+        {/* Right Actions Toolbar */}
         <div className="flex items-center gap-3">
-          <Button variant="outline" className="gap-2">
-            <Filter className="w-4 h-4" />
-            Filter Date
-          </Button>
-          <Button variant="outline" className="gap-2">
-            <Download className="w-4 h-4" />
-            Export CSV
-          </Button>
+          {/* Status Filter Button Group */}
+          <div className="flex items-center gap-0 bg-white p-1.5 rounded-xl border border-gray-200 shadow-sm">
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "gap-1.5 rounded-lg transition-all text-xs",
+                activeTab === 'all'
+                  ? "bg-gray-900 text-white hover:bg-gray-800 shadow-md"
+                  : "text-gray-600 hover:text-indigo-600 hover:bg-gray-50"
+              )}
+              onClick={() => setActiveTab('all')}
+            >
+              All
+            </Button>
+            <div className="w-px h-4 bg-gray-200 mx-0.5"></div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "gap-1.5 rounded-lg transition-all text-xs",
+                activeTab === 'processing'
+                  ? "bg-gray-900 text-white hover:bg-gray-800 shadow-md"
+                  : "text-gray-600 hover:text-indigo-600 hover:bg-gray-50"
+              )}
+              onClick={() => setActiveTab('processing')}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              Active
+            </Button>
+            <div className="w-px h-4 bg-gray-200 mx-0.5"></div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "gap-1.5 rounded-lg transition-all text-xs",
+                activeTab === 'disputed'
+                  ? "bg-gray-900 text-white hover:bg-gray-800 shadow-md"
+                  : "text-gray-600 hover:text-orange-600 hover:bg-gray-50"
+              )}
+              onClick={() => setActiveTab('disputed')}
+            >
+              <AlertCircle className="w-3.5 h-3.5" />
+              Disputed
+            </Button>
+            <div className="w-px h-4 bg-gray-200 mx-0.5"></div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "gap-1.5 rounded-lg transition-all text-xs",
+                activeTab === 'cancelled'
+                  ? "bg-gray-900 text-white hover:bg-gray-800 shadow-md"
+                  : "text-gray-600 hover:text-red-600 hover:bg-gray-50"
+              )}
+              onClick={() => setActiveTab('cancelled')}
+            >
+              <XCircle className="w-3.5 h-3.5" />
+              Cancelled
+            </Button>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex items-center gap-0 bg-white p-1.5 rounded-xl border border-gray-200 shadow-sm">
+            <Button variant="ghost" size="sm" className="gap-2 text-gray-600 hover:text-indigo-600">
+              <Filter className="w-4 h-4" />
+              Filter Date
+            </Button>
+            <div className="w-px h-4 bg-gray-200 mx-1"></div>
+            <Button variant="ghost" size="sm" className="gap-2 text-gray-600 hover:text-indigo-600">
+              <Download className="w-4 h-4" />
+              Export CSV
+            </Button>
+          </div>
         </div>
       </div>
 
       {/* Main Content */}
       <div className="flex-1 bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col overflow-hidden">
-        <Tabs defaultValue="all" className="flex-1 flex flex-col" onValueChange={setActiveTab}>
-          <div className="px-6 pt-4 border-b border-gray-100">
-            <TabsList className="grid w-[400px] grid-cols-4">
-              <TabsTrigger value="all">All</TabsTrigger>
-              <TabsTrigger value="processing">Active</TabsTrigger>
-              <TabsTrigger value="disputed">Disputed</TabsTrigger>
-              <TabsTrigger value="cancelled">Cancelled</TabsTrigger>
-            </TabsList>
-          </div>
-
-          <div className="flex-1 overflow-auto">
-            <Table>
-              <TableHeader className="bg-gray-50 sticky top-0 z-10">
+        <div className="flex-1 overflow-auto">
+          <Table>
+            <TableHeader className="bg-gray-50 sticky top-0 z-10">
+              <TableRow>
+                <TableHead className="w-[100px]">Order ID</TableHead>
+                <TableHead>Time Placed</TableHead>
+                <TableHead>Customer</TableHead>
+                <TableHead>Store Name</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Amount</TableHead>
+                <TableHead className="text-right">SLA Timer</TableHead>
+                <TableHead className="w-[50px]"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredOrders.length === 0 ? (
                 <TableRow>
-                  <TableHead className="w-[100px]">Order ID</TableHead>
-                  <TableHead>Time Placed</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Store Name</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead className="text-right">SLA Timer</TableHead>
-                  <TableHead className="w-[50px]"></TableHead>
+                  <TableCell colSpan={8} className="text-center py-10 text-gray-500">
+                    {loading ? "Loading live orders..." : "No orders found"}
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredOrders.map((order) => (
+              ) : (
+                filteredOrders.map((order) => (
                   <TableRow key={order.id} className="cursor-pointer hover:bg-gray-50" onClick={() => handleOrderClick(order)}>
-                    <TableCell className="font-medium text-blue-600">{order.id}</TableCell>
-                    <TableCell className="text-gray-500">{order.time}</TableCell>
+                    <TableCell className="font-medium text-blue-600">#{order.id.slice(0, 8)}</TableCell>
+                    <TableCell className="text-gray-500">{getTimeAgo(order.created_at)}</TableCell>
                     <TableCell>
-                      <div className="flex flex-col">
-                        <span className="font-medium text-gray-900">{order.customer}</span>
-                        <span className="text-xs text-gray-500">{order.phone}</span>
+                      <div className="flex flex-col group cursor-pointer" onClick={(e) => {
+                        e.stopPropagation();
+                        // Reconstruct a partial customer object to open the sheet
+                        setSelectedCustomer({
+                          id: order.user_id || 'unknown',
+                          name: order.customer_name,
+                          phone: order.customer_phone,
+                          city: 'Hyderabad', // Fallback
+                          ltv: 0, // Will be fetched
+                          last_order: null,
+                          status: 'active',
+                          avatar_url: null,
+                          created_at: new Date().toISOString()
+                        });
+                      }}>
+                        <span className="font-medium text-gray-900 group-hover:text-blue-600 transition-colors underline-offset-4 group-hover:underline">{order.customer_name}</span>
+                        <span className="text-xs text-gray-500">{order.customer_phone}</span>
                       </div>
                     </TableCell>
-                    <TableCell>{order.store}</TableCell>
+                    <TableCell>
+                      <span
+                        className="font-medium text-gray-900 hover:text-blue-600 cursor-pointer underline-offset-4 hover:underline transition-colors"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          // Reconstruct a partial merchant object to open the sheet
+                          setSelectedMerchant({
+                            id: order.store_id,
+                            store_name: order.store_name,
+                            owner_name: 'Loading...',
+                            email: 'loading@example.com',
+                            phone: 'Loading...',
+                            city: 'Hyderabad',
+                            status: 'active',
+                            kyc_status: 'approved',
+                            rating: 4.5,
+                            created_at: new Date().toISOString()
+                          } as any);
+                        }}
+                      >
+                        {order.store_name}
+                      </span>
+                    </TableCell>
                     <TableCell>
                       <StatusPill status={order.status} />
                     </TableCell>
                     <TableCell className="text-right font-medium">₹{order.amount}</TableCell>
-                    <TableCell className={`text-right font-medium ${order.sla > 15 && order.status === 'processing' ? 'text-red-600' : 'text-gray-600'}`}>
-                      {order.sla > 15 && order.status === 'processing' ? `Overdue (${order.sla}m)` : `${order.sla}m`}
+                    <TableCell className={`text-right font-medium ${order.sla_minutes > 15 && order.status === 'processing' ? 'text-red-600' : 'text-gray-600'}`}>
+                      {order.sla_minutes > 15 && order.status === 'processing' ? `Overdue` : `${order.sla_minutes}m`}
                     </TableCell>
                     <TableCell>
                       <DropdownMenu>
@@ -170,11 +280,10 @@ export function OrderManager() {
                       </DropdownMenu>
                     </TableCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </Tabs>
+                )))}
+            </TableBody>
+          </Table>
+        </div>
       </div>
 
       {/* Side Drawer */}
@@ -200,11 +309,11 @@ export function OrderManager() {
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <p className="text-gray-500">Name</p>
-                    <p className="font-medium">{selectedOrder.customer}</p>
+                    <p className="font-medium">{selectedOrder.customer_name}</p>
                   </div>
                   <div>
                     <p className="text-gray-500">Phone</p>
-                    <p className="font-medium">{selectedOrder.phone}</p>
+                    <p className="font-medium">{selectedOrder.customer_phone}</p>
                   </div>
                 </div>
               </div>
@@ -251,21 +360,34 @@ export function OrderManager() {
 
               {/* Actions */}
               <div className="grid grid-cols-2 gap-4 pt-4">
-                <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => toast.success("Order Force Completed")}>
+                <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => updateOrderStatus(selectedOrder.id, 'completed')}>
                   Force Complete
                 </Button>
-                <Button variant="destructive" className="w-full" onClick={() => toast.error("Order Refunded & Cancelled")}>
+                <Button variant="destructive" className="w-full" onClick={() => updateOrderStatus(selectedOrder.id, 'cancelled')}>
                   Refund & Cancel
                 </Button>
               </div>
             </div>
           )}
-          
+
           <SheetFooter className="mt-8">
             <Button variant="ghost" onClick={() => setIsSheetOpen(false)}>Close</Button>
           </SheetFooter>
         </SheetContent>
       </Sheet>
+
+      {/* Linked Data Sheets */}
+      <CustomerDetailsSheet
+        customer={selectedCustomer}
+        isOpen={!!selectedCustomer}
+        onClose={() => setSelectedCustomer(null)}
+      />
+
+      <MerchantDetailsSheet
+        merchant={selectedMerchant}
+        isOpen={!!selectedMerchant}
+        onClose={() => setSelectedMerchant(null)}
+      />
     </div>
   );
 }

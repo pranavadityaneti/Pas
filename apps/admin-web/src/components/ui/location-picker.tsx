@@ -1,51 +1,201 @@
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import { Crosshair, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 
-import React from 'react';
-import { MapPin } from 'lucide-react';
+// Fix for default marker icon in Leaflet with Vite
+const customIcon = new L.Icon({
+    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+    iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowSize: [41, 41]
+});
 
 interface LocationPickerProps {
     value: { lat: number; lng: number };
     onChange: (lat: number, lng: number) => void;
 }
 
+// Component to handle map click events
+function MapClickHandler({ onChange }: { onChange: (lat: number, lng: number) => void }) {
+    useMapEvents({
+        click(e) {
+            onChange(e.latlng.lat, e.latlng.lng);
+        },
+    });
+    return null;
+}
+
+// Component to handle map resize and initialization
+function MapResizer() {
+    const map = useMap();
+    useEffect(() => {
+        // Delay to ensure container is fully rendered
+        const timer = setTimeout(() => {
+            map.invalidateSize();
+        }, 100);
+        return () => clearTimeout(timer);
+    }, [map]);
+    return null;
+}
+
+// Component to fly map to new location
+function MapFlyTo({ lat, lng }: { lat: number; lng: number }) {
+    const map = useMap();
+    const prevLatRef = useRef(lat);
+    const prevLngRef = useRef(lng);
+
+    useEffect(() => {
+        // Only fly if coordinates changed significantly
+        if (Math.abs(lat - prevLatRef.current) > 0.0001 || Math.abs(lng - prevLngRef.current) > 0.0001) {
+            map.flyTo([lat, lng], 16, { duration: 1 });
+            prevLatRef.current = lat;
+            prevLngRef.current = lng;
+        }
+    }, [map, lat, lng]);
+
+    return null;
+}
+
 export function LocationPicker({ value, onChange }: LocationPickerProps) {
+    const [mapKey, setMapKey] = useState(0);
+    const [isLocating, setIsLocating] = useState(false);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    // Force map remount when component becomes visible
+    useEffect(() => {
+        const observer = new ResizeObserver(() => {
+            setMapKey(prev => prev + 1);
+        });
+
+        if (containerRef.current) {
+            observer.observe(containerRef.current);
+        }
+
+        return () => observer.disconnect();
+    }, []);
+
+    // Handle geolocation request
+    const handleGetCurrentLocation = useCallback(() => {
+        if (!navigator.geolocation) {
+            toast.error('Geolocation not supported', {
+                description: 'Your browser does not support location services.'
+            });
+            return;
+        }
+
+        setIsLocating(true);
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const { latitude, longitude } = position.coords;
+                onChange(latitude, longitude);
+                setIsLocating(false);
+                toast.success('Location found!', {
+                    description: 'Map centered on your current location.'
+                });
+            },
+            (error) => {
+                setIsLocating(false);
+                switch (error.code) {
+                    case error.PERMISSION_DENIED:
+                        toast.error('Location access denied', {
+                            description: 'Please allow location access in your browser settings.'
+                        });
+                        break;
+                    case error.POSITION_UNAVAILABLE:
+                        toast.error('Location unavailable', {
+                            description: 'Unable to determine your location. Please try again.'
+                        });
+                        break;
+                    case error.TIMEOUT:
+                        toast.error('Location request timed out', {
+                            description: 'Please check your connection and try again.'
+                        });
+                        break;
+                    default:
+                        toast.error('Location error', {
+                            description: 'An unexpected error occurred.'
+                        });
+                }
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 60000
+            }
+        );
+    }, [onChange]);
+
     return (
-        <div className="relative h-44 w-full rounded-xl overflow-hidden bg-gradient-to-br from-blue-50 via-gray-50 to-blue-100 border border-gray-200 shadow-sm">
-            {/* Decorative grid pattern */}
-            <div
-                className="absolute inset-0 opacity-30"
-                style={{
-                    backgroundImage: `
-                        linear-gradient(rgba(0,0,0,0.03) 1px, transparent 1px),
-                        linear-gradient(90deg, rgba(0,0,0,0.03) 1px, transparent 1px)
-                    `,
-                    backgroundSize: '20px 20px'
-                }}
-            />
+        <div
+            ref={containerRef}
+            className="relative w-full rounded-xl overflow-hidden border-2 border-gray-200 shadow-sm"
+            style={{ height: '200px' }}
+        >
+            <MapContainer
+                key={mapKey}
+                center={[value.lat, value.lng]}
+                zoom={15}
+                scrollWheelZoom={true}
+                style={{ height: '100%', width: '100%' }}
+                className="z-0"
+            >
+                <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                />
+                <Marker
+                    position={[value.lat, value.lng]}
+                    icon={customIcon}
+                    draggable={true}
+                    eventHandlers={{
+                        dragend: (e) => {
+                            const marker = e.target;
+                            const position = marker.getLatLng();
+                            onChange(position.lat, position.lng);
+                        },
+                    }}
+                />
+                <MapClickHandler onChange={onChange} />
+                <MapResizer />
+                <MapFlyTo lat={value.lat} lng={value.lng} />
+            </MapContainer>
 
-            {/* Center content */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-                {/* Animated pin with pulse */}
-                <div className="relative">
-                    <div className="absolute inset-0 -m-2 bg-blue-400/20 rounded-full animate-ping" />
-                    <div className="relative bg-white p-3 rounded-full shadow-lg border border-gray-100">
-                        <MapPin className="w-6 h-6 text-blue-600" />
-                    </div>
-                </div>
+            {/* Use My Location button */}
+            <button
+                type="button"
+                onClick={handleGetCurrentLocation}
+                disabled={isLocating}
+                className="absolute z-[1000] bg-white hover:bg-gray-50 
+                           shadow-md border border-gray-200 rounded-lg p-2.5
+                           transition-all duration-200 hover:shadow-lg
+                           disabled:opacity-50 disabled:cursor-not-allowed
+                           group"
+                style={{ top: '8px', right: '8px' }}
+                title="Use my current location"
+            >
+                {isLocating ? (
+                    <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                ) : (
+                    <Crosshair className="w-5 h-5 text-gray-600 group-hover:text-blue-600 transition-colors" />
+                )}
+            </button>
 
-                {/* Label */}
-                <div className="mt-4 text-center">
-                    <p className="text-sm font-medium text-gray-700">Click to select location</p>
-                    <p className="text-xs text-gray-400 mt-1">
-                        {value.lat.toFixed(4)}°N, {value.lng.toFixed(4)}°E
-                    </p>
-                </div>
+            {/* Coordinates display */}
+            <div className="absolute bottom-2 left-2 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 shadow-sm border border-gray-100 z-[1000]">
+                📍 {value.lat.toFixed(5)}, {value.lng.toFixed(5)}
             </div>
 
-            {/* Decorative corner markers */}
-            <div className="absolute top-3 left-3 w-4 h-4 border-l-2 border-t-2 border-gray-300 rounded-tl-sm" />
-            <div className="absolute top-3 right-3 w-4 h-4 border-r-2 border-t-2 border-gray-300 rounded-tr-sm" />
-            <div className="absolute bottom-3 left-3 w-4 h-4 border-l-2 border-b-2 border-gray-300 rounded-bl-sm" />
-            <div className="absolute bottom-3 right-3 w-4 h-4 border-r-2 border-b-2 border-gray-300 rounded-br-sm" />
+            {/* Helper text */}
+            <div className="absolute bottom-2 right-2 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-lg text-xs text-gray-500 shadow-sm border border-gray-100 z-[1000]">
+                Click map or drag marker
+            </div>
         </div>
     );
 }

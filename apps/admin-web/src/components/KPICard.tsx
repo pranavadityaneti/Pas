@@ -12,15 +12,15 @@ interface KPICardProps {
   subtext?: string;
 }
 
-export function KPICard({ 
-  title, 
-  value, 
-  icon: Icon, 
-  trend, 
-  trendValue, 
-  showGraph, 
+export function KPICard({
+  title,
+  value,
+  icon: Icon,
+  trend,
+  trendValue,
+  showGraph,
   showPulse,
-  subtext 
+  subtext
 }: KPICardProps) {
   const handleClick = () => {
     toast.info(`Metric: ${title}`, {
@@ -29,18 +29,16 @@ export function KPICard({
   };
 
   return (
-    <div 
+    <div
       onClick={handleClick}
       className="bg-white rounded-lg border border-gray-200 p-6 hover:shadow-lg transition-all cursor-pointer active:scale-95 duration-200"
     >
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3">
-          <div className={`p-2 rounded-lg ${
-            showPulse ? 'bg-green-100' : 'bg-blue-100'
-          }`}>
-            <Icon className={`w-5 h-5 ${
-              showPulse ? 'text-green-600' : 'text-blue-600'
-            }`} />
+          <div className={`p-2 rounded-lg ${showPulse ? 'bg-emerald-100' : 'bg-primary/10'
+            }`}>
+            <Icon className={`w-5 h-5 ${showPulse ? 'text-emerald-600' : 'text-primary'
+              }`} />
           </div>
           {showPulse && (
             <div className="relative">
@@ -50,21 +48,20 @@ export function KPICard({
           )}
         </div>
         {trend && trendValue && (
-          <span className={`text-sm font-medium ${
-            trend === 'up' ? 'text-green-600' : 'text-red-600'
-          }`}>
+          <span className={`text-sm font-medium ${trend === 'up' ? 'text-green-600' : 'text-red-600'
+            }`}>
             {trendValue}
           </span>
         )}
       </div>
-      
+
       <p className="text-sm text-gray-600 mb-1">{title}</p>
       <p className="text-3xl font-bold text-gray-900 mb-2">{value}</p>
-      
+
       {subtext && (
         <p className="text-xs text-gray-500">{subtext}</p>
       )}
-      
+
       {showGraph && (
         <div className="mt-4 h-12">
           <svg className="w-full h-full" viewBox="0 0 200 50" preserveAspectRatio="none">

@@ -1,128 +1,123 @@
 # Pick At Store (Pas) - Project Manifesto
 
 ## 1. Project Overview
-**Pick At Store** is a hyperlocal commerce platform connecting Consumers with local Merchants. The system enables consumers to browse city-specific store inventories, place orders, and track them, while providing merchants and admins with powerful tools to manage catalogs, inventory, and order fulfillment.
+**Pick At Store** is a massive hyperlocal commerce platform designed to bridge the gap between Consumers and their local neighborhood Merchants. It empowers consumers to find products in nearby stores, place orders instantly, and track them in real-time. For merchants and administrators, it provides a unified "Command Center" to manage catalogs, track inventory, and oversee the entire fulfillment network.
 
-**Current Status**: **Phase 2 Complete** (Admin Dashboard & Master Catalog).
-**Development Methodology**: "Agentic-Co-Founder" Model (User + Technical Co-founder + Google Antigravity).
+**Current Status**: **Phase 2 Complete (Advanced Admin Ecosystem)**.
 
-### Recent Progress (Phase 2 - Admin)
-- [x] **New Application**: Initialized `apps/admin-web` (Vite + React + Tailwind).
-- [x] **Master Catalog**: Full CRUD for Global Products.
-- [x] **Advanced UI**: Custom "Card" Modals, Horizontal Image Galleries, Numeric Type Safety.
-- [x] **Data Logic**: 
-    - **Bulk Import**: Excel/CSV ingestion with **Error Reporting** & **Dropdown Validation**.
-    - **Persistence**: robust Image Upload flow (Direct to Supabase Storage) with Policy guidance.
-    - **Export**: Generates Spreadsheets on demand.
-- [x] **Infrastructure**: 
-    - **Supabase Storage**: Integrated via AWS S3 standard wrapper.
-    - **Audit Logs**: Tracking who changed what (Price/Stock).
+### Core Philosophy
+We rejected the "simple CRUD app" approach. This is a complex, **event-driven ecosystem** built on:
+*   **Real-Time Data**: No refreshing pages. If an order happens, the screen updates.
+*   **Deep Interconnectivity**: All data points (Orders, Customers, Merchants) are hyperlinked.
+*   **Single Source of Truth**: A centralized Master Catalog that feeds thousands of merchant inventories.
 
 ---
 
-## 2. Architecture: "The Full-Stack Monorepo"
-We have rejected the "Web Wrapper" and "Serverless-Only" approaches in favor of a robust, industry-standard architecture that supports true native performance and real-time operations.
+## 2. Key Modules & Features (The "Big 4")
 
-### Structure
-The project lives in a **Monorepo** to ensure code reuse (Shared Types) and consistent tooling.
+## 2. Key Modules & Features (The "Big 4")
 
-| Component | Technology | Path | Description |
-| :--- | :--- | :--- | :--- |
-| **Backend API** | Node.js + Express + TypeScript | `apps/api` | The Central Brain. REST API + Socket.io Server. |
-| **Database** | PostgreSQL + Prisma ORM | - | Source of Truth. No SQLite/In-Memory. |
-| **Consumer App** | React Native (Expo) | `apps/consumer-mobile` | **Native Binary**. Browsing, Cart, Checkout. |
-| **Merchant App** | React Native (Expo) | `apps/merchant-mobile` | **Native Binary**. Real-time Order Alerts, Fulfillment. |
-| **Admin Dashboard** | React (Vite) | `apps/admin-web` | Super-Admin web panel. Master Catalog, User Mgmt. |
-| **Merchant Panel** | React (Vite) | `apps/merchant-web` | Store Manager web panel. Analytics, Inventory. |
-| **Shared** | TypeScript | `packages/shared` | Zod Schemas, TS Interfaces, Constants. |
+### A. The Master Catalog (The "Product Brain")
+The single source of truth for all product data. We moved away from the chaotic "marketplace" model where every seller uploads their own low-quality images. Instead, we use a **Centralized Master Catalog**.
+*   **Why it matters**: Ensures every customer sees high-res images and accurate descriptions, regardless of which local shop they buy from.
+*   **Deep Dive Features**:
+    *   **Visual Excel Import**: A drag-and-drop importer that parses Excel files client-side, displays a data grid preview, identifies invalid rows (e.g., negative prices), and prevents "garbage data" from ever reaching the database.
+    *   **Virtualised Infinite Scroll**: Built to handle 100,000+ SKUs without slowing down the browser. It renders only the DOM nodes currently visible on screen.
+    *   **Multi-View Gallery**: Each product supports a primary image and unlimited secondary images (e.g., Back of Pack, Nutrition Info), managed via a custom "Image Strip" UI that uploads directly to Supabase Storage buckets.
 
----
+### B. The Merchant Network (The "Supply Web")
+This module manages the physical nodes of our network. It goes beyond a simple address book—it is a live **Performance Monitor**.
+*   **Why it matters**: We need to know which stores are healthy, which are churning, and who is driving revenue *right now*.
+*   **Deep Dive Features**:
+    *   **The "Merchant Sheet"**: A slide-over dashboard that activates when you click any merchant. It is **Connected to the Core**, meaning it runs live SQL queries (via Postgres RPC `get_merchant_stats`) to calculate:
+        *   **Real-time GMV**: Sum of all successful orders in the last 30 days.
+        *   **Top Categories**: Aggregates `OrderItems` to show if a store sells more "Dairy" or "Snacks".
+    *   **Inventory vs. Velocity**: The dashboard distinguishes between what a merchant *claims* to have (Inventory) and what they actually *sell* (Velocity), helping admins spot discrepancies.
 
-## 3. Workflow Strategy: "Figma-to-Git"
-To guarantee pixel-perfect fidelity to the Client-Approved Designs, we serve a strict workflow:
+### C. Order Command Center (The "Traffic Controller")
+The mission-critical screen for Operations teams. It is designed for high-stress environments where speed is everything.
+*   **Why it matters**: A delayed order is a lost customer. This screen reduces "Time to Action".
+*   **Deep Dive Features**:
+    *   **Deep Linking Ecosystem**: The defining feature of Phase 2. The Order Table is the bridge between modules.
+        *   Clicking **"Customer Name"** opens the *Customer 360 Sheet* (Is he a VIP? Is this his first order?).
+        *   Clicking **"Store Name"** opens the *Merchant Sheet* (Is this store reliable? Do they have a history of cancellations?).
+    *   **Supabase Realtime Subscriptions**: The table listens to `INSERT` and `UPDATE` events on the `orders` table. No manual refreshing required—new orders flash onto the screen instantly.
+    *   **SLA & Status Logic**: Colored pills and "Time Ago" badges visually warn operators if an order is stuck in "Processing" for too long (e.g., > 45 mins).
 
-1.  **Design Approval**: Client approves UI in Figma.
-2.  **Code Export**: Design team exports/converts Figma screens to React/React Native code.
-3.  **Git Push**: This code is pushed to specific GitHub repositories (e.g., `simulated-consumer-ui`).
-4.  **Integration**: Antigravity (AI) clones these repos and refactors the "dumb" UI components into the Main Monorepo, connecting them to the Logic/API.
-
-> **Constraint**: We DO NOT build UI from scratch. We refactor imported UI.
-
----
-
-## 4. Technical Specifications & Constraints
-
-### A. Database (PostgreSQL)
-*   **Hosting**: Cloud (Supabase/Neon) preferred over Local Docker for ease of maintenance.
-*   **Critical Schema Entities**:
-    *   **City / ServiceArea**: Mandatory for the "Hyperlocal" discovery model. Stores must belong to a City.
-    *   **Store**: Linked to City.
-    *   **Products**: Gloabl Master Catalog vs Store-Specific Inventory.
-    *   **Orders**: Transactional data.
-
-### B. Real-Time Layer (Socket.io)
-*   **Why**: Merchants cannot hit "Refresh". Orders must "ring" instantly.
-*   **Implementation**: `apps/api` hosts the Socket server. Merchant App listens on `store_{id}` channel.
-
-### C. Authentication & Security
-*   **Strategy**: Custom JWT Middleware in Express.
-*   **Roles**: `SUPER_ADMIN`, `MERCHANT`, `CONSUMER`.
-*   **Authorization**: Middleware must strictly enforce role access (e.g., Consumers cannot hit `/admin/*` endpoints).
-
-### D. File Storage
-*   **Strategy**: Object Storage (S3-compatible).
-*   **Constraint**: No local file storage. Images must be uploaded to the cloud and URLs stored in the DB.
+### D. Customer 360 (The "Intelligence Layer")
+A CRM built directly into the transaction platform. It gives support agents "X-Ray Vision" on who they are talking to.
+*   **Why it matters**: Treating a high-value customer like a stranger is a fatal error.
+*   **Deep Dive Features**:
+    *   **Dynamic LTV Calculation**: We don't just store a static "LTV" number. When you open a profile, the system aggregates their entire order history in real-time to compute their exact Lifetime Value.
+    *   **Behavioral Insights**:
+        *   **Avg. Order Value**: Does this user buy small snacks or monthly groceries?
+        *   **Tenure**: How many years have they been with us?
+    *   **Contextual History**: A scrollable list of their past orders (successes and failures) helps agents resolve disputes faster.
 
 ---
 
-## 5. Development Phases
+## 3. Technology Stack (The "Modern Web")
 
-#### Phase 1: The Backbone (Completed)
-*   [x] Setup Monorepo Workspace.
-*   [x] Initialize PostgreSQL + Prisma.
-*   [x] Implement Express API with Auth & Socket.io.
-*   **Deliverable**: Healthy API returning JSON data (verified).
+We use a high-performance stack optimized for speed and developer experience:
 
-#### Phase 2: The "God" View (Admin) - (Completed)
-*   [x] Integrate Admin UI (from Git).
-*   [x] **Master Catalog**: Deep integration with Image Gallery & Excel Bulk Tools.
-*   [x] **UI Polish**: High-fidelity "Card" modals and responsive layouts.
-*   **Deliverable**: Robust Admin Dashboard for Catalog & User Management.
-
-#### Phase 3: The Consumer Experience - **NEXT**
-*   **Pending**: User to provide Consumer UI Git Link.
-*   Integrate Consumer UI (from Git).
-*   Implement "Stores Near Me" (City logic) and Checkout.
-*   **Deliverable**: Consumer can place an order.
-
-#### Phase 4: The Loop Closer (Merchant)
-*   Integrate Merchant UI (from Git).
-*   Connect Real-time Sockets.
-*   **Deliverable**: Merchant gets "Ping" when Consumer buys.
+| Layer | Technology | Why we chose it? |
+| :--- | :--- | :--- |
+| **Frontend** | **React 18 + Vite** | Blazing fast builds and HMR. |
+| **Styling** | **Tailwind CSS + Shadcn UI** | Beautiful, accessible, and consistent design system. |
+| **Backend Logic** | **Node.js (Express)** | Proven scalability for API logic. |
+| **Database** | **PostgreSQL** | Relational integrity (unlike NoSQL). |
+| **ORM** | **Prisma** | Type-safe database queries. |
+| **Real-Time** | **Supabase Realtime** | Live subscriptions for Orders/Chats. |
+| **Analytics** | **Postgres RPC (PL/pgSQL)** | Raw SQL functions for heavy number-crunching. |
 
 ---
 
-## 6. How to Run (Local Dev)
-1.  **Install Dependencies**:
-    ```bash
-    npm install
-    ```
-2.  **Setup Database**:
-    Ensure `apps/api/.env` has the correct `DATABASE_URL` (Supabase Transaction Mode).
-    ```bash
-    cd apps/api && npx prisma db push
-    ```
-3.  **Seed Data**:
-    ```bash
-    cd apps/api && npx prisma db seed
-    ```
-4.  **Start API**:
-    ```bash
-    cd apps/api && npm run dev
-    ```
-    API will run at `http://localhost:3000`.
-5.  **Start Admin Web**:
-    ```bash
-    cd apps/admin-web && npm run dev
-    ```
-    Dashboard will run at `http://localhost:3001` (by default).
+## 4. Setup Instructions (For New Developers)
+
+Follow these steps to wake up the system locally.
+
+### Prerequisites
+*   Node.js (v18 or higher)
+*   npm (v9 or higher)
+
+### Step 1: Install Dependencies
+Install all libraries for the frontend, backend, and shared packages.
+```bash
+npm install
+```
+
+### Step 2: Database Connection
+Ensure your `.env` file in `apps/api` has the correct `DATABASE_URL` pointing to the Supabase Postgres instance.
+
+### Step 3: Run Migrations & RPCs
+Push the schema to the cloud and create the necessary SQL functions for analytics.
+```bash
+cd apps/api
+npx prisma db push
+npx ts-node run_stats_v2.ts  # Important: Creates the Analytics SQL Function
+```
+
+### Step 4: Launch the Servers
+We run the API (Backend) and Admin Web (Frontend) concurrently.
+
+**Terminal 1 (Backend):**
+```bash
+cd apps/api
+npm run dev
+# Connects to Database & Socket Server
+```
+
+**Terminal 2 (Frontend):**
+```bash
+cd apps/admin-web
+npm run dev
+# Launches Dashboard at http://localhost:3005
+```
+
+---
+
+## 5. Development Workflow (Agentic)
+This project is built using an "Agentic Pair Programming" model.
+1.  **Cursor Driven**: The Human User directs the "Antigravity" Agent.
+2.  **Verification**: Every feature is audited for "Mock Data" vs "Real Data".
+3.  **Atomic Commits**: We build one module (e.g., Merchant Stats), perfect it, and then move to the next.

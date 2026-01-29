@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
     Sheet,
     SheetContent,
@@ -21,6 +21,7 @@ import { Checkbox } from '../../ui/checkbox';
 
 interface AddMerchantSheetProps {
     trigger?: React.ReactNode;
+    onSuccess?: () => void;
 }
 
 const STEPS = [
@@ -29,11 +30,12 @@ const STEPS = [
     { label: 'KYC & Docs' }
 ];
 
-export function AddMerchantSheet({ trigger }: AddMerchantSheetProps) {
+export function AddMerchantSheet({ trigger, onSuccess }: AddMerchantSheetProps) {
     const { createMerchant } = useMerchants();
     const [open, setOpen] = useState(false);
     const [step, setStep] = useState(1);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isLoadingLocation, setIsLoadingLocation] = useState(false);
 
     // Form State
     const [formData, setFormData] = useState({
@@ -58,6 +60,36 @@ export function AddMerchantSheet({ trigger }: AddMerchantSheetProps) {
         turnoverRange: '<20L'
     });
 
+    // Auto-request location when sheet opens
+    useEffect(() => {
+        if (open && navigator.geolocation) {
+            setIsLoadingLocation(true);
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const { latitude, longitude } = position.coords;
+                    setFormData(prev => ({
+                        ...prev,
+                        latitude,
+                        longitude
+                    }));
+                    setIsLoadingLocation(false);
+                    toast.success('Location detected!', {
+                        description: 'Map centered on your current location.'
+                    });
+                },
+                (error) => {
+                    setIsLoadingLocation(false);
+                    if (error.code === error.PERMISSION_DENIED) {
+                        toast.info('Location access', {
+                            description: 'Click the crosshair on the map to use your location.'
+                        });
+                    }
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+            );
+        }
+    }, [open]);
+
     const handleNext = () => setStep(p => p + 1);
     const handleBack = () => setStep(p => p - 1);
 
@@ -65,19 +97,62 @@ export function AddMerchantSheet({ trigger }: AddMerchantSheetProps) {
         try {
             setIsSubmitting(true);
 
+            // Map form fields to database schema
             const payload = {
-                ...formData,
-                branches,
-                kyc: kycData
+                store_name: formData.name,
+                owner_name: formData.ownerName,
+                email: formData.email,
+                phone: formData.phone,
+                city: formData.city,
+                address: formData.address,
+                latitude: formData.latitude,
+                longitude: formData.longitude,
+                has_branches: formData.hasBranches,
+                // Map KYC fields
+                pan_number: kycData.panNumber,
+                aadhar_number: kycData.aadharNumber,
+                bank_account_number: kycData.bankAccount,
+                ifsc_code: kycData.ifsc,
+                turnover_range: kycData.turnoverRange
             };
 
             console.log("Submitting Payload to Supabase:", payload);
 
-            await createMerchant(payload);
+            await createMerchant(payload, {
+                pan: kycData.panDocument,
+                aadharFront: kycData.aadharFront,
+                aadharBack: kycData.aadharBack
+            });
 
             toast.success(`Merchant "${formData.name}" onboarded successfully!`);
+
+            // Call onSuccess callback to refresh the parent's merchant list
+            if (onSuccess) {
+                onSuccess();
+            }
+
             setOpen(false);
             setStep(1);
+            // Reset form
+            setFormData({
+                name: '',
+                email: '',
+                phone: '',
+                ownerName: '',
+                city: 'Hyderabad',
+                address: '',
+                latitude: 17.3850,
+                longitude: 78.4867,
+                hasBranches: false
+            });
+            setBranches([]);
+            setKycData({
+                panNumber: '',
+                aadharNumber: '',
+                bankAccount: '',
+                ifsc: '',
+                turnoverRange: '<20L'
+            });
         } catch (error: any) {
             console.error(error);
             toast.error("Failed to onboard merchant", {
@@ -175,14 +250,14 @@ export function AddMerchantSheet({ trigger }: AddMerchantSheetProps) {
                                     <MapPin className="w-5 h-5 text-blue-600" />
                                     <h3 className="font-semibold text-gray-900">Store Location</h3>
                                 </div>
-                                <p className="text-xs text-gray-500 mb-5">Drag pin to exact shop entrance.</p>
+                                <p className="text-xs text-gray-500 mb-4">Click on the map or drag the pin to mark the exact shop location.</p>
 
                                 <LocationPicker
                                     value={{ lat: formData.latitude, lng: formData.longitude }}
                                     onChange={(lat, lng) => setFormData({ ...formData, latitude: lat, longitude: lng })}
                                 />
 
-                                <div className="mt-5 space-y-2">
+                                <div className="mt-6 space-y-2">
                                     <Label className="text-gray-700 text-sm font-medium">Full Address</Label>
                                     <Input
                                         value={formData.address}

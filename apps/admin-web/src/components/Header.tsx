@@ -2,6 +2,9 @@ import { Search, Bell, ChevronRight, User } from 'lucide-react';
 import { toast } from 'sonner';
 import { useState } from 'react';
 
+import { SidebarTrigger } from './ui/sidebar';
+import { Separator } from './ui/separator';
+
 export function Header() {
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -27,13 +30,17 @@ export function Header() {
   };
 
   return (
-    <header className="bg-white border-b border-gray-200 px-8 py-4">
-      <div className="flex items-center justify-between">
-        {/* Left: Breadcrumbs */}
-        <div className="flex items-center gap-2 text-sm text-gray-600">
-          <span>Home</span>
-          <ChevronRight className="w-4 h-4" />
-          <span className="text-gray-900 font-medium">Dashboard</span>
+    <header className="bg-white border-b border-gray-200 px-4 py-3 shrink-0">
+      <div className="flex items-center justify-between h-full">
+        {/* Left: Trigger & Breadcrumbs */}
+        <div className="flex items-center gap-3">
+          <SidebarTrigger />
+          <Separator orientation="vertical" className="h-4" />
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <span>Home</span>
+            <ChevronRight className="w-4 h-4" />
+            <span className="text-gray-900 font-medium">Dashboard</span>
+          </div>
         </div>
 
         {/* Center: Search Bar */}
@@ -54,7 +61,7 @@ export function Header() {
         {/* Right: Notifications & Profile */}
         <div className="flex items-center gap-4">
           {/* Notifications */}
-          <button 
+          <button
             onClick={handleNotificationClick}
             className="relative p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
           >
@@ -63,7 +70,7 @@ export function Header() {
           </button>
 
           {/* Admin Profile */}
-          <button 
+          <button
             onClick={handleProfileClick}
             className="flex items-center gap-3 hover:bg-gray-50 p-2 rounded-lg transition-colors text-left"
           >

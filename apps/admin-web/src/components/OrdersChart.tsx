@@ -27,16 +27,16 @@ export function OrdersChart() {
       <ResponsiveContainer width="100%" height={240}>
         <LineChart data={data}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-          <XAxis 
-            dataKey="hour" 
+          <XAxis
+            dataKey="hour"
             tick={{ fontSize: 10 }}
             stroke="#9ca3af"
           />
-          <YAxis 
+          <YAxis
             tick={{ fontSize: 10 }}
             stroke="#9ca3af"
           />
-          <Tooltip 
+          <Tooltip
             contentStyle={{
               backgroundColor: '#fff',
               border: '1px solid #e5e7eb',
@@ -44,22 +44,22 @@ export function OrdersChart() {
               fontSize: '12px'
             }}
           />
-          <Legend 
+          <Legend
             wrapperStyle={{ fontSize: '12px' }}
           />
-          <Line 
-            type="monotone" 
-            dataKey="today" 
-            stroke="#3b82f6" 
+          <Line
+            type="monotone"
+            dataKey="today"
+            stroke="hsl(var(--primary))"
             strokeWidth={2}
             dot={{ r: 3 }}
             activeDot={{ r: 5 }}
             name="Today"
           />
-          <Line 
-            type="monotone" 
-            dataKey="yesterday" 
-            stroke="#9ca3af" 
+          <Line
+            type="monotone"
+            dataKey="yesterday"
+            stroke="#9ca3af"
             strokeWidth={2}
             strokeDasharray="5 5"
             dot={{ r: 3 }}

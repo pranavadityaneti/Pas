@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import { useRef } from 'react';
 import { Label } from "../../../ui/label";
 import { Input } from "../../../ui/input";
 import {
@@ -42,7 +42,8 @@ function FileUpload({ label, accept = "image/*,.pdf", file, onFileChange }: File
                 ref={inputRef}
                 type="file"
                 accept={accept}
-                className="hidden"
+                className="sr-only absolute w-0 h-0 opacity-0 pointer-events-none"
+                style={{ position: 'absolute', visibility: 'hidden', width: 0, height: 0 }}
                 onChange={(e) => onFileChange(e.target.files?.[0] || null)}
             />
 
