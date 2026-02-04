@@ -1,12 +1,10 @@
-<<<<<<< HEAD
 node_modules/
-=======
-node_modules
-dist
-build
+dist/
+build/
 .env
 .DS_Store
-coverage
-.vscode
-tmp
->>>>>>> 8431af3d (fix(admin): resolve Phase 2 issues (Bulk Import Dropdowns, Image Upload repair, Edit Reflection))
+coverage/
+.vscode/
+tmp/
+.expo/
+*.log

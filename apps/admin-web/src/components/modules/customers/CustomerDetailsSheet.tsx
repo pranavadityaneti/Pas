@@ -1,6 +1,5 @@
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "../../ui/sheet";
+import { Sheet, SheetContent, SheetTitle } from "../../ui/sheet";
 import { Badge } from "../../ui/badge";
-import { Button } from "../../ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../ui/tabs";
 import { ShoppingBag, Package, MapPin, Phone, Mail, Clock, Calendar } from "lucide-react";
 import { Customer } from "../../../hooks/useCustomers";
@@ -59,17 +58,13 @@ export function CustomerDetailsSheet({ customer, isOpen, onClose }: CustomerDeta
                 </SheetHeader>
 
                 <Tabs defaultValue="overview" className="w-full">
-                    <TabsList className="w-full justify-start border-b border-gray-100 bg-transparent p-0 mb-6 rounded-none space-x-6 h-auto">
-                        <TabsTrigger
-                            value="overview"
-                            className="rounded-none border-b-2 border-transparent data-[state=active]:border-fuchsia-600 data-[state=active]:text-fuchsia-600 px-0 pb-2"
-                        >
+                    <TabsList className="mb-6">
+                        <TabsTrigger value="overview">
+                            <Clock className="w-4 h-4" />
                             Overview
                         </TabsTrigger>
-                        <TabsTrigger
-                            value="orders"
-                            className="rounded-none border-b-2 border-transparent data-[state=active]:border-fuchsia-600 data-[state=active]:text-fuchsia-600 px-0 pb-2"
-                        >
+                        <TabsTrigger value="orders">
+                            <Package className="w-4 h-4" />
                             Order History ({orders.length})
                         </TabsTrigger>
                     </TabsList>

@@ -19,6 +19,9 @@ export interface KYCData {
     panDocument?: File | null;
     aadharFront?: File | null;
     aadharBack?: File | null;
+    gstDocument?: File | null;
+    gstNumber?: string;
+    storePhotos?: File[];
 }
 
 interface KYCFormProps {
@@ -181,22 +184,80 @@ export function KYCForm({ data, onChange }: KYCFormProps) {
                     <h3 className="font-semibold text-gray-900">Business Information</h3>
                 </div>
 
-                <div className="space-y-2">
-                    <Label className="text-gray-700 text-sm font-medium">Annual Turnover Range</Label>
-                    <Select
-                        value={data.turnoverRange}
-                        onValueChange={(val) => handleChange('turnoverRange', val)}
-                    >
-                        <SelectTrigger className="bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500 h-11">
-                            <SelectValue placeholder="Select Turnover Range" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="<20L">Less than ₹20 Lakhs</SelectItem>
-                            <SelectItem value="20L-1Cr">₹20 Lakhs - ₹1 Crore</SelectItem>
-                            <SelectItem value="1Cr-5Cr">₹1 Crore - ₹5 Crores</SelectItem>
-                            <SelectItem value=">5Cr">More than ₹5 Crores</SelectItem>
-                        </SelectContent>
-                    </Select>
+                <div className="space-y-4">
+                    <div className="space-y-2">
+                        <Label className="text-gray-700 text-sm font-medium">Annual Turnover Range</Label>
+                        <Select
+                            value={data.turnoverRange}
+                            onValueChange={(val) => handleChange('turnoverRange', val)}
+                        >
+                            <SelectTrigger className="bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500 h-11">
+                                <SelectValue placeholder="Select Turnover Range" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="<20L">Less than ₹20 Lakhs</SelectItem>
+                                <SelectItem value="20L-40L">₹20 Lakhs - ₹40 Lakhs</SelectItem>
+                                <SelectItem value="40L-1Cr">₹40 Lakhs - ₹1 Crore</SelectItem>
+                                <SelectItem value=">1Cr">More than ₹1 Crore</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    {data.turnoverRange !== '<20L' && (
+                        <div className="space-y-4 pt-4 border-t border-gray-200 animate-in fade-in duration-300">
+                            <div className="space-y-2">
+                                <Label className="text-gray-700 text-sm font-medium">GST Number <span className="text-red-500">*</span></Label>
+                                <Input
+                                    value={data.gstNumber}
+                                    onChange={(e) => handleChange('gstNumber', e.target.value.toUpperCase())}
+                                    placeholder="22AAAAA0000A1Z5"
+                                    className="uppercase bg-white border-gray-300 h-11"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label className="text-gray-700 text-sm font-medium">GST Certificate <span className="text-red-500">*</span></Label>
+                                <FileUpload
+                                    label="GST Certificate"
+                                    file={data.gstDocument}
+                                    onFileChange={(f) => handleChange('gstDocument', f)}
+                                />
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="space-y-2 pt-4 border-t border-gray-200">
+                        <Label className="text-gray-700 text-sm font-medium">Store Photos (Min 2) <span className="text-red-500">*</span></Label>
+                        <div className="grid grid-cols-2 gap-3 mb-2">
+                            {(data.storePhotos || []).map((p, i) => (
+                                <div key={i} className="relative group">
+                                    <div className="h-20 bg-gray-100 rounded-lg border border-gray-200 flex items-center justify-center overflow-hidden">
+                                        <img src={URL.createObjectURL(p)} alt="Store" className="w-full h-full object-cover" />
+                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            const newPhotos = [...(data.storePhotos || [])];
+                                            newPhotos.splice(i, 1);
+                                            handleChange('storePhotos', newPhotos as any);
+                                        }}
+                                        className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                                    >
+                                        <X className="w-3 h-3" />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                        <FileUpload
+                            label="Add Store Photo"
+                            accept="image/*"
+                            onFileChange={(f) => {
+                                if (f) {
+                                    const newPhotos = [...(data.storePhotos || []), f];
+                                    handleChange('storePhotos', newPhotos as any);
+                                }
+                            }}
+                        />
+                        <p className="text-[10px] text-gray-400">Please upload front and inside views.</p>
+                    </div>
                 </div>
             </div>
         </div>

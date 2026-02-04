@@ -7,28 +7,24 @@ import {
   FileText,
   User,
   MapPin,
-  Calendar,
-  ChevronRight,
-  ShieldAlert,
-  Loader2
+  Loader2,
+  Trash2
 } from 'lucide-react';
 import { Button } from '../../ui/button';
-import { Input } from '../../ui/input';
 import { Textarea } from '../../ui/textarea';
 import { Checkbox } from '../../ui/checkbox';
 import { Label } from '../../ui/label';
 import { ScrollArea } from '../../ui/scroll-area';
-import { Separator } from '../../ui/separator';
 import { ImageWithFallback } from '../../figma/ImageWithFallback';
 import { toast } from 'sonner';
 import { useMerchants, Merchant } from '../../../hooks/useMerchants';
 import { formatDistanceToNow } from 'date-fns';
 
 export function KYCQueue() {
-  const { merchants, updateMerchant, loading } = useMerchants();
+  const { merchants, updateMerchant, deleteMerchant, loading } = useMerchants();
   const [selectedApp, setSelectedApp] = useState<Merchant | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
-  const [activeDoc, setActiveDoc] = useState<'pan' | 'aadhar_front' | 'aadhar_back'>('pan');
+  const [activeDoc, setActiveDoc] = useState<'pan' | 'aadhar_front' | 'aadhar_back' | 'gst' | 'store_1' | 'store_2'>('pan');
   const [rejectionReason, setRejectionReason] = useState('');
 
   const [checklist, setChecklist] = useState({
@@ -40,12 +36,12 @@ export function KYCQueue() {
 
   const pendingApplications = merchants.filter(m => m.kyc_status === 'pending');
 
-  // Select first app on load if none selected
+  // Select first app on load if none selected, or clear if deleted
   useEffect(() => {
-    if (!selectedApp && pendingApplications.length > 0) {
-      setSelectedApp(pendingApplications[0]);
-    } else if (pendingApplications.length === 0) {
+    if (pendingApplications.length === 0) {
       setSelectedApp(null);
+    } else if (!selectedApp || !pendingApplications.find(a => a.id === selectedApp.id)) {
+      setSelectedApp(pendingApplications[0]);
     }
   }, [merchants]);
 
@@ -85,6 +81,9 @@ export function KYCQueue() {
       case 'pan': return selectedApp.pan_doc_url;
       case 'aadhar_front': return selectedApp.aadhar_front_url;
       case 'aadhar_back': return selectedApp.aadhar_back_url;
+      case 'gst': return selectedApp.gst_certificate_url;
+      case 'store_1': return selectedApp.store_photos?.[0];
+      case 'store_2': return selectedApp.store_photos?.[1];
       default: return null;
     }
   };
@@ -168,6 +167,33 @@ export function KYCQueue() {
               >
                 Aadhar Back
               </button>
+              {selectedApp.gst_certificate_url && (
+                <button
+                  onClick={() => setActiveDoc('gst')}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-sm transition-all border ${activeDoc === 'gst' ? 'bg-black/80 text-white border-black' : 'bg-white/80 text-gray-700 border-gray-200 hover:bg-white'
+                    }`}
+                >
+                  GST Cert
+                </button>
+              )}
+              {selectedApp.store_photos?.[0] && (
+                <button
+                  onClick={() => setActiveDoc('store_1')}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-sm transition-all border ${activeDoc === 'store_1' ? 'bg-black/80 text-white border-black' : 'bg-white/80 text-gray-700 border-gray-200 hover:bg-white'
+                    }`}
+                >
+                  Store 1
+                </button>
+              )}
+              {selectedApp.store_photos?.[1] && (
+                <button
+                  onClick={() => setActiveDoc('store_2')}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-sm transition-all border ${activeDoc === 'store_2' ? 'bg-black/80 text-white border-black' : 'bg-white/80 text-gray-700 border-gray-200 hover:bg-white'
+                    }`}
+                >
+                  Store 2
+                </button>
+              )}
             </div>
 
             <div className="flex-1 flex items-center justify-center p-8 overflow-auto">
@@ -222,13 +248,61 @@ export function KYCQueue() {
                   <div className="text-gray-600 truncate" title={selectedApp.address}>{selectedApp.city}</div>
 
                   <FileText className="w-3 h-3 text-gray-400" />
-                  <div className="flex gap-2">
-                    <span className="bg-gray-100 px-1.5 py-0.5 rounded text-[10px] font-mono border border-gray-200">
+                  <div className="flex gap-2 flex-wrap">
+                    <span className="bg-gray-100 px-1.5 py-0.5 rounded text-[10px] font-mono border border-gray-200" title="PAN">
                       {selectedApp.pan_number || 'No PAN'}
                     </span>
-                    <span className="bg-gray-100 px-1.5 py-0.5 rounded text-[10px] font-mono border border-gray-200">
+                    <span className="bg-gray-100 px-1.5 py-0.5 rounded text-[10px] font-mono border border-gray-200" title="Aadhar">
                       {selectedApp.aadhar_number || 'No Aadhar'}
                     </span>
+                    {selectedApp.gst_number && (
+                      <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px] font-mono border border-blue-100" title="GSTIN">
+                        {selectedApp.gst_number}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Detailed Business Info */}
+              <div className="space-y-3 mb-4">
+                <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+                  <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Business Compliance</h4>
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center bg-gray-50/50 p-1.5 rounded">
+                      <span className="text-[11px] text-gray-500">GSTIN</span>
+                      <span className="text-[11px] font-semibold text-gray-900">{selectedApp.gst_number || 'N/A'}</span>
+                    </div>
+                    <div className="flex justify-between items-center bg-gray-50/50 p-1.5 rounded">
+                      <span className="text-[11px] text-gray-500">Turnover</span>
+                      <span className="text-[11px] font-semibold text-gray-900">{selectedApp.turnover_range || 'N/A'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+                  <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Payout & Bank</h4>
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center bg-gray-50/50 p-1.5 rounded">
+                      <span className="text-[11px] text-gray-500">Account</span>
+                      <span className="text-[11px] font-mono font-semibold text-gray-900">{selectedApp.bank_account_number || 'N/A'}</span>
+                    </div>
+                    <div className="flex justify-between items-center bg-gray-50/50 p-1.5 rounded">
+                      <span className="text-[11px] text-gray-500">IFSC</span>
+                      <span className="text-[11px] font-mono font-semibold text-gray-900">{selectedApp.ifsc_code || 'N/A'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+                  <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Application Meta</h4>
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[11px] text-gray-500 italic">Submitted</span>
+                      <span className="text-[11px] text-gray-600">
+                        {selectedApp.created_at ? new Date(selectedApp.created_at).toLocaleDateString() : 'N/A'}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -274,7 +348,7 @@ export function KYCQueue() {
             </div>
 
             {/* Footer - Fixed Bottom */}
-            <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-3 space-y-2 z-10 h-[110px] box-border">
+            <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-3 space-y-2 z-10 h-[150px] box-border">
               <Button
                 className="w-full bg-green-600 hover:bg-green-700 text-white shadow-sm h-9 text-xs"
                 disabled={!Object.values(checklist).every(Boolean)}
@@ -283,16 +357,30 @@ export function KYCQueue() {
                 <Check className="w-3.5 h-3.5 mr-2" />
                 Approve Store
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 h-9 text-xs"
-                disabled={!rejectionReason && checklist.nameMatch} // Require reason if rejecting
-                onClick={() => handleDecision('reject')}
-              >
-                <X className="w-3.5 h-3.5 mr-2" />
-                Reject Application
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 h-9 text-xs"
+                  disabled={!rejectionReason && checklist.nameMatch} // Require reason if rejecting
+                  onClick={() => handleDecision('reject')}
+                >
+                  <X className="w-3.5 h-3.5 mr-2" />
+                  Reject
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="px-3 text-gray-400 hover:text-red-600 hover:bg-red-50 h-9"
+                  onClick={() => {
+                    if (confirm(`Are you sure you want to PERMANENTLY delete the application for ${selectedApp.store_name}?`)) {
+                      deleteMerchant(selectedApp.id);
+                    }
+                  }}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
           </div>
         </>

@@ -144,26 +144,17 @@ export function MerchantReportDialog({ merchant, open, onOpenChange }: MerchantR
 
                 {/* Tabs for Reports */}
                 <Tabs defaultValue="overview" className="flex-1 flex flex-col overflow-hidden">
-                    <div className="px-6 border-b bg-background">
-                        <TabsList className="flex w-full justify-start rounded-none p-0 bg-transparent h-auto gap-2">
-                            <TabsTrigger
-                                value="overview"
-                                className="gap-2 rounded-md border border-transparent px-4 py-2 text-sm font-medium text-gray-500 data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-sm hover:text-gray-900 transition-colors"
-                            >
+                    <div className="px-6 border-b bg-background py-2">
+                        <TabsList className="gap-2">
+                            <TabsTrigger value="overview">
                                 <BarChart3 className="w-4 h-4" />
                                 Overview
                             </TabsTrigger>
-                            <TabsTrigger
-                                value="operations"
-                                className="gap-2 rounded-md border border-transparent px-4 py-2 text-sm font-medium text-gray-500 data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-sm hover:text-gray-900 transition-colors"
-                            >
+                            <TabsTrigger value="operations">
                                 <Clock className="w-4 h-4" />
                                 Operational Health
                             </TabsTrigger>
-                            <TabsTrigger
-                                value="products"
-                                className="gap-2 rounded-md border border-transparent px-4 py-2 text-sm font-medium text-gray-500 data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-sm hover:text-gray-900 transition-colors"
-                            >
+                            <TabsTrigger value="products">
                                 <ShoppingBag className="w-4 h-4" />
                                 Products
                             </TabsTrigger>

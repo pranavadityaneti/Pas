@@ -1,6 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Search, Star, Pencil, BarChart3, Filter, ArrowUpDown, ChevronDown, Plus, Download, ExternalLink, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Search, Star, Pencil, BarChart3, Filter, ArrowUpDown, ChevronDown, Plus, Download, ExternalLink, X, Trash2, CheckCircle, XCircle } from 'lucide-react';
 import { Input } from '../../ui/input';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
@@ -28,6 +27,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '../../ui/tooltip';
+import { MerchantInventoryModal } from './MerchantInventoryModal';
 import { toast } from 'sonner';
 import { AddMerchantSheet } from './AddMerchantSheet';
 import { ExportMerchantsDialog } from './ExportMerchantsDialog';
@@ -41,8 +41,10 @@ type SortField = 'rating' | 'city' | 'orders_30d' | 'revenue_30d' | null;
 type SortDirection = 'asc' | 'desc';
 
 export function MerchantDirectory() {
-  const { merchants, loading, fetchMerchants, updateMerchant } = useMerchants();
-  const navigate = useNavigate();
+  // Inventory Modal State
+  const [inventoryMerchant, setInventoryMerchant] = useState<{ id: string; store_name: string } | null>(null);
+
+  const { merchants, loading, fetchMerchants, updateMerchant, bulkDeleteMerchants } = useMerchants();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMerchant, setSelectedMerchant] = useState<Merchant | null>(null);
   const [sortField, setSortField] = useState<SortField>(null);
@@ -115,6 +117,29 @@ export function MerchantDirectory() {
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (!confirm(`Are you sure you want to delete ${selectedMerchants.length} selected merchants? This action cannot be undone.`)) return;
+
+    try {
+      await bulkDeleteMerchants(selectedMerchants); // Use new bulk function
+      setSelectedMerchants([]);
+    } catch (error) {
+      // Error handled in hook
+    }
+  };
+
+  const handleBulkStatus = async (status: 'active' | 'inactive') => {
+    const toastId = toast.loading(`Updating status to ${status}...`);
+    try {
+      await Promise.all(selectedMerchants.map(id => updateMerchant(id, { status })));
+      toast.success(`Selected merchants marked as ${status}`, { id: toastId });
+      setSelectedMerchants([]);
+      fetchMerchants();
+    } catch (error) {
+      console.error('Bulk status update failed:', error);
+      toast.error('Failed to update status', { id: toastId });
+    }
+  };
 
 
   const handleSort = (field: SortField) => {
@@ -158,11 +183,6 @@ export function MerchantDirectory() {
     // Apply KYC Filter
     if (filterKyc.length > 0) {
       result = result.filter(m => filterKyc.includes(m.kyc_status));
-    } else {
-      // Default: If no KYC filter selected, hide 'rejected' ONLY IF search is empty (keep directory clean)
-      if (!searchTerm) {
-        result = result.filter(m => m.kyc_status !== 'rejected');
-      }
     }
 
     // Apply sorting
@@ -357,7 +377,9 @@ export function MerchantDirectory() {
                     key={merchant.id}
                     className={`group transition-colors ${merchant.kyc_status === 'pending'
                       ? 'bg-orange-50/50 hover:bg-orange-50'
-                      : 'hover:bg-primary/5'
+                      : merchant.kyc_status === 'rejected'
+                        ? 'bg-red-50/50 hover:bg-red-50'
+                        : 'hover:bg-primary/5'
                       }`}
                   >
                     <TableCell>
@@ -368,18 +390,21 @@ export function MerchantDirectory() {
                         />
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="cursor-pointer" onClick={() => setSelectedMerchant(merchant)}>
                       <div className="flex items-center gap-2">
-                        <span className={`font-medium ${merchant.kyc_status === 'pending' ? 'text-orange-900' : 'text-gray-900'}`}>
+                        <span className={`font-medium ${merchant.kyc_status === 'pending' ? 'text-orange-900' : merchant.kyc_status === 'rejected' ? 'text-red-900' : 'text-gray-900'}`}>
                           {merchant.store_name}
                         </span>
                         {merchant.kyc_status === 'pending' && (
                           <Badge variant="outline" className="h-5 px-1.5 text-[10px] border-orange-200 text-orange-600 bg-orange-100/50">KYC</Badge>
                         )}
+                        {merchant.kyc_status === 'rejected' && (
+                          <Badge variant="outline" className="h-5 px-1.5 text-[10px] border-red-200 text-red-600 bg-red-100/50">REJECTED</Badge>
+                        )}
                       </div>
                     </TableCell>
-                    <TableCell className="text-gray-600">{merchant.branch_name || '-'}</TableCell>
-                    <TableCell>
+                    <TableCell className="text-gray-600 cursor-pointer" onClick={() => setSelectedMerchant(merchant)}>{merchant.branch_name || '-'}</TableCell>
+                    <TableCell className="cursor-pointer" onClick={() => setSelectedMerchant(merchant)}>
                       <div className="flex flex-col">
                         <span className="text-sm text-gray-900">{merchant.owner_name}</span>
                         <span className="text-xs text-gray-500">{merchant.phone}</span>
@@ -389,23 +414,23 @@ export function MerchantDirectory() {
                       <Button
                         variant="outline"
                         size="sm"
-                        disabled={merchant.kyc_status === 'pending'}
+                        disabled={merchant.kyc_status === 'pending'} // Already synced logic
                         className="h-7 text-xs gap-1.5 text-primary hover:text-primary/90 hover:bg-primary/5 border-primary/20"
-                        onClick={() => navigate('/catalog')}
+                        onClick={() => setInventoryMerchant({ id: merchant.id, store_name: merchant.store_name })}
                       >
                         <ExternalLink className="w-3 h-3" />
                         Full View
                       </Button>
                     </TableCell>
-                    <TableCell>{merchant.city}</TableCell>
-                    <TableCell className="text-center">
+                    <TableCell className="cursor-pointer" onClick={() => setSelectedMerchant(merchant)}>{merchant.city}</TableCell>
+                    <TableCell className="text-center cursor-pointer" onClick={() => setSelectedMerchant(merchant)}>
                       <Badge variant="secondary" className="bg-yellow-100 text-yellow-700 hover:bg-yellow-100 border-none gap-1">
                         {merchant.rating || 'N/A'} <Star className="w-3 h-3 fill-yellow-600 text-yellow-600" />
                       </Badge>
                     </TableCell>
 
                     {/* Live Status Column */}
-                    < TableCell className="text-center" >
+                    < TableCell className="text-center cursor-pointer" onClick={() => setSelectedMerchant(merchant)} >
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <div className="flex items-center justify-center gap-2">
@@ -422,12 +447,12 @@ export function MerchantDirectory() {
                     </TableCell>
 
                     {/* Orders (30d) Column */}
-                    <TableCell className="text-center">
+                    <TableCell className="text-center cursor-pointer" onClick={() => setSelectedMerchant(merchant)}>
                       <span className="font-medium text-gray-900">{merchant.orders_30d || 0}</span>
                     </TableCell>
 
                     {/* Revenue Column */}
-                    <TableCell className="text-center">
+                    <TableCell className="text-center cursor-pointer" onClick={() => setSelectedMerchant(merchant)}>
                       <span className="font-semibold text-green-700">{formatCurrency(merchant.revenue_30d || 0)}</span>
                     </TableCell>
 
@@ -441,7 +466,7 @@ export function MerchantDirectory() {
                           <Switch
                             checked={merchant.status === 'active'}
                             onCheckedChange={(checked) => handleStatusToggle(merchant, checked)}
-                            className="data-[state=checked]:bg-green-600"
+                            className="data-[state=checked]:bg-green-600 data-[state=unchecked]:bg-gray-200"
                           />
                         )}
                       </div>
@@ -534,6 +559,35 @@ export function MerchantDirectory() {
                 <Button
                   size="sm"
                   variant="ghost"
+                  className="text-white hover:bg-gray-800 gap-2"
+                  onClick={handleBulkDelete}
+                >
+                  <Trash2 className="w-4 h-4 text-red-500" />
+                  Delete
+                </Button>
+                <div className="w-px h-8 bg-gray-600"></div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-emerald-400 hover:text-emerald-300 hover:bg-gray-800 gap-2"
+                  onClick={() => handleBulkStatus('active')}
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  Activate
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-amber-400 hover:text-amber-300 hover:bg-gray-800 gap-2"
+                  onClick={() => handleBulkStatus('inactive')}
+                >
+                  <XCircle className="w-4 h-4" />
+                  Deactivate
+                </Button>
+                <div className="w-px h-8 bg-gray-600"></div>
+                <Button
+                  size="sm"
+                  variant="ghost"
                   className="text-gray-400 hover:text-white hover:bg-gray-800"
                   onClick={() => setSelectedMerchants([])}
                 >
@@ -549,6 +603,11 @@ export function MerchantDirectory() {
         merchant={selectedMerchant}
         isOpen={!!selectedMerchant}
         onClose={() => setSelectedMerchant(null)}
+      />
+      <MerchantInventoryModal
+        isOpen={!!inventoryMerchant}
+        onClose={() => setInventoryMerchant(null)}
+        merchant={inventoryMerchant}
       />
     </TooltipProvider >
   );

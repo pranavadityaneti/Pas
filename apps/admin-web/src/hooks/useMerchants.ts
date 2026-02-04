@@ -32,6 +32,9 @@ export interface Merchant {
     pan_doc_url?: string;
     aadhar_front_url?: string;
     aadhar_back_url?: string;
+    gst_certificate_url?: string;
+    gst_number?: string;
+    store_photos?: string[];
     kyc_rejection_reason?: string;
     // Computed/joined fields
     orders_30d?: number;
@@ -71,47 +74,48 @@ export interface MerchantStats {
     daily_orders: { date: string; orders: number; gmv: number }[];
 }
 
+// --- SINGLETON STATE ---
+let globalMerchants: Merchant[] = [];
+let globalLoading = false;
+let globalError: string | null = null;
+let listeners: Array<() => void> = [];
+
+const notifyListeners = () => {
+    listeners.forEach(l => l());
+};
+
 export function useMerchants() {
-    const [merchants, setMerchants] = useState<Merchant[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const [merchants, setMerchants] = useState<Merchant[]>(globalMerchants);
+    const [loading, setLoading] = useState(globalLoading);
+    const [error, setError] = useState<string | null>(globalError);
 
-    // Fetch all merchants
-    const fetchMerchants = useCallback(async () => {
-        setLoading(true);
-        setError(null);
-        try {
-            const { data, error } = await supabase
-                .from('merchants')
-                .select('*, merchant_branches(*)')
-                .order('created_at', { ascending: false });
+    // Subscribe to global state changes
+    useEffect(() => {
+        const listener = () => {
+            setMerchants(globalMerchants);
+            setLoading(globalLoading);
+            setError(globalError);
+        };
+        listeners.push(listener);
 
-            if (error) throw error;
+        // Initial sync
+        listener();
 
-            // Add defaults for computed fields
-            const enrichedData = (data || []).map((m: any) => ({
-                ...m,
-                orders_30d: 0, // Default to 0 until we have real orders
-                revenue_30d: 0, // Default to 0
-                is_online: false, // Default to offline
-                last_active: 'Never',
-                rating: m.rating || 0
-            }));
-
-            setMerchants(enrichedData);
-            return enrichedData;
-        } catch (err: any) {
-            console.error('Error fetching merchants:', err);
-            setError(err.message);
-            return [];
-        } finally {
-            setLoading(false);
+        // If no data and not loading, fetch
+        if (globalMerchants.length === 0 && !globalLoading) {
+            fetchMerchantsGlobal();
         }
+
+        return () => {
+            listeners = listeners.filter(l => l !== listener);
+        };
     }, []);
 
+    // Global Fetch Function
+    const fetchMerchants = useCallback(async () => {
+        await fetchMerchantsGlobal();
+    }, []);
 
-
-    // Helper to upload file
     const uploadFile = async (file: File, path: string) => {
         const { data, error } = await supabase.storage
             .from('merchant-docs')
@@ -126,17 +130,24 @@ export function useMerchants() {
         return publicUrl;
     };
 
-    // Create new merchant
     const createMerchant = async (
         merchantData: Partial<Merchant>,
-        files?: { pan?: File | null, aadharFront?: File | null, aadharBack?: File | null }
+        files?: {
+            pan?: File | null,
+            aadharFront?: File | null,
+            aadharBack?: File | null,
+            gst?: File | null,
+            storePhotos?: File[]
+        }
     ) => {
-        setLoading(true);
+        globalLoading = true;
+        notifyListeners();
         try {
             // Upload files if present
             let panUrl = '';
             let aadharFrontUrl = '';
             let aadharBackUrl = '';
+            let gstUrl = '';
 
             const timestamp = Date.now();
             const safeName = merchantData.store_name?.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'unknown';
@@ -149,6 +160,17 @@ export function useMerchants() {
             }
             if (files?.aadharBack) {
                 aadharBackUrl = await uploadFile(files.aadharBack, `${safeName}/aadhar_back_${timestamp}.png`);
+            }
+            if (files?.gst) {
+                gstUrl = await uploadFile(files.gst, `${safeName}/gst_${timestamp}.png`);
+            }
+
+            const storePhotoUrls = [];
+            if (files?.storePhotos) {
+                for (let i = 0; i < files.storePhotos.length; i++) {
+                    const url = await uploadFile(files.storePhotos[i], `${safeName}/store_${i}_${timestamp}.png`);
+                    storePhotoUrls.push(url);
+                }
             }
 
             const { data, error } = await supabase
@@ -178,7 +200,10 @@ export function useMerchants() {
                         // Document URLs
                         pan_doc_url: panUrl || null,
                         aadhar_front_url: aadharFrontUrl || null,
-                        aadhar_back_url: aadharBackUrl || null
+                        aadhar_back_url: aadharBackUrl || null,
+                        gst_certificate_url: gstUrl || null,
+                        gst_number: merchantData.gst_number,
+                        store_photos: storePhotoUrls.length > 0 ? storePhotoUrls : merchantData.store_photos || []
                     }
                 ])
                 .select()
@@ -186,7 +211,7 @@ export function useMerchants() {
 
             if (error) throw error;
 
-            await fetchMerchants();
+            await fetchMerchantsGlobal();
             toast.success('Merchant application submitted successfully');
             return data;
         } catch (err: any) {
@@ -194,13 +219,14 @@ export function useMerchants() {
             toast.error('Failed to create merchant', { description: err.message });
             throw err;
         } finally {
-            setLoading(false);
+            globalLoading = false;
+            notifyListeners();
         }
     };
 
-    // Update merchant
     const updateMerchant = async (id: string, updates: Partial<Merchant>) => {
-        setLoading(true);
+        globalLoading = true;
+        notifyListeners();
         try {
             const { data, error } = await supabase
                 .from('merchants')
@@ -214,7 +240,7 @@ export function useMerchants() {
 
             if (error) throw error;
 
-            await fetchMerchants();
+            await fetchMerchantsGlobal();
             toast.success('Merchant updated successfully');
             return data;
         } catch (err: any) {
@@ -222,33 +248,66 @@ export function useMerchants() {
             toast.error('Failed to update merchant', { description: err.message });
             throw err;
         } finally {
-            setLoading(false);
+            globalLoading = false;
+            notifyListeners();
         }
     };
 
-    // Delete merchant
     const deleteMerchant = async (id: string) => {
-        setLoading(true);
+        const toastId = toast.loading('Initiating deep delete...');
+        globalLoading = true;
+        notifyListeners();
         try {
-            const { error } = await supabase
-                .from('merchants')
-                .delete()
-                .eq('id', id);
+            // Using the updated RPC that returns JSONB trace
+            const { data, error } = await supabase.rpc('delete_merchants_cascaded', {
+                merchant_ids: [id]
+            });
 
             if (error) throw error;
 
-            await fetchMerchants();
-            toast.success('Merchant deleted successfully');
+            console.log('Delete Trace:', data);
+            await fetchMerchantsGlobal();
+            toast.success('Merchant and all associated data deleted successfully', { id: toastId });
         } catch (err: any) {
             console.error('Error deleting merchant:', err);
-            toast.error('Failed to delete merchant', { description: err.message });
+            toast.error('Failed to delete merchant', {
+                id: toastId,
+                description: err.message
+            });
             throw err;
         } finally {
-            setLoading(false);
+            globalLoading = false;
+            notifyListeners();
         }
     };
 
-    // Branch operations
+    const bulkDeleteMerchants = async (ids: string[]) => {
+        const toastId = toast.loading(`Deleting ${ids.length} merchants and their data...`);
+        globalLoading = true;
+        notifyListeners();
+        try {
+            const { data, error } = await supabase.rpc('delete_merchants_cascaded', {
+                merchant_ids: ids
+            });
+
+            if (error) throw error;
+
+            console.log('Bulk Delete Trace:', data);
+            await fetchMerchantsGlobal();
+            toast.success(`${ids.length} merchants deleted successfully`, { id: toastId });
+        } catch (err: any) {
+            console.error('Error bulk deleting merchants:', err);
+            toast.error('Failed to delete merchants', {
+                id: toastId,
+                description: err.message
+            });
+            throw err;
+        } finally {
+            globalLoading = false;
+            notifyListeners();
+        }
+    };
+
     const addMerchantBranch = async (branchData: Partial<MerchantBranch>) => {
         try {
             const { data, error } = await supabase
@@ -258,7 +317,7 @@ export function useMerchants() {
                 .single();
 
             if (error) throw error;
-            await fetchMerchants(); // Refresh
+            await fetchMerchantsGlobal();
             toast.success('Branch added successfully');
             return data;
         } catch (err: any) {
@@ -276,7 +335,7 @@ export function useMerchants() {
                 .eq('id', branchId);
 
             if (error) throw error;
-            await fetchMerchants();
+            await fetchMerchantsGlobal();
             toast.success('Branch deleted');
         } catch (err: any) {
             console.error('Error deleting branch:', err);
@@ -285,32 +344,28 @@ export function useMerchants() {
         }
     };
 
-    // Get merchant stats for report
+    // Helper for stats logic (kept unrelated to global state for now as it's ad-hoc)
     const getMerchantStats = async (id: string): Promise<MerchantStats> => {
         try {
             const { data, error } = await supabase.rpc('get_merchant_stats', { merchant_id: id });
-
             if (error) throw error;
-
-            // Transform RPC result to UI model
             return {
-                total_orders: data.total_orders || 0,
-                orders_30d: data.orders_30d || 0,
+                total_orders: data?.total_orders || 0,
+                orders_30d: data?.orders_30d || 0,
                 orders_7d: 0,
-                total_gmv: data.total_gmv || 0,
-                gmv_30d: data.gmv_30d || 0,
+                total_gmv: data?.total_gmv || 0,
+                gmv_30d: data?.gmv_30d || 0,
                 gmv_7d: 0,
-                avg_order_value: data.avg_order_value || 0,
-                current_rating: 4.5, // Fallback as not in orders table
+                avg_order_value: data?.avg_order_value || 0,
+                current_rating: 4.5,
                 rating_30d_avg: 4.5,
                 fulfillment_rate: 98,
                 pending_payout: 0,
-                top_categories: data.top_categories || [],
-                daily_orders: data.daily_orders || []
+                top_categories: data?.top_categories || [],
+                daily_orders: data?.daily_orders || []
             };
         } catch (e) {
-            console.error('Stats Error:', e);
-            // Fallback for dev if RPC fails
+            console.warn('Stats Error or Dev Environment:', e);
             return {
                 total_orders: 0,
                 orders_30d: 0,
@@ -329,45 +384,28 @@ export function useMerchants() {
         }
     };
 
-    // Export merchants (with filters)
     const exportMerchants = async (options: {
         format: 'csv' | 'excel' | 'pdf';
         dateRange?: { from: Date; to: Date };
         fields: string[];
     }) => {
         try {
-            let query = supabase
-                .from('merchants')
-                .select('*');
-
+            let query = supabase.from('merchants').select('*');
             if (options.dateRange) {
                 query = query
                     .gte('created_at', options.dateRange.from.toISOString())
                     .lte('created_at', options.dateRange.to.toISOString());
             }
-
             const { data, error } = await query;
             if (error) throw error;
-
-            // Generate export based on format
-            if (options.format === 'csv') {
-                return generateCSV(data || [], options.fields);
-            } else if (options.format === 'excel') {
-                return generateCSV(data || [], options.fields); // Simplified - same as CSV for now
-            } else {
-                return generateCSV(data || [], options.fields); // PDF would need different handling
-            }
+            if (options.format === 'csv') return generateCSV(data || [], options.fields);
+            else return generateCSV(data || [], options.fields);
         } catch (err: any) {
             console.error('Error exporting merchants:', err);
             toast.error('Export failed', { description: err.message });
             throw err;
         }
     };
-
-    // Auto-fetch on mount
-    useEffect(() => {
-        fetchMerchants();
-    }, [fetchMerchants]);
 
     return {
         merchants,
@@ -380,14 +418,47 @@ export function useMerchants() {
         getMerchantStats,
         exportMerchants,
         addMerchantBranch,
-        deleteMerchantBranch
+        deleteMerchantBranch,
+        bulkDeleteMerchants
     };
 }
 
-// Helper to generate CSV
+// Actual fetch logic independent of hook
+async function fetchMerchantsGlobal() {
+    globalLoading = true;
+    notifyListeners();
+    try {
+        const { data, error } = await supabase
+            .from('merchants')
+            .select('*, merchant_branches(*)')
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        // Add defaults for computed fields
+        const enrichedData = (data || []).map((m: any) => ({
+            ...m,
+            orders_30d: 0,
+            revenue_30d: 0,
+            is_online: false,
+            last_active: 'Never',
+            rating: m.rating || 0
+        }));
+
+        globalMerchants = enrichedData;
+        globalError = null;
+    } catch (err: any) {
+        console.error('Error fetching merchants:', err);
+        globalError = err.message;
+        toast.error('Failed to fetch merchants');
+    } finally {
+        globalLoading = false;
+        notifyListeners();
+    }
+}
+
 function generateCSV(data: any[], fields: string[]): string {
     if (!data.length) return '';
-
     const headers = fields.join(',');
     const rows = data.map(item =>
         fields.map(field => {
@@ -399,6 +470,5 @@ function generateCSV(data: any[], fields: string[]): string {
             return value;
         }).join(',')
     );
-
     return [headers, ...rows].join('\n');
 }

@@ -11,6 +11,10 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+    dedupe: ['react', 'react-dom'],
+  },
+  esbuild: {
+    jsxInject: `import React from 'react'`,
   },
   server: {
     port: 3001,

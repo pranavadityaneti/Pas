@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Loader2, Plus, Trash2, Store, ExternalLink } from 'lucide-react';
+import { Loader2, Plus, Trash2, Store, ExternalLink, MapPin } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import {
     Dialog,
@@ -46,7 +46,7 @@ const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export function EditMerchantDialog({ merchant, open, onOpenChange, onRefresh }: EditMerchantDialogProps) {
     const navigate = useNavigate();
-    const { updateMerchant, addMerchantBranch, deleteMerchantBranch, loading } = useMerchants();
+    const { updateMerchant, addMerchantBranch, deleteMerchantBranch, deleteMerchant, loading } = useMerchants();
     const [activeTab, setActiveTab] = useState('details');
 
     // Merchant Data Form
@@ -69,6 +69,8 @@ export function EditMerchantDialog({ merchant, open, onOpenChange, onRefresh }: 
         aadhar_number: '',
         bank_account_number: '',
         ifsc_code: '',
+        gst_number: '',
+        turnover_range: '',
     });
 
     // New Branch Form
@@ -102,6 +104,8 @@ export function EditMerchantDialog({ merchant, open, onOpenChange, onRefresh }: 
                 aadhar_number: merchant.aadhar_number || '',
                 bank_account_number: merchant.bank_account_number || '',
                 ifsc_code: merchant.ifsc_code || '',
+                gst_number: merchant.gst_number || '',
+                turnover_range: merchant.turnover_range || '',
             });
         }
     }, [merchant]);
@@ -171,18 +175,14 @@ export function EditMerchantDialog({ merchant, open, onOpenChange, onRefresh }: 
                 </DialogHeader>
 
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-                    <div className="px-6 border-b bg-background">
-                        <TabsList className="flex w-full justify-start rounded-none p-0 bg-transparent h-auto gap-2">
-                            <TabsTrigger
-                                value="details"
-                                className="rounded-md border border-transparent px-4 py-2 text-sm font-medium text-gray-500 data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-sm hover:text-gray-900 transition-colors"
-                            >
+                    <div className="px-6 border-b bg-background py-2">
+                        <TabsList className="gap-2">
+                            <TabsTrigger value="details">
+                                <Store className="w-4 h-4" />
                                 Details
                             </TabsTrigger>
-                            <TabsTrigger
-                                value="branches"
-                                className="rounded-md border border-transparent px-4 py-2 text-sm font-medium text-gray-500 data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-sm hover:text-gray-900 transition-colors"
-                            >
+                            <TabsTrigger value="branches">
+                                <MapPin className="w-4 h-4" />
                                 Branches
                             </TabsTrigger>
                         </TabsList>
@@ -356,8 +356,45 @@ export function EditMerchantDialog({ merchant, open, onOpenChange, onRefresh }: 
                                             className="h-9"
                                         />
                                     </div>
+                                    <div className="space-y-1.5">
+                                        <Label className="text-xs font-medium">GST Number</Label>
+                                        <Input
+                                            value={formData.gst_number}
+                                            onChange={(e) => setFormData({ ...formData, gst_number: e.target.value })}
+                                            className="h-9"
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <Label className="text-xs font-medium">Turnover Range</Label>
+                                        <Select value={formData.turnover_range} onValueChange={(v) => setFormData({ ...formData, turnover_range: v })}>
+                                            <SelectTrigger className="h-9">
+                                                <SelectValue placeholder="Select turnover" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {['<20L', '20L-40L', '40L-1Cr', '>1Cr'].map(range => (
+                                                    <SelectItem key={range} value={range}>{range}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
                                 </div>
                             </div>
+
+                            {merchant.store_photos && merchant.store_photos.length > 0 && (
+                                <>
+                                    <Separator />
+                                    <div className="space-y-4">
+                                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Store Photos</h4>
+                                        <div className="grid grid-cols-3 gap-2">
+                                            {merchant.store_photos.map((url, i) => (
+                                                <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="aspect-square rounded-md overflow-hidden border bg-gray-50 flex items-center justify-center hover:opacity-80 transition-opacity">
+                                                    <img src={url} alt={`Store ${i + 1}`} className="object-cover w-full h-full" />
+                                                </a>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </>
+                            )}
                         </TabsContent>
 
                         <TabsContent value="branches" className="space-y-6 mt-0">
@@ -462,14 +499,33 @@ export function EditMerchantDialog({ merchant, open, onOpenChange, onRefresh }: 
                     </div>
                 </Tabs>
 
-                <DialogFooter className="px-6 py-4 border-t bg-gray-50">
-                    <Button variant="outline" onClick={() => onOpenChange(false)}>
-                        Cancel
+                <DialogFooter className="px-6 py-4 border-t bg-gray-50 flex items-center justify-between">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={loading}
+                        className="text-red-500 hover:text-red-700 hover:bg-red-50 gap-2"
+                        onClick={() => {
+                            if (confirm(`Are you sure you want to PERMANENTLY delete ${merchant.store_name}? This will wipe all orders, stock, and staff data. This cannot be undone.`)) {
+                                deleteMerchant(merchant.id).then(() => {
+                                    onRefresh(); // Trigger parent refresh (optional with singleton but good for safety)
+                                    onOpenChange(false);
+                                });
+                            }
+                        }}
+                    >
+                        <Trash2 className="w-4 h-4" />
+                        Delete Store
                     </Button>
-                    <Button onClick={handleSave} disabled={loading} className="gap-2 bg-black text-white hover:bg-gray-800 shadow-sm">
-                        {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-                        Save Changes
-                    </Button>
+                    <div className="flex gap-2">
+                        <Button variant="outline" onClick={() => onOpenChange(false)}>
+                            Cancel
+                        </Button>
+                        <Button onClick={handleSave} disabled={loading} className="gap-2 bg-black text-white hover:bg-gray-800 shadow-sm">
+                            {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+                            Save Changes
+                        </Button>
+                    </div>
                 </DialogFooter>
             </DialogContent>
         </Dialog>

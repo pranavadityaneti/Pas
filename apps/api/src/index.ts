@@ -143,7 +143,9 @@ app.get('/products', async (req, res) => {
             minPrice,
             maxPrice,
             gstRate,
-            missingData
+
+            missingData,
+            type = 'global' // 'global' | 'custom' | 'all'
         } = req.query;
 
         const skip = (Number(page) - 1) * Number(limit);
@@ -151,6 +153,13 @@ app.get('/products', async (req, res) => {
 
         // Build Filter Conditions
         const where: any = {};
+
+        // Filter by Type
+        if (type === 'global') {
+            where.createdByStoreId = null;
+        } else if (type === 'custom') {
+            where.createdByStoreId = { not: null };
+        }
 
         if (search) {
             where.OR = [
@@ -762,7 +771,211 @@ app.patch('/products/images/:imageId', async (req, res) => {
     }
 });
 
+// --- Order Routes ---
+
+// Create Order (for testing/Consumer App)
+app.post('/orders', async (req, res) => {
+    try {
+        const { userId, storeId, items, totalAmount } = req.body;
+        const order = await prisma.order.create({
+            data: {
+                userId,
+                storeId,
+                totalAmount,
+                status: 'PENDING',
+                isPaid: false,
+                items: {
+                    create: items.map((item: any) => ({
+                        storeProductId: item.storeProductId,
+                        quantity: item.quantity,
+                        price: item.price
+                    }))
+                }
+            },
+            include: { items: { include: { storeProduct: { include: { product: true } } } } }
+        });
+
+        // Broadcast to merchants
+        io.to(`store_${storeId}`).emit('new_order', order);
+        res.status(201).json(order);
+    } catch (error) {
+        console.error('Create Order Error:', error);
+        res.status(500).json({ error: 'Failed to create order' });
+    }
+});
+
+// Update Order Status (Merchant Side)
+app.patch('/orders/:id/status', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+
+        const data: any = { status };
+
+        // Generate 4-digit OTP when moving to READY
+        if (status === 'READY') {
+            data.otp = Math.floor(1000 + Math.random() * 9000).toString();
+        }
+
+        const order = await prisma.order.update({
+            where: { id },
+            data,
+            include: { user: true, items: { include: { storeProduct: { include: { product: true } } } } }
+        });
+
+        io.emit('order_updated', order);
+        res.json(order);
+    } catch (error) {
+        console.error('Update Status Error:', error);
+        res.status(500).json({ error: 'Failed to update order status' });
+    }
+});
+
+// Payment Webhook (Simulation)
+app.post('/webhooks/payment', async (req, res) => {
+    try {
+        const { orderId, status } = req.body;
+        if (status === 'success') {
+            const order = await prisma.order.update({
+                where: { id: orderId },
+                data: { isPaid: true },
+                include: { user: true, items: { include: { storeProduct: { include: { product: true } } } } }
+            });
+            io.emit('order_updated', order);
+            return res.json({ message: 'Payment captured' });
+        }
+        res.status(400).json({ error: 'Payment failed' });
+    } catch (error) {
+        console.error('Webhook processing failed', error);
+        res.status(500).json({ error: 'Webhook error' });
+    }
+});
+
+// Verify OTP for Completion
+app.post('/orders/:id/verify-otp', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { otp } = req.body;
+
+        const order = await prisma.order.findUnique({ where: { id } });
+        if (!order || order.otp !== otp) {
+            return res.status(400).json({ error: 'Invalid PIN' });
+        }
+
+        const updatedOrder = await prisma.order.update({
+            where: { id },
+            data: { status: 'COMPLETED' },
+            include: { user: true, items: { include: { storeProduct: { include: { product: true } } } } }
+        });
+
+        io.emit('order_updated', updatedOrder);
+        res.json({ success: true, order: updatedOrder });
+    } catch (error) {
+        console.error('Verify OTP Error:', error);
+        res.status(500).json({ error: 'OTP verification failed' });
+    }
+});
+
+// --- Auto-Reject logic ---
+const startAutoRejectTimer = () => {
+    setInterval(async () => {
+        try {
+            const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+            const expiredOrders = await prisma.order.findMany({
+                where: {
+                    status: 'PENDING',
+                    createdAt: { lt: twoMinsAgo }
+                }
+            });
+
+            for (const order of expiredOrders) {
+                const cancelled = await prisma.order.update({
+                    where: { id: order.id },
+                    data: { status: 'CANCELLED' },
+                    include: { user: true, items: { include: { storeProduct: { include: { product: true } } } } }
+                });
+                io.emit('order_updated', cancelled);
+                console.log(`[Auto-Reject] Order ${order.id} cancelled`);
+            }
+        } catch (error) {
+            console.error('Auto-reject check failed', error);
+        }
+    }, 30000);
+};
+
+startAutoRejectTimer();
+
 // --- Merchant Routes ---
+
+
+// Get Merchant Inventory (Specific Store)
+app.get('/merchants/:id/inventory', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { search, category } = req.query;
+
+        const where: any = { storeId: id };
+
+        if (search) {
+            where.product = {
+                name: { contains: String(search), mode: 'insensitive' }
+            };
+        }
+
+        if (category) {
+            where.product = {
+                ...where.product,
+                category: { in: String(category).split(',') }
+            };
+        }
+
+        const inventory = await prisma.storeProduct.findMany({
+            where,
+            include: {
+                product: true
+            },
+            orderBy: { updatedAt: 'desc' }
+        });
+
+        res.json(inventory);
+    } catch (error) {
+        console.error('Merchant Inventory API Error:', error);
+        res.status(500).json({ error: 'Failed to fetch merchant inventory' });
+    }
+});
+
+// Get Merchant Branches
+app.get('/merchants/:id/branches', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // 1. Get the manager/owner of the current store
+        const currentStore = await prisma.store.findUnique({
+            where: { id },
+            select: { managerId: true }
+        });
+
+        if (!currentStore || !currentStore.managerId) {
+            return res.json([]);
+        }
+
+        // 2. Fetch all stores managed by the same person
+        const branches = await prisma.store.findMany({
+            where: { managerId: currentStore.managerId },
+            select: {
+                id: true,
+                name: true,
+                address: true,
+                active: true
+            }
+        });
+
+        res.json(branches);
+    } catch (error) {
+        console.error('Merchant Branches API Error:', error);
+        res.status(500).json({ error: 'Failed to fetch merchant branches' });
+    }
+});
 
 // Export Selected Merchants
 app.post('/merchants/export-selected', async (req, res) => {
@@ -824,6 +1037,73 @@ app.post('/merchants/export-selected', async (req, res) => {
     } catch (error) {
         console.error('Merchant export failed:', error);
         res.status(500).json({ error: 'Failed to export merchants' });
+    }
+});
+
+// Update Store Details & Sync to Merchants Table
+app.patch('/stores/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, address, cityId } = req.body;
+
+        if (!name) {
+            return res.status(400).json({ error: 'Store name is required' });
+        }
+
+        const updateData: any = { name };
+        if (address !== undefined) updateData.address = address;
+        if (cityId !== undefined) updateData.cityId = cityId;
+
+        // 1. Update Postgres (Prisma)
+        const updatedStore = await prisma.store.update({
+            where: { id },
+            data: updateData
+        });
+
+        // 2. Fetch Full Details for Sync (Need Manager & City)
+        const fullStore = await prisma.store.findUnique({
+            where: { id },
+            include: {
+                manager: true,
+                city: true
+            }
+        });
+
+        if (fullStore && fullStore.manager) {
+            // 3. Sync to Supabase 'merchants' table (Used by Admin Dashboard)
+            const merchantPayload = {
+                id: fullStore.id,
+                store_name: fullStore.name,
+                owner_name: fullStore.manager.name || 'Unknown',
+                email: fullStore.manager.email,
+                phone: fullStore.manager.phone || '',
+                city: fullStore.city?.name || 'Unknown', // Assuming included city has name
+                address: fullStore.address,
+                has_branches: false, // Default
+                status: fullStore.active ? 'active' : 'inactive',
+                updated_at: new Date().toISOString()
+            };
+
+            const { error: syncError } = await supabase
+                .from('merchants')
+                .upsert(merchantPayload, { onConflict: 'id' });
+
+            if (syncError) {
+                console.error('Failed to sync to merchants table:', syncError);
+                // Don't fail the request, just log it. 
+                // In production, might want a queue or retry mechanism.
+            } else {
+                console.log('Synced store update to merchants table:', fullStore.name);
+            }
+        }
+
+        // Audit Log
+        logAudit(id, 'UPDATE_STORE', Object.keys(updateData).join(','), null, JSON.stringify(updateData), 'Merchant App').catch(() => { });
+
+        res.json(updatedStore);
+    } catch (error) {
+        console.error('Update Store Failed:', error);
+        res.status(500).json({ error: 'Failed to update store details' });
     }
 });
 

@@ -113,7 +113,8 @@ export function AddMerchantSheet({ trigger, onSuccess }: AddMerchantSheetProps) 
                 aadhar_number: kycData.aadharNumber,
                 bank_account_number: kycData.bankAccount,
                 ifsc_code: kycData.ifsc,
-                turnover_range: kycData.turnoverRange
+                turnover_range: kycData.turnoverRange,
+                gst_number: kycData.gstNumber
             };
 
             console.log("Submitting Payload to Supabase:", payload);
@@ -121,7 +122,9 @@ export function AddMerchantSheet({ trigger, onSuccess }: AddMerchantSheetProps) 
             await createMerchant(payload, {
                 pan: kycData.panDocument,
                 aadharFront: kycData.aadharFront,
-                aadharBack: kycData.aadharBack
+                aadharBack: kycData.aadharBack,
+                gst: kycData.gstDocument,
+                storePhotos: kycData.storePhotos
             });
 
             toast.success(`Merchant "${formData.name}" onboarded successfully!`);
@@ -411,7 +414,19 @@ export function AddMerchantSheet({ trigger, onSuccess }: AddMerchantSheetProps) 
 
                     {step < 3 ? (
                         <Button
-                            onClick={handleNext}
+                            onClick={() => {
+                                if (step === 3) {
+                                    if (kycData.turnoverRange !== '<20L' && (!kycData.gstNumber || !kycData.gstDocument)) {
+                                        toast.error("GST Number and Certificate are required for the selected turnover range.");
+                                        return;
+                                    }
+                                    if (!kycData.storePhotos || kycData.storePhotos.length < 2) {
+                                        toast.error("At least 2 store photos are required.");
+                                        return;
+                                    }
+                                }
+                                handleNext();
+                            }}
                             disabled={step === 1 && !formData.name}
                             className="bg-gray-900 hover:bg-gray-800 text-white h-10 px-5"
                         >

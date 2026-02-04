@@ -57,8 +57,9 @@ model User {
   updatedAt     DateTime @updatedAt
   
   // Relations
-  orders        Order[]
-  managedStore  Store?   @relation("StoreManager")
+  orders          Order[]  @relation("CustomerOrders")
+  handledOrders   Order[]  @relation("StaffHandledOrders")
+  managedStore    Store?   @relation("StoreManager")
 }
 
 model Store {
@@ -89,7 +90,9 @@ model Product {
   mrp         Float
   category    String
   brand       String?
+
   ean         String?
+  createdByStoreId String? // Null = Global, Value = Private to Store
   
   // Specs for Commerce
   unitType    String?   // "ml", "L", "kg", "g", "pc"
@@ -147,28 +150,108 @@ model StoreProduct {
 // --- Transaction Models ---
 
 model Order {
-  id          String      @id @default(uuid())
-  userId      String
-  user        User        @relation(fields: [userId], references: [id])
-  storeId     String
-  store       Store       @relation(fields: [storeId], references: [id])
+  id              String      @id @default(uuid())
+  orderNumber     String      @unique @map("order_number") // PAS-YYYYMMDD-XXXX
+  userId          String      @map("user_id")
+  user            User        @relation("CustomerOrders", fields: [userId], references: [id])
+  storeId         String      @map("store_id")
+  store           Store       @relation(fields: [storeId], references: [id])
+  staffId         String?     @map("staff_id")
+  staff           User?       @relation("StaffHandledOrders", fields: [staffId], references: [id])
   
-  status      OrderStatus @default(PENDING)
-  totalAmount Float
+  status          OrderStatus @default(PENDING)
+  totalAmount     Float       @map("total_amount")
+  isPaid          Boolean     @default(false) @map("ispaid")
+  otp             String?     // 4-digit PIN for pickup verification
+  cancelledReason String?     @map("cancelled_reason")
   
-  items       OrderItem[]
+  metadata        Json?       @map("metadata") // For platform fees, taxes, loyalty pts
   
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  items           OrderItem[]
+  
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  @@index([orderNumber])
+  @@index([storeId])
+  @@index([userId])
 }
 
 model OrderItem {
   id             String       @id @default(uuid())
-  orderId        String
+  orderId        String       @map("order_id")
   order          Order        @relation(fields: [orderId], references: [id])
-  storeProductId String
+  storeProductId String       @map("store_product_id")
   storeProduct   StoreProduct @relation(fields: [storeProductId], references: [id])
   
   quantity       Int
-  price          Float       // Price at time of purchase
+  price          Float       @map("price")
+}
+
+// --- Legacy & Merchant Management ---
+
+model Merchant {
+  id                  String   @id @default(uuid())
+  storeName           String   @map("store_name")
+  branchName          String?  @map("branch_name")
+  ownerName           String   @map("owner_name")
+  email               String
+  phone               String
+  city                String?
+  address             String?
+  latitude            Float?
+  longitude           Float?
+  hasBranches         Boolean? @map("has_branches")
+  kycStatus           String?  @map("kyc_status")
+  status              String?
+  rating              Float?
+  commissionRate      Float?   @map("commission_rate")
+  operatingHours      String?  @map("operating_hours")
+  operatingDays       String[] @map("operating_days")
+  
+  // Compliance & KYC
+  panNumber           String?  @map("pan_number")
+  aadharNumber        String?  @map("aadhar_number")
+  bankAccountNumber   String?  @map("bank_account_number")
+  ifscCode            String?  @map("ifsc_code")
+  
+  panDocUrl           String?  @map("pan_doc_url")
+  panDocumentUrl      String?  @map("pan_document_url")
+  aadharFrontUrl      String?  @map("aadhar_front_url")
+  aadharBackUrl       String?  @map("aadhar_back_url")
+  gstNumber           String?  @map("gst_number")
+  gstCertificateUrl   String?  @map("gst_certificate_url")
+  msmeNumber          String?  @map("msme_number")
+  msmeCertificateUrl  String?  @map("msme_certificate_url")
+  storePhotos         String[] @map("store_photos")
+  
+  category            String?
+  kycRejectionReason  String?  @map("kyc_rejection_reason")
+  turnoverRange       String?  @map("turnover_range")
+  
+  createdAt           DateTime? @default(now()) @map("created_at")
+  updatedAt           DateTime? @updatedAt @map("updated_at")
+
+  branches            MerchantBranch[]
+
+  @@map("merchants")
+}
+
+model MerchantBranch {
+  id          String   @id @default(uuid())
+  merchantId  String?  @map("merchant_id")
+  merchant    Merchant? @relation(fields: [merchantId], references: [id])
+  branchName  String   @map("branch_name")
+  managerName String?  @map("manager_name")
+  phone       String?
+  email       String?
+  address     String?
+  city        String?
+  latitude    Float?
+  longitude   Float?
+  isActive    Boolean? @map("is_active")
+  createdAt   DateTime? @default(now()) @map("created_at")
+  updatedAt   DateTime? @updatedAt @map("updated_at")
+
+  @@map("merchant_branches")
 }

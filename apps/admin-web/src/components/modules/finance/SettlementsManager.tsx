@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { 
-  CheckCircle2, 
-  FileText, 
+import {
+  CheckCircle2,
+  FileText,
   AlertCircle,
   Download,
   Filter,
   Calendar,
   Search,
-  ArrowUpRight
+  ArrowUpRight,
+  Clock
 } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
@@ -25,45 +26,45 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../ui/tabs';
 import { toast } from 'sonner';
 
 const settlements = [
-  { 
-    id: 1, 
-    merchant: 'Ratnadeep Supermarket', 
-    cycle: '1 Jan - 15 Jan', 
-    orders: 145, 
-    gmv: 50000, 
-    commission: 5000, 
-    net: 45000, 
-    status: 'due' 
+  {
+    id: 1,
+    merchant: 'Ratnadeep Supermarket',
+    cycle: '1 Jan - 15 Jan',
+    orders: 145,
+    gmv: 50000,
+    commission: 5000,
+    net: 45000,
+    status: 'due'
   },
-  { 
-    id: 2, 
-    merchant: 'Vijetha Supermarkets', 
-    cycle: '1 Jan - 15 Jan', 
-    orders: 89, 
-    gmv: 32000, 
-    commission: 3200, 
-    net: 28800, 
-    status: 'due' 
+  {
+    id: 2,
+    merchant: 'Vijetha Supermarkets',
+    cycle: '1 Jan - 15 Jan',
+    orders: 89,
+    gmv: 32000,
+    commission: 3200,
+    net: 28800,
+    status: 'due'
   },
-  { 
-    id: 3, 
-    merchant: 'Organic World', 
-    cycle: '1 Jan - 15 Jan', 
-    orders: 12, 
-    gmv: 4500, 
-    commission: 450, 
-    net: 4050, 
+  {
+    id: 3,
+    merchant: 'Organic World',
+    cycle: '1 Jan - 15 Jan',
+    orders: 12,
+    gmv: 4500,
+    commission: 450,
+    net: 4050,
     status: 'on_hold',
     reason: 'Bank Details Pending'
   },
-  { 
-    id: 4, 
-    merchant: 'Fresh Mart', 
-    cycle: '16 Dec - 31 Dec', 
-    orders: 200, 
-    gmv: 75000, 
-    commission: 7500, 
-    net: 67500, 
+  {
+    id: 4,
+    merchant: 'Fresh Mart',
+    cycle: '16 Dec - 31 Dec',
+    orders: 200,
+    gmv: 75000,
+    commission: 7500,
+    net: 67500,
     status: 'paid',
     paidDate: '2 Jan 2026'
   },
@@ -107,10 +108,19 @@ export function SettlementsManager() {
 
       <div className="flex-1 px-6 pb-20 overflow-hidden flex flex-col">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
-          <TabsList className="w-[400px] mb-4">
-            <TabsTrigger value="due" className="flex-1">Due (Active)</TabsTrigger>
-            <TabsTrigger value="paid" className="flex-1">Paid History</TabsTrigger>
-            <TabsTrigger value="hold" className="flex-1">On Hold</TabsTrigger>
+          <TabsList className="mb-4">
+            <TabsTrigger value="due" className="flex-1">
+              <Clock className="w-4 h-4" />
+              Due (Active)
+            </TabsTrigger>
+            <TabsTrigger value="paid" className="flex-1">
+              <CheckCircle2 className="w-4 h-4" />
+              Paid History
+            </TabsTrigger>
+            <TabsTrigger value="hold" className="flex-1">
+              <AlertCircle className="w-4 h-4" />
+              On Hold
+            </TabsTrigger>
           </TabsList>
 
           <Card className="flex-1 border-gray-200 shadow-sm overflow-hidden flex flex-col">
@@ -149,9 +159,9 @@ export function SettlementsManager() {
                       </TableCell>
                       <TableCell className="text-right">
                         {item.status === 'due' ? (
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
+                          <Button
+                            variant="outline"
+                            size="sm"
                             className="text-blue-600 border-blue-200 hover:bg-blue-50"
                             onClick={() => handleSettle(item.id)}
                           >
@@ -189,21 +199,21 @@ export function SettlementsManager() {
 
 function InfoIcon() {
   return (
-    <svg 
-      xmlns="http://www.w3.org/2000/svg" 
-      width="16" 
-      height="16" 
-      viewBox="0 0 24 24" 
-      fill="none" 
-      stroke="currentColor" 
-      strokeWidth="2" 
-      strokeLinecap="round" 
-      strokeLinejoin="round" 
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
       className="w-4 h-4"
     >
-      <circle cx="12" cy="12" r="10"/>
-      <path d="M12 16v-4"/>
-      <path d="M12 8h.01"/>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16v-4" />
+      <path d="M12 8h.01" />
     </svg>
   );
 }

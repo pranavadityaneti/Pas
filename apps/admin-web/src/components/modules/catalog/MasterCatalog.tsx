@@ -76,7 +76,9 @@ interface Product {
   mrp: number;
   image: string | null;
   ean?: string;
+  ean?: string;
   brand?: string;
+  createdByStoreId?: string | null;
   images?: ProductImage[];
   // New Fields
   unitType?: string;
@@ -107,6 +109,7 @@ export function MasterCatalog() {
   const [loading, setLoading] = useState(true);
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [catalogType, setCatalogType] = useState<'global' | 'custom'>('global');
 
   // Server-Side Filters
   const [page, setPage] = useState(1);
@@ -137,7 +140,7 @@ export function MasterCatalog() {
 
   useEffect(() => {
     fetchProducts();
-  }, [page, filters, searchQuery]); // Re-fetch when any filter changes
+  }, [page, filters, searchQuery, catalogType]); // Re-fetch when any filter changes
 
   const fetchProducts = async () => {
     setLoading(true);
@@ -150,6 +153,7 @@ export function MasterCatalog() {
       if (filters.category.length > 0) params.append('category', filters.category.join(','));
       if (filters.gstRate.length > 0) params.append('gstRate', filters.gstRate.join(','));
       if (filters.missingData.length > 0) params.append('missingData', filters.missingData.join(','));
+      params.append('type', catalogType);
 
       // Price Range
       if (filters.priceRange[0] > 0) params.append('minPrice', filters.priceRange[0].toString());
@@ -157,12 +161,13 @@ export function MasterCatalog() {
 
       const response = await api.get(`/products?${params.toString()}`);
 
+      console.log('API Response:', response.data);
       if (response.data.pagination) {
-        setProducts(response.data.data);
+        setProducts(Array.isArray(response.data.data) ? response.data.data : []);
         setPagination(response.data.pagination);
       } else {
         // Fallback for array response
-        setProducts(response.data);
+        setProducts(Array.isArray(response.data) ? response.data : []);
       }
     } catch (error) {
       console.error('Failed to fetch products:', error);
@@ -478,6 +483,22 @@ export function MasterCatalog() {
         </div>
       </div>
 
+      {/* --- Filter Tabs --- */}
+      <div className="flex gap-4 border-b border-gray-200">
+        <button
+          className={`pb-2 px-4 font-medium transition-colors ${catalogType === 'global' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          onClick={() => { setCatalogType('global'); setPage(1); }}
+        >
+          Global Catalog
+        </button>
+        <button
+          className={`pb-2 px-4 font-medium transition-colors ${catalogType === 'custom' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          onClick={() => { setCatalogType('custom'); setPage(1); }}
+        >
+          Merchant Requests
+        </button>
+      </div>
+
       <div className="flex-1 bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col overflow-hidden">
         {/* Toolbar */}
         <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
@@ -696,7 +717,7 @@ export function MasterCatalog() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {products.map((product) => (
+                  {Array.isArray(products) && products.map((product) => (
                     <TableRow key={product.id} className="group hover:bg-gray-50/80 transition-colors">
                       <TableCell>
                         <div className="flex items-center justify-center">
@@ -725,6 +746,11 @@ export function MasterCatalog() {
                           <span className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
                             <Barcode className="w-3 h-3" /> {product.ean || 'N/A'} • {product.brand || 'Generic'}
                           </span>
+                          {product.createdByStoreId && (
+                            <Badge variant="outline" className="mt-1 w-fit bg-purple-50 text-purple-700 border-purple-200">
+                              Store: {product.createdByStoreId}
+                            </Badge>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell>
