@@ -100,7 +100,7 @@ export function SettlementsManager() {
           <h2 className="text-lg font-semibold text-gray-900">Merchant Settlements</h2>
           <p className="text-sm text-gray-500">Manage payouts and financial reconciliation.</p>
         </div>
-        <Button className="bg-blue-600 hover:bg-blue-700 gap-2">
+        <Button className="bg-[#121212] hover:bg-[#2d2d2d] gap-2">
           <ArrowUpRight className="w-4 h-4" />
           Run Batch Payout
         </Button>

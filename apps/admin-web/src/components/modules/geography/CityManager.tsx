@@ -58,7 +58,7 @@ export function CityManager() {
   if (loading) {
     return (
       <div className="h-full flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+        <Loader2 className="w-8 h-8 animate-spin text-[#B52725]" />
       </div>
     );
   }
@@ -78,7 +78,7 @@ export function CityManager() {
           <div className="p-4 border-b border-gray-200 bg-white">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-gray-900">Serviceable Cities</h3>
-              <Button size="sm" className="h-8 gap-1 bg-blue-600 hover:bg-blue-700">
+              <Button size="sm" className="h-8 gap-1 bg-[#121212] hover:bg-[#2d2d2d]">
                 <Plus className="w-3.5 h-3.5" /> Add City
               </Button>
             </div>
@@ -95,8 +95,8 @@ export function CityManager() {
                   key={city.id}
                   onClick={() => setSelectedCity(city)}
                   className={`p-4 rounded-lg border cursor-pointer transition-all ${selectedCity?.id === city.id
-                      ? 'bg-white border-blue-500 shadow-md ring-1 ring-blue-500'
-                      : 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-sm'
+                    ? 'bg-white border-blue-500 shadow-md ring-1 ring-blue-500'
+                    : 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-sm'
                     }`}
                 >
                   <div className="flex items-center justify-between mb-2">

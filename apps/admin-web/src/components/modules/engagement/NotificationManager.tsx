@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { 
-  Bell, 
-  Send, 
-  Calendar, 
+import {
+  Bell,
+  Send,
+  Calendar,
   Smartphone,
   Info
 } from 'lucide-react';
@@ -45,33 +45,33 @@ export function NotificationManager() {
           <div className="p-6 border-b border-gray-100 flex items-center justify-between">
             <div>
               <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                <Bell className="w-5 h-5 text-blue-600" />
+                <Bell className="w-5 h-5 text-[#B52725]" />
                 Push Campaign Builder
               </h3>
               <p className="text-sm text-gray-500 mt-1">Send notifications to wake up users.</p>
             </div>
-            <Button onClick={handleSend} className="bg-blue-600 hover:bg-blue-700 gap-2">
+            <Button onClick={handleSend} className="bg-[#121212] hover:bg-[#2d2d2d] gap-2">
               <Send className="w-4 h-4" />
               {schedule === 'now' ? 'Send Blast' : 'Schedule Campaign'}
             </Button>
           </div>
-          
+
           <div className="p-6 space-y-8 flex-1 overflow-auto">
             {/* Message Content */}
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label className="text-base font-semibold text-gray-900">Notification Title</Label>
-                <Input 
+                <Input
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="e.g. Flash Sale! 50% Off Chai"
                   className="font-medium"
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <Label className="text-base font-semibold text-gray-900">Message Body</Label>
-                <Textarea 
+                <Textarea
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
                   placeholder="e.g. It's raining! Get hot snacks delivered in 10 mins..."
@@ -116,12 +116,12 @@ export function NotificationManager() {
             <div className="space-y-4">
               <Label className="text-base font-semibold text-gray-900">Scheduling</Label>
               <RadioGroup value={schedule} onValueChange={setSchedule} className="grid grid-cols-2 gap-4">
-                <div className={`border rounded-lg p-4 cursor-pointer transition-all ${schedule === 'now' ? 'border-blue-600 bg-blue-50/50 ring-1 ring-blue-600' : 'border-gray-200 hover:border-gray-300'}`}>
+                <div className={`border rounded-lg p-4 cursor-pointer transition-all ${schedule === 'now' ? 'border-[#B52725] bg-red-50/50 ring-1 ring-[#B52725]' : 'border-gray-200 hover:border-gray-300'}`}>
                   <RadioGroupItem value="now" id="now" className="sr-only" />
                   <Label htmlFor="now" className="cursor-pointer">
                     <div className="flex items-center gap-2 mb-2">
-                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${schedule === 'now' ? 'border-blue-600' : 'border-gray-400'}`}>
-                        {schedule === 'now' && <div className="w-2 h-2 rounded-full bg-blue-600" />}
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${schedule === 'now' ? 'border-[#B52725]' : 'border-gray-400'}`}>
+                        {schedule === 'now' && <div className="w-2 h-2 rounded-full bg-[#B52725]" />}
                       </div>
                       <span className="font-bold text-gray-900">Send Immediately</span>
                     </div>
@@ -150,7 +150,7 @@ export function NotificationManager() {
       {/* Right Panel: Preview */}
       <div className="w-[380px] shrink-0 flex flex-col items-center justify-center bg-gray-100 rounded-xl border border-gray-200 p-8 relative overflow-hidden">
         <div className="absolute inset-0 opacity-[0.03] bg-[radial-gradient(#000_1px,transparent_1px)] [background-size:16px_16px]"></div>
-        
+
         <div className="text-center mb-8 z-10">
           <h3 className="text-lg font-bold text-gray-900 mb-1">Preview</h3>
           <p className="text-sm text-gray-500">How it looks on iOS Lock Screen</p>
@@ -173,16 +173,16 @@ export function NotificationManager() {
 
           {/* Time */}
           <div className="relative z-20 text-center mt-8 text-white/90">
-             <div className="text-6xl font-light tracking-tighter">9:41</div>
-             <div className="text-lg font-medium mt-1">Wednesday, 21 January</div>
+            <div className="text-6xl font-light tracking-tighter">9:41</div>
+            <div className="text-lg font-medium mt-1">Wednesday, 21 January</div>
           </div>
 
           {/* Notification Card */}
           <div className="relative z-20 mx-3 mt-8">
             <div className="bg-white/90 backdrop-blur-md rounded-xl p-3 shadow-lg animate-in slide-in-from-top-4 duration-500">
               <div className="flex items-start gap-3">
-                <div className="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center shrink-0 shadow-sm">
-                   <div className="text-white font-bold text-xs">Pick</div>
+                <div className="w-9 h-9 bg-[#B52725] rounded-lg flex items-center justify-center shrink-0 shadow-sm">
+                  <div className="text-white font-bold text-xs">Pick</div>
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-0.5">

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { 
+import {
   Info,
   CheckCircle2,
   Percent
@@ -37,20 +37,20 @@ export function CouponBuilder() {
         <Card className="border-gray-200 shadow-sm h-full flex flex-col">
           <div className="p-6 border-b border-gray-100">
             <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-              <Percent className="w-5 h-5 text-blue-600" />
+              <Percent className="w-5 h-5 text-[#B52725]" />
               Coupon Configuration
             </h3>
             <p className="text-sm text-gray-500 mt-1">Define the rules and limits for this promotion.</p>
           </div>
-          
+
           <div className="p-6 space-y-8 flex-1 overflow-auto">
             {/* Promo Code Input */}
             <div className="space-y-3">
               <Label className="text-base font-semibold text-gray-900">Promo Code</Label>
-              <Input 
-                value={promoCode} 
+              <Input
+                value={promoCode}
                 onChange={(e) => setPromoCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10))}
-                className="font-mono text-lg uppercase tracking-wider border-gray-300 focus:border-blue-500"
+                className="font-mono text-lg uppercase tracking-wider border-gray-300 focus:border-[#B52725]"
                 placeholder="e.g. SUMMER20"
               />
               <p className="text-xs text-gray-500 flex items-center gap-1">
@@ -77,8 +77,8 @@ export function CouponBuilder() {
               <div className="space-y-3">
                 <Label className="font-semibold text-gray-900">Value</Label>
                 <div className="relative">
-                  <Input 
-                    type="number" 
+                  <Input
+                    type="number"
                     value={discountValue}
                     onChange={(e) => setDiscountValue(e.target.value)}
                     className="pl-8"
@@ -108,12 +108,12 @@ export function CouponBuilder() {
                 <Badge variant="destructive" className="bg-red-50 text-red-600 border-red-200 hover:bg-red-100">Critical Finance Impact</Badge>
               </div>
               <RadioGroup value={fundingSource} onValueChange={setFundingSource} className="grid grid-cols-2 gap-4">
-                <div className={`border rounded-lg p-4 cursor-pointer transition-all ${fundingSource === 'platform' ? 'border-blue-600 bg-blue-50/50 ring-1 ring-blue-600' : 'border-gray-200 hover:border-gray-300'}`}>
+                <div className={`border rounded-lg p-4 cursor-pointer transition-all ${fundingSource === 'platform' ? 'border-[#B52725] bg-red-50/50 ring-1 ring-[#B52725]' : 'border-gray-200 hover:border-gray-300'}`}>
                   <RadioGroupItem value="platform" id="platform" className="sr-only" />
                   <Label htmlFor="platform" className="cursor-pointer">
                     <div className="flex items-center gap-2 mb-2">
-                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${fundingSource === 'platform' ? 'border-blue-600' : 'border-gray-400'}`}>
-                        {fundingSource === 'platform' && <div className="w-2 h-2 rounded-full bg-blue-600" />}
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${fundingSource === 'platform' ? 'border-[#B52725]' : 'border-gray-400'}`}>
+                        {fundingSource === 'platform' && <div className="w-2 h-2 rounded-full bg-[#B52725]" />}
                       </div>
                       <span className="font-bold text-gray-900">Platform Funded</span>
                     </div>
@@ -143,24 +143,24 @@ export function CouponBuilder() {
               <Label className="font-semibold text-gray-900">Target Audience</Label>
               <div className="space-y-3 mt-2">
                 <div className="flex items-center space-x-2">
-                  <Checkbox 
-                    id="all" 
+                  <Checkbox
+                    id="all"
                     checked={audience.includes('all')}
                     onCheckedChange={() => handleAudienceChange('all')}
                   />
                   <Label htmlFor="all" className="font-normal">All Users</Label>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <Checkbox 
-                    id="new" 
+                  <Checkbox
+                    id="new"
                     checked={audience.includes('new')}
                     onCheckedChange={() => handleAudienceChange('new')}
                   />
                   <Label htmlFor="new" className="font-normal">New Users Only (First Order)</Label>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <Checkbox 
-                    id="inactive" 
+                  <Checkbox
+                    id="inactive"
                     checked={audience.includes('inactive')}
                     onCheckedChange={() => handleAudienceChange('inactive')}
                   />
@@ -169,10 +169,10 @@ export function CouponBuilder() {
               </div>
             </div>
           </div>
-          
+
           <div className="p-6 border-t border-gray-100 bg-gray-50 flex justify-end gap-3 rounded-b-xl">
             <Button variant="outline">Save Draft</Button>
-            <Button className="bg-blue-600 hover:bg-blue-700">Launch Campaign</Button>
+            <Button className="bg-[#121212] hover:bg-[#2d2d2d]">Launch Campaign</Button>
           </div>
         </Card>
       </div>
@@ -180,7 +180,7 @@ export function CouponBuilder() {
       {/* Right Panel: The Preview */}
       <div className="w-[380px] shrink-0 flex flex-col items-center justify-center bg-gray-100 rounded-xl border border-gray-200 p-8 relative overflow-hidden">
         <div className="absolute inset-0 opacity-[0.03] bg-[radial-gradient(#000_1px,transparent_1px)] [background-size:16px_16px]"></div>
-        
+
         <div className="text-center mb-8 z-10">
           <h3 className="text-lg font-bold text-gray-900 mb-1">Mobile App Preview</h3>
           <p className="text-sm text-gray-500">Live preview of the coupon card</p>
@@ -201,20 +201,20 @@ export function CouponBuilder() {
           {/* App Content */}
           <div className="p-4 bg-gray-50 min-h-[500px]">
             <p className="text-xs font-bold text-gray-500 mb-3 uppercase tracking-wider">Checkout</p>
-            
+
             {/* The Coupon Card */}
-            <div className="bg-white rounded-lg border-2 border-dashed border-blue-200 p-4 relative overflow-hidden shadow-sm">
+            <div className="bg-white rounded-lg border-2 border-dashed border-[#B52725] p-4 relative overflow-hidden shadow-sm">
               <div className="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 bg-gray-50 rounded-full"></div>
               <div className="absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 bg-gray-50 rounded-full"></div>
-              
+
               <div className="flex items-start gap-4">
-                <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
-                  <Percent className="w-6 h-6 text-blue-600" />
+                <div className="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center shrink-0">
+                  <Percent className="w-6 h-6 text-[#B52725]" />
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center justify-between">
                     <h4 className="font-bold text-gray-900 text-lg">{promoCode || 'CODE'}</h4>
-                    <span className="text-blue-600 font-bold text-sm">APPLY</span>
+                    <span className="text-[#B52725] font-bold text-sm">APPLY</span>
                   </div>
                   <p className="text-sm text-gray-600 font-medium mt-0.5">
                     Get {discountType === 'percentage' ? `${discountValue}%` : `₹${discountValue}`} OFF
@@ -224,7 +224,7 @@ export function CouponBuilder() {
                   </p>
                 </div>
               </div>
-              
+
               <div className="mt-3 pt-3 border-t border-dashed border-gray-200 flex items-center gap-2">
                 <Badge variant="secondary" className="bg-green-100 text-green-700 text-[10px] hover:bg-green-100 h-5 px-1.5 border-none">
                   <CheckCircle2 className="w-3 h-3 mr-1" />

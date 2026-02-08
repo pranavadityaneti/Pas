@@ -27,7 +27,7 @@ export function OnboardingStepper({ currentStep, steps }: OnboardingStepperProps
                                         ${isCompleted
                                             ? 'bg-gray-900 text-white'
                                             : isActive
-                                                ? 'bg-blue-600 text-white ring-4 ring-blue-100'
+                                                ? 'bg-[#B52725] text-white ring-4 ring-red-100'
                                                 : 'bg-gray-200 text-gray-500'
                                         }
                                     `}
@@ -41,7 +41,7 @@ export function OnboardingStepper({ currentStep, steps }: OnboardingStepperProps
                                 <span
                                     className={`
                                         mt-2 text-xs font-medium text-center max-w-[80px]
-                                        ${isActive ? 'text-blue-600' : isCompleted ? 'text-gray-900' : 'text-gray-400'}
+                                        ${isActive ? 'text-[#B52725]' : isCompleted ? 'text-gray-900' : 'text-gray-400'}
                                     `}
                                 >
                                     {step.label}

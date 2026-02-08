@@ -40,17 +40,17 @@ export function DisputeConsole({ id, onBack, onResolve }: DisputeConsoleProps) {
         <div className="w-1/2 border-r border-gray-200 flex flex-col bg-gray-50/50">
           <div className="p-4 border-b border-gray-200 bg-white">
             <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-              <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
+              <span className="w-2 h-2 bg-[#B52725] rounded-full"></span>
               User Evidence
             </h3>
             <p className="text-sm text-gray-500 mt-1">Uploaded 45 mins ago via Mobile App</p>
           </div>
-          
+
           <ScrollArea className="flex-1 p-6">
             <div className="space-y-6">
               <div className="rounded-xl border border-gray-200 overflow-hidden bg-white shadow-sm">
                 <div className="relative aspect-[4/3] w-full bg-black/5">
-                  <ImageWithFallback 
+                  <ImageWithFallback
                     src="https://images.unsplash.com/photo-1710383934725-0895f9f20298?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxncm9jZXJ5JTIwcHJvZHVjdCUyMHN1cGVybWFya2V0JTIwc2hlbGYlMjBwcmljZSUyMHRhZ3xlbnwxfHx8fDE3Njg5ODM1NDN8MA&ixlib=rb-4.1.0&q=80&w=1080"
                     alt="User Uploaded Evidence"
                     className="object-cover w-full h-full"
@@ -85,7 +85,7 @@ export function DisputeConsole({ id, onBack, onResolve }: DisputeConsoleProps) {
             <div className="space-y-6">
               <div className="flex gap-6">
                 <div className="w-32 h-32 rounded-lg border border-gray-200 overflow-hidden shrink-0">
-                  <ImageWithFallback 
+                  <ImageWithFallback
                     src="https://images.unsplash.com/photo-1555910114-d4ba95cc20e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtaWxrJTIwY2FydG9uJTIwcHJvZHVjdCUyMHdoaXRlJTIwYmFja2dyb3VuZHxlbnwxfHx8fDE3Njg5ODM1NDN8MA&ixlib=rb-4.1.0&q=80&w=1080"
                     alt="System Product Image"
                     className="object-cover w-full h-full"
@@ -94,7 +94,7 @@ export function DisputeConsole({ id, onBack, onResolve }: DisputeConsoleProps) {
                 <div className="flex-1">
                   <h4 className="text-xl font-bold text-gray-900">Fresh Farm Milk (1L)</h4>
                   <p className="text-gray-500 text-sm">Brand: MilkyWay | EAN: 890123456789</p>
-                  
+
                   <div className="mt-4 flex items-center gap-8">
                     <div>
                       <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">System Price</p>
@@ -133,15 +133,15 @@ export function DisputeConsole({ id, onBack, onResolve }: DisputeConsoleProps) {
           Make a decision to close this ticket. This action is irreversible.
         </div>
         <div className="flex items-center gap-3">
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
             onClick={() => onResolve("Fraud Flagged")}
           >
             <Flag className="w-4 h-4 mr-2" />
             Flag User as Fraud
           </Button>
-          <Button 
+          <Button
             variant="outline"
             className="bg-white"
             onClick={() => onResolve("Claim Rejected")}
@@ -149,7 +149,7 @@ export function DisputeConsole({ id, onBack, onResolve }: DisputeConsoleProps) {
             <X className="w-4 h-4 mr-2" />
             Reject Claim
           </Button>
-          <Button 
+          <Button
             className="bg-green-600 hover:bg-green-700 text-white"
             onClick={() => onResolve("Claim Accepted (Refund Issued)")}
           >
@@ -158,6 +158,6 @@ export function DisputeConsole({ id, onBack, onResolve }: DisputeConsoleProps) {
           </Button>
         </div>
       </div>
-    </div>
+    </div >
   );
 }

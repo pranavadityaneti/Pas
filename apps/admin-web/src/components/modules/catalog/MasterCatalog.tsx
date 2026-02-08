@@ -448,7 +448,7 @@ export function MasterCatalog() {
       {/* --- Header --- */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-blue-600 rounded-lg shadow-lg shadow-blue-200">
+          <div className="p-2 bg-[#B52725] rounded-lg shadow-lg shadow-red-200">
             <Package className="w-6 h-6 text-white" />
           </div>
           <div>
@@ -486,13 +486,13 @@ export function MasterCatalog() {
       {/* --- Filter Tabs --- */}
       <div className="flex gap-4 border-b border-gray-200">
         <button
-          className={`pb-2 px-4 font-medium transition-colors ${catalogType === 'global' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          className={`pb-2 px-4 font-medium transition-colors ${catalogType === 'global' ? 'border-b-2 border-[#B52725] text-[#B52725]' : 'text-gray-500 hover:text-gray-700'}`}
           onClick={() => { setCatalogType('global'); setPage(1); }}
         >
           Global Catalog
         </button>
         <button
-          className={`pb-2 px-4 font-medium transition-colors ${catalogType === 'custom' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          className={`pb-2 px-4 font-medium transition-colors ${catalogType === 'custom' ? 'border-b-2 border-[#B52725] text-[#B52725]' : 'text-gray-500 hover:text-gray-700'}`}
           onClick={() => { setCatalogType('custom'); setPage(1); }}
         >
           Merchant Requests
@@ -504,10 +504,10 @@ export function MasterCatalog() {
         <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
           <div className="flex items-center gap-4 flex-1">
             <div className="relative w-96 group">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 group-focus-within:text-blue-500 transition-colors" />
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 group-focus-within:text-[#B52725] transition-colors" />
               <Input
                 placeholder="Search products..."
-                className="pl-10 bg-white border-gray-200 focus:border-blue-500 transition-all font-medium"
+                className="pl-10 bg-white border-gray-200 focus:border-[#B52725] transition-all font-medium"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
@@ -687,7 +687,7 @@ export function MasterCatalog() {
           </div>
 
           <div className="flex items-center gap-2 text-sm text-gray-500 bg-white px-3 py-1.5 rounded-lg border border-gray-200">
-            <Package className="w-4 h-4 text-blue-500" />
+            <Package className="w-4 h-4 text-[#B52725]" />
             <span className="font-semibold text-gray-900">{pagination.total}</span> SKUs
           </div>
         </div>
@@ -696,7 +696,7 @@ export function MasterCatalog() {
         <div className="flex-1 overflow-auto flex flex-col">
           {loading ? (
             <div className="flex h-full items-center justify-center">
-              <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+              <Loader2 className="w-8 h-8 animate-spin text-[#B52725]" />
             </div>
           ) : (
             <>
@@ -884,7 +884,7 @@ export function MasterCatalog() {
                             <X className="w-3 h-3" />
                           </button>
                           {idx === 0 && (
-                            <div className="absolute bottom-0 inset-x-0 bg-blue-600/90 text-white text-[9px] font-bold text-center py-0.5">
+                            <div className="absolute bottom-0 inset-x-0 bg-[#B52725]/90 text-white text-[9px] font-bold text-center py-0.5">
                               MAIN
                             </div>
                           )}

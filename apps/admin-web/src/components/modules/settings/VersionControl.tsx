@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { 
-  Smartphone, 
-  Store, 
+import {
+  Smartphone,
+  Store,
   AlertTriangle,
   Save,
   Power
@@ -53,7 +53,7 @@ export function VersionControl() {
           <CardHeader className="pb-4">
             <div className="flex items-center gap-2">
               <div className="p-2 bg-blue-50 rounded-lg">
-                <Smartphone className="w-5 h-5 text-blue-600" />
+                <Smartphone className="w-5 h-5 text-[#B52725]" />
               </div>
               <div>
                 <CardTitle className="text-base">Consumer App Config</CardTitle>
@@ -72,9 +72,9 @@ export function VersionControl() {
                 <Input defaultValue="1.1.5" className="font-mono" />
               </div>
             </div>
-            
+
             <Separator />
-            
+
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
                 <Label>Show 'Update Required'</Label>
@@ -83,7 +83,7 @@ export function VersionControl() {
               <Switch defaultChecked />
             </div>
 
-            <Button className="w-full bg-blue-600 hover:bg-blue-700" onClick={() => handleSave('Consumer App')}>
+            <Button className="w-full bg-[#121212] hover:bg-[#2d2d2d]" onClick={() => handleSave('Consumer App')}>
               <Save className="w-4 h-4 mr-2" /> Save Changes
             </Button>
           </CardContent>
@@ -113,9 +113,9 @@ export function VersionControl() {
                 <Input defaultValue="2.3.0" className="font-mono" />
               </div>
             </div>
-            
+
             <Separator />
-            
+
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
                 <Label>Show 'Update Required'</Label>
@@ -146,9 +146,9 @@ export function VersionControl() {
               </CardDescription>
             </div>
             <div className="ml-auto">
-               {maintenanceMode && (
-                 <Badge variant="destructive" className="animate-pulse bg-red-600">ACTIVE</Badge>
-               )}
+              {maintenanceMode && (
+                <Badge variant="destructive" className="animate-pulse bg-red-600">ACTIVE</Badge>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -159,7 +159,7 @@ export function VersionControl() {
                 Enable Maintenance Mode
               </Label>
               <p className="text-sm text-gray-500 max-w-lg">
-                When enabled, all consumer and merchant apps will display a "Under Maintenance" screen. 
+                When enabled, all consumer and merchant apps will display a "Under Maintenance" screen.
                 APIs will reject non-admin requests. Use with caution.
               </p>
             </div>
@@ -167,7 +167,7 @@ export function VersionControl() {
               <span className="text-sm font-bold text-red-600 uppercase tracking-wider">
                 {maintenanceMode ? 'ENABLED' : 'DISABLED'}
               </span>
-              <Switch 
+              <Switch
                 checked={maintenanceMode}
                 onCheckedChange={handleMaintenanceToggle}
                 className="data-[state=checked]:bg-red-600"

@@ -91,7 +91,7 @@ export function KYCQueue() {
   if (loading && !selectedApp) {
     return (
       <div className="h-[calc(100vh-220px)] flex items-center justify-center bg-white border border-gray-200 rounded-lg">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+        <Loader2 className="w-8 h-8 animate-spin text-[#B52725]" />
         <span className="ml-2 text-gray-500">Loading requests...</span>
       </div>
     );

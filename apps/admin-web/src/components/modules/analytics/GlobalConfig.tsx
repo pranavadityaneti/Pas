@@ -17,7 +17,7 @@ import {
 
 export function GlobalConfig() {
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
-  
+
   const handleSave = () => {
     setIsConfirmOpen(true);
   };
@@ -36,7 +36,7 @@ export function GlobalConfig() {
           <h2 className="text-lg font-semibold text-gray-900">Global Platform Variables</h2>
           <p className="text-sm text-gray-500">The "Switchboard" for critical operational parameters.</p>
         </div>
-        <Button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 gap-2">
+        <Button onClick={handleSave} className="bg-[#121212] hover:bg-[#2d2d2d] gap-2">
           <Save className="w-4 h-4" /> Save Changes
         </Button>
       </div>

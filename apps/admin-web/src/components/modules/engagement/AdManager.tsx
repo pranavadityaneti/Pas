@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { 
+import {
   Megaphone,
   Plus,
   TrendingUp,
@@ -75,7 +75,7 @@ export function AdManager() {
         </div>
         <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
           <DialogTrigger asChild>
-            <Button className="bg-blue-600 hover:bg-blue-700 gap-2">
+            <Button className="bg-[#121212] hover:bg-[#2d2d2d] gap-2">
               <Plus className="w-4 h-4" /> Create Boost
             </Button>
           </DialogTrigger>
@@ -86,7 +86,7 @@ export function AdManager() {
                 Boost a merchant's visibility on the platform.
               </DialogDescription>
             </DialogHeader>
-            
+
             <div className="space-y-4 py-4">
               <div className="space-y-2">
                 <Label>Merchant Name</Label>
@@ -130,7 +130,7 @@ export function AdManager() {
 
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsModalOpen(false)}>Cancel</Button>
-              <Button onClick={handleCreate} className="bg-blue-600 hover:bg-blue-700">Launch Campaign</Button>
+              <Button onClick={handleCreate} className="bg-[#121212] hover:bg-[#2d2d2d]">Launch Campaign</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -172,9 +172,9 @@ export function AdManager() {
                     <StatusBadge status={ad.status} />
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       className={`${ad.status === 'active' ? 'text-red-600 hover:text-red-700 hover:bg-red-50' : 'text-green-600 hover:text-green-700 hover:bg-green-50'}`}
                       onClick={() => toggleStatus(ad.id)}
                     >
