@@ -92,12 +92,15 @@ model Store {
   image       String?
   managerId   String?  @unique
   manager     User?    @relation("StoreManager", fields: [managerId], references: [id])
+  merchantId  String?  @map("merchant_id")
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   products    StoreProduct[]
   orders      Order[]
+
+  @@index([merchantId])
 }
 
 // --- Catalog Models ---

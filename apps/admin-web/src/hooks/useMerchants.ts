@@ -423,27 +423,66 @@ export function useMerchants() {
     };
 }
 
-// Actual fetch logic independent of hook
+// Actual fetch logic independent of hook - uses RPC for aggregated stats
 async function fetchMerchantsGlobal() {
     globalLoading = true;
     notifyListeners();
     try {
-        const { data, error } = await supabase
-            .from('merchants')
-            .select('*, merchant_branches(*)')
-            .order('created_at', { ascending: false });
+        // Use RPC to get merchants with computed order/revenue stats
+        const { data, error } = await supabase.rpc('get_merchants_with_stats');
 
-        if (error) throw error;
+        if (error) {
+            // Fallback to direct query if RPC fails
+            console.warn('RPC failed, falling back to direct query:', error);
+            const { data: fallbackData, error: fallbackError } = await supabase
+                .from('merchants')
+                .select('*, merchant_branches(*)')
+                .order('created_at', { ascending: false });
 
-        // Add defaults for computed fields
-        const enrichedData = (data || []).map((m: any) => ({
-            ...m,
-            orders_30d: 0,
-            revenue_30d: 0,
-            is_online: false,
-            last_active: 'Never',
-            rating: m.rating || 0
-        }));
+            if (fallbackError) throw fallbackError;
+
+            // Process fallback data with defaults
+            const enrichedData = (fallbackData || []).map((m: any) => ({
+                ...m,
+                orders_30d: 0,
+                revenue_30d: 0,
+                is_online: false,
+                last_active: 'Never',
+                rating: m.rating || 0
+            }));
+            globalMerchants = enrichedData;
+            globalError = null;
+            return;
+        }
+
+        // Format the RPC response for display
+        const enrichedData = (data || []).map((m: any) => {
+            // Format last_active for display
+            let lastActiveDisplay = 'Never';
+            if (m.last_active) {
+                const lastActive = new Date(m.last_active);
+                const diffMs = Date.now() - lastActive.getTime();
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMs / 3600000);
+                const diffDays = Math.floor(diffMs / 86400000);
+
+                if (diffMins < 5) lastActiveDisplay = 'Just now';
+                else if (diffMins < 60) lastActiveDisplay = `${diffMins} mins ago`;
+                else if (diffHours < 24) lastActiveDisplay = `${diffHours} hours ago`;
+                else lastActiveDisplay = `${diffDays} days ago`;
+            }
+
+            return {
+                ...m,
+                // RPC returns these as computed values
+                orders_30d: m.orders_30d || 0,
+                revenue_30d: m.revenue_30d || 0,
+                // is_online is already computed by RPC (last_active within 10 mins)
+                is_online: m.is_online || false,
+                last_active: lastActiveDisplay,
+                rating: m.rating || 0
+            };
+        });
 
         globalMerchants = enrichedData;
         globalError = null;
