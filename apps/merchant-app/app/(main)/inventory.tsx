@@ -98,7 +98,7 @@ export default function InventoryScreen() {
 
     if (!loading && isInventoryEmpty) {
         return (
-            <SafeAreaView style={styles.container}>
+            <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
                 <View style={[styles.header, { borderBottomWidth: 0 }]}>
                     <Text style={styles.title}>Inventory</Text>
                     <View style={styles.storeBadge}>
@@ -125,7 +125,7 @@ export default function InventoryScreen() {
     }
 
     return (
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
             {/* Header */}
             <View style={styles.header}>
                 <Text style={styles.title}>Inventory</Text>

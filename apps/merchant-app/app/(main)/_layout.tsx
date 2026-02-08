@@ -12,14 +12,17 @@ export default function MainLayout() {
                 tabBarStyle: {
                     backgroundColor: '#FFFFFF',
                     borderTopColor: '#E5E7EB',
-                    height: 70, // Tighter height
-                    paddingTop: 10,
-                    paddingBottom: 10,  // Reduced padding
+                    height: 85,
+                    paddingTop: 12,
                 },
                 tabBarLabelStyle: {
-                    fontSize: 12,
-                    fontWeight: '600',
+                    fontSize: 10,
+                    fontWeight: '700',
+                    marginTop: 4,
                 },
+                tabBarIconStyle: {
+                    marginBottom: 2,
+                }
             }}
         >
             <Tabs.Screen
@@ -27,7 +30,7 @@ export default function MainLayout() {
                 options={{
                     title: 'Dashboard',
                     tabBarIcon: ({ color, focused }) => (
-                        <Ionicons name={focused ? 'home' : 'home-outline'} size={24} color={color} />
+                        <Ionicons name={focused ? 'home' : 'home-outline'} size={22} color={color} />
                     ),
                 }}
             />
@@ -36,7 +39,7 @@ export default function MainLayout() {
                 options={{
                     title: 'Orders',
                     tabBarIcon: ({ color, focused }) => (
-                        <Ionicons name={focused ? 'receipt' : 'receipt-outline'} size={24} color={color} />
+                        <Ionicons name={focused ? 'receipt' : 'receipt-outline'} size={22} color={color} />
                     ),
                 }}
             />
@@ -45,7 +48,7 @@ export default function MainLayout() {
                 options={{
                     title: 'Inventory',
                     tabBarIcon: ({ color, focused }) => (
-                        <Ionicons name={focused ? 'cube' : 'cube-outline'} size={24} color={color} />
+                        <Ionicons name={focused ? 'cube' : 'cube-outline'} size={22} color={color} />
                     ),
                 }}
             />
@@ -54,12 +57,18 @@ export default function MainLayout() {
                 options={{
                     title: 'Settings',
                     tabBarIcon: ({ color, focused }) => (
-                        <Ionicons name={focused ? 'settings' : 'settings-outline'} size={24} color={color} />
+                        <Ionicons name={focused ? 'settings' : 'settings-outline'} size={22} color={color} />
                     ),
                 }}
             />
             <Tabs.Screen
                 name="catalog-picker"
+                options={{
+                    href: null,
+                }}
+            />
+            <Tabs.Screen
+                name="notifications"
                 options={{
                     href: null,
                 }}

@@ -62,11 +62,35 @@ export function useStore() {
         fetchStore();
     }, []);
 
+    const toggleStoreStatus = async (newStatus: boolean): Promise<boolean> => {
+        try {
+            if (!store?.id) return false;
+
+            const { error } = await supabase
+                .from('Store')
+                .update({ active: newStatus })
+                .eq('id', store.id);
+
+            if (error) {
+                console.error('[useStore] Toggle error:', error);
+                return false;
+            }
+
+            // Optimistic update
+            setStore(prev => prev ? { ...prev, active: newStatus } : null);
+            return true;
+        } catch (e) {
+            console.error('[useStore] Toggle exception:', e);
+            return false;
+        }
+    };
+
     return {
         store,
         storeId: store?.id || null,
         storeName: store?.name || null,
         loading,
-        error: null
+        error: null,
+        toggleStoreStatus
     };
 }

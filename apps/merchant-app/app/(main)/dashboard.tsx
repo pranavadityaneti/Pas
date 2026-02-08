@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
@@ -11,7 +11,7 @@ import { useRouter } from 'expo-router';
 
 export default function DashboardScreen() {
     const router = useRouter();
-    const { store } = useStore();
+    const { store, toggleStoreStatus } = useStore();
     const { stats, loading: earningsLoading } = useEarnings();
     const { orders, loading: ordersLoading } = useOrders();
 
@@ -37,122 +37,173 @@ export default function DashboardScreen() {
 
     const recentOrders = orders.slice(0, 5);
 
+    const handleToggleStatus = () => {
+        const newStatus = !store?.active;
+        const title = newStatus ? 'Go Online?' : 'Go Offline?';
+        const message = newStatus
+            ? 'Your store will start accepting new orders.'
+            : 'Your store will stop accepting new orders. Existing orders can still be processed.';
+
+        Alert.alert(
+            title,
+            message,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Confirm',
+                    onPress: async () => {
+                        const success = await toggleStoreStatus(newStatus);
+                        if (!success) {
+                            Alert.alert('Error', 'Failed to update store status. Please try again.');
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    const isOffline = !store?.active;
+
     return (
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+            {isOffline && (
+                <View style={styles.offlineBanner}>
+                    <Ionicons name="close-circle" size={20} color="#FFF" />
+                    <Text style={styles.offlineText}>Store Offline - Not accepting new orders</Text>
+                </View>
+            )}
+
             <ScrollView contentContainerStyle={styles.scrollContent}>
-                <View style={styles.header}>
-                    <View>
-                        <Text style={styles.greeting}>{getGreeting()}</Text>
-                        <Text style={styles.storeName}>{store?.name || 'Loading...'}</Text>
-                    </View>
-                    <TouchableOpacity style={styles.notificationButton}>
-                        <Ionicons name="notifications-outline" size={24} color="#374151" />
-                        <View style={styles.notificationBadge} />
-                    </TouchableOpacity>
-                </View>
-
-                <View style={styles.statsGrid}>
-                    {dashboardStats.map((stat, i) => (
-                        <View key={i} style={styles.statCard}>
-                            <View style={[styles.statIcon, { backgroundColor: `${stat.color}15` }]}>
-                                <Ionicons name={stat.icon as any} size={22} color={stat.color} />
+                <View style={[styles.contentWrapper, isOffline && styles.greyscale]}>
+                    <View style={styles.header}>
+                        <View>
+                            <Text style={styles.greeting}>{getGreeting()}</Text>
+                            <View style={styles.storeHeader}>
+                                <Text style={styles.storeName}>{store?.name || 'Loading...'}</Text>
+                                <TouchableOpacity
+                                    style={[styles.statusBadgeButton, !store?.active && styles.statusBadgeOffline]}
+                                    onPress={handleToggleStatus}
+                                >
+                                    <View style={[styles.statusDot, !store?.active && styles.statusDotOffline]} />
+                                    <Text style={[styles.statusLabel, !store?.active && styles.statusLabelOffline]}>
+                                        {store?.active ? 'Online' : 'Offline'}
+                                    </Text>
+                                    <Ionicons name="chevron-down" size={14} color={store?.active ? '#10B981' : '#6B7280'} />
+                                </TouchableOpacity>
                             </View>
-                            <Text style={styles.statValue}>{stat.value}</Text>
-                            <Text style={styles.statLabel}>{stat.label}</Text>
                         </View>
-                    ))}
-                </View>
-
-                {/* Performance Banner */}
-                <View style={styles.payoutCard}>
-                    <View>
-                        <Text style={styles.payoutLabel}>Estimated Payout (Today)</Text>
-                        <Text style={styles.payoutValue}>{formatCurrency(stats.estimatedPayout)}</Text>
-                    </View>
-                    <View style={styles.payoutTag}>
-                        <Text style={styles.payoutTagText}>Net Earnings</Text>
-                    </View>
-                </View>
-
-                <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Quick Actions</Text>
-                    <View style={styles.actionsRow}>
                         <TouchableOpacity
-                            style={styles.actionButton}
-                            onPress={() => router.push('/catalog-picker')}
+                            style={styles.notificationButton}
+                            onPress={() => router.push('/(main)/notifications')}
                         >
-                            <View style={[styles.actionIcon, { backgroundColor: Colors.primary + '15' }]}>
-                                <Ionicons name="add-circle-outline" size={24} color={Colors.primary} />
-                            </View>
-                            <Text style={styles.actionLabel}>Add Product</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={styles.actionButton}
-                            onPress={() => router.push('/inventory')}
-                        >
-                            <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
-                                <Ionicons name="pricetags-outline" size={24} color="#F59E0B" />
-                            </View>
-                            <Text style={styles.actionLabel}>Manage Items</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={styles.actionButton}
-                            onPress={() => router.push('/orders')}
-                        >
-                            <View style={[styles.actionIcon, { backgroundColor: '#ECFDF5' }]}>
-                                <Ionicons name="scan-outline" size={24} color="#10B981" />
-                            </View>
-                            <Text style={styles.actionLabel}>All Orders</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-
-                <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Recent Orders</Text>
-                        <TouchableOpacity onPress={() => router.push('/orders')}>
-                            <Text style={styles.viewAllText}>View All</Text>
+                            <Ionicons name="notifications-outline" size={24} color="#374151" />
+                            <View style={styles.notificationBadge} />
                         </TouchableOpacity>
                     </View>
 
-                    {recentOrders.length === 0 ? (
-                        <View style={styles.emptyOrders}>
-                            <Text style={styles.emptyText}>No orders yet</Text>
+                    <View style={styles.statsGrid}>
+                        {dashboardStats.map((stat, i) => (
+                            <View key={i} style={styles.statCard}>
+                                <View style={[styles.statIcon, { backgroundColor: `${stat.color}15` }]}>
+                                    <Ionicons name={stat.icon as any} size={22} color={stat.color} />
+                                </View>
+                                <Text style={styles.statValue}>{stat.value}</Text>
+                                <Text style={styles.statLabel}>{stat.label}</Text>
+                            </View>
+                        ))}
+                    </View>
+
+                    {/* Performance Banner */}
+                    <View style={styles.payoutCard}>
+                        <View>
+                            <Text style={styles.payoutLabel}>Estimated Payout (Today)</Text>
+                            <Text style={styles.payoutValue}>{formatCurrency(stats.estimatedPayout)}</Text>
                         </View>
-                    ) : (
-                        recentOrders.map((order) => (
+                        <View style={styles.payoutTag}>
+                            <Text style={styles.payoutTagText}>Net Earnings</Text>
+                        </View>
+                    </View>
+
+                    <View style={styles.section}>
+                        <Text style={styles.sectionTitle}>Quick Actions</Text>
+                        <View style={styles.actionsRow}>
                             <TouchableOpacity
-                                key={order.id}
-                                style={styles.orderCard}
-                                onPress={() => router.push({ pathname: '/orders', params: { orderId: order.id } })}
+                                style={styles.actionButton}
+                                onPress={() => router.push('/catalog-picker')}
                             >
-                                <View style={styles.orderIcon}>
-                                    <Ionicons name="bag-handle-outline" size={20} color={Colors.primary} />
+                                <View style={[styles.actionIcon, { backgroundColor: Colors.primary + '15' }]}>
+                                    <Ionicons name="add-circle-outline" size={24} color={Colors.primary} />
                                 </View>
-                                <View style={styles.orderInfo}>
-                                    <Text style={styles.orderTitle}>Order #{order.displayId}</Text>
-                                    <Text style={styles.orderSubtitle}>
-                                        {order.items.length} items • ₹{order.totalAmount}
-                                    </Text>
-                                </View>
-                                <View style={[
-                                    styles.statusBadge,
-                                    order.status === 'PENDING' && styles.statusBadgePending,
-                                    order.status === 'READY' && styles.statusBadgeReady,
-                                    order.status === 'COMPLETED' && styles.statusBadgeCompleted
-                                ]}>
-                                    <Text style={[
-                                        styles.statusText,
-                                        order.status === 'PENDING' && styles.statusTextPending,
-                                        order.status === 'READY' && styles.statusTextReady,
-                                        order.status === 'COMPLETED' && styles.statusTextCompleted
-                                    ]}>
-                                        {order.status}
-                                    </Text>
-                                </View>
+                                <Text style={styles.actionLabel}>Add Product</Text>
                             </TouchableOpacity>
-                        ))
-                    )}
+                            <TouchableOpacity
+                                style={styles.actionButton}
+                                onPress={() => router.push('/inventory')}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
+                                    <Ionicons name="pricetags-outline" size={24} color="#F59E0B" />
+                                </View>
+                                <Text style={styles.actionLabel}>Manage Items</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.actionButton}
+                                onPress={() => router.push('/orders')}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#ECFDF5' }]}>
+                                    <Ionicons name="scan-outline" size={24} color="#10B981" />
+                                </View>
+                                <Text style={styles.actionLabel}>All Orders</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+
+                    <View style={styles.section}>
+                        <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionTitle}>Recent Orders</Text>
+                            <TouchableOpacity onPress={() => router.push('/orders')}>
+                                <Text style={styles.viewAllText}>View All</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        {recentOrders.length === 0 ? (
+                            <View style={styles.emptyOrders}>
+                                <Text style={styles.emptyText}>No orders yet</Text>
+                            </View>
+                        ) : (
+                            recentOrders.map((order) => (
+                                <TouchableOpacity
+                                    key={order.id}
+                                    style={styles.orderCard}
+                                    onPress={() => router.push({ pathname: '/orders', params: { orderId: order.id } })}
+                                >
+                                    <View style={styles.orderIcon}>
+                                        <Ionicons name="bag-handle-outline" size={20} color={Colors.primary} />
+                                    </View>
+                                    <View style={styles.orderInfo}>
+                                        <Text style={styles.orderTitle}>Order #{order.displayId}</Text>
+                                        <Text style={styles.orderSubtitle}>
+                                            {order.items.length} items • ₹{order.totalAmount}
+                                        </Text>
+                                    </View>
+                                    <View style={[
+                                        styles.statusBadge,
+                                        order.status === 'PENDING' && styles.statusBadgePending,
+                                        order.status === 'READY' && styles.statusBadgeReady,
+                                        order.status === 'COMPLETED' && styles.statusBadgeCompleted
+                                    ]}>
+                                        <Text style={[
+                                            styles.statusText,
+                                            order.status === 'PENDING' && styles.statusTextPending,
+                                            order.status === 'READY' && styles.statusTextReady,
+                                            order.status === 'COMPLETED' && styles.statusTextCompleted
+                                        ]}>
+                                            {order.status}
+                                        </Text>
+                                    </View>
+                                </TouchableOpacity>
+                            ))
+                        )}
+                    </View>
                 </View>
             </ScrollView>
         </SafeAreaView>
@@ -161,10 +212,51 @@ export default function DashboardScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#F9FAFB' },
-    scrollContent: { padding: 16 },
+    offlineBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#EF4444',
+        padding: 12,
+        gap: 8
+    },
+    offlineText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
+    contentWrapper: {},
+    greyscale: { opacity: 0.6 },
+    scrollContent: { padding: 16, paddingBottom: 0 },
     header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
     greeting: { fontSize: 14, color: '#6B7280' },
-    storeName: { fontSize: 22, fontWeight: '700', color: '#111827', marginTop: 4 },
+    storeHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+    storeName: { fontSize: 22, fontWeight: '700', color: '#111827' },
+    statusBadgeButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#D1FAE5',
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 20,
+        gap: 4
+    },
+    statusBadgeOffline: {
+        backgroundColor: '#F3F4F6'
+    },
+    statusDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: '#10B981'
+    },
+    statusDotOffline: {
+        backgroundColor: '#6B7280'
+    },
+    statusLabel: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#10B981'
+    },
+    statusLabelOffline: {
+        color: '#6B7280'
+    },
     notificationButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
     notificationBadge: { position: 'absolute', top: 10, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444' },
     statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 24 },

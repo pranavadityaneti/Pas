@@ -7,6 +7,7 @@ import { useOrders, Order, OrderStatus } from '../../src/hooks/useOrders';
 import { useStore } from '../../src/hooks/useStore';
 import OTPVerificationModal from '../../src/components/OTPVerificationModal';
 import ReceiptSummaryModal from '../../src/components/ReceiptSummaryModal';
+import RejectionReasonModal from '../../src/components/RejectionReasonModal';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -30,27 +31,30 @@ export default function OrdersScreen() {
     const { orders, loading, refreshing, refetch, updateOrderStatus, verifyOTP } = useOrders();
     const { store } = useStore();
     const [activeTab, setActiveTab] = useState('pending');
+    const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
     const [search, setSearch] = useState('');
-    const [currentTime, setCurrentTime] = useState(Date.now());
+    const [dateFilter, setDateFilter] = useState<'today' | 'week' | 'month' | 'all'>('all');
+    const [now, setNow] = useState(Date.now());
+
+    // Update 'now' every second to drive the countdown timers
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setNow(Date.now());
+        }, 1000);
+        return () => clearInterval(interval);
+    }, []);
 
     // Modal states
     const [showOTPModal, setShowOTPModal] = useState(false);
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
     const [showReceiptModal, setShowReceiptModal] = useState(false);
     const [receiptOrder, setReceiptOrder] = useState<Order | null>(null);
-
-    // Accordion state
-    const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+    const [showRejectionModal, setShowRejectionModal] = useState(false);
+    const [rejectionOrder, setRejectionOrder] = useState<Order | null>(null);
 
     // Toast state
     const [toastMessage, setToastMessage] = useState<string | null>(null);
     const toastOpacity = useRef(new Animated.Value(0)).current;
-
-    // Update current time for timers
-    useEffect(() => {
-        const interval = setInterval(() => setCurrentTime(Date.now()), 1000);
-        return () => clearInterval(interval);
-    }, []);
 
     const showToast = (message: string) => {
         setToastMessage(message);
@@ -68,13 +72,41 @@ export default function OrdersScreen() {
 
     const filteredOrders = useMemo(() => {
         const allowedStatuses = STATUS_MAP[activeTab];
-        return orders.filter(o =>
+        let filtered = orders.filter(o =>
             allowedStatuses.includes(o.status) &&
             (search === '' || o.displayId.toLowerCase().includes(search.toLowerCase()))
         );
-    }, [orders, activeTab, search]);
+
+        // Apply date filter (only for History tab)
+        if (activeTab === 'history' && dateFilter !== 'all') {
+            const now = new Date();
+            const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+            const startOfWeek = startOfToday - (now.getDay() * 24 * 60 * 60 * 1000);
+            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+
+            filtered = filtered.filter(o => {
+                const orderTime = new Date(o.createdAt).getTime();
+                if (dateFilter === 'today') return orderTime >= startOfToday;
+                if (dateFilter === 'week') return orderTime >= startOfWeek;
+                if (dateFilter === 'month') return orderTime >= startOfMonth;
+                return true;
+            });
+        }
+
+        return filtered;
+    }, [orders, activeTab, search, dateFilter]);
 
     const handleUpdateStatus = async (orderId: string, nextStatus: OrderStatus, displayId: string) => {
+        // Intercept rejection to show reason modal
+        if (nextStatus === 'CANCELLED') {
+            const orderToReject = orders.find(o => o.id === orderId);
+            if (orderToReject) {
+                setRejectionOrder(orderToReject);
+                setShowRejectionModal(true);
+            }
+            return;
+        }
+
         const res = await updateOrderStatus(orderId, nextStatus);
         if (res.success) {
             showToast(`Order #${displayId} moved to ${nextStatus.charAt(0) + nextStatus.slice(1).toLowerCase()}`);
@@ -83,15 +115,29 @@ export default function OrdersScreen() {
         }
     };
 
-    const formatTimer = (createdAt: string) => {
-        const createdTime = new Date(createdAt).getTime();
-        const expiryTime = createdTime + (2 * 60 * 1000);
-        const remaining = expiryTime - currentTime;
+    const handleConfirmRejection = async (reason: string) => {
+        if (!rejectionOrder) return;
 
-        if (remaining <= 0) return '00:00';
-        const mins = Math.floor(remaining / 60000);
-        const secs = Math.floor((remaining % 60000) / 1000);
-        return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        const res = await updateOrderStatus(rejectionOrder.id, 'CANCELLED');
+        if (res.success) {
+            setShowRejectionModal(false);
+            showToast(`Order #${rejectionOrder.displayId} Rejected: ${reason}`);
+            setRejectionOrder(null);
+        } else {
+            alert('Failed to reject order');
+        }
+    };
+
+    const formatTimer = (createdAtStr: string) => {
+        const createdAt = new Date(createdAtStr).getTime();
+        const expiresAt = createdAt + (2 * 60 * 1000); // 2 minutes auto-reject
+        const remaining = Math.max(0, expiresAt - now);
+
+        const minutes = Math.floor(remaining / 60000);
+        const seconds = Math.floor((remaining % 60000) / 1000);
+        const timerText = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        const isExpiringSoon = remaining < (30 * 1000); // 30 seconds left
+        return { timerText, isExpiringSoon };
     };
 
     const handleEnterOTP = (order: Order) => {
@@ -116,8 +162,7 @@ export default function OrdersScreen() {
         const isPending = item.status === 'PENDING';
         const isProcessing = item.status === 'CONFIRMED' || item.status === 'PREPARING';
         const isReady = item.status === 'READY';
-        const timerText = formatTimer(item.createdAt);
-        const isExpiringSoon = timerText !== '00:00' && parseInt(timerText.split(':')[0]) === 0;
+        const { timerText, isExpiringSoon } = formatTimer(item.createdAt);
         const isExpanded = expandedOrderId === item.id;
 
         const subTotal = item.items.reduce((acc, oi) => acc + (oi.price * oi.quantity), 0);
@@ -161,20 +206,25 @@ export default function OrdersScreen() {
                     </View>
                     {item.items.map((oi) => (
                         <View key={oi.id} style={styles.itemRow}>
-                            <View style={styles.itemDot} />
-                            <Text style={styles.itemText}>
-                                <Text style={styles.itemQty}>{oi.quantity}x</Text> {oi.storeProduct.product.name}
-                            </Text>
-                            {oi.storeProduct.stock < 5 ? (
-                                <View style={styles.lowStockBadge}>
-                                    <Text style={styles.lowStockText}>⚠️ Low</Text>
-                                </View>
-                            ) : (
-                                <View style={styles.stockBadge}>
-                                    <Text style={styles.stockText}>Stock: {oi.storeProduct.stock}</Text>
-                                </View>
-                            )}
-                            <Text style={styles.itemPrice}>₹{oi.price * oi.quantity}</Text>
+                            <View style={styles.itemMainInfo}>
+                                <View style={styles.itemDot} />
+                                <Text style={styles.itemText} numberOfLines={1}>
+                                    <Text style={styles.itemQty}>{oi.quantity}x</Text> {oi.storeProduct.product.name}
+                                </Text>
+                            </View>
+
+                            <View style={styles.itemSideInfo}>
+                                {oi.storeProduct.stock < 5 ? (
+                                    <View style={styles.lowStockBadge}>
+                                        <Text style={styles.lowStockText}>⚠️ Low</Text>
+                                    </View>
+                                ) : (
+                                    <View style={styles.stockBadge}>
+                                        <Text style={styles.stockText}>Stock: {oi.storeProduct.stock}</Text>
+                                    </View>
+                                )}
+                                <Text style={styles.itemPrice}>₹{oi.price * oi.quantity}</Text>
+                            </View>
                         </View>
                     ))}
                 </View>
@@ -248,85 +298,131 @@ export default function OrdersScreen() {
         );
     };
 
+    const isOffline = !store?.active;
+
     return (
-        <SafeAreaView style={styles.container}>
-            <View style={styles.header}>
-                <Text style={styles.headerTitle}>Orders</Text>
-                <View style={styles.storeInfo}>
-                    <Text style={styles.storeName}>{store?.name || 'Loading Store...'} - Main Branch</Text>
-                    <View style={styles.onlineBadge}>
-                        <View style={[styles.onlineDot, { backgroundColor: store?.active !== false ? '#10B981' : '#9CA3AF' }]} />
-                        <Text style={[styles.onlineText, { color: store?.active !== false ? '#10B981' : '#9CA3AF' }]}>
-                            {store?.active !== false ? 'Online' : 'Offline'}
-                        </Text>
-                    </View>
+        <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+            {isOffline && (
+                <View style={styles.offlineBanner}>
+                    <Ionicons name="close-circle" size={20} color="#FFF" />
+                    <Text style={styles.offlineText}>Store Offline - Not accepting new orders</Text>
                 </View>
-            </View>
-
-            <View style={styles.searchBox}>
-                <Ionicons name="search-outline" size={20} color="#9CA3AF" />
-                <TextInput
-                    style={styles.searchInput}
-                    placeholder="Search Order ID..."
-                    value={search}
-                    onChangeText={setSearch}
-                    placeholderTextColor="#9CA3AF"
-                />
-            </View>
-
-            <View style={styles.tabContainer}>
-                {TABS.map((tab) => (
-                    <TouchableOpacity
-                        key={tab.value}
-                        onPress={() => setActiveTab(tab.value)}
-                        style={[styles.tab, activeTab === tab.value && styles.activeTab]}
-                    >
-                        <Text style={[styles.tabText, activeTab === tab.value && styles.activeTabText]}>{tab.label}</Text>
-                    </TouchableOpacity>
-                ))}
-            </View>
-
-            <FlatList
-                data={filteredOrders}
-                renderItem={renderOrderCard}
-                keyExtractor={item => item.id}
-                contentContainerStyle={styles.list}
-                refreshControl={
-                    <RefreshControl refreshing={refreshing} onRefresh={refetch} tintColor={Colors.primary} />
-                }
-                ListEmptyComponent={
-                    <View style={styles.emptyContainer}>
-                        <MaterialCommunityIcons name="receipt" size={64} color="#E5E7EB" />
-                        <Text style={styles.emptyTitle}>No {activeTab} orders</Text>
-                        <Text style={styles.emptyDesc}>New orders in this category will appear here.</Text>
-                    </View>
-                }
-            />
-
-            {toastMessage && (
-                <Animated.View style={[styles.toast, { opacity: toastOpacity }]}>
-                    <Text style={styles.toastText}>{toastMessage}</Text>
-                </Animated.View>
             )}
 
-            <OTPVerificationModal
-                visible={showOTPModal}
-                onClose={() => setShowOTPModal(false)}
-                onVerify={handleVerifyOTP}
-                orderId={selectedOrder?.id || ''}
-            />
+            <View style={[styles.mainContent, isOffline && styles.greyscale]}>
+                <View style={styles.header}>
+                    <Text style={styles.headerTitle}>Orders</Text>
+                    <View style={styles.storeInfo}>
+                        <Text style={styles.storeName}>{store?.name || 'Loading Store...'} - Main Branch</Text>
+                        <View style={styles.onlineBadge}>
+                            <View style={[styles.onlineDot, { backgroundColor: store?.active !== false ? '#10B981' : '#9CA3AF' }]} />
+                            <Text style={[styles.onlineText, { color: store?.active !== false ? '#10B981' : '#9CA3AF' }]}>
+                                {store?.active !== false ? 'Online' : 'Offline'}
+                            </Text>
+                        </View>
+                    </View>
+                </View>
 
-            <ReceiptSummaryModal
-                visible={showReceiptModal}
-                onClose={() => setShowReceiptModal(false)}
-                order={receiptOrder}
-            />
+                <View style={styles.searchBox}>
+                    <Ionicons name="search-outline" size={20} color="#9CA3AF" />
+                    <TextInput
+                        style={styles.searchInput}
+                        placeholder="Search Order ID..."
+                        value={search}
+                        onChangeText={setSearch}
+                        placeholderTextColor="#9CA3AF"
+                    />
+                </View>
+
+                <View style={styles.tabContainer}>
+                    {TABS.map((tab) => (
+                        <TouchableOpacity
+                            key={tab.value}
+                            onPress={() => setActiveTab(tab.value)}
+                            style={[styles.tab, activeTab === tab.value && styles.activeTab]}
+                        >
+                            <Text style={[styles.tabText, activeTab === tab.value && styles.activeTabText]}>{tab.label}</Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+
+                {/* Date Filter - Only show for History tab */}
+                {activeTab === 'history' && (
+                    <View style={styles.dateFilterContainer}>
+                        <View style={styles.dateFilterButtons}>
+                            {[{ label: 'All', value: 'all' }, { label: 'Today', value: 'today' }, { label: 'Week', value: 'week' }, { label: 'Month', value: 'month' }].map(filter => (
+                                <TouchableOpacity
+                                    key={filter.value}
+                                    style={[styles.dateFilterBtn, dateFilter === filter.value && styles.dateFilterBtnActive]}
+                                    onPress={() => setDateFilter(filter.value as any)}
+                                >
+                                    <Text style={[styles.dateFilterBtnText, dateFilter === filter.value && styles.dateFilterBtnTextActive]}>{filter.label}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    </View>
+                )}
+
+                <FlatList
+                    data={filteredOrders}
+                    renderItem={renderOrderCard}
+                    keyExtractor={item => item.id}
+                    contentContainerStyle={styles.list}
+                    refreshControl={
+                        <RefreshControl refreshing={refreshing} onRefresh={refetch} tintColor={Colors.primary} />
+                    }
+                    ListEmptyComponent={
+                        <View style={styles.emptyContainer}>
+                            <MaterialCommunityIcons name="receipt" size={64} color="#E5E7EB" />
+                            <Text style={styles.emptyTitle}>No {activeTab} orders</Text>
+                            <Text style={styles.emptyDesc}>New orders in this category will appear here.</Text>
+                        </View>
+                    }
+                />
+
+                {toastMessage && (
+                    <Animated.View style={[styles.toast, { opacity: toastOpacity }]}>
+                        <Text style={styles.toastText}>{toastMessage}</Text>
+                    </Animated.View>
+                )}
+
+                <OTPVerificationModal
+                    visible={showOTPModal}
+                    onClose={() => setShowOTPModal(false)}
+                    onVerify={handleVerifyOTP}
+                    orderId={selectedOrder?.id || ''}
+                />
+
+                <ReceiptSummaryModal
+                    visible={showReceiptModal}
+                    onClose={() => setShowReceiptModal(false)}
+                    order={receiptOrder}
+                />
+
+                <RejectionReasonModal
+                    visible={showRejectionModal}
+                    onClose={() => setShowRejectionModal(false)}
+                    onConfirm={handleConfirmRejection}
+                    orderId={rejectionOrder?.displayId || ''}
+                />
+            </View>
         </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#FFFFFF' },
+    offlineBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#EF4444',
+        padding: 12,
+        gap: 8
+    },
+    offlineText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
+    mainContent: { flex: 1 },
+    greyscale: { opacity: 0.6 },
     header: { paddingHorizontal: 20, paddingTop: 10, alignItems: 'center' },
     headerTitle: { fontSize: 32, fontWeight: 'bold', color: '#111827' },
     storeInfo: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
@@ -363,11 +459,11 @@ const styles = StyleSheet.create({
         borderBottomWidth: 2,
         borderBottomColor: 'transparent'
     },
-    activeTab: { borderBottomColor: '#2563EB' },
+    activeTab: { borderBottomColor: Colors.primary },
     tabText: { fontSize: 15, fontWeight: '600', color: '#9CA3AF' },
-    activeTabText: { color: '#111827' },
+    activeTabText: { color: Colors.primary },
 
-    list: { padding: 20, paddingBottom: 100 },
+    list: { padding: 20, paddingBottom: 20 },
     orderCard: {
         backgroundColor: '#FFFFFF',
         borderRadius: 24,
@@ -381,10 +477,10 @@ const styles = StyleSheet.create({
         shadowRadius: 12,
         elevation: 3
     },
-    cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
-    orderId: { fontSize: 22, fontWeight: 'bold', color: '#111827' },
+    cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
+    orderId: { fontSize: 18, fontWeight: 'bold', color: '#111827' },
     placedAt: { fontSize: 13, color: '#6B7280', marginTop: 2 },
-    approvalBadge: { backgroundColor: '#2563EB', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
+    approvalBadge: { backgroundColor: Colors.primary, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
     approvalText: { fontSize: 11, fontWeight: 'bold', color: '#FFFFFF' },
     paidBadge: { backgroundColor: '#10B981', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
     paidBadgeText: { fontSize: 11, fontWeight: 'bold', color: '#FFFFFF' },
@@ -405,14 +501,16 @@ const styles = StyleSheet.create({
     itemsSection: { marginBottom: 20 },
     sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
     sectionTitle: { fontSize: 15, fontWeight: 'bold', color: '#374151' },
-    itemRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+    itemRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+    itemMainInfo: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 12 },
+    itemSideInfo: { flexDirection: 'row', alignItems: 'center' },
     itemDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10B981', marginRight: 12 },
     itemText: { flex: 1, fontSize: 15, color: '#111827' },
     itemQty: { fontWeight: '700' },
-    itemPrice: { fontSize: 15, fontWeight: '600', color: '#111827', marginLeft: 12 },
-    lowStockBadge: { backgroundColor: '#FFF7ED', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, marginRight: 8 },
+    itemPrice: { fontSize: 15, fontWeight: '700', color: '#111827', marginLeft: 16, minWidth: 50, textAlign: 'right' },
+    lowStockBadge: { backgroundColor: '#FFF7ED', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
     lowStockText: { fontSize: 11, fontWeight: 'bold', color: '#C2410C' },
-    stockBadge: { backgroundColor: '#F0FDF4', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, marginRight: 8 },
+    stockBadge: { backgroundColor: '#F0FDF4', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
     stockText: { fontSize: 11, fontWeight: '600', color: '#15803D' },
 
     cardFooter: {
@@ -455,7 +553,7 @@ const styles = StyleSheet.create({
         flex: 2,
         height: 56,
         borderRadius: 16,
-        backgroundColor: '#2563EB',
+        backgroundColor: Colors.primary,
         justifyContent: 'center',
         alignItems: 'center'
     },
@@ -510,6 +608,13 @@ const styles = StyleSheet.create({
         elevation: 10
     },
     toastText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
+
+    dateFilterContainer: { paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#F9FAFB' },
+    dateFilterButtons: { flexDirection: 'row', gap: 8 },
+    dateFilterBtn: { flex: 1, paddingVertical: 10, paddingHorizontal: 12, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', alignItems: 'center' },
+    dateFilterBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+    dateFilterBtnText: { fontSize: 14, fontWeight: '600', color: '#6B7280' },
+    dateFilterBtnTextActive: { color: '#FFFFFF' },
 
     emptyContainer: { alignItems: 'center', justifyContent: 'center', marginTop: 60, padding: 40 },
     emptyTitle: { fontSize: 20, fontWeight: 'bold', color: '#374151', marginTop: 20 },

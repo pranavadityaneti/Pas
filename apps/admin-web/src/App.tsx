@@ -1,8 +1,10 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { useState } from 'react';
 import { Login } from './components/Login';
 import Layout from './Layout';
 import { Dashboard } from './components/Dashboard';
+import { useAuth } from './context/AuthContext';
+import { Loader2 } from 'lucide-react';
+import { ForcePasswordChange } from './components/ForcePasswordChange';
 
 // Modules
 import { OrderManager } from './components/modules/orders/OrderManager';
@@ -17,10 +19,26 @@ import { AnalyticsHub } from './components/modules/analytics/AnalyticsHub';
 import { SettingsHub } from './components/modules/settings/SettingsHub';
 
 export default function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const { isAuthenticated, loading, mustChangePassword, clearPasswordChangeFlag } = useAuth();
 
-  if (!isLoggedIn) {
-    return <Login onLogin={() => setIsLoggedIn(true)} />;
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-900">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-10 h-10 animate-spin text-[#B52725]" />
+          <p className="text-gray-400">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Login />;
+  }
+
+  // Force password change for new admins
+  if (mustChangePassword) {
+    return <ForcePasswordChange onComplete={clearPasswordChangeFlag} />;
   }
 
   return (

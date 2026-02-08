@@ -46,7 +46,12 @@
     "@types/react": "~19.1.10",
     "babel-plugin-transform-define": "^2.1.4",
     "babel-preset-expo": "^54.0.10",
+    "expo-print": "^15.0.8",
+    "expo-sharing": "^14.0.8",
     "typescript": "~5.9.2"
   },
-  "private": true
+  "private": true,
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }

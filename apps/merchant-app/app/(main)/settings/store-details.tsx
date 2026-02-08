@@ -33,22 +33,25 @@ export default function StoreDetailsScreen() {
             if (!authUser) return;
 
             // 1. Try Store table
-            let { data, error } = await supabase
+            // explicitly cast to any to allow merging in later steps
+            let { data: storeData, error } = await supabase
                 .from('Store')
                 .select('name, address, cityId')
                 .eq('id', storeId || '')
                 .maybeSingle();
 
+            let finalData: any = storeData;
+
             // 2. If not found, try merchants table using auth userId
-            if (!data) {
+            if (!finalData) {
                 const { data: merchantData } = await supabase
                     .from('merchants')
-                    .select('store_name, address, city')
+                    .select('store_name, address, city, category, store_photos')
                     .eq('id', authUser.id)
                     .maybeSingle();
 
                 if (merchantData) {
-                    data = {
+                    finalData = {
                         name: merchantData.store_name,
                         address: merchantData.address,
                         cityId: merchantData.city, // city name as temporary ID or logic
@@ -65,16 +68,15 @@ export default function StoreDetailsScreen() {
                     .maybeSingle();
 
                 if (merchantData) {
-                    data = {
-                        ...data,
+                    finalData = {
+                        ...finalData,
                         category: merchantData.category,
                         photos: merchantData.store_photos || []
                     };
                 }
             }
 
-            if (data) {
-                const finalData = data as any;
+            if (finalData) {
                 setDetails({
                     name: finalData.name || '',
                     address: finalData.address || '',

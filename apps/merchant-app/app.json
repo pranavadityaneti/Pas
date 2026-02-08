@@ -2,7 +2,7 @@
   "expo": {
     "name": "PAS Merchant",
     "slug": "pas-merchant-app",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "scheme": "pasmerchant",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -18,6 +18,7 @@
       "router": {
         "origin": false
       },
+      "apiUrl": "https://adell-noncrystallizable-marilee.ngrok-free.dev",
       "eas": {
         "projectId": "795d700d-a871-4f9e-a6d2-df905ae9f4ff"
       }
@@ -30,7 +31,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.pas.merchant",
-      "buildNumber": "1",
+      "buildNumber": "3",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Your location is used to set your shop address, allowing customers to find your store correctly on the map.",
         "NSCameraUsageDescription": "Camera access is required to capture and upload KYC documents for account verification.",
@@ -40,7 +41,7 @@
     },
     "android": {
       "package": "com.pas.merchant",
-      "versionCode": 1,
+      "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#F6C344"

@@ -13,8 +13,8 @@
     "framer-motion": "^12.31.0",
     "lucide-react": "^0.487.0",
     "next": "16.1.6",
-    "react": "19.2.3",
-    "react-dom": "19.2.3",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {

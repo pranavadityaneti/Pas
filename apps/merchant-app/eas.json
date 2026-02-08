@@ -1,4 +1,7 @@
 {
+    "cli": {
+        "appVersionSource": "remote"
+    },
     "build": {
         "development": {
             "developmentClient": true,
@@ -8,7 +11,10 @@
             "distribution": "internal"
         },
         "production": {
-            "distribution": "store"
+            "distribution": "store",
+            "env": {
+                "NPM_CONFIG_LEGACY_PEER_DEPS": "true"
+            }
         }
     },
     "submit": {

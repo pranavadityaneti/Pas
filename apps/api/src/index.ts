@@ -45,6 +45,32 @@ async function logAudit(productId: string, action: string, field: string | null,
     }
 }
 
+async function createNotification(userId: string, type: string, title: string, message: string, link?: string) {
+    try {
+        // Safe check for notification model existence (in case prisma generate wasn't run)
+        const notificationDelegate = (prisma as any).notification;
+
+        if (notificationDelegate) {
+            await notificationDelegate.create({
+                data: {
+                    userId,
+                    type,
+                    title,
+                    message,
+                    link,
+                    isRead: false
+                }
+            });
+        } else {
+            console.warn('Prisma Client mismatch: notification model not found. Please run "prisma generate".');
+        }
+        // Optional: Emit real-time event if user is connected via socket
+        // io.to(`user_${userId}`).emit('new_notification', { type, title, message }); 
+    } catch (error) {
+        console.error('Failed to create notification', error);
+    }
+}
+
 // --- MOCK DATABASE (In-Memory Fallback) ---
 // This allows the app to work fully even without a PostgreSQL connection.
 let MOCK_PRODUCTS: any[] = [
@@ -124,6 +150,10 @@ const addMockImage = (productId: string, url: string, name: string, isPrimary: b
 };
 
 // --- Routes ---
+
+app.get('/', (req, res) => {
+    res.send('PickAtStore API is running 🚀');
+});
 
 // Health Check
 app.get('/health', (req, res) => {
@@ -777,8 +807,11 @@ app.patch('/products/images/:imageId', async (req, res) => {
 app.post('/orders', async (req, res) => {
     try {
         const { userId, storeId, items, totalAmount } = req.body;
+        const orderNumber = `PAS-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
+
         const order = await prisma.order.create({
             data: {
+                orderNumber,
                 userId,
                 storeId,
                 totalAmount,
@@ -792,8 +825,54 @@ app.post('/orders', async (req, res) => {
                     }))
                 }
             },
-            include: { items: { include: { storeProduct: { include: { product: true } } } } }
+            include: {
+                items: { include: { storeProduct: { include: { product: true } } } },
+                store: true
+            }
         });
+
+        // --- Post-Order Operations (Notifications & Stock) ---
+
+        // 1. Get Store Manager ID
+        const store = await prisma.store.findUnique({
+            where: { id: storeId },
+            select: { managerId: true, name: true }
+        });
+
+        if (store && store.managerId) {
+            // 2. Trigger New Order Notification
+            await createNotification(
+                store.managerId,
+                'ORDER',
+                'New Order Received',
+                `Order #${orderNumber} received for ₹${totalAmount}`,
+                `/orders/${order.id}`
+            );
+
+            // 3. Decrement Stock & Check Low Inventory
+            for (const item of items) {
+                try {
+                    const sp = await prisma.storeProduct.update({
+                        where: { id: item.storeProductId },
+                        data: { stock: { decrement: item.quantity } },
+                        include: { product: true }
+                    });
+
+                    // Low Inventory Alert (Threshold: 5)
+                    if (sp.stock <= 5) {
+                        await createNotification(
+                            store.managerId,
+                            'INVENTORY',
+                            'Low Stock Alert',
+                            `${sp.product.name} is running low (${sp.stock} left).`,
+                            `/inventory`
+                        );
+                    }
+                } catch (err) {
+                    console.error(`Failed to update stock for item ${item.storeProductId}`, err);
+                }
+            }
+        }
 
         // Broadcast to merchants
         io.to(`store_${storeId}`).emit('new_order', order);
@@ -820,8 +899,30 @@ app.patch('/orders/:id/status', async (req, res) => {
         const order = await prisma.order.update({
             where: { id },
             data,
-            include: { user: true, items: { include: { storeProduct: { include: { product: true } } } } }
+            include: { user: true, items: { include: { storeProduct: { include: { product: true } } } }, store: { include: { manager: true } } }
         });
+
+        // --- Notification & Stock Restoration on Cancellation ---
+        if (status === 'CANCELLED') {
+            // 1. Notify Manager (Confirmation)
+            if (order.store?.managerId) {
+                await createNotification(
+                    order.store.managerId,
+                    'ORDER',
+                    'Order Cancelled',
+                    `Order #${order.orderNumber} has been cancelled.`,
+                    `/orders/${id}`
+                );
+            }
+
+            // 2. Restore Stock
+            for (const item of order.items) {
+                await prisma.storeProduct.update({
+                    where: { id: item.storeProductId },
+                    data: { stock: { increment: item.quantity } }
+                }).catch(e => console.error('Failed to restore stock', e));
+            }
+        }
 
         io.emit('order_updated', order);
         res.json(order);
@@ -892,8 +993,32 @@ const startAutoRejectTimer = () => {
                 const cancelled = await prisma.order.update({
                     where: { id: order.id },
                     data: { status: 'CANCELLED' },
-                    include: { user: true, items: { include: { storeProduct: { include: { product: true } } } } }
+                    include: {
+                        user: true,
+                        items: { include: { storeProduct: { include: { product: true } } } },
+                        store: { include: { manager: true } }
+                    }
                 });
+
+                // Notify Manager
+                if (cancelled.store?.managerId) {
+                    await createNotification(
+                        cancelled.store.managerId,
+                        'ORDER',
+                        'Order Auto-Cancelled',
+                        `Order #${cancelled.orderNumber} was cancelled due to timeout.`,
+                        `/orders/${cancelled.id}`
+                    );
+                }
+
+                // Restore Stock
+                for (const item of cancelled.items) {
+                    await prisma.storeProduct.update({
+                        where: { id: item.storeProductId },
+                        data: { stock: { increment: item.quantity } }
+                    }).catch(e => console.error('Failed to restore stock', e));
+                }
+
                 io.emit('order_updated', cancelled);
                 console.log(`[Auto-Reject] Order ${order.id} cancelled`);
             }
@@ -1104,6 +1229,123 @@ app.patch('/stores/:id', async (req, res) => {
     } catch (error) {
         console.error('Update Store Failed:', error);
         res.status(500).json({ error: 'Failed to update store details' });
+    }
+});
+
+// --- DEBUG: Fix DB Route ---
+// --- DEBUG: Fix DB Route ---
+app.post('/debug/fix-db', async (req, res) => {
+    try {
+        const { email } = req.body;
+        console.log('-------------------------------------------');
+        console.log('🛠️  Fixing DB for email:', email);
+
+        // 1. Fix RLS Policies
+        try {
+            await prisma.$executeRawUnsafe(`ALTER TABLE "Product" ENABLE ROW LEVEL SECURITY;`);
+            console.log('✅ Enabled RLS on Product');
+        } catch (e) {
+            console.log('ℹ️  Product RLS already enabled');
+        }
+
+        try {
+            await prisma.$executeRawUnsafe(`ALTER TABLE "StoreProduct" ENABLE ROW LEVEL SECURITY;`);
+            console.log('✅ Enabled RLS on StoreProduct');
+        } catch (e) {
+            console.log('ℹ️  StoreProduct RLS already enabled');
+        }
+
+        // Define policies with more robust permissions for UPSERT
+        const policies = [
+            `DROP POLICY IF EXISTS "Allow Authenticated Select StoreProduct" ON "StoreProduct";`,
+            `CREATE POLICY "Allow Authenticated Select StoreProduct" ON "StoreProduct" FOR SELECT TO authenticated USING (true);`,
+
+            `DROP POLICY IF EXISTS "Allow Authenticated Insert StoreProduct" ON "StoreProduct";`,
+            `CREATE POLICY "Allow Authenticated Insert StoreProduct" ON "StoreProduct" FOR INSERT TO authenticated WITH CHECK (true);`,
+
+            `DROP POLICY IF EXISTS "Allow Authenticated Update StoreProduct" ON "StoreProduct";`,
+            `CREATE POLICY "Allow Authenticated Update StoreProduct" ON "StoreProduct" FOR UPDATE TO authenticated USING (true) WITH CHECK (true);`,
+
+            `DROP POLICY IF EXISTS "Allow Authenticated Delete StoreProduct" ON "StoreProduct";`,
+            `CREATE POLICY "Allow Authenticated Delete StoreProduct" ON "StoreProduct" FOR DELETE TO authenticated USING (true);`,
+
+            `DROP POLICY IF EXISTS "Allow Public Product Select" ON "Product";`,
+            `CREATE POLICY "Allow Public Product Select" ON "Product" FOR SELECT TO authenticated USING (true);`
+        ];
+
+        console.log('🔄 Applying RLS Policies...');
+        for (const sql of policies) {
+            try {
+                await prisma.$executeRawUnsafe(sql);
+            } catch (e: any) {
+                // Ignore "does not exist" errors for DROP, but log others
+                if (!sql.startsWith('DROP')) {
+                    console.error('❌ Policy Error:', e.message);
+                }
+            }
+        }
+        console.log('✅ RLS Policies Applied');
+
+        // 2. Fix Store Status
+        if (email) {
+            const merchants: any[] = await prisma.$queryRawUnsafe(`SELECT * FROM merchants WHERE email = '${email}'`);
+
+            if (merchants.length > 0) {
+                const merchant = merchants[0];
+                const userId = merchant.id;
+                console.log('👤 Found Merchant ID:', userId);
+
+                const store = await prisma.store.findFirst({ where: { managerId: userId } });
+
+                if (store) {
+                    await prisma.store.update({
+                        where: { id: store.id },
+                        data: { active: true }
+                    });
+                    console.log('✅ Activated existing store:', store.id);
+                } else {
+                    await prisma.store.create({
+                        data: {
+                            id: merchant.id,
+                            managerId: userId,
+                            name: merchant.store_name || 'My Store',
+                            address: merchant.address || 'Unknown',
+                            active: true
+                        }
+                    });
+                    console.log('✅ Created new active store for merchant');
+                }
+            } else {
+                console.warn('⚠️  No merchant found for email:', email);
+                return res.status(404).json({ error: 'Merchant not found' });
+            }
+        }
+
+        console.log('-------------------------------------------');
+        res.json({ success: true, message: 'DB Fixed - Policies Updated & Store Active' });
+    } catch (e: any) {
+        console.error('🔥 Critical Error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// --- DEBUG: List Merchants Route ---
+app.get('/debug/list-merchants', async (req, res) => {
+    try {
+        const merchants: any[] = await prisma.$queryRawUnsafe(`SELECT * FROM merchants`);
+        // sanitize sensitive data if any
+        res.json(merchants);
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.get('/debug/list-users', async (req, res) => {
+    try {
+        const users = await prisma.user.findMany();
+        res.json(users);
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
     }
 });
 

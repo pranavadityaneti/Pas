@@ -1,11 +1,20 @@
-import { Search, Bell, ChevronRight, User } from 'lucide-react';
+import { Search, Bell, ChevronRight, User, LogOut } from 'lucide-react';
 import { toast } from 'sonner';
 import { useState } from 'react';
+import { useAuth } from '../context/AuthContext';
 
 import { SidebarTrigger } from './ui/sidebar';
 import { Separator } from './ui/separator';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
 
 export function Header() {
+  const { user, logout } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
 
   const handleSearch = (e: React.KeyboardEvent) => {
@@ -22,11 +31,9 @@ export function Header() {
     });
   };
 
-  const handleProfileClick = () => {
-    toast("Admin Profile", {
-      description: "Logged in as Super Admin (admin@pickatstore.com)",
-      icon: <User className="w-4 h-4" />
-    });
+  const handleLogout = async () => {
+    await logout();
+    toast.success("Logged out successfully");
   };
 
   return (
@@ -53,7 +60,7 @@ export function Header() {
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={handleSearch}
               placeholder="Search for Orders, Users, or Stores... Cmd+K"
-              className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-gray-50 transition-all"
+              className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#B52725] focus:border-[#B52725] outline-none bg-gray-50 transition-all"
             />
           </div>
         </div>
@@ -66,22 +73,37 @@ export function Header() {
             className="relative p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
           >
             <Bell className="w-6 h-6" />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+            <span className="absolute top-1 right-1 w-2 h-2 bg-[#B52725] rounded-full"></span>
           </button>
 
-          {/* Admin Profile */}
-          <button
-            onClick={handleProfileClick}
-            className="flex items-center gap-3 hover:bg-gray-50 p-2 rounded-lg transition-colors text-left"
-          >
-            <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-medium">
-              SA
-            </div>
-            <div className="text-sm">
-              <p className="font-medium text-gray-900">Super Admin</p>
-              <p className="text-gray-500 text-xs">admin@pickatstore.com</p>
-            </div>
-          </button>
+          {/* Admin Profile with Dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex items-center gap-3 hover:bg-gray-50 p-2 rounded-lg transition-colors text-left">
+                <div className="w-10 h-10 bg-gradient-to-br from-[#B52725] to-[#FFCC05] rounded-full flex items-center justify-center text-white font-medium">
+                  {(user?.name || user?.email || 'SA').charAt(0).toUpperCase()}
+                </div>
+                <div className="text-sm">
+                  <p className="font-medium text-gray-900">{user?.name || 'Super Admin'}</p>
+                  <p className="text-gray-500 text-xs">{user?.email || 'admin@pickatstore.com'}</p>
+                </div>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem className="flex items-center gap-2">
+                <User className="w-4 h-4" />
+                <span>Profile Settings</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={handleLogout}
+                className="flex items-center gap-2 text-[#B52725] focus:text-[#B52725]"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Logout</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
     </header>
