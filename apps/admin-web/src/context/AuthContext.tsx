@@ -45,27 +45,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return data as AdminUser;
     };
 
-    // Initialize auth state
+    // Initialize auth state with timeout to prevent infinite loading
     useEffect(() => {
+        let isMounted = true;
+        const controller = new AbortController();
+
         const initAuth = async () => {
             try {
-                const { data: { session } } = await supabase.auth.getSession();
-                setSession(session);
+                // Add timeout to prevent hanging
+                const timeoutId = setTimeout(() => {
+                    console.warn('Auth initialization timeout - forcing loading complete');
+                    if (isMounted) setLoading(false);
+                }, 5000); // 5 second timeout
 
-                if (session?.user) {
+                const { data: { session }, error } = await supabase.auth.getSession();
+
+                clearTimeout(timeoutId);
+
+                if (error) {
+                    console.error('Session error, clearing auth:', error);
+                    if (isMounted) {
+                        setSession(null);
+                        setUser(null);
+                    }
+                    return;
+                }
+
+                if (isMounted) setSession(session);
+
+                if (session?.user && isMounted) {
                     const profile = await fetchUserProfile(session.user);
                     if (profile?.role === 'SUPER_ADMIN') {
-                        setUser(profile);
+                        if (isMounted) setUser(profile);
                     } else {
                         // User exists but is not an admin - sign out
                         await supabase.auth.signOut();
-                        setSession(null);
+                        if (isMounted) setSession(null);
                     }
                 }
             } catch (error) {
                 console.error('Auth initialization error:', error);
+                // On error, ensure we clear the session to show login
+                if (isMounted) {
+                    setSession(null);
+                    setUser(null);
+                }
             } finally {
-                setLoading(false);
+                if (isMounted) setLoading(false);
             }
         };
 
@@ -73,21 +99,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         // Listen for auth changes
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+            if (!isMounted) return;
             setSession(session);
 
             if (session?.user) {
                 const profile = await fetchUserProfile(session.user);
                 if (profile?.role === 'SUPER_ADMIN') {
-                    setUser(profile);
+                    if (isMounted) setUser(profile);
                 } else {
-                    setUser(null);
+                    if (isMounted) setUser(null);
                 }
             } else {
-                setUser(null);
+                if (isMounted) setUser(null);
             }
         });
 
-        return () => subscription.unsubscribe();
+        return () => {
+            isMounted = false;
+            controller.abort();
+            subscription.unsubscribe();
+        };
     }, []);
 
     const login = async (email: string, password: string): Promise<{ error: string | null }> => {
