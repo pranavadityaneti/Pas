@@ -13,9 +13,6 @@ export default defineConfig({
     },
     dedupe: ['react', 'react-dom'],
   },
-  esbuild: {
-    jsxInject: `import React from 'react'`,
-  },
   server: {
     port: 3001,
     proxy: {
