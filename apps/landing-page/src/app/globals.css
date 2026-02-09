@@ -1,22 +1,48 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* PickAtStore Primary Palette */
+  --store-red: #B52725;
+  --store-red-80: #C35451;
+  --store-red-60: #D27F7D;
+  --store-red-40: #E1A9A8;
+
+  --location-yellow: #FFCC05;
+  --location-yellow-120: #BF9905;
+  --location-yellow-60: #FFE06A;
+  --location-yellow-40: #FFEB9C;
+
+  --vista-white: #FDFCFA;
+  --black-shadow: #121212;
+
+  /* Theme Colors */
+  --background: var(--vista-white);
+  --foreground: var(--black-shadow);
+  --primary: var(--store-red);
+  --primary-light: var(--store-red-40);
+  --accent: var(--location-yellow);
+  --accent-dark: var(--location-yellow-120);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-light: var(--primary-light);
+  --color-accent: var(--accent);
+  --color-accent-dark: var(--accent-dark);
+  --color-store-red: var(--store-red);
+  --color-store-red-80: var(--store-red-80);
+  --color-store-red-60: var(--store-red-60);
+  --color-store-red-40: var(--store-red-40);
+  --color-location-yellow: var(--location-yellow);
+  --color-location-yellow-120: var(--location-yellow-120);
+  --color-location-yellow-60: var(--location-yellow-60);
+  --color-location-yellow-40: var(--location-yellow-40);
+  --color-vista-white: var(--vista-white);
+  --color-black-shadow: var(--black-shadow);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {

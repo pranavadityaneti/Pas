@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { Store, Smartphone, Globe, ArrowRight, Shield, ArrowLeft } from "lucide-react";
+import { Store, Smartphone, Globe, ArrowRight, Shield, FileText, ArrowLeft, Lock } from "lucide-react";
 
 const policyCards = [
     {
@@ -16,7 +16,7 @@ const policyCards = [
     {
         id: "customer-app",
         title: "Customer App",
-        description: "Privacy policy for customers using the PickAtStore shopping experience.",
+        description: "Privacy policy for customers using the PickAtStore mobile application.",
         icon: Smartphone,
         status: "coming-soon",
         href: "/privacypolicy/customer-app",
@@ -24,7 +24,7 @@ const policyCards = [
     {
         id: "website",
         title: "Website",
-        description: "Privacy policy for visitors browsing our main website and web services.",
+        description: "Privacy policy for visitors and users of the PickAtStore website.",
         icon: Globe,
         status: "coming-soon",
         href: "/privacypolicy/website",
@@ -33,23 +33,23 @@ const policyCards = [
 
 export default function PrivacyPolicyPage() {
     return (
-        <div className="min-h-screen bg-[#FDFBF7] text-gray-900">
+        <div className="min-h-screen bg-vista-white text-black-shadow">
             {/* Header */}
-            <header className="fixed top-0 left-0 right-0 z-50 bg-[#FDFBF7]/80 backdrop-blur-md border-b border-gray-200/50">
+            <header className="fixed top-0 left-0 right-0 z-50 bg-vista-white/80 backdrop-blur-md border-b border-store-red-40/20">
                 <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-                    <Link href="/" className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors">
+                    <Link href="/" className="flex items-center gap-2 text-black-shadow/60 hover:text-black-shadow transition-colors">
                         <ArrowLeft size={20} />
                         <span className="font-medium">Back to Home</span>
                     </Link>
                     <div className="flex items-center gap-2">
-                        <Shield className="text-orange-500" size={24} />
-                        <span className="font-bold text-lg">Privacy Center</span>
+                        <Shield className="text-store-red" size={20} />
+                        <span className="font-semibold">Privacy Center</span>
                     </div>
                 </div>
             </header>
 
             {/* Main Content */}
-            <main className="pt-32 pb-20 px-6">
+            <main className="pt-28 pb-20 px-6">
                 <div className="max-w-4xl mx-auto">
                     {/* Hero Section */}
                     <motion.div
@@ -57,12 +57,13 @@ export default function PrivacyPolicyPage() {
                         animate={{ opacity: 1, y: 0 }}
                         className="text-center mb-16"
                     >
-                        <h1 className="text-4xl md:text-5xl font-bold tracking-tight mb-4">
-                            Privacy Policies
-                        </h1>
-                        <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-                            We value your privacy and are committed to protecting your personal information.
-                            Select a policy below to learn more about how we handle your data.
+                        <div className="inline-flex items-center gap-2 px-4 py-2 bg-location-yellow rounded-full text-black-shadow text-sm font-semibold mb-6">
+                            <Lock size={16} />
+                            <span>Your Privacy Matters</span>
+                        </div>
+                        <h1 className="text-4xl md:text-5xl font-bold mb-6">Privacy Policy Hub</h1>
+                        <p className="text-lg text-black-shadow/60 max-w-2xl mx-auto">
+                            Select a product below to view its specific privacy policy. We believe in transparency and protecting your data.
                         </p>
                     </motion.div>
 
@@ -71,38 +72,34 @@ export default function PrivacyPolicyPage() {
                         {policyCards.map((card, index) => (
                             <motion.div
                                 key={card.id}
-                                initial={{ opacity: 0, y: 30 }}
+                                initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: index * 0.1 }}
+                                transition={{ delay: 0.1 * index }}
                             >
                                 {card.status === "available" ? (
                                     <Link
                                         href={card.href}
-                                        className="block h-full p-6 bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-lg hover:border-orange-300 transition-all group"
+                                        className="block p-6 bg-white rounded-2xl border border-store-red-40/30 hover:border-store-red hover:shadow-lg transition-all group h-full"
                                     >
-                                        <div className="flex flex-col h-full">
-                                            <div className="w-14 h-14 rounded-xl bg-orange-100 flex items-center justify-center mb-4 group-hover:bg-orange-200 transition-colors">
-                                                <card.icon className="text-orange-600" size={28} />
-                                            </div>
-                                            <h3 className="text-xl font-semibold mb-2">{card.title}</h3>
-                                            <p className="text-gray-600 text-sm flex-grow">{card.description}</p>
-                                            <div className="mt-4 flex items-center gap-2 text-orange-600 font-medium text-sm group-hover:gap-3 transition-all">
-                                                Read Policy
-                                                <ArrowRight size={16} />
-                                            </div>
+                                        <div className="w-12 h-12 rounded-xl bg-store-red/10 flex items-center justify-center mb-4 group-hover:bg-store-red group-hover:text-white transition-colors">
+                                            <card.icon className="text-store-red group-hover:text-white transition-colors" size={24} />
+                                        </div>
+                                        <h3 className="text-xl font-bold mb-2">{card.title}</h3>
+                                        <p className="text-black-shadow/60 text-sm mb-4">{card.description}</p>
+                                        <div className="flex items-center gap-2 text-store-red font-medium">
+                                            <span>View Policy</span>
+                                            <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
                                         </div>
                                     </Link>
                                 ) : (
-                                    <div className="block h-full p-6 bg-gray-50 rounded-2xl border border-gray-200 opacity-70">
-                                        <div className="flex flex-col h-full">
-                                            <div className="w-14 h-14 rounded-xl bg-gray-200 flex items-center justify-center mb-4">
-                                                <card.icon className="text-gray-400" size={28} />
-                                            </div>
-                                            <h3 className="text-xl font-semibold mb-2 text-gray-500">{card.title}</h3>
-                                            <p className="text-gray-400 text-sm flex-grow">{card.description}</p>
-                                            <div className="mt-4 inline-flex items-center gap-2 px-3 py-1 bg-gray-200 rounded-full text-gray-500 text-xs font-medium w-fit">
-                                                Coming Soon
-                                            </div>
+                                    <div className="block p-6 bg-white/50 rounded-2xl border border-gray-200 h-full opacity-70">
+                                        <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center mb-4">
+                                            <card.icon className="text-gray-400" size={24} />
+                                        </div>
+                                        <h3 className="text-xl font-bold mb-2 text-gray-500">{card.title}</h3>
+                                        <p className="text-gray-400 text-sm mb-4">{card.description}</p>
+                                        <div className="flex items-center gap-2 text-gray-400 font-medium">
+                                            <span>Coming Soon</span>
                                         </div>
                                     </div>
                                 )}
@@ -114,15 +111,18 @@ export default function PrivacyPolicyPage() {
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
-                        transition={{ delay: 0.4 }}
-                        className="mt-16 text-center text-gray-500 text-sm"
+                        transition={{ delay: 0.5 }}
+                        className="mt-16 text-center"
                     >
-                        <p>
-                            For any privacy-related inquiries, please contact us at{" "}
-                            <a href="mailto:support@pickatstore.io" className="text-orange-600 hover:underline">
-                                support@pickatstore.io
-                            </a>
-                        </p>
+                        <div className="inline-flex items-center gap-3 px-6 py-4 bg-white rounded-xl border border-store-red-40/30">
+                            <FileText className="text-store-red" size={20} />
+                            <p className="text-sm text-black-shadow/60">
+                                Questions about our privacy practices?{" "}
+                                <a href="mailto:support@pickatstore.io" className="text-store-red font-medium hover:underline">
+                                    Contact us
+                                </a>
+                            </p>
+                        </div>
                     </motion.div>
                 </div>
             </main>

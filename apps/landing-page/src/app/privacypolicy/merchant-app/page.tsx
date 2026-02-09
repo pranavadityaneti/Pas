@@ -2,20 +2,20 @@
 
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { ArrowLeft, Shield, Store, Mail, Globe } from "lucide-react";
+import { ArrowLeft, Store, Shield, Calendar, Mail, AlertCircle } from "lucide-react";
 
 export default function MerchantAppPrivacyPolicy() {
     return (
-        <div className="min-h-screen bg-[#FDFBF7] text-gray-900">
+        <div className="min-h-screen bg-vista-white text-black-shadow">
             {/* Header */}
-            <header className="fixed top-0 left-0 right-0 z-50 bg-[#FDFBF7]/80 backdrop-blur-md border-b border-gray-200/50">
+            <header className="fixed top-0 left-0 right-0 z-50 bg-vista-white/80 backdrop-blur-md border-b border-store-red-40/20">
                 <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
-                    <Link href="/privacypolicy" className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors">
+                    <Link href="/privacypolicy" className="flex items-center gap-2 text-black-shadow/60 hover:text-black-shadow transition-colors">
                         <ArrowLeft size={20} />
-                        <span className="font-medium">All Policies</span>
+                        <span className="font-medium">Back to All Policies</span>
                     </Link>
                     <div className="flex items-center gap-2">
-                        <Store className="text-orange-500" size={20} />
+                        <Store className="text-store-red" size={20} />
                         <span className="font-semibold">Merchant App</span>
                     </div>
                 </div>
@@ -31,196 +31,230 @@ export default function MerchantAppPrivacyPolicy() {
                         className="mb-12"
                     >
                         <div className="flex items-center gap-3 mb-4">
-                            <div className="w-12 h-12 rounded-xl bg-orange-100 flex items-center justify-center">
-                                <Shield className="text-orange-600" size={24} />
+                            <div className="w-12 h-12 rounded-xl bg-store-red flex items-center justify-center">
+                                <Shield className="text-white" size={24} />
                             </div>
                             <div>
                                 <h1 className="text-3xl md:text-4xl font-bold">Privacy Policy</h1>
-                                <p className="text-gray-500">Pick At Store - Merchant App</p>
+                                <p className="text-black-shadow/60">Pick At Store - Merchant App</p>
                             </div>
                         </div>
-                        <p className="text-sm text-gray-500 mt-4 px-4 py-2 bg-gray-100 rounded-lg inline-block">
-                            Last Updated: February 2, 2026
-                        </p>
+                        <div className="flex items-center gap-2 text-sm text-black-shadow/50 mt-4">
+                            <Calendar size={16} />
+                            <span>Last Updated: February 2, 2026</span>
+                        </div>
                     </motion.div>
 
                     {/* Policy Content */}
                     <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.1 }}
                         className="prose prose-gray max-w-none"
                     >
-                        <p className="text-lg text-gray-700 leading-relaxed mb-8">
-                            This Privacy Policy describes how Pick At Store ("we", "us", or "our") collects, uses, and shares
-                            information when you use our Merchant App. By using the app, you agree to the collection and use
-                            of information in accordance with this policy.
+                        <p className="text-lg text-black-shadow/70 mb-8">
+                            This Privacy Policy describes how Pick At Store ("we", "us", or "our") collects, uses, and shares information about you when you use our Merchant App.
                         </p>
 
                         {/* Section 1 */}
                         <section className="mb-10">
-                            <h2 className="text-2xl font-bold mb-4 flex items-center gap-3">
-                                <span className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center text-sm font-bold">1</span>
+                            <h2 className="text-2xl font-bold mb-4 pb-2 border-b border-store-red-40/30 flex items-center gap-2">
+                                <span className="w-8 h-8 rounded-full bg-store-red text-white flex items-center justify-center text-sm">1</span>
                                 Information Collection and Use
                             </h2>
-                            <p className="text-gray-700 mb-4">To provide and improve our Service, we collect several types of information:</p>
-                            <ul className="space-y-4">
-                                <li className="bg-white p-4 rounded-xl border border-gray-200">
-                                    <strong className="text-gray-900">Personal Identification Information:</strong>
-                                    <span className="text-gray-600"> During account setup and KYC verification, we may collect your full name, email address, phone number, and official business details.</span>
+                            <p className="text-black-shadow/70 mb-4">
+                                We collect information necessary to provide our services to merchant partners. This includes:
+                            </p>
+                            <ul className="space-y-3 text-black-shadow/70">
+                                <li className="flex items-start gap-3">
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span><strong>Personal Identification Information:</strong> Name, email address, phone number, and business address for account creation and communication.</span>
                                 </li>
-                                <li className="bg-white p-4 rounded-xl border border-gray-200">
-                                    <strong className="text-gray-900">KYC Documents (Sensitive Data):</strong>
-                                    <span className="text-gray-600"> To verify your merchant status, we require access to your Camera and Photo Library to capture and upload government-issued ID cards, tax registration documents, and store permits.</span>
+                                <li className="flex items-start gap-3">
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span><strong>KYC Documents:</strong> National ID cards, business permits, and related documentation required for regulatory compliance and account verification.</span>
                                 </li>
-                                <li className="bg-white p-4 rounded-xl border border-gray-200">
-                                    <strong className="text-gray-900">Location Data:</strong>
-                                    <span className="text-gray-600"> With your permission, we collect precise location data to help you set your store's physical address accurately on our map, making it discoverable to customers.</span>
+                                <li className="flex items-start gap-3">
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span><strong>Business Information:</strong> Store name, product inventory, pricing data, and operational hours.</span>
                                 </li>
-                                <li className="bg-white p-4 rounded-xl border border-gray-200">
-                                    <strong className="text-gray-900">Inventory & Store Data:</strong>
-                                    <span className="text-gray-600"> Product names, descriptions, pricing, and stock levels are stored to facilitate your shop's operations and sync with our customer platform.</span>
+                                <li className="flex items-start gap-3">
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span><strong>Transaction Data:</strong> Order history, payment records, and sales analytics.</span>
                                 </li>
-                                <li className="bg-white p-4 rounded-xl border border-gray-200">
-                                    <strong className="text-gray-900">Device Information:</strong>
-                                    <span className="text-gray-600"> We may collect technical data such as device model, OS version, and unique device identifiers for troubleshooting and security.</span>
+                                <li className="flex items-start gap-3">
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span><strong>Device Information:</strong> Device type, operating system, and app version for technical support and optimization.</span>
                                 </li>
                             </ul>
                         </section>
 
                         {/* Section 2 */}
                         <section className="mb-10">
-                            <h2 className="text-2xl font-bold mb-4 flex items-center gap-3">
-                                <span className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center text-sm font-bold">2</span>
-                                How We Use Your Information
+                            <h2 className="text-2xl font-bold mb-4 pb-2 border-b border-store-red-40/30 flex items-center gap-2">
+                                <span className="w-8 h-8 rounded-full bg-store-red text-white flex items-center justify-center text-sm">2</span>
+                                Data Storage and Security
                             </h2>
-                            <ul className="space-y-3">
+                            <p className="text-black-shadow/70 mb-4">
+                                Your data is stored securely using industry-standard practices:
+                            </p>
+                            <ul className="space-y-3 text-black-shadow/70">
                                 <li className="flex items-start gap-3">
-                                    <span className="w-2 h-2 rounded-full bg-orange-500 mt-2 flex-shrink-0"></span>
-                                    <span className="text-gray-700">To verify your identity and prevent fraud (KYC).</span>
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span>All data is encrypted in transit and at rest using AES-256 encryption.</span>
                                 </li>
                                 <li className="flex items-start gap-3">
-                                    <span className="w-2 h-2 rounded-full bg-orange-500 mt-2 flex-shrink-0"></span>
-                                    <span className="text-gray-700">To enable store discovery for customers via location services.</span>
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span>We use Supabase as our backend service provider, which maintains SOC 2 Type II compliance.</span>
                                 </li>
                                 <li className="flex items-start gap-3">
-                                    <span className="w-2 h-2 rounded-full bg-orange-500 mt-2 flex-shrink-0"></span>
-                                    <span className="text-gray-700">To manage and synchronize your inventory levels in real-time.</span>
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span>KYC documents are stored in secure, access-controlled storage with limited personnel access.</span>
                                 </li>
                                 <li className="flex items-start gap-3">
-                                    <span className="w-2 h-2 rounded-full bg-orange-500 mt-2 flex-shrink-0"></span>
-                                    <span className="text-gray-700">To provide customer support and send important service notifications.</span>
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span>Regular security audits and penetration testing are conducted.</span>
                                 </li>
                             </ul>
                         </section>
 
                         {/* Section 3 */}
                         <section className="mb-10">
-                            <h2 className="text-2xl font-bold mb-4 flex items-center gap-3">
-                                <span className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center text-sm font-bold">3</span>
-                                Data Sharing and Third Parties
+                            <h2 className="text-2xl font-bold mb-4 pb-2 border-b border-store-red-40/30 flex items-center gap-2">
+                                <span className="w-8 h-8 rounded-full bg-store-red text-white flex items-center justify-center text-sm">3</span>
+                                Third-Party Services
                             </h2>
-                            <p className="text-gray-700 mb-4">We do not sell your personal information. We share data only with:</p>
-                            <ul className="space-y-4">
-                                <li className="bg-white p-4 rounded-xl border border-gray-200">
-                                    <strong className="text-gray-900">Service Providers:</strong>
-                                    <span className="text-gray-600"> Trusted partners like Supabase (database/storage) and Expo (app infrastructure) to operate our platform securely.</span>
+                            <p className="text-black-shadow/70 mb-4">
+                                We integrate with the following third-party services to provide our platform:
+                            </p>
+                            <ul className="space-y-3 text-black-shadow/70">
+                                <li className="flex items-start gap-3">
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span><strong>Supabase:</strong> Database and authentication services.</span>
                                 </li>
-                                <li className="bg-white p-4 rounded-xl border border-gray-200">
-                                    <strong className="text-gray-900">Compliance with Law:</strong>
-                                    <span className="text-gray-600"> We may disclose information if required by law or in response to valid requests by public authorities.</span>
+                                <li className="flex items-start gap-3">
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span><strong>Expo:</strong> App infrastructure and push notification services.</span>
+                                </li>
+                                <li className="flex items-start gap-3">
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span><strong>Payment Processors:</strong> Secure payment processing partners for financial transactions.</span>
                                 </li>
                             </ul>
+                            <p className="text-black-shadow/70 mt-4">
+                                Each third-party service maintains their own privacy policy and data handling practices.
+                            </p>
                         </section>
 
                         {/* Section 4 */}
                         <section className="mb-10">
-                            <h2 className="text-2xl font-bold mb-4 flex items-center gap-3">
-                                <span className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center text-sm font-bold">4</span>
+                            <h2 className="text-2xl font-bold mb-4 pb-2 border-b border-store-red-40/30 flex items-center gap-2">
+                                <span className="w-8 h-8 rounded-full bg-store-red text-white flex items-center justify-center text-sm">4</span>
                                 Data Retention and Deletion
                             </h2>
-                            <ul className="space-y-4">
-                                <li className="bg-white p-4 rounded-xl border border-gray-200">
-                                    <strong className="text-gray-900">Retention:</strong>
-                                    <span className="text-gray-600"> We retain KYC documents for as long as necessary to comply with regional merchant regulations. Inventory data is kept as long as your account is active.</span>
+                            <ul className="space-y-3 text-black-shadow/70">
+                                <li className="flex items-start gap-3">
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span>Account data is retained for the duration of your active merchant partnership.</span>
                                 </li>
-                                <li className="bg-white p-4 rounded-xl border border-gray-200">
-                                    <strong className="text-gray-900">Account Deletion:</strong>
-                                    <span className="text-gray-600"> You can request account deletion at any time via the app settings. Upon deletion, we will remove your personal data from our active databases, subject to legal retention requirements.</span>
+                                <li className="flex items-start gap-3">
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span>Upon account deletion request, personal data is removed within 30 days.</span>
+                                </li>
+                                <li className="flex items-start gap-3">
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span>Transaction records may be retained for up to 7 years for legal and tax compliance.</span>
+                                </li>
+                                <li className="flex items-start gap-3">
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span>You may request data deletion by contacting us or using the in-app account deletion feature.</span>
                                 </li>
                             </ul>
+                            <div className="mt-4 p-4 bg-location-yellow/20 rounded-xl border border-location-yellow/30">
+                                <Link href="/deleteaccount" className="text-store-red font-medium hover:underline flex items-center gap-2">
+                                    <AlertCircle size={16} />
+                                    Learn how to delete your account →
+                                </Link>
+                            </div>
                         </section>
 
                         {/* Section 5 */}
                         <section className="mb-10">
-                            <h2 className="text-2xl font-bold mb-4 flex items-center gap-3">
-                                <span className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center text-sm font-bold">5</span>
-                                Children's Privacy
+                            <h2 className="text-2xl font-bold mb-4 pb-2 border-b border-store-red-40/30 flex items-center gap-2">
+                                <span className="w-8 h-8 rounded-full bg-store-red text-white flex items-center justify-center text-sm">5</span>
+                                Your Rights
                             </h2>
-                            <p className="text-gray-700">
-                                Our Service is not intended for anyone under the age of 18 (or 13 depending on region).
-                                We do not knowingly collect personal information from children.
+                            <p className="text-black-shadow/70 mb-4">
+                                As a merchant partner, you have the right to:
                             </p>
+                            <ul className="space-y-3 text-black-shadow/70">
+                                <li className="flex items-start gap-3">
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span>Access your personal data stored in our systems.</span>
+                                </li>
+                                <li className="flex items-start gap-3">
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span>Request correction of inaccurate information.</span>
+                                </li>
+                                <li className="flex items-start gap-3">
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span>Request deletion of your account and associated data.</span>
+                                </li>
+                                <li className="flex items-start gap-3">
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span>Export your data in a portable format.</span>
+                                </li>
+                                <li className="flex items-start gap-3">
+                                    <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
+                                    <span>Opt out of marketing communications.</span>
+                                </li>
+                            </ul>
                         </section>
 
                         {/* Section 6 */}
                         <section className="mb-10">
-                            <h2 className="text-2xl font-bold mb-4 flex items-center gap-3">
-                                <span className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center text-sm font-bold">6</span>
-                                Security
+                            <h2 className="text-2xl font-bold mb-4 pb-2 border-b border-store-red-40/30 flex items-center gap-2">
+                                <span className="w-8 h-8 rounded-full bg-store-red text-white flex items-center justify-center text-sm">6</span>
+                                Contact Information
                             </h2>
-                            <p className="text-gray-700">
-                                We use industry-standard encryption and security protocols (SSL/TLS) to protect your data.
-                                However, remember that no method of electronic storage is 100% secure.
+                            <p className="text-black-shadow/70 mb-4">
+                                For any privacy-related questions or requests, please contact us:
                             </p>
+                            <div className="bg-white p-6 rounded-xl border border-store-red-40/30">
+                                <div className="flex items-center gap-3 mb-3">
+                                    <Mail className="text-store-red" size={20} />
+                                    <a href="mailto:support@pickatstore.io" className="text-store-red font-medium hover:underline">
+                                        support@pickatstore.io
+                                    </a>
+                                </div>
+                                <p className="text-black-shadow/60 text-sm">
+                                    Website: <a href="https://www.pickatstore.io" className="text-store-red hover:underline">www.pickatstore.io</a>
+                                </p>
+                            </div>
                         </section>
 
                         {/* Section 7 */}
                         <section className="mb-10">
-                            <h2 className="text-2xl font-bold mb-4 flex items-center gap-3">
-                                <span className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center text-sm font-bold">7</span>
-                                Your Rights (GDPR/Global Compliance)
+                            <h2 className="text-2xl font-bold mb-4 pb-2 border-b border-store-red-40/30 flex items-center gap-2">
+                                <span className="w-8 h-8 rounded-full bg-store-red text-white flex items-center justify-center text-sm">7</span>
+                                Policy Updates
                             </h2>
-                            <p className="text-gray-700">
-                                Depending on your location, you have the right to access, correct, or delete your personal data.
-                                You may also object to certain data processing activities.
+                            <p className="text-black-shadow/70">
+                                We may update this Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page and updating the "Last Updated" date. Continued use of the app after any modifications constitutes acceptance of the updated policy.
                             </p>
-                        </section>
-
-                        {/* Section 8 - Contact */}
-                        <section className="mb-10">
-                            <h2 className="text-2xl font-bold mb-4 flex items-center gap-3">
-                                <span className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center text-sm font-bold">8</span>
-                                Contact Us
-                            </h2>
-                            <p className="text-gray-700 mb-4">For privacy concerns or data deletion requests, please contact:</p>
-                            <div className="bg-white p-6 rounded-xl border border-gray-200 space-y-3">
-                                <div className="flex items-center gap-3">
-                                    <Mail className="text-orange-500" size={20} />
-                                    <a href="mailto:support@pickatstore.io" className="text-orange-600 hover:underline font-medium">
-                                        support@pickatstore.io
-                                    </a>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <Globe className="text-orange-500" size={20} />
-                                    <a href="https://www.pickatstore.io" target="_blank" rel="noopener noreferrer" className="text-orange-600 hover:underline font-medium">
-                                        www.pickatstore.io
-                                    </a>
-                                </div>
-                            </div>
                         </section>
                     </motion.div>
 
-                    {/* Back to Policies */}
+                    {/* Back Link */}
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
-                        transition={{ delay: 0.2 }}
-                        className="mt-12 pt-8 border-t border-gray-200"
+                        transition={{ delay: 0.3 }}
+                        className="mt-12 pt-8 border-t border-store-red-40/30"
                     >
                         <Link
                             href="/privacypolicy"
-                            className="inline-flex items-center gap-2 text-orange-600 hover:text-orange-700 font-medium"
+                            className="inline-flex items-center gap-2 text-store-red hover:text-store-red-80 font-medium"
                         >
                             <ArrowLeft size={18} />
                             Back to All Policies
