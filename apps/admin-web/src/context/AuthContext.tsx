@@ -48,7 +48,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Initialize auth state with timeout to prevent infinite loading
     useEffect(() => {
         let isMounted = true;
-        const controller = new AbortController();
 
         const initAuth = async () => {
             try {
@@ -116,7 +115,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         return () => {
             isMounted = false;
-            controller.abort();
             subscription.unsubscribe();
         };
     }, []);
