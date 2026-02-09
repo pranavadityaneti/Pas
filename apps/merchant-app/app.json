@@ -2,7 +2,7 @@
   "expo": {
     "name": "PAS Merchant",
     "slug": "pas-merchant-app",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "scheme": "pasmerchant",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -41,7 +41,7 @@
     },
     "android": {
       "package": "com.pas.merchant",
-      "versionCode": 5,
+      "versionCode": 6,
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyAZPXR9kkXQj_JkrLM2V8L1qvBYwoI5bN4"
