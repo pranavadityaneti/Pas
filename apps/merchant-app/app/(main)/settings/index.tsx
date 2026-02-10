@@ -97,11 +97,11 @@ export default function SettingsScreen() {
         }
     };
 
-    const handleSignOut = () => {
-        Alert.alert('Sign Out', 'Are you sure?', [
+    const handleLogout = () => {
+        Alert.alert('Log Out', 'Are you sure?', [
             { text: 'Cancel', style: 'cancel' },
             {
-                text: 'Sign Out',
+                text: 'Log Out',
                 style: 'destructive',
                 onPress: async () => {
                     await supabase.auth.signOut();
@@ -246,7 +246,7 @@ export default function SettingsScreen() {
                 </View>
 
                 {/* Sign Out Button */}
-                <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
+                <TouchableOpacity style={styles.signOutButton} onPress={handleLogout}>
                     <Ionicons name="log-out-outline" size={24} color={Colors.primary} />
                     <Text style={styles.signOutText}>Log Out</Text>
                 </TouchableOpacity>

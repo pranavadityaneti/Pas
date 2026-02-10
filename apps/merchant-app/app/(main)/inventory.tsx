@@ -55,7 +55,7 @@ export default function InventoryScreen() {
             if (appliedFilters.categories.length > 0 && !appliedFilters.categories.includes(item.product.category)) matchesFilter = false;
 
             // Availability
-            if (appliedFilters.availability.includes('Low Stock') && item.stock >= 10) matchesFilter = false;
+            if (appliedFilters.availability.includes('Low Stock') && item.stock >= 5) matchesFilter = false;
             if (appliedFilters.availability.includes('Out of Stock') && item.stock > 0) matchesFilter = false;
             if (appliedFilters.availability.includes('In Stock') && item.stock === 0) matchesFilter = false;
 

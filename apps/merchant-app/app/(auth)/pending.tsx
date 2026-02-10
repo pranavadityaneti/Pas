@@ -9,12 +9,12 @@ import { Colors } from '../../constants/Colors';
 export default function PendingScreen() {
     const handleSignOut = async () => {
         Alert.alert(
-            'Sign Out',
-            'Are you sure you want to sign out?',
+            'Log Out',
+            'Are you sure you want to log out?',
             [
                 { text: 'Cancel', style: 'cancel' },
                 {
-                    text: 'Sign Out',
+                    text: 'Log Out',
                     style: 'destructive',
                     onPress: async () => {
                         await supabase.auth.signOut();
@@ -71,8 +71,8 @@ export default function PendingScreen() {
             </View>
 
             <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
-                <Ionicons name="log-out-outline" size={20} color="#EF4444" />
-                <Text style={styles.signOutText}>Sign Out</Text>
+                <Ionicons name="arrow-back" size={20} color="#EF4444" />
+                <Text style={styles.signOutText}>Back to Login</Text>
             </TouchableOpacity>
         </SafeAreaView>
     );

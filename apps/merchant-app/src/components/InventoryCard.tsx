@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Image, TextInput, TouchableOpacity, Switch } from 'react-native';
+import { View, Text, StyleSheet, Image, TextInput, TouchableOpacity, Switch, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 interface Props {
@@ -35,6 +35,17 @@ export default function InventoryCard({ item, onUpdate, onDelete, onToggleStatus
         const stockVal = parseInt(stock, 10);
 
         if (!isNaN(priceVal) && !isNaN(stockVal)) {
+            // Validation: Selling Price <= MRP
+            // MRP might be 0 if not set, so we only validate if MRP > 0
+            if (mrp > 0 && priceVal > mrp) {
+                Alert.alert(
+                    "Invalid Price",
+                    `Selling price (₹${priceVal}) cannot be higher than MRP (₹${mrp}).`,
+                    [{ text: "OK", onPress: () => setSellingPrice(mrp.toString()) }]
+                );
+                return;
+            }
+
             onUpdate(item.id, { price: priceVal, stock: stockVal });
         }
     };
@@ -59,6 +70,13 @@ export default function InventoryCard({ item, onUpdate, onDelete, onToggleStatus
                 <View style={styles.info}>
                     <Text style={styles.name} numberOfLines={2}>{item.product?.name || item.name}</Text>
                     <Text style={styles.category}>{item.product?.category || item.category || 'General'}</Text>
+                    {/* Low Stock Indicator */}
+                    {parseInt(stock) < 5 && item.active && (
+                        <View style={styles.lowStockBadge}>
+                            <Ionicons name="alert-circle" size={12} color="#EF4444" />
+                            <Text style={styles.lowStockText}>Low Stock</Text>
+                        </View>
+                    )}
                 </View>
 
                 <TouchableOpacity onPress={() => onDelete(item.id)} style={styles.deleteBtn}>
@@ -259,4 +277,15 @@ const styles = StyleSheet.create({
         borderBottomColor: '#ddd',
         paddingBottom: 2,
     },
+    lowStockBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 4,
+        gap: 2
+    },
+    lowStockText: {
+        color: '#EF4444',
+        fontSize: 10,
+        fontWeight: 'bold'
+    }
 });

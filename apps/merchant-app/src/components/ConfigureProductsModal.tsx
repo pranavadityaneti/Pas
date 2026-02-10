@@ -102,6 +102,30 @@ export default function ConfigureProductsModal({ visible, storeId, products, onC
             return;
         }
 
+        // 1.1 Validation: Price > MRP Check
+        let priceError = '';
+        products.forEach(p => {
+            Object.entries(config[p.id] || {}).forEach(([variantLabel, data]: [string, any]) => {
+                if (data.active) {
+                    // Calculate Variant MRP again to match render logic
+                    const variantDefs = getVariantsForCategory(p.category);
+                    const def = variantDefs.find(v => v.label === variantLabel);
+                    if (def) {
+                        const variantMrp = Math.round((p.mrp || 0) * def.ratio);
+                        const sellingPrice = parseFloat(data.price || '0');
+                        if (sellingPrice > variantMrp) {
+                            priceError = `Selling price for ${p.name} (${variantLabel}) cannot exceed MRP ₹${variantMrp}`;
+                        }
+                    }
+                }
+            });
+        });
+
+        if (priceError) {
+            Alert.alert("Invalid Price", priceError);
+            return;
+        }
+
         setIsSubmitting(true);
 
         try {

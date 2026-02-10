@@ -22,6 +22,7 @@ export default function StoreDetailsScreen() {
         category: '',
         photos: [] as string[]
     });
+    const [initialDetails, setInitialDetails] = useState<typeof details | null>(null);
 
     useEffect(() => {
         if (storeId) fetchStoreDetails();
@@ -77,13 +78,15 @@ export default function StoreDetailsScreen() {
             }
 
             if (finalData) {
-                setDetails({
+                const fetchedData = {
                     name: finalData.name || '',
                     address: finalData.address || '',
                     cityId: finalData.cityId || '',
                     category: finalData.category || '',
                     photos: finalData.photos || []
-                });
+                };
+                setDetails(fetchedData);
+                setInitialDetails(fetchedData);
             }
         } catch (error) {
             console.error('Error fetching store details:', error);
@@ -92,6 +95,8 @@ export default function StoreDetailsScreen() {
             setLoading(false);
         }
     };
+
+    const isDirty = initialDetails && JSON.stringify(details) !== JSON.stringify(initialDetails);
 
     const handleSave = async () => {
         if (!details.name.trim()) {
@@ -114,6 +119,7 @@ export default function StoreDetailsScreen() {
                 throw new Error('Failed to update store');
             }
 
+            setInitialDetails(details); // Update initial state on success
             Alert.alert('Success', 'Store details updated successfully', [
                 { text: 'OK', onPress: () => router.back() }
             ]);
@@ -212,9 +218,9 @@ export default function StoreDetailsScreen() {
                 </View>
 
                 <TouchableOpacity
-                    style={[styles.saveButton, saving && { opacity: 0.7 }]}
+                    style={[styles.saveButton, (saving || !isDirty) && { opacity: 0.7 }]}
                     onPress={handleSave}
-                    disabled={saving}
+                    disabled={saving || !isDirty}
                 >
                     {saving ? (
                         <ActivityIndicator color="#fff" />

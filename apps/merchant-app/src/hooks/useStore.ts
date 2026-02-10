@@ -8,6 +8,7 @@ export interface Store {
     address: string | null;
     image: string | null;
     active: boolean;
+    operating_hours?: any;
 }
 
 // Heartbeat interval: 5 minutes
@@ -100,7 +101,7 @@ export function useStore() {
                 // First try the Store table (for established stores)
                 let { data, error } = await supabase
                     .from('Store')
-                    .select('id, name, address, image, active')
+                    .select('id, name, address, image, active, operating_hours')
                     .eq('managerId', user.id)
                     .maybeSingle();
 
@@ -134,7 +135,8 @@ export function useStore() {
                             name: merchantData.store_name,
                             address: null,
                             image: null,
-                            active: false
+                            active: false,
+                            operating_hours: null
                         });
                     }
                 }

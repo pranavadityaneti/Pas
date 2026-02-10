@@ -169,7 +169,7 @@ export default function TimingsScreen() {
                     <View style={styles.divider} />
 
                     <View style={styles.rowBetween}>
-                        <Text style={[styles.label, { marginBottom: 0 }]}>LUNCH BREAK</Text>
+                        <Text style={[styles.label, { marginBottom: 0 }]}>LUNCH / DINNER</Text>
                         <Switch
                             value={hasLunchBreak}
                             onValueChange={setHasLunchBreak}

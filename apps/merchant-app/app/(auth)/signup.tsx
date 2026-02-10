@@ -126,6 +126,19 @@ export default function SignupScreen() {
                 Alert.alert('Error', 'Please fill all required fields');
                 return false;
             }
+            // Phone Validation: 10 digits, starts with 6-9
+            const phoneRegex = /^[6-9]\d{9}$/;
+            if (!phoneRegex.test(identity.phone)) {
+                Alert.alert('Invalid Phone', 'Please enter a valid 10-digit Indian mobile number.');
+                return false;
+            }
+            // Email Validation
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(identity.email)) {
+                Alert.alert('Invalid Email', 'Please enter a valid email address.');
+                return false;
+            }
+            // Password Length
             if (identity.password.length < 6) {
                 Alert.alert('Error', 'Password must be at least 6 characters');
                 return false;
@@ -144,20 +157,46 @@ export default function SignupScreen() {
             }
         }
         if (step === 5) {
-            if (!kyc.panNumber || !kyc.aadharNumber) {
-                Alert.alert('Error', 'PAN and Aadhar numbers are required');
+            // PAN Validation
+            const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+            if (!kyc.panNumber || !panRegex.test(kyc.panNumber)) {
+                Alert.alert('Invalid PAN', 'Please enter a valid PAN number (e.g., ABCDE1234F).');
                 return false;
             }
-            if (!docFiles.pan || !docFiles.aadharFront || !docFiles.aadharBack) {
-                Alert.alert('Error', 'Please upload PAN and Aadhaar (Front & Back) images');
+            if (!docFiles.pan) {
+                Alert.alert('Error', 'Please upload a PAN card image.');
                 return false;
             }
+
+            // Aadhaar Validation
+            const aadhaarRegex = /^\d{12}$/;
+            if (!kyc.aadharNumber || !aadhaarRegex.test(kyc.aadharNumber)) {
+                Alert.alert('Invalid Aadhaar', 'Aadhaar number must be exactly 12 digits.');
+                return false;
+            }
+            if (!docFiles.aadharFront || !docFiles.aadharBack) {
+                Alert.alert('Error', 'Please upload Aadhaar (Front & Back) images');
+                return false;
+            }
+
+            // GSTIN Validation (Mandatory for > 20L)
             if (kyc.turnoverRange !== '<20L') {
-                if (!kyc.msmeNumber && !docFiles.gst) { // Assuming GST is mandatory for >20L
-                    // Actually user said: "mandatorily ask them to enter the details of the mandatory documents, and uupload them too"
-                    // Mandatory for >20L: GSTIN details and upload.
-                    if (!docFiles.gst) {
-                        Alert.alert('Error', 'GST Certificate upload is mandatory for turnover > 20L');
+                const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+
+                if (!kyc.gstNumber || !gstRegex.test(kyc.gstNumber)) {
+                    Alert.alert('Invalid GSTIN', 'Please enter a valid GSTIN format (e.g., 22AAAAA0000A1Z5).');
+                    return false;
+                }
+                if (!docFiles.gst) {
+                    Alert.alert('Error', 'GST Certificate upload is mandatory for turnover > 20L');
+                    return false;
+                }
+            } else {
+                // If provided voluntarily, still validate format
+                if (kyc.gstNumber && kyc.gstNumber.trim() !== '') {
+                    const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+                    if (!gstRegex.test(kyc.gstNumber)) {
+                        Alert.alert('Invalid GSTIN', 'The entered GSTIN is invalid.');
                         return false;
                     }
                 }

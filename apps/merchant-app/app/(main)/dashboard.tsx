@@ -37,7 +37,46 @@ export default function DashboardScreen() {
 
     const recentOrders = orders.slice(0, 5);
 
+    const [isLunchBreak, setIsLunchBreak] = React.useState(false);
+
+    // Check for lunch break status
+    React.useEffect(() => {
+        const checkLunchStatus = () => {
+            if (!store?.operating_hours) return;
+            const oh = store.operating_hours;
+
+            if (!oh.hasLunchBreak || !oh.lunchStart || !oh.lunchEnd) {
+                setIsLunchBreak(false);
+                return;
+            }
+
+            const now = new Date();
+            const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+            const [startH, startM] = oh.lunchStart.split(':').map(Number);
+            const startMinutes = startH * 60 + startM;
+
+            const [endH, endM] = oh.lunchEnd.split(':').map(Number);
+            const endMinutes = endH * 60 + endM;
+
+            if (currentMinutes >= startMinutes && currentMinutes < endMinutes) {
+                setIsLunchBreak(true);
+            } else {
+                setIsLunchBreak(false);
+            }
+        };
+
+        checkLunchStatus();
+        const interval = setInterval(checkLunchStatus, 60000); // Check every minute
+        return () => clearInterval(interval);
+    }, [store?.operating_hours]);
+
     const handleToggleStatus = () => {
+        if (isLunchBreak) {
+            Alert.alert('Lunch Break', 'Store is currently on lunch break. Please wait until lunch time is over to go online.');
+            return;
+        }
+
         const newStatus = !store?.active;
         const title = newStatus ? 'Go Online?' : 'Go Offline?';
         const message = newStatus
@@ -62,14 +101,18 @@ export default function DashboardScreen() {
         );
     };
 
-    const isOffline = !store?.active;
+    const isOffline = !store?.active || isLunchBreak;
 
     return (
         <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
             {isOffline && (
-                <View style={styles.offlineBanner}>
-                    <Ionicons name="close-circle" size={20} color="#FFF" />
-                    <Text style={styles.offlineText}>Store Offline - Not accepting new orders</Text>
+                <View style={[styles.offlineBanner, isLunchBreak && { backgroundColor: '#F59E0B' }]}>
+                    <Ionicons name={isLunchBreak ? "restaurant" : "close-circle"} size={20} color="#FFF" />
+                    <Text style={styles.offlineText}>
+                        {isLunchBreak
+                            ? "Lunch Break - Store is temporarily offline"
+                            : "Store Offline - Not accepting new orders"}
+                    </Text>
                 </View>
             )}
 
@@ -81,12 +124,24 @@ export default function DashboardScreen() {
                             <View style={styles.storeHeader}>
                                 <Text style={styles.storeName}>{store?.name || 'Loading...'}</Text>
                                 <TouchableOpacity
-                                    style={[styles.statusBadgeButton, !store?.active && styles.statusBadgeOffline]}
+                                    style={[
+                                        styles.statusBadgeButton,
+                                        !store?.active && styles.statusBadgeOffline,
+                                        isLunchBreak && { backgroundColor: '#FEF3C7' }
+                                    ]}
                                     onPress={handleToggleStatus}
                                 >
-                                    <View style={[styles.statusDot, !store?.active && styles.statusDotOffline]} />
-                                    <Text style={[styles.statusLabel, !store?.active && styles.statusLabelOffline]}>
-                                        {store?.active ? 'Online' : 'Offline'}
+                                    <View style={[
+                                        styles.statusDot,
+                                        !store?.active && styles.statusDotOffline,
+                                        isLunchBreak && { backgroundColor: '#F59E0B' }
+                                    ]} />
+                                    <Text style={[
+                                        styles.statusLabel,
+                                        !store?.active && styles.statusLabelOffline,
+                                        isLunchBreak && { color: '#B45309' }
+                                    ]}>
+                                        {isLunchBreak ? 'Lunch Break' : (store?.active ? 'Online' : 'Offline')}
                                     </Text>
                                     <Ionicons name="chevron-down" size={14} color={store?.active ? '#10B981' : '#6B7280'} />
                                 </TouchableOpacity>

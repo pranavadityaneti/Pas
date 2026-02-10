@@ -62,7 +62,11 @@ export default function LoginScreen() {
                 if (merchant.status === 'active') {
                     router.replace('/(main)/dashboard');
                 } else {
-                    router.replace('/(auth)/pending');
+                    Alert.alert(
+                        'Account Under Review',
+                        'Your account is pending approval. You will be able to login once an admin approves your request.'
+                    );
+                    await supabase.auth.signOut();
                 }
             }
         } catch (error: any) {

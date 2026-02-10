@@ -34,7 +34,15 @@ export default function LegalScreen() {
 
                 <View style={styles.linksContainer}>
                     {LEGAL_LINKS.map((item, index) => (
-                        <TouchableOpacity key={index} style={[styles.linkItem, { marginTop: index === 0 ? 0 : 12 }]}>
+                        <TouchableOpacity
+                            key={index}
+                            style={[styles.linkItem, { marginTop: index === 0 ? 0 : 12 }]}
+                            onPress={() => {
+                                if (item.label === 'Privacy Policy') {
+                                    Linking.openURL('https://www.pickatstore.io/privacypolicy/merchant-app');
+                                }
+                            }}
+                        >
                             <View style={styles.iconBox}>
                                 <MaterialCommunityIcons name={item.icon as any} size={20} color="#6B7280" />
                             </View>

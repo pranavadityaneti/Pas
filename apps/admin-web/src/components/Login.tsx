@@ -211,7 +211,7 @@ export function Login() {
               {/* Heading */}
               <h2 className="text-4xl font-bold text-gray-900 mb-3">Welcome back</h2>
               <p className="text-gray-500 text-lg mb-10">
-                Sign in to access your admin dashboard
+                Log in to access your admin dashboard
               </p>
 
               {/* Error Message */}
@@ -275,7 +275,7 @@ export function Login() {
                       Signing in...
                     </>
                   ) : (
-                    'Sign in'
+                    'Log in'
                   )}
                 </button>
               </form>
