@@ -31,7 +31,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.pas.merchant",
-      "buildNumber": "3",
+      "buildNumber": "4",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Your location is used to set your shop address, allowing customers to find your store correctly on the map.",
         "NSCameraUsageDescription": "Camera access is required to capture and upload KYC documents for account verification.",
@@ -41,7 +41,7 @@
     },
     "android": {
       "package": "com.pas.merchant",
-      "versionCode": 6,
+      "versionCode": 7,
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyAZPXR9kkXQj_JkrLM2V8L1qvBYwoI5bN4"
