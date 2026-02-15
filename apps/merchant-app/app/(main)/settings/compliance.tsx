@@ -1,57 +1,50 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { supabase } from '../../../src/lib/supabase';
 import { Colors } from '../../../constants/Colors';
+import { useUser } from '../../../src/context/UserContext';
+import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
 
 export default function ComplianceScreen() {
-    const [loading, setLoading] = useState(true);
-    const [kyc, setKyc] = useState({
-        panNumber: '',
-        aadharNumber: '',
-        gstNumber: '',
-        turnoverRange: '',
-        panDocUrl: '',
-        aadharFrontUrl: '',
-        aadharBackUrl: '',
-        gstCertificateUrl: ''
+    const { user } = useUser();
+
+    // Realtime Compliance Details
+    const { data: merchants, loading: tableLoading } = useRealtimeTable({
+        tableName: 'merchants',
+        select: 'pan_number, aadhar_number, gst_number, turnover_range, pan_document_url, aadhar_front_url, aadhar_back_url, gst_certificate_url',
+        filter: user?.id ? `id=eq.${user.id}` : undefined,
+        enabled: !!user?.id
     });
 
-    useEffect(() => {
-        fetchKycDetails();
-    }, []);
-
-    const fetchKycDetails = async () => {
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
-            const { data, error } = await supabase
-                .from('merchants')
-                .select('pan_number, aadhar_number, gst_number, turnover_range, pan_document_url, aadhar_front_url, aadhar_back_url, gst_certificate_url')
-                .eq('id', user.id)
-                .single();
-
-            if (data) {
-                setKyc({
-                    panNumber: data.pan_number || 'Not Provided',
-                    aadharNumber: data.aadhar_number || 'Not Provided',
-                    gstNumber: data.gst_number || 'Not Provided',
-                    turnoverRange: data.turnover_range || 'Not Specified',
-                    panDocUrl: data.pan_document_url,
-                    aadharFrontUrl: data.aadhar_front_url,
-                    aadharBackUrl: data.aadhar_back_url,
-                    gstCertificateUrl: data.gst_certificate_url
-                });
-            }
-        } catch (error) {
-            console.error('Error fetching KYC details:', error);
-        } finally {
-            setLoading(false);
+    const kyc = React.useMemo(() => {
+        if (merchants && merchants.length > 0) {
+            const data = merchants[0];
+            return {
+                panNumber: data.pan_number || 'Not Provided',
+                aadharNumber: data.aadhar_number || 'Not Provided',
+                gstNumber: data.gst_number || 'Not Provided',
+                turnoverRange: data.turnover_range || 'Not Specified',
+                panDocUrl: data.pan_document_url,
+                aadharFrontUrl: data.aadhar_front_url,
+                aadharBackUrl: data.aadhar_back_url,
+                gstCertificateUrl: data.gst_certificate_url
+            };
         }
-    };
+        return {
+            panNumber: '',
+            aadharNumber: '',
+            gstNumber: '',
+            turnoverRange: '',
+            panDocUrl: '',
+            aadharFrontUrl: '',
+            aadharBackUrl: '',
+            gstCertificateUrl: ''
+        };
+    }, [merchants]);
+
+    const loading = tableLoading && !merchants.length;
 
     const InfoRow = ({ label, value, icon }: { label: string, value: string, icon: string }) => (
         <View style={styles.infoRow}>

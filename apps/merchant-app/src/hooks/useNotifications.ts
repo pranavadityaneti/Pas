@@ -1,5 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Vibration } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { playSound } from '../lib/audio';
 
 export interface Notification {
     id: string;
@@ -9,10 +11,11 @@ export interface Notification {
     message: string;
     read: boolean;
     createdAt: string;
+    link?: string;
     metadata?: any;
 }
 
-export function useNotifications() {
+export function useNotifications(user: any) {
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [loading, setLoading] = useState(true);
     const [unreadCount, setUnreadCount] = useState(0);
@@ -47,23 +50,72 @@ export function useNotifications() {
         }
     }, []);
 
-    useEffect(() => {
-        fetchNotifications();
+    const prefsRef = useRef(user?.notification_preferences);
 
-        // Subscribe to real-time updates
-        const subscription = supabase
-            .channel('notifications')
-            .on('postgres_changes', {
-                event: '*',
-                schema: 'public',
-                table: 'notification'
-            }, () => {
-                fetchNotifications();
-            })
-            .subscribe();
+    // Keep ref in sync
+    useEffect(() => {
+        prefsRef.current = user?.notification_preferences;
+    }, [user?.notification_preferences]);
+
+    useEffect(() => {
+        let subscription: any;
+
+        const setupSubscription = async () => {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            fetchNotifications();
+
+            // Subscribe to real-time updates with filter for currentUser
+            subscription = supabase
+                .channel('notifications')
+                .on('postgres_changes', {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'notification',
+                    filter: `merchantId=eq.${user.id}`
+                }, (payload) => {
+                    const newNotif = payload.new as Notification;
+
+                    // Logic to check preferences
+                    const prefs = prefsRef.current;
+                    if (prefs) {
+                        const isCancelled = newNotif.title.toLowerCase().includes('cancel') || newNotif.message.toLowerCase().includes('cancel');
+                        const isNewOrder = newNotif.title.toLowerCase().includes('order') && !isCancelled;
+
+                        let shouldAlert = false;
+                        if (isNewOrder && prefs.newOrder) shouldAlert = true;
+                        if (isCancelled && prefs.orderCancelled) shouldAlert = true;
+
+                        // Fallback for other types if strictly not disabled? 
+                        // For now, only alert if matches these specifically or if it's a general alert?
+                        // Let's assume general system alerts also respect 'sound' global toggle at least.
+                        if (!isNewOrder && !isCancelled) shouldAlert = true;
+
+                        if (shouldAlert) {
+                            if (prefs.sound) {
+                                playSound(prefs.soundType || 'Amber');
+                            }
+                            if (prefs.vibration) {
+                                Vibration.vibrate();
+                            }
+                        }
+                    } else {
+                        // Default behavior if no prefs found (e.g. first load)
+                        Vibration.vibrate();
+                        playSound('Amber');
+                    }
+
+                    // Optimistic update or refetch
+                    fetchNotifications();
+                })
+                .subscribe();
+        };
+
+        setupSubscription();
 
         return () => {
-            subscription.unsubscribe();
+            if (subscription) subscription.unsubscribe();
         };
     }, [fetchNotifications]);
 

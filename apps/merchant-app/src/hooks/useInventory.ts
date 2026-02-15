@@ -66,13 +66,33 @@ export function useInventory() {
 
     // Initial load when storeId is available
     useEffect(() => {
-        if (storeLoading) return; // Wait for store check to complete
+        if (storeLoading) return;
+
+        let subscription: any;
 
         if (storeId) {
             fetchInventory();
+
+            // Subscribe to real-time changes for this store's inventory
+            subscription = supabase
+                .channel(`inventory-${storeId}`)
+                .on('postgres_changes', {
+                    event: '*',
+                    schema: 'public',
+                    table: 'StoreProduct',
+                    filter: `storeId=eq.${storeId}`
+                }, () => {
+                    // Refetch to get the latest data including joined Product details
+                    fetchInventory();
+                })
+                .subscribe();
         } else {
-            setLoading(false); // No store, stop loading
+            setLoading(false);
         }
+
+        return () => {
+            if (subscription) subscription.unsubscribe();
+        };
     }, [storeId, storeLoading, fetchInventory]);
 
 

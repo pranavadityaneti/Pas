@@ -10,6 +10,7 @@ import {
     ScrollView,
     ActivityIndicator,
     Alert,
+    Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -79,7 +80,8 @@ export default function LoginScreen() {
     return (
         <SafeAreaView style={styles.container}>
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
                 style={styles.keyboardView}
             >
                 <ScrollView
@@ -88,9 +90,9 @@ export default function LoginScreen() {
                 >
                     <View style={styles.logoContainer}>
                         <View style={styles.logoBox}>
-                            <Ionicons name="storefront" size={32} color={Colors.primary} />
+                            <Image source={require('../../assets/logo.png')} style={styles.logo} resizeMode="contain" />
                         </View>
-                        <Text style={styles.title}>Merchant Portal</Text>
+                        <Text style={styles.title}>Partner Portal</Text>
                         <Text style={styles.subtitle}>Manage your store, orders, and inventory</Text>
                     </View>
 
@@ -156,7 +158,7 @@ export default function LoginScreen() {
                             style={styles.signupButton}
                             onPress={() => router.push('/(auth)/signup')}
                         >
-                            <Text style={styles.signupButtonText}>Apply as Merchant Partner</Text>
+                            <Text style={styles.signupButtonText}>Apply as Partner</Text>
                         </TouchableOpacity>
                     </View>
 
@@ -179,19 +181,16 @@ const styles = StyleSheet.create({
         flexGrow: 1,
         justifyContent: 'center',
         padding: 24,
+        paddingBottom: 40,
     },
     logoContainer: {
         alignItems: 'center',
         marginBottom: 32,
     },
     logoBox: {
-        width: 64,
-        height: 64,
-        backgroundColor: Colors.primary + '11',
-        borderRadius: 16,
-        justifyContent: 'center',
+        marginBottom: 10,
         alignItems: 'center',
-        marginBottom: 16,
+        justifyContent: 'center',
     },
     title: {
         fontSize: 24,
@@ -300,5 +299,9 @@ const styles = StyleSheet.create({
         color: '#9CA3AF',
         fontSize: 12,
         marginTop: 24,
+    },
+    logo: {
+        width: 220,
+        height: 220,
     },
 });

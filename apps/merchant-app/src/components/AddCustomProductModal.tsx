@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, ActivityIndicator, ScrollView, Alert, KeyboardAvoidingView, Platform, Image, FlatList } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, ActivityIndicator, ScrollView, Alert, KeyboardAvoidingView, Platform, Image, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors } from '../../constants/Colors';
 import { supabase } from '../lib/supabase';
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 interface AddCustomProductModalProps {
     visible: boolean;
@@ -64,7 +66,7 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
             });
 
             const { data, error } = await supabase.storage
-                .from('products') // Confirmed bucket name
+                .from('products')
                 .upload(fileName, formData, {
                     contentType: 'image/jpeg',
                 });
@@ -153,7 +155,10 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
 
     return (
         <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
-            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.overlay}>
+            <KeyboardAvoidingView
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                style={styles.overlay}
+            >
                 <View style={styles.container}>
                     <View style={styles.header}>
                         <Text style={styles.title}>Add Custom Product</Text>
@@ -162,7 +167,10 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
                         </TouchableOpacity>
                     </View>
 
-                    <ScrollView contentContainerStyle={styles.content}>
+                    <ScrollView
+                        contentContainerStyle={styles.content}
+                        keyboardShouldPersistTaps="handled"
+                    >
                         {/* Image Picker */}
                         <Text style={styles.label}>Product Photos (Min 1, Max 4) *</Text>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imageScroll}>
@@ -266,7 +274,13 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
 
 const styles = StyleSheet.create({
     overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-    container: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, height: '90%', paddingBottom: 20 },
+    container: {
+        backgroundColor: '#fff',
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        height: Platform.OS === 'android' ? SCREEN_HEIGHT * 0.9 : '90%',
+        paddingBottom: 20
+    },
     header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#eee' },
     title: { fontSize: 20, fontWeight: 'bold' },
     content: { padding: 20 },

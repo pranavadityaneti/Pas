@@ -1,0 +1,1064 @@
+<!DOCTYPE html>
+<html lang="en">
+<meta http-equiv="content-type" content="text/html;charset=utf-8" />
+
+<head>
+
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Master</title>
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/fonts.googleapis.com/css24b9.css?family=Source+Sans+Pro:300,400,400i,700&amp;display=fallback">
+    <link rel="shortcut icon" type="image/x-icon" href="">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sriracha&display=swap" rel="stylesheet">
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/bower_components/bootstrap-datepicker/dist/css/bootstrap-datepicker.min.css">
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/select2/css/select2.min.css">
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/select2-bootstrap4-theme/select2-bootstrap4.min.css">
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/code.ionicframework.com/ionicons/2.0.1/css/ionicons.min.css">
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/tempusdominus-bootstrap-4/css/tempusdominus-bootstrap-4.min.css">
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/icheck-bootstrap/icheck-bootstrap.min.css">
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/jqvmap/jqvmap.min.css">
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/dist/css/adminlte.min.css">
+    <link href="https://cdn.jsdelivr.net/gh/gitbrent/bootstrap-switch-button@1.1.0/css/bootstrap-switch-button.min.css"
+        rel="stylesheet" />
+    <link rel="stylesheet" type="text/css"
+        href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" />
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/daterangepicker/daterangepicker.css">
+
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/summernote/summernote-bs4.min.css">
+
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/datatables-bs4/css/dataTables.bootstrap4.min.css">
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/datatables-responsive/css/responsive.bootstrap4.min.css">
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/datatables-buttons/css/buttons.bootstrap4.min.css">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css"
+        integrity="sha384-wvfXpqpZZVQGK6TAh5PVlGOfQNHSoD2xbE+QkPxCAFlNEevoEH3Sl0sibVcOQVnN" crossorigin="anonymous">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" type="text/css">
+
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/common/css/flaticon.css" />
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/dist/css/custom.css">
+    <link rel="stylesheet" href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/common/css/admin.css" />
+
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+
+    <!-- Toast -->
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/common/css/jquery.toast.css" />
+    <script type="text/javascript"
+        src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/common/js/jquery.toast.js"></script>
+    <!-- Confirm Alert -->
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/common/css/jquery-confirm.min.css" />
+    <script type='text/javascript'
+        src='https://crazyconceptsindia.com/beta/pickatstore/public/assets/common/js/jquery-confirm.min.js'></script>
+    <!-- Fancy box -->
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/dist/css/jquery.fancybox.min.css" />
+    <script
+        src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/dist/js/jquery.fancybox.js"></script>
+    <!-- Button Toggle -->
+    <link href="https://cdn.jsdelivr.net/gh/gitbrent/bootstrap4-toggle@3.6.1/css/bootstrap4-toggle.min.css"
+        rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/gh/gitbrent/bootstrap4-toggle@3.6.1/js/bootstrap4-toggle.min.js"></script>
+    <script
+        src="https://cdn.jsdelivr.net/gh/gitbrent/bootstrap-switch-button@1.1.0/dist/bootstrap-switch-button.min.js"></script>
+    <!-- Crop Image -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/croppie/2.6.4/croppie.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/croppie/2.6.4/croppie.js"></script>
+    <!-- Colorpicker -->
+    <link rel="stylesheet"
+        href="https://crazyconceptsindia.com/beta/pickatstore/public/assets/common/css/colorpicker.css"
+        type="text/css" />
+    <script src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/common/js/colorpicker.js"></script>
+
+
+    <script type="text/javascript">
+        $(document).ready(function () {
+            var active = $('.cat-navs a.active');
+            var left = active.position().left;
+            var currScroll = $(".cat-navs").scrollLeft();
+            var contWidth = $('.cat-navs').width() / 2;
+            var activeOuterWidth = active.outerWidth() / 2;
+            left = left + currScroll - contWidth + activeOuterWidth;
+            $('.cat-navs').animate({
+                scrollLeft: left
+            }, 'slow');
+
+            $('.lightbox-image').fancybox({
+                openEffect: 'fade',
+                closeEffect: 'fade',
+                helpers: {
+                    media: {}
+                }
+            });
+        });
+        $('.clk a').click(function () {
+            $(this).find('i').toggleClass('fa-arrow-left fa-arrow-right');
+        });
+    </script>
+    <style>
+        .breadcrumb.lh1 {
+            display: none;
+        }
+    </style>
+</head>
+
+<body class="hold-transition sidebar-mini layout-fixed">
+    <div class="wrapper">
+        <nav class="main-header navbar navbar-expand navbar-white  navbar-siteclr navbar-light">
+            <ul class="navbar-nav">
+                <li class="nav-item  clk d-none d-md-inline">
+                    <a class="nav-link h-auto text-white" data-widget="pushmenu" href="#" role="button"><i
+                            class="fa fa-bars white"></i> </a>
+                </li>
+                <li class="nav-item  clk d-md-none barright">
+                    <a class="nav-link h-auto text-white" data-widget="pushmenu" href="#" role="button"><i
+                            class="fa fa-bars white"></i> </a>
+                </li>
+                <li class="nav-item ">
+                    <span class="d-md-none d-block mb-admin pt-1">Master Panel </span>
+                </li>
+            </ul>
+            <ul class="navbar-nav ml-auto">
+                <li class="nav-item hdr-btn2 d-none d-md-inline">
+                    <label class="tooltip-main">
+                        <span class="tooltip-link"><i class="fa fa-calendar fa-lg text-white "></i></span>
+                        <div class="tooltip-sub">
+                            <ul class="pl-3 mb-0">
+                                <li>
+                                    Last Login
+                                    <div class="bdrbtm1 mb-1"></div>
+                                    22 Jan 2026 <br>Thursday <br>
+                                    11:04 AM
+                                </li>
+                            </ul>
+                        </div>
+                    </label>
+                </li>
+
+                <li class="nav-item d-md-none hdr-btn2">
+                    <label class="tooltip-main">
+                        <span class="tooltip-link"><i class="fa fa-calendar fa-lg text-white "></i></span>
+                        <div class="tooltip-sub">
+                            <ul class="pl-3 mb-0">
+                                <li>22 Jan 2026 <br>Thursday <br>
+                                    11:04 AM </li>
+                            </ul>
+                        </div>
+                    </label>
+                    </span>
+                </li>
+
+
+                <li class="nav-item hdr-btn1 ml-3">
+                    <a class="nav-link h-auto " href="https://crazyconceptsindia.com/beta/pickatstore/" target="_blank">
+                        <label class="tooltip-main">
+                            <span class="tooltip-link"><i class="fa fa-globe fa-lg"></i></span>
+                            <div class="tooltip-sub">
+                                <ul class="pl-3 mb-0">
+                                    <li>View Live Site</li>
+                                </ul>
+                            </div>
+                        </label>
+
+                    </a>
+                </li>
+
+                <li class="nav-item hdr-btn ml-3 mr-md-4 mr-2">
+                    <a class="nav-link h-auto white confirm_alert"
+                        href="https://crazyconceptsindia.com/beta/pickatstore/master/logout"
+                        data-title="Are you sure you want to Logout ?">
+                        <label class="tooltip-main">
+                            <span class="tooltip-link"><i class="fa fa-power-off fa-lg"></i></span>
+                            <div class="tooltip-sub">
+                                <ul class="pl-3 mb-0">
+                                    <li>Logout</li>
+                                </ul>
+                            </div>
+                        </label>
+
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+
+
+        <script>
+            $(document).ready(function () {
+                $('#sidebar_div').animate({
+                    scrollTop: $('#sidebar_div .active').offset().top - 150
+                }, 1000);
+            });
+            function search_left_menu() {
+                var value = $("#myInput").val().toLowerCase();
+                $(".sidebar-menu > li").filter(function () {
+                    $(this).toggle($(this).text().toLowerCase().indexOf(value) !== -1)
+                });
+            }
+        </script>
+        <div id="left_menu_div" class="main-sidebar  elevation-4">
+            <a href="#" data-widget="pushmenu" class="brand-link logo-header">
+                <div>Admin Login<span>
+
+                        <i class="fa fa-times d-md-none d-inline float-right closemenu"></i> </span> </div>
+
+                <span class="line"></span>
+            </a>
+            <div id="sidebar_div" class="sidebar pad-0" style="height: 100%;overflow-x: hidden;overflow-y: auto;">
+                <div class="px-2 pt-2">
+                    <input type="text" id="myInput" name="q" class="form-control" placeholder="Search..."
+                        autocomplete="off" onkeyup="search_left_menu()">
+                </div>
+                <nav class="">
+                    <ul class="nav nav-pills nav-sidebar sidebar-menu  flex-column" data-widget="treeview" role="menu"
+                        data-accordion="false">
+                        <li class="li-heading">Orders</li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/orders" title="Orders"
+                                class="nav-link active"><i class="fa fa-snowflake-o"></i> Orders</a>
+                        </li>
+                        <li class="li-heading">Users</li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/stores" title="Stores"
+                                class="nav-link "><i class="fa fa-snowflake-o"></i> Stores</a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/customers" title="Customers"
+                                class="nav-link "><i class="fa fa-snowflake-o"></i> Customers</a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/influencers"
+                                title="influencers" class="nav-link "><i class="fa fa-snowflake-o"></i> Influencers</a>
+                        </li>
+                        <li class="li-heading">Products</li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/products/business_verticals"
+                                title="Products" class="nav-link "><i class="fa fa-snowflake-o"></i> Products</a>
+                        </li>
+                        <li class="li-heading">Master Data</li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/measurement_groups"
+                                title="Measurements" class="nav-link "><i class="fa fa-snowflake-o"></i>
+                                Measurements</a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/brands" title="Brands"
+                                class="nav-link "><i class="fa fa-snowflake-o"></i> Brands</a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/colors" title="Colors"
+                                class="nav-link "><i class="fa fa-snowflake-o"></i> Colors</a>
+                        </li>
+                        <li class="li-heading">Enquiries</li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/contact_us_enquiries/contact_us_enquiries/0"
+                                title="Package Tags" class="nav-link "><i class="fa fa-snowflake-o"></i> Contact Us
+                                Enquiries</a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/store_app_registrations/store_app_registrations/0"
+                                title="Package Tags" class="nav-link "><i class="fa fa-snowflake-o"></i> Store App
+                                Registrations</a>
+                        </li>
+                        <li class="li-heading">CMS Management</li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/trails" title="Trails"
+                                class="nav-link "><i class="fa fa-snowflake-o"></i> Trails</a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/events" title="Events"
+                                class="nav-link "><i class="fa fa-snowflake-o"></i> Events</a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/header_menu"
+                                title="header_menu" class="nav-link "><i class="fa fa-bars"></i> Header Menu</a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/banners/banners"
+                                title="Banners" class="nav-link "><i class="fa fa-picture-o"></i> Banners</a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/hero_pick_banners/hero_pick_banners"
+                                title="Hero Pick Banners" class="nav-link "><i class="fa fa-picture-o"></i> Hero Pick
+                                Banners</a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/contact_us_details/contact_us_details"
+                                title="Contact Details" class="nav-link "><i class="fa fa-phone"></i> Contact
+                                Details</a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/about_us/about_us"
+                                title="CMS Pages" class="nav-link "><i class="fa fa-snowflake-o"></i> About Us /
+                                Carnival</a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/cms_pages/cms_pages"
+                                title="CMS Pages" class="nav-link "><i class="fa fa-snowflake-o"></i> CMS Pages</a>
+                        </li>
+                        <li class="li-heading">SEO Related</li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/seo_related/seo_tags"
+                                title="SEO Related" class="nav-link "><i class="fa fa-snowflake-o"></i> SEO Tags</a>
+                        </li>
+                        <li class="li-heading">Web Settings</li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/web_settings"
+                                title="Web Settings" class="nav-link "><i class="fa fa-snowflake-o"></i> Web
+                                Settings</a>
+                        </li>
+                        <li class="li-heading">SETTINGS</li>
+                        <li class="nav-item">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/settings"
+                                title="Username & Password" class="nav-link "><i class="fa fa-user"></i> Username &
+                                Password</a>
+                        </li>
+                        <li class="nav-item d-none d-md-block">
+                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/logout" title="Logout"
+                                class="nav-link "><i class="fa fa-power-off"></i> Logout</a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+            <div class="sidebar-menu-footer d-md-none">
+                <a href="https://crazyconceptsindia.com/beta/pickatstore/master/logout" title="Logout"><button
+                        class="btn btn-sm btn-danger px-4"><i class="fa fa-power-off"></i> Logout</button></a>
+            </div>
+        </div>
+        <div class="content-wrapper">
+            <div class="content-header">
+                <div class="container-fluid">
+                    <div class="  box box-primary">
+                        <div class="box-header with-border">
+                            <div class="row">
+                                <div class="col-md-6 col-7">
+                                    <div class="main-heading p-0 lh1"><i class="fa fa-forward"></i> Orders <span
+                                            class="blak-color">View</span></div>
+                                    <ol class="breadcrumb lh1">
+                                        <li class="breadcrumb-item">
+                                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/"
+                                                class="black"> <i class="fa fa-home"></i> Home</a>
+                                        </li>
+                                        <li class="breadcrumb-item">
+                                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/"
+                                                class="black"> <i class="fa fa-snowflake-o"></i> Orders</a>
+                                        </li>
+                                        <li class="breadcrumb-item active">Orders</li>
+                                    </ol>
+                                </div>
+                                <div class="col-md-6 col-5 text-right pl-0">
+                                    <a target="_blank"
+                                        href="https://crazyconceptsindia.com/beta/pickatstore/master/orders/customer_pdf/ORD1768196852"
+                                        class="btn btn-sm btn-success"><i class="fa fa-download"></i> Customer
+                                        Invoice</a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="content-header">
+                <div class="container-fluid">
+                    <div class="card box box-primary mb-3">
+                        <div class="card-body table-responsive">
+                            <table id="" class="table table-bordered table-striped  ">
+                                <thead>
+                                    <tr>
+                                        <th>Action</th>
+                                        <th>Order ID</th>
+                                        <th>Customer Details</th>
+                                        <th>Payment Details</th>
+                                        <th>Order Date Time</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td>
+                                            <a href="https://crazyconceptsindia.com/beta/pickatstore/master/orders/orders/1"
+                                                class="btn btn-sm btn-danger"><i class="fa fa-arrow-left"></i> Back</a>
+                                        </td>
+                                        <td>
+                                            <div>ORD1768196852</div>
+                                        </td>
+                                        <td>
+                                            <div>Radhakrishna</div>
+                                            <div>9100873271</div>
+                                            <div>Radhakrishna143@gmail.com</div>
+                                        </td>
+                                        <td>
+                                            <div class="font-weight-bold"><i class="fa fa-inr"></i> 1737</div>
+                                        </td>
+                                        <td>
+                                            <div>12-Jan-2026</div>
+                                            <div>Monday</div>
+                                            <div>11:17 AM</div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="card box box-primary mb-3">
+                        <div class="box-header">
+                            <div class="d-flex justify-content-between">
+                                <h2 class="main-heading1"><i class="fa fa-forward"></i> Store <span
+                                        class="blak-color">Details </span> </h2>
+                                <a target="_blank"
+                                    href="https://crazyconceptsindia.com/beta/pickatstore/master/orders/store_pdf/ORDS91768196852"
+                                    class="btn btn-sm btn-success"><i class="fa fa-download"></i> Store Order</a>
+                            </div>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table id="" class="table table-bordered table-striped m-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Store Order ID</th>
+                                            <th>Store Details</th>
+                                            <th>Branch Details</th>
+                                            <th>Pickup</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td>
+                                                <div>ORDS91768196852</div>
+                                            </td>
+                                            <td>
+                                                <div>Bawarchi</div>
+                                                <div>7032857071</div>
+                                            </td>
+                                            <td>
+                                                <div>Kondapur</div>
+                                                <div>8247285729</div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold text-danger">Pending</div>
+                                                <a class="badge badge-warning" href="javascript:void(0)"
+                                                    onclick="change_default_status('pickup_status',290,1)"
+                                                    title="Ready">Ready For Pickup</a><br>
+                                                <a class="badge badge-success" href="javascript:void(0)"
+                                                    onclick="change_default_status('pickup_status',290,2)"
+                                                    title="Deactive">Pickup Completed</a>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="table-responsive">
+                                <table id="" class="table table-bordered table-striped m-0">
+                                    <thead>
+                                        <tr>
+                                            <th>S.No</th>
+                                            <th>Product Details</th>
+                                            <th>Price</th>
+                                            <th>QTY</th>
+                                            <th>Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+
+                                        <tr>
+                                            <td>1</td>
+                                            <td>
+                                                <div>Chicken Dum biryani</div>
+                                                <div></div>
+                                                <div></div>
+                                                <div></div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold"><i class="fa fa-inr"></i> 270</div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold">1</div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold"><i class="fa fa-inr"></i> 270</div>
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <th colspan="4" class="text-right">Sub Total</th>
+                                            <th>
+                                                <div>270</div>
+                                            </th>
+                                        </tr>
+                                        <tr>
+                                            <th colspan="4" class="text-right">GST</th>
+                                            <th>
+                                                <div>0</div>
+                                            </th>
+                                        </tr>
+                                        <tr>
+                                            <th colspan="4" class="text-right">Total Amount</th>
+                                            <th>
+                                                <div>270</div>
+                                            </th>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card box box-primary mb-3">
+                        <div class="box-header">
+                            <div class="d-flex justify-content-between">
+                                <h2 class="main-heading1"><i class="fa fa-forward"></i> Store <span
+                                        class="blak-color">Details </span> </h2>
+                                <a target="_blank"
+                                    href="https://crazyconceptsindia.com/beta/pickatstore/master/orders/store_pdf/ORDS81768196852"
+                                    class="btn btn-sm btn-success"><i class="fa fa-download"></i> Store Order</a>
+                            </div>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table id="" class="table table-bordered table-striped m-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Store Order ID</th>
+                                            <th>Store Details</th>
+                                            <th>Branch Details</th>
+                                            <th>Pickup</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td>
+                                                <div>ORDS81768196852</div>
+                                            </td>
+                                            <td>
+                                                <div>Sarvi</div>
+                                                <div>8247285729</div>
+                                            </td>
+                                            <td>
+                                                <div>Nizampet</div>
+                                                <div>9000916367</div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold text-danger">Pending</div>
+                                                <a class="badge badge-warning" href="javascript:void(0)"
+                                                    onclick="change_default_status('pickup_status',291,1)"
+                                                    title="Ready">Ready For Pickup</a><br>
+                                                <a class="badge badge-success" href="javascript:void(0)"
+                                                    onclick="change_default_status('pickup_status',291,2)"
+                                                    title="Deactive">Pickup Completed</a>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="table-responsive">
+                                <table id="" class="table table-bordered table-striped m-0">
+                                    <thead>
+                                        <tr>
+                                            <th>S.No</th>
+                                            <th>Product Details</th>
+                                            <th>Price</th>
+                                            <th>QTY</th>
+                                            <th>Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+
+                                        <tr>
+                                            <td>1</td>
+                                            <td>
+                                                <div>Egg biryani</div>
+                                                <div></div>
+                                                <div></div>
+                                                <div></div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold"><i class="fa fa-inr"></i> 145</div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold">1</div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold"><i class="fa fa-inr"></i> 145</div>
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <th colspan="4" class="text-right">Sub Total</th>
+                                            <th>
+                                                <div>145</div>
+                                            </th>
+                                        </tr>
+                                        <tr>
+                                            <th colspan="4" class="text-right">GST</th>
+                                            <th>
+                                                <div>0</div>
+                                            </th>
+                                        </tr>
+                                        <tr>
+                                            <th colspan="4" class="text-right">Total Amount</th>
+                                            <th>
+                                                <div>145</div>
+                                            </th>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card box box-primary mb-3">
+                        <div class="box-header">
+                            <div class="d-flex justify-content-between">
+                                <h2 class="main-heading1"><i class="fa fa-forward"></i> Store <span
+                                        class="blak-color">Details </span> </h2>
+                                <a target="_blank"
+                                    href="https://crazyconceptsindia.com/beta/pickatstore/master/orders/store_pdf/ORDS71768196852"
+                                    class="btn btn-sm btn-success"><i class="fa fa-download"></i> Store Order</a>
+                            </div>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table id="" class="table table-bordered table-striped m-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Store Order ID</th>
+                                            <th>Store Details</th>
+                                            <th>Branch Details</th>
+                                            <th>Pickup</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td>
+                                                <div>ORDS71768196852</div>
+                                            </td>
+                                            <td>
+                                                <div>Nawaab's</div>
+                                                <div>9353886733</div>
+                                            </td>
+                                            <td>
+                                                <div>Kondapur</div>
+                                                <div>9353886733</div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold text-danger">Pending</div>
+                                                <a class="badge badge-warning" href="javascript:void(0)"
+                                                    onclick="change_default_status('pickup_status',292,1)"
+                                                    title="Ready">Ready For Pickup</a><br>
+                                                <a class="badge badge-success" href="javascript:void(0)"
+                                                    onclick="change_default_status('pickup_status',292,2)"
+                                                    title="Deactive">Pickup Completed</a>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="table-responsive">
+                                <table id="" class="table table-bordered table-striped m-0">
+                                    <thead>
+                                        <tr>
+                                            <th>S.No</th>
+                                            <th>Product Details</th>
+                                            <th>Price</th>
+                                            <th>QTY</th>
+                                            <th>Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+
+                                        <tr>
+                                            <td>1</td>
+                                            <td>
+                                                <div>Mutton biryani</div>
+                                                <div></div>
+                                                <div></div>
+                                                <div></div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold"><i class="fa fa-inr"></i> 550</div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold">1</div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold"><i class="fa fa-inr"></i> 550</div>
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <th colspan="4" class="text-right">Sub Total</th>
+                                            <th>
+                                                <div>550</div>
+                                            </th>
+                                        </tr>
+                                        <tr>
+                                            <th colspan="4" class="text-right">GST</th>
+                                            <th>
+                                                <div>0</div>
+                                            </th>
+                                        </tr>
+                                        <tr>
+                                            <th colspan="4" class="text-right">Total Amount</th>
+                                            <th>
+                                                <div>550</div>
+                                            </th>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card box box-primary mb-3">
+                        <div class="box-header">
+                            <div class="d-flex justify-content-between">
+                                <h2 class="main-heading1"><i class="fa fa-forward"></i> Store <span
+                                        class="blak-color">Details </span> </h2>
+                                <a target="_blank"
+                                    href="https://crazyconceptsindia.com/beta/pickatstore/master/orders/store_pdf/ORDS61768196852"
+                                    class="btn btn-sm btn-success"><i class="fa fa-download"></i> Store Order</a>
+                            </div>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table id="" class="table table-bordered table-striped m-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Store Order ID</th>
+                                            <th>Store Details</th>
+                                            <th>Branch Details</th>
+                                            <th>Pickup</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td>
+                                                <div>ORDS61768196852</div>
+                                            </td>
+                                            <td>
+                                                <div>Shahi Dastarkhwan</div>
+                                                <div>9000916367</div>
+                                            </td>
+                                            <td>
+                                                <div>KPHB</div>
+                                                <div>9000916367</div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold text-danger">Pending</div>
+                                                <a class="badge badge-warning" href="javascript:void(0)"
+                                                    onclick="change_default_status('pickup_status',293,1)"
+                                                    title="Ready">Ready For Pickup</a><br>
+                                                <a class="badge badge-success" href="javascript:void(0)"
+                                                    onclick="change_default_status('pickup_status',293,2)"
+                                                    title="Deactive">Pickup Completed</a>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="table-responsive">
+                                <table id="" class="table table-bordered table-striped m-0">
+                                    <thead>
+                                        <tr>
+                                            <th>S.No</th>
+                                            <th>Product Details</th>
+                                            <th>Price</th>
+                                            <th>QTY</th>
+                                            <th>Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+
+                                        <tr>
+                                            <td>1</td>
+                                            <td>
+                                                <div>Chicken Biryani</div>
+                                                <div></div>
+                                                <div></div>
+                                                <div></div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold"><i class="fa fa-inr"></i> 430</div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold">1</div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold"><i class="fa fa-inr"></i> 430</div>
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <th colspan="4" class="text-right">Sub Total</th>
+                                            <th>
+                                                <div>430</div>
+                                            </th>
+                                        </tr>
+                                        <tr>
+                                            <th colspan="4" class="text-right">GST</th>
+                                            <th>
+                                                <div>0</div>
+                                            </th>
+                                        </tr>
+                                        <tr>
+                                            <th colspan="4" class="text-right">Total Amount</th>
+                                            <th>
+                                                <div>430</div>
+                                            </th>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card box box-primary mb-3">
+                        <div class="box-header">
+                            <div class="d-flex justify-content-between">
+                                <h2 class="main-heading1"><i class="fa fa-forward"></i> Store <span
+                                        class="blak-color">Details </span> </h2>
+                                <a target="_blank"
+                                    href="https://crazyconceptsindia.com/beta/pickatstore/master/orders/store_pdf/ORDS51768196852"
+                                    class="btn btn-sm btn-success"><i class="fa fa-download"></i> Store Order</a>
+                            </div>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table id="" class="table table-bordered table-striped m-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Store Order ID</th>
+                                            <th>Store Details</th>
+                                            <th>Branch Details</th>
+                                            <th>Pickup</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td>
+                                                <div>ORDS51768196852</div>
+                                            </td>
+                                            <td>
+                                                <div>Paradise</div>
+                                                <div>7032857073</div>
+                                            </td>
+                                            <td>
+                                                <div>Kondapur</div>
+                                                <div>7032857073</div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold text-danger">Pending</div>
+                                                <a class="badge badge-warning" href="javascript:void(0)"
+                                                    onclick="change_default_status('pickup_status',294,1)"
+                                                    title="Ready">Ready For Pickup</a><br>
+                                                <a class="badge badge-success" href="javascript:void(0)"
+                                                    onclick="change_default_status('pickup_status',294,2)"
+                                                    title="Deactive">Pickup Completed</a>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="table-responsive">
+                                <table id="" class="table table-bordered table-striped m-0">
+                                    <thead>
+                                        <tr>
+                                            <th>S.No</th>
+                                            <th>Product Details</th>
+                                            <th>Price</th>
+                                            <th>QTY</th>
+                                            <th>Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+
+                                        <tr>
+                                            <td>1</td>
+                                            <td>
+                                                <div>Fry piece Chicken Biryani</div>
+                                                <div></div>
+                                                <div>Brand 1</div>
+                                                <div></div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold"><i class="fa fa-inr"></i> 290</div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold">1</div>
+                                            </td>
+                                            <td>
+                                                <div class="font-weight-bold"><i class="fa fa-inr"></i> 290</div>
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <th colspan="4" class="text-right">Sub Total</th>
+                                            <th>
+                                                <div>290</div>
+                                            </th>
+                                        </tr>
+                                        <tr>
+                                            <th colspan="4" class="text-right">GST</th>
+                                            <th>
+                                                <div>52</div>
+                                            </th>
+                                        </tr>
+                                        <tr>
+                                            <th colspan="4" class="text-right">Total Amount</th>
+                                            <th>
+                                                <div>342</div>
+                                            </th>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6 p-0 mx-auto">
+                        <div class="card box box-primary mb-3">
+                            <div class="box-header">
+                                <h2 class="main-heading1"><i class="fa fa-inr"></i> Payment <span
+                                        class="blak-color">Details </span> </h2>
+                            </div>
+                            <div class="card-body table-responsive">
+                                <table id="" class="table table-bordered table-striped  ">
+                                    <tbody>
+                                        <tr>
+                                            <th colspan="4" class="text-right">Sub Total</th>
+                                            <th>
+                                                <div>1685</div>
+                                            </th>
+                                        </tr>
+                                        <tr>
+                                            <th colspan="4" class="text-right">GST</th>
+                                            <th>
+                                                <div>52</div>
+                                            </th>
+                                        </tr>
+                                        <tr>
+                                            <th colspan="4" class="text-right">Total Amount</th>
+                                            <th>
+                                                <div>1737</div>
+                                            </th>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <script>
+            function change_default_status(coloumn_name, id, sts) {
+                if (confirm("Are you sure want to change status?")) {
+                    $.ajax({
+                        type: "POST",
+                        dataType: "html",
+                        url: "https://crazyconceptsindia.com/beta/pickatstore/master/orders/orders_change_" + coloumn_name + "_status/" + id + "/" + sts,
+                        data: { ids: '1' }
+                    })
+                        .done(function (data) {
+                            var jsondata = jQuery.parseJSON(data);
+                            if (jsondata['status'] == 1) {
+                                $.toast({ heading: 'Success', text: jsondata['msg'], showHideTransition: 'fade', position: 'top-right', icon: 'success' });
+                                setTimeout(function () { window.location.reload(); }, 1000);
+                            }
+                            else {
+                                $.toast({ heading: 'Error', text: jsondata['msg'], showHideTransition: 'fade', position: 'top-right', icon: 'error' });
+                            }
+                        });
+                } else {
+                    window.location.reload();
+                }
+            }
+        </script>
+        <script>
+        </script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/bootstrap/js/bootstrap.bundle.min.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/chart.js/Chart.min.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/sparklines/sparkline.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/jqvmap/jquery.vmap.min.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/jqvmap/maps/jquery.vmap.usa.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/jquery-knob/jquery.knob.min.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/moment/moment.min.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/daterangepicker/daterangepicker.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/bower_components/bootstrap-datepicker/dist/js/bootstrap-datepicker.min.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/tempusdominus-bootstrap-4/js/tempusdominus-bootstrap-4.min.js"></script>
+        <script type="text/javascript"
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/select2/js/select2.full.min.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/summernote/summernote-bs4.min.js"></script>
+        <script src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/dist/js/adminlte.js"></script>
+        <script src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/dist/js/demo.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/dist/js/pages/dashboard.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/datatables/jquery.dataTables.min.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/datatables-bs4/js/dataTables.bootstrap4.min.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/datatables-responsive/js/dataTables.responsive.min.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/datatables-responsive/js/responsive.bootstrap4.min.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/datatables-buttons/js/dataTables.buttons.min.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/datatables-buttons/js/buttons.bootstrap4.min.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/jszip/jszip.min.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/pdfmake/pdfmake.min.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/pdfmake/vfs_fonts.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/datatables-buttons/js/buttons.html5.min.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/datatables-buttons/js/buttons.print.min.js"></script>
+        <script
+            src="https://crazyconceptsindia.com/beta/pickatstore/public/assets/admin/plugins/datatables-buttons/js/buttons.colVis.min.js"></script>
+        <script>
+            $(function () {
+                $('.datepicker').datepicker({
+                    autoclose: true,
+                    format: 'dd-mm-yyyy',
+                })
+                //Initialize Select2 Elements
+                $('.select2').select2()
+            })
+            $('a.confirm_alert').confirm({
+                content: "",
+            });
+            $('a.confirm_alert').confirm({
+                buttons: {
+                    hey: function () {
+                        location.href = this.$target.attr('href');
+                    }
+                }
+            });	
+        </script>
+</body>
+
+</html>

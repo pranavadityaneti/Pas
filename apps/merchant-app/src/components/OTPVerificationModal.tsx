@@ -77,7 +77,11 @@ export default function OTPVerificationModal({ visible, onClose, onVerify, order
 
                     <View style={styles.otpContainer}>
                         {[0, 1, 2, 3].map((index) => (
-                            <View key={index} style={[styles.otpDot, otp.length > index && styles.otpDotActive]} />
+                            <View key={index} style={[styles.otpBox, otp.length > index && styles.otpBoxActive]}>
+                                <Text style={[styles.otpText, otp.length > index && styles.otpTextActive]}>
+                                    {otp[index] || ''}
+                                </Text>
+                            </View>
                         ))}
                     </View>
 
@@ -137,9 +141,30 @@ const styles = StyleSheet.create({
     header: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
     title: { fontSize: 22, fontWeight: 'bold', color: '#111827' },
     subtitle: { fontSize: 16, color: '#6B7280', textAlign: 'center', marginBottom: 32, paddingHorizontal: 20, lineHeight: 22 },
-    otpContainer: { flexDirection: 'row', gap: 16, marginBottom: 24 },
-    otpDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#E5E7EB' },
-    otpDotActive: { backgroundColor: '#111827' },
+    otpContainer: { flexDirection: 'row', gap: 12, marginBottom: 24 },
+    otpBox: {
+        width: 50,
+        height: 60,
+        borderRadius: 12,
+        backgroundColor: '#F3F4F6',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#E5E7EB'
+    },
+    otpBoxActive: {
+        backgroundColor: '#fff',
+        borderColor: '#374151',
+        borderWidth: 2
+    },
+    otpText: {
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: '#374151'
+    },
+    otpTextActive: {
+        color: '#111827'
+    },
     errorText: { color: '#EF4444', fontSize: 14, fontWeight: '600', marginBottom: 16 },
     keypad: { width: '100%', gap: 12, marginBottom: 32 },
     row: { flexDirection: 'row', gap: 12 },

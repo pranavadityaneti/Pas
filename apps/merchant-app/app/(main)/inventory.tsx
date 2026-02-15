@@ -284,14 +284,14 @@ const styles = StyleSheet.create({
     title: { fontSize: 28, fontWeight: 'bold', color: '#000' },
     stats: { alignItems: 'flex-end' },
     totalLabel: { fontSize: 12, color: '#666' },
-    totalValue: { fontSize: 16, fontWeight: 'bold' },
+    totalValue: { fontSize: 16, fontWeight: 'bold', color: '#000' },
     storeBadge: { backgroundColor: '#f0f0f0', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
-    storeText: { fontSize: 12, fontWeight: '600' },
+    storeText: { fontSize: 12, fontWeight: '600', color: '#000' },
 
     controls: { paddingHorizontal: 20, paddingTop: 10 },
     searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 15, borderRadius: 10, height: 50, borderWidth: 1, borderColor: '#eee', marginBottom: 15 },
     searchIcon: { marginRight: 10 },
-    searchInput: { flex: 1, fontSize: 16 },
+    searchInput: { flex: 1, fontSize: 16, color: '#000' },
 
     filterRow: { paddingBottom: 10, gap: 10 },
     chip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#ddd', marginRight: 8, gap: 6 },
@@ -307,7 +307,7 @@ const styles = StyleSheet.create({
 
     emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
     illustration: { width: 200, height: 200, marginBottom: 20, opacity: 0.5 },
-    emptyTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' },
+    emptyTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 10, textAlign: 'center', color: '#000' },
     emptyDesc: { fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 30 },
     bigAddBtn: { backgroundColor: Colors.primary, paddingHorizontal: 30, paddingVertical: 15, borderRadius: 30 },
     bigAddText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },

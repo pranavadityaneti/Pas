@@ -4,11 +4,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
 import { useRouter } from 'expo-router';
-import { useNotifications } from '../../src/hooks/useNotifications';
+import { useNotificationContext } from '../../src/context/NotificationContext';
 
 export default function NotificationsScreen() {
     const router = useRouter();
-    const { notifications, loading, markAsRead, markAllAsRead } = useNotifications();
+    const { notifications, loading, markAsRead, markAllAsRead } = useNotificationContext();
 
     const getIcon = (type: string) => {
         switch (type) {
@@ -32,9 +32,18 @@ export default function NotificationsScreen() {
         return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
     };
 
-    const handleNotificationPress = async (notificationId: string, read: boolean) => {
+    const handleNotificationPress = async (notificationId: string, read: boolean, link?: string) => {
         if (!read) {
             await markAsRead(notificationId);
+        }
+        if (link) {
+            // Check if link is a relative path or requires special handling
+            if (link.startsWith('/')) {
+                router.push(link as any);
+            } else {
+                // Handle external links or other schemas if needed
+                console.log("External link:", link);
+            }
         }
     };
 
@@ -80,7 +89,7 @@ export default function NotificationsScreen() {
                         <TouchableOpacity
                             key={notif.id}
                             style={[styles.notifCard, !notif.read && styles.unread]}
-                            onPress={() => handleNotificationPress(notif.id, notif.read)}
+                            onPress={() => handleNotificationPress(notif.id, notif.read, notif.link)}
                         >
                             <View style={[styles.iconCircle, !notif.read && styles.iconCircleUnread]}>
                                 <Ionicons name={getIcon(notif.type) as any} size={20} color={notif.read ? '#6B7280' : Colors.primary} />

@@ -82,7 +82,7 @@ export default function SettingsScreen() {
             }
 
             setUser({
-                name: userData?.name || 'Merchant',
+                name: userData?.name || 'Partner',
                 role: userData?.role === 'MERCHANT' ? 'Admin' : (userData?.role || 'Staff'),
                 branch: storeName, // Default to store name
                 storeName: storeName
@@ -251,7 +251,7 @@ export default function SettingsScreen() {
                     <Text style={styles.signOutText}>Log Out</Text>
                 </TouchableOpacity>
 
-                <Text style={styles.versionText}>v1.2.0 • Pick At Store Merchant</Text>
+                <Text style={styles.versionText}>v1.2.0 • Pick At Store Partner</Text>
                 <View style={{ height: 20 }} />
             </ScrollView>
         </SafeAreaView>

@@ -6,16 +6,19 @@ import Image from "next/image";
 import { cn } from "@/lib/utils";
 
 const cards = [
-    { id: 1, src: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=60" },
-    { id: 2, src: "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=500&auto=format&fit=crop&q=60" },
-    { id: 3, src: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=500&auto=format&fit=crop&q=60" },
-    { id: 4, src: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=500&auto=format&fit=crop&q=60" },
-    { id: 5, src: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=500&auto=format&fit=crop&q=60" },
-    { id: 6, src: "https://images.unsplash.com/photo-1488426862026-3ee34a7d66df?w=500&auto=format&fit=crop&q=60" },
-    { id: 7, src: "https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?w=500&auto=format&fit=crop&q=60" },
+    { id: 1, src: "https://images.unsplash.com/photo-1604719312566-b7cb33746955?w=500&auto=format&fit=crop&q=60" }, // Shopping bag
+    { id: 2, src: "https://images.unsplash.com/photo-1578916171728-46686eac8d58?w=500&auto=format&fit=crop&q=60" }, // Grocery store
+    { id: 3, src: "https://images.unsplash.com/photo-1583258292688-d0213dc5a3a8?w=500&auto=format&fit=crop&q=60" }, // Market
+    { id: 4, src: "https://images.unsplash.com/photo-1601599967104-18c79870ea41?w=500&auto=format&fit=crop&q=60" }, // Coffee to go
+    { id: 5, src: "https://images.unsplash.com/photo-1542838132-92c53300491e?w=500&auto=format&fit=crop&q=60" }, // Fresh produce
+    { id: 6, src: "https://images.unsplash.com/photo-1556740738-b6a63e27c4df?w=500&auto=format&fit=crop&q=60" }, // Payment
+    { id: 7, src: "https://images.unsplash.com/photo-1528698827591-e19ccd7bc23d?w=500&auto=format&fit=crop&q=60" }, // Storefront
+    { id: 8, src: "https://images.unsplash.com/photo-1506617516198-48f39545cdeb?w=500&auto=format&fit=crop&q=60" }, // Happy customer
+    { id: 9, src: "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=500&auto=format&fit=crop&q=60" }, // Clothes
+    { id: 10, src: "https://images.unsplash.com/photo-1534452203293-494d7ddbf7e0?w=500&auto=format&fit=crop&q=60" }, // Shopping
 ];
 
-// Duplicate cards for infinite effect
+// Duplicate cards for infinite effect (tripled for smoothness)
 const infiniteCards = [...cards, ...cards, ...cards];
 
 export function CurvedCarousel() {
@@ -24,15 +27,13 @@ export function CurvedCarousel() {
 
     // Auto-scroll logic
     useAnimationFrame((time, delta) => {
-        // Move 0.5px per frame for smooth 60fps
-        const moveBy = 0.5 * (delta / 16);
+        // Move faster: 1.0px per frame (was 0.5)
+        const moveBy = 1.2 * (delta / 16);
         // Reset when we've scrolled past the first set width (approx)
-        // For now simple infinite scrolling
         let newX = scrollX.get() - moveBy;
 
-        // A rough reset mechanism - in a real app create a windowing system or seamless loop
-        // forcing a large enough reset buffer
-        if (newX <= -2000) {
+        // Reset buffer based on increased card count
+        if (newX <= -3000) {
             newX = 0;
         }
         scrollX.set(newX);

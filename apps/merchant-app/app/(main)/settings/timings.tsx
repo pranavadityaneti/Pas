@@ -4,14 +4,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
-import { useStore } from '../../../src/hooks/useStore';
+import { useStoreContext } from '../../../src/context/StoreContext';
 import { supabase } from '../../../src/lib/supabase';
 import { Colors } from '../../../constants/Colors';
 
 const DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
 export default function TimingsScreen() {
-    const { storeId, loading: storeLoading } = useStore();
+    const { store, loading: storeLoading, updateStoreDetails } = useStoreContext();
     const [saving, setSaving] = useState(false);
 
     const [selectedDays, setSelectedDays] = useState<number[]>([0, 1, 2, 3, 4, 5]);
@@ -28,44 +28,27 @@ export default function TimingsScreen() {
     const [pickerMode, setPickerMode] = useState<'open' | 'close' | 'lunchStart' | 'lunchEnd'>('open');
 
     useEffect(() => {
-        if (!storeId) return;
-        fetchTimings();
-    }, [storeId]);
+        if (store?.operating_hours && Object.keys(store.operating_hours).length > 0) {
+            const oh = store.operating_hours;
 
-    const fetchTimings = async () => {
-        try {
-            const { data, error } = await supabase
-                .from('Store')
-                .select('operating_hours')
-                .eq('id', storeId)
-                .single();
+            if (oh.days) setSelectedDays(oh.days);
 
-            if (error) throw error;
+            // Helper to parse time string "HH:mm" to Date object
+            const parseTime = (timeStr: string) => {
+                const [h, m] = timeStr.split(':').map(Number);
+                const d = new Date();
+                d.setHours(h, m, 0, 0);
+                return d;
+            };
 
-            if (data?.operating_hours && Object.keys(data.operating_hours).length > 0) {
-                const oh = data.operating_hours;
+            if (oh.open) setOpenTime(parseTime(oh.open));
+            if (oh.close) setCloseTime(parseTime(oh.close));
 
-                if (oh.days) setSelectedDays(oh.days);
-
-                // Helper to parse time string "HH:mm" to Date object
-                const parseTime = (timeStr: string) => {
-                    const [h, m] = timeStr.split(':').map(Number);
-                    const d = new Date();
-                    d.setHours(h, m, 0, 0);
-                    return d;
-                };
-
-                if (oh.open) setOpenTime(parseTime(oh.open));
-                if (oh.close) setCloseTime(parseTime(oh.close));
-
-                if (oh.hasLunchBreak !== undefined) setHasLunchBreak(oh.hasLunchBreak);
-                if (oh.lunchStart) setLunchStart(parseTime(oh.lunchStart));
-                if (oh.lunchEnd) setLunchEnd(parseTime(oh.lunchEnd));
-            }
-        } catch (error) {
-            console.error('Error fetching timings:', error);
+            if (oh.hasLunchBreak !== undefined) setHasLunchBreak(oh.hasLunchBreak);
+            if (oh.lunchStart) setLunchStart(parseTime(oh.lunchStart));
+            if (oh.lunchEnd) setLunchEnd(parseTime(oh.lunchEnd));
         }
-    };
+    }, [store]);
 
     const toggleDay = (index: number) => {
         if (selectedDays.includes(index)) {
@@ -90,7 +73,7 @@ export default function TimingsScreen() {
     };
 
     const handleSave = async () => {
-        if (!storeId) return;
+        if (!store?.id) return;
         setSaving(true);
 
         // Format dates to HH:mm string
@@ -109,12 +92,11 @@ export default function TimingsScreen() {
         };
 
         try {
-            const { error } = await supabase
-                .from('Store')
-                .update({ operating_hours: payload })
-                .eq('id', storeId);
+            // Use Context for Optimistic Update
+            const { success, error } = await updateStoreDetails({ operating_hours: payload });
 
-            if (error) throw error;
+            if (!success) throw new Error(error);
+
             Alert.alert('Success', 'Store timings updated successfully');
             router.back();
         } catch (error) {

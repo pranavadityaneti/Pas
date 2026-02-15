@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, Modal, ActivityIndicator } from 'react-native';
+import React, { useState, useMemo } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import BottomModal from '../../../src/components/BottomModal';
 import { Colors } from '../../../constants/Colors';
 import { supabase } from '../../../src/lib/supabase';
 import { useStore } from '../../../src/hooks/useStore';
+import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
 
 const MOCK_BRANCHES = ['Main Store', 'Downtown Branch', 'Airport Branch'];
 
@@ -23,14 +24,29 @@ interface StaffMember {
 export default function StaffScreen() {
     const { storeId } = useStore();
     const [modalVisible, setModalVisible] = useState(false);
-    const [staff, setStaff] = useState<StaffMember[]>([]);
-    const [loading, setLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState(false);
 
-    // Form State
-    // ... imports
-    // we need to add activity types and state
-    // I will rewrite the component part to include new state and UI
+    // Realtime Data Hook
+    const { data: rawStaff, loading: tableLoading, setData } = useRealtimeTable({
+        tableName: 'StoreStaff',
+        filter: storeId ? `store_id=eq.${storeId}` : undefined,
+        orderBy: { column: 'created_at', ascending: false },
+        enabled: !!storeId
+    });
+
+    const staff = useMemo(() => {
+        return rawStaff.map(item => ({
+            id: item.id,
+            name: item.name,
+            role: item.role,
+            phone: item.phone,
+            branch: item.branch,
+            initials: item.name ? item.name.charAt(0).toUpperCase() : '?',
+            activities: Array.isArray(item.activities) ? item.activities : []
+        })) as StaffMember[];
+    }, [rawStaff]);
+
+    const loading = tableLoading && staff.length === 0;
 
     // Form State
     const [name, setName] = useState('');
@@ -42,43 +58,6 @@ export default function StaffScreen() {
 
     // Feature Flag / Logic for Branches
     const hasBranches = false;
-
-    useEffect(() => {
-        if (storeId) {
-            fetchStaff();
-        }
-    }, [storeId]);
-
-    const fetchStaff = async () => {
-        try {
-            const { data, error } = await supabase
-                .from('StoreStaff')
-                .select('*')
-                .eq('store_id', storeId)
-                .order('created_at', { ascending: false });
-
-            if (error) throw error;
-
-            if (data) {
-                // Map DB fields to UI if needed, currently they match roughly
-                // initials are generated in DB but good to have fallback
-                const formatted: StaffMember[] = data.map(item => ({
-                    id: item.id,
-                    name: item.name,
-                    role: item.role,
-                    phone: item.phone,
-                    branch: item.branch,
-                    initials: item.name ? item.name.charAt(0).toUpperCase() : '?',
-                    activities: item.activities || []
-                }));
-                setStaff(formatted);
-            }
-        } catch (error) {
-            console.error('Error fetching staff:', error);
-        } finally {
-            setLoading(false);
-        }
-    };
 
     const ACTIVITY_OPTIONS = [
         'Order Management',
@@ -138,6 +117,10 @@ export default function StaffScreen() {
             };
 
             if (editingId) {
+                // Optimistic Update
+                // @ts-ignore
+                setData(prev => prev.map(p => p.id === editingId ? { ...p, ...payload } : p));
+
                 // Update Existing
                 const { error } = await supabase
                     .from('StoreStaff')
@@ -152,16 +135,33 @@ export default function StaffScreen() {
 
                 if (error) throw error;
             } else {
-                // Add New
-                const { error } = await supabase
-                    .from('StoreStaff')
-                    .insert([payload]);
+                // Optimistic Add
+                const tempId = `temp-${Date.now()}`;
+                const tempMember = { ...payload, id: tempId };
+                // @ts-ignore
+                setData(prev => [tempMember, ...prev]);
 
-                if (error) throw error;
+                // Add New
+                const { data: newStaff, error } = await supabase
+                    .from('StoreStaff')
+                    .insert([payload])
+                    .select()
+                    .single();
+
+                if (error) {
+                    // Revert optimistic add on error
+                    // @ts-ignore
+                    setData(prev => prev.filter(p => p.id !== tempId));
+                    throw error;
+                }
+
+                // Replace temp ID with real ID (if Realtime doesn't beat us to it)
+                // @ts-ignore
+                setData(prev => prev.map(p => p.id === tempId ? newStaff : p));
             }
 
             // Refresh list
-            await fetchStaff();
+            // await fetchStaff(); // Auto-updated via realtime
             setModalVisible(false);
 
         } catch (error) {
@@ -176,9 +176,68 @@ export default function StaffScreen() {
 
     return (
         <SafeAreaView style={styles.container}>
-            {/* ... Header ... */}
+            {/* Header */}
+            <View style={styles.header}>
+                <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+                    <Ionicons name="chevron-back" size={24} color={Colors.text} />
+                </TouchableOpacity>
+                <Text style={styles.headerTitle}>Staff Management</Text>
+            </View>
 
-            {/* ... List ... */}
+            {/* List */}
+            {loading ? (
+                <View style={styles.loaderContainer}>
+                    <ActivityIndicator size="large" color={Colors.primary} />
+                </View>
+            ) : staff.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                    <View style={styles.emptyIconContainer}>
+                        <Ionicons name="people-outline" size={60} color={Colors.text} />
+                    </View>
+                    <Text style={styles.emptyTitle}>No Staff Members</Text>
+                    <Text style={styles.emptySubtitle}>
+                        Add staff members to help manage your store operations.
+                    </Text>
+                    <TouchableOpacity style={styles.emptyAddButton} onPress={openAddModal}>
+                        <Ionicons name="add" size={24} color={Colors.white} style={{ marginRight: 8 }} />
+                        <Text style={styles.emptyAddButtonText}>Add First Staff</Text>
+                    </TouchableOpacity>
+                </View>
+            ) : (
+                <ScrollView contentContainerStyle={styles.content}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Total Staff</Text>
+                        <View style={styles.badge}>
+                            <Text style={styles.badgeText}>{staff.length}</Text>
+                        </View>
+                    </View>
+
+                    {staff.map((member) => (
+                        <View key={member.id} style={styles.card}>
+                            <View style={styles.avatar}>
+                                <Text style={styles.avatarText}>{member.initials}</Text>
+                            </View>
+                            <View style={styles.info}>
+                                <Text style={styles.name}>{member.name}</Text>
+                                <Text style={styles.role}>{member.role}</Text>
+                                <Text style={styles.phone}>{member.phone}</Text>
+                                {member.branch && <Text style={styles.branchRole}>{member.branch}</Text>}
+                            </View>
+                            <View style={styles.actions}>
+                                <TouchableOpacity style={styles.iconButton} onPress={() => openEditModal(member)}>
+                                    <Ionicons name="pencil" size={20} color={Colors.text} />
+                                </TouchableOpacity>
+                                {/* Note: Delete functionality should be added here later */}
+                            </View>
+                        </View>
+                    ))}
+
+                    <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
+                        <Ionicons name="add" size={24} color={Colors.white} style={{ marginRight: 8 }} />
+                        <Text style={styles.addButtonText}>Add Staff Member</Text>
+                    </TouchableOpacity>
+                </ScrollView>
+            )}
 
             <BottomModal
                 visible={modalVisible}
@@ -193,7 +252,7 @@ export default function StaffScreen() {
                                 style={styles.input}
                                 placeholder="e.g. Ravi Kumar"
                                 placeholderTextColor={Colors.textSecondary}
-                                value={name}
+                                value={name || ''} // Safety guard
                                 onChangeText={setName}
                             />
                         </View>
@@ -203,7 +262,7 @@ export default function StaffScreen() {
                                 style={styles.input}
                                 placeholder="e.g. Store Manager"
                                 placeholderTextColor={Colors.textSecondary}
-                                value={role}
+                                value={role || ''} // Safety guard
                                 onChangeText={setRole}
                             />
                         </View>
@@ -214,7 +273,7 @@ export default function StaffScreen() {
                                 placeholder="+91 XXXXX XXXXX"
                                 placeholderTextColor={Colors.textSecondary}
                                 keyboardType="phone-pad"
-                                value={phone}
+                                value={phone || ''} // Safety guard
                                 onChangeText={setPhone}
                             />
                         </View>
@@ -297,8 +356,8 @@ export default function StaffScreen() {
                         </View>
                     </View>
                 </ScrollView>
-            </BottomModal>
-        </SafeAreaView>
+            </BottomModal >
+        </SafeAreaView >
     );
 }
 

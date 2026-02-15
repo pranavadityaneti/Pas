@@ -8,9 +8,11 @@ import { useStore } from '../../src/hooks/useStore';
 import { useEarnings } from '../../src/hooks/useEarnings';
 import { useOrders } from '../../src/hooks/useOrders';
 import { useRouter } from 'expo-router';
+import { useNotificationContext } from '../../src/context/NotificationContext';
 
 export default function DashboardScreen() {
     const router = useRouter();
+    const { unreadCount } = useNotificationContext();
     const { store, toggleStoreStatus } = useStore();
     const { stats, loading: earningsLoading } = useEarnings();
     const { orders, loading: ordersLoading } = useOrders();
@@ -91,9 +93,9 @@ export default function DashboardScreen() {
                 {
                     text: 'Confirm',
                     onPress: async () => {
-                        const success = await toggleStoreStatus(newStatus);
-                        if (!success) {
-                            Alert.alert('Error', 'Failed to update store status. Please try again.');
+                        const result = await toggleStoreStatus(newStatus);
+                        if (!result.success) {
+                            Alert.alert('Error', result.error || 'Failed to update store status. Please try again.');
                         }
                     }
                 }
@@ -152,7 +154,7 @@ export default function DashboardScreen() {
                             onPress={() => router.push('/(main)/notifications')}
                         >
                             <Ionicons name="notifications-outline" size={24} color="#374151" />
-                            <View style={styles.notificationBadge} />
+                            {unreadCount > 0 && <View style={styles.notificationBadge} />}
                         </TouchableOpacity>
                     </View>
 

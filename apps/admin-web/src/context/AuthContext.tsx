@@ -51,11 +51,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const initAuth = async () => {
             try {
-                // Add timeout to prevent hanging - reduced to 2 seconds
+                // Add timeout to prevent hanging - increased to 5 seconds
                 const timeoutId = setTimeout(() => {
                     console.warn('Auth initialization timeout - forcing loading complete');
                     if (isMounted) setLoading(false);
-                }, 2000); // 2 second timeout
+                }, 5000); // 5 second timeout
 
                 const { data: { session }, error } = await supabase.auth.getSession();
 
@@ -121,17 +121,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const login = async (email: string, password: string): Promise<{ error: string | null }> => {
         try {
-            const { data, error } = await supabase.auth.signInWithPassword({
+            console.log('Attempting login for:', email);
+
+            // Add a timeout to the login call itself
+            const loginPromise = supabase.auth.signInWithPassword({
                 email,
                 password,
             });
 
+            const timeoutPromise = new Promise<{ data: any, error: any }>((_, reject) =>
+                setTimeout(() => reject(new Error('Login attempt timed out after 15s')), 15000)
+            );
+
+            console.log('Calling signInWithPassword...');
+            const { data, error } = await Promise.race([loginPromise, timeoutPromise]) as any;
+            console.log('signInWithPassword result:', { hasUser: !!data?.user, error });
+
             if (error) {
+                console.error('Sign in error:', error);
                 return { error: error.message };
             }
 
             if (data.user) {
+                console.log('User authenticated, fetching profile...');
                 const profile = await fetchUserProfile(data.user);
+                console.log('Profile fetch result:', profile);
 
                 if (!profile) {
                     await supabase.auth.signOut();
@@ -154,7 +168,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             return { error: null };
         } catch (err) {
-            return { error: 'An unexpected error occurred' };
+            console.error('Login exception:', err);
+            return { error: `An unexpected error occurred: ${err instanceof Error ? err.message : String(err)}` };
         }
     };
 
@@ -227,7 +242,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             return { error: null };
         } catch (err) {
-            return { error: 'An unexpected error occurred' };
+            console.error('Create admin exception:', err);
+            return { error: `An unexpected error occurred: ${err instanceof Error ? err.message : String(err)}` };
         }
     };
 

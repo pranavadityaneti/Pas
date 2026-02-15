@@ -15,8 +15,10 @@ const SOUND_OPTIONS = [
     { id: 'Siren', label: 'Emergency Siren 🚨' },
 ];
 
+import { useUser } from '../../../src/context/UserContext';
+
 export default function NotificationsScreen() {
-    const [userId, setUserId] = useState<string | null>(null);
+    const { user, refreshUser } = useUser(); // refreshUser might be needed if update doesn't trigger automatically
     const [loading, setLoading] = useState(true);
     const [modalVisible, setModalVisible] = useState(false);
 
@@ -29,47 +31,35 @@ export default function NotificationsScreen() {
     });
 
     useEffect(() => {
-        fetchUserAndSettings();
+        refreshUser();
     }, []);
 
-    const fetchUserAndSettings = async () => {
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
-            setUserId(user.id);
-
-            const { data, error } = await supabase
-                .from('User')
-                .select('notification_preferences')
-                .eq('id', user.id)
-                .single();
-
-            if (error && error.code !== 'PGRST116') {
-                console.error('Error fetching settings:', error);
-            }
-
-            if (data?.notification_preferences) {
-                setSettings(prev => ({ ...prev, ...data.notification_preferences }));
-            }
-        } catch (error) {
-            console.error('Error in fetchUserAndSettings:', error);
-        } finally {
+    useEffect(() => {
+        if (user?.notification_preferences) {
+            setSettings(prev => ({
+                ...prev,
+                ...user.notification_preferences
+            }));
+            setLoading(false);
+        } else if (user) {
             setLoading(false);
         }
-    };
+    }, [user]);
 
     const updateSettings = async (newSettings: typeof settings) => {
         setSettings(newSettings); // Optimistic update
-        if (!userId) return;
+        if (!user?.id) return;
 
         try {
             const { error } = await supabase
                 .from('User')
                 .update({ notification_preferences: newSettings })
-                .eq('id', userId);
+                .eq('id', user.id);
 
             if (error) throw error;
+
+            // Force refresh to ensure context is in sync
+            await refreshUser();
         } catch (error) {
             console.error('Error updating settings:', error);
             // Revert on error? For now, we just log it.

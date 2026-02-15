@@ -1,54 +1,47 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Image, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import BottomModal from '../../../src/components/BottomModal';
 import { Colors } from '../../../constants/Colors';
 import { supabase } from '../../../src/lib/supabase';
-import { ActivityIndicator } from 'react-native';
+import { useUser } from '../../../src/context/UserContext';
+import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
 
 export default function PayoutsScreen() {
-    const [loading, setLoading] = useState(true);
+    const { user } = useUser();
     const [modalVisible, setModalVisible] = useState(false);
-    const [bankDetails, setBankDetails] = useState({
-        bankName: 'HDFC Bank', // Default or fetch if possible
-        accountNumber: '**** **** **** ****',
-        ifsc: '----------',
-        beneficiary: 'Loading...',
-        isVerified: true
+
+    // Realtime Bank Details
+    const { data: merchants, loading: tableLoading } = useRealtimeTable({
+        tableName: 'merchants',
+        select: 'bank_account_number, ifsc_code, owner_name',
+        filter: user?.id ? `id=eq.${user.id}` : undefined,
+        enabled: !!user?.id
     });
 
-    React.useEffect(() => {
-        fetchBankDetails();
-    }, []);
-
-    const fetchBankDetails = async () => {
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
-            const { data, error } = await supabase
-                .from('merchants')
-                .select('bank_account_number, ifsc_code, owner_name')
-                .eq('id', user.id)
-                .single();
-
-            if (data) {
-                setBankDetails({
-                    bankName: 'Verified Bank', // Table doesn't have bank name, using generic or logic
-                    accountNumber: data.bank_account_number ? `**** **** **** ${data.bank_account_number.slice(-4)}` : 'Not Set',
-                    ifsc: data.ifsc_code || 'Not Set',
-                    beneficiary: data.owner_name || 'Merchant',
-                    isVerified: !!data.bank_account_number
-                });
-            }
-        } catch (error) {
-            console.error('Error fetching bank details:', error);
-        } finally {
-            setLoading(false);
+    const bankDetails = React.useMemo(() => {
+        if (merchants && merchants.length > 0) {
+            const data = merchants[0];
+            return {
+                bankName: 'Verified Bank', // Placeholder as before
+                accountNumber: data.bank_account_number ? `**** **** **** ${data.bank_account_number.slice(-4)}` : 'Not Set',
+                ifsc: data.ifsc_code || 'Not Set',
+                beneficiary: data.owner_name || 'Partner',
+                isVerified: !!data.bank_account_number
+            };
         }
-    };
+        return {
+            bankName: 'HDFC Bank',
+            accountNumber: '**** **** **** ****',
+            ifsc: '----------',
+            beneficiary: 'Loading...',
+            isVerified: false
+        };
+    }, [merchants]);
+
+    const loading = tableLoading && !merchants.length;
 
     const [newBank, setNewBank] = useState({ name: '', account: '', ifsc: '', beneficiary: '' });
 
@@ -56,45 +49,38 @@ export default function PayoutsScreen() {
     const [step, setStep] = useState(1); // 1: Details, 2: OTP
     const [otp, setOtp] = useState('');
 
-    if (loading) {
-        return (
-            <SafeAreaView style={styles.container}>
-                <View style={styles.header}>
-                    <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                        <Ionicons name="chevron-back" size={24} color={Colors.text} />
-                    </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Payouts & Bank</Text>
-                </View>
-                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                    <ActivityIndicator size="large" color={Colors.primary} />
-                </View>
-            </SafeAreaView>
-        );
-    }
-
-
     const handleRequestOtp = () => {
-        // TODO: Call API to send OTP
+        // Mock OTP send
         setStep(2);
     };
 
-    const handleVerifyOtp = () => {
-        // TODO: Verify OTP API
+    const handleVerifyOtp = async () => {
         if (otp === '123456') {
-            setBankDetails({
-                bankName: newBank.name || bankDetails.bankName,
-                accountNumber: newBank.account ? `**** **** **** ${newBank.account.slice(-4)}` : bankDetails.accountNumber,
-                ifsc: newBank.ifsc || bankDetails.ifsc,
-                beneficiary: newBank.beneficiary || bankDetails.beneficiary,
-                isVerified: true
-            });
-            setModalVisible(false);
-            setStep(1);
-            setOtp('');
-            setNewBank({ name: '', account: '', ifsc: '', beneficiary: '' });
-            alert('Bank account updated successfully!');
+            try {
+                if (!user?.id) return;
+
+                // Update DB
+                const { error } = await supabase
+                    .from('merchants')
+                    .update({
+                        bank_account_number: newBank.account,
+                        ifsc_code: newBank.ifsc,
+                        owner_name: newBank.beneficiary
+                    })
+                    .eq('id', user.id);
+
+                if (error) throw error;
+
+                setModalVisible(false);
+                setStep(1);
+                setOtp('');
+                setNewBank({ name: '', account: '', ifsc: '', beneficiary: '' });
+                Alert.alert('Success', 'Bank account updated successfully!');
+            } catch (err: any) {
+                Alert.alert('Error', 'Failed to update bank details: ' + err.message);
+            }
         } else {
-            alert('Invalid OTP. Use 123456 for testing.');
+            Alert.alert('Error', 'Invalid OTP. Use 123456 for testing.');
         }
     };
 

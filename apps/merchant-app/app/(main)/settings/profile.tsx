@@ -6,10 +6,11 @@ import { router } from 'expo-router';
 import { supabase } from '../../../src/lib/supabase';
 import BottomModal from '../../../src/components/BottomModal';
 import { Colors } from '../../../constants/Colors';
+import { useUser } from '../../../src/context/UserContext';
 
 export default function ProfileScreen() {
+    const { user: contextUser, loading: userLoading } = useUser();
     const [modalVisible, setModalVisible] = useState(false);
-    const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
     // OTP State
@@ -17,74 +18,26 @@ export default function ProfileScreen() {
     const [otp, setOtp] = useState('');
     const [verifying, setVerifying] = useState(false);
 
-    const [user, setUser] = useState({
-        id: '',
+    // Form State
+    const [formState, setFormState] = useState({
         name: '',
-        role: 'Store Owner',
         phone: '',
         email: ''
     });
 
-    // To track changes
-    const [originalUser, setOriginalUser] = useState<any>(null);
-
     useEffect(() => {
-        fetchProfile();
-    }, []);
-
-    const fetchProfile = async () => {
-        try {
-            const { data: { user: authUser } } = await supabase.auth.getUser();
-            if (!authUser) return;
-
-            const { data, error } = await supabase
-                .from('User')
-                .select('id, name, email, phone, role')
-                .eq('id', authUser.id)
-                .single();
-
-            if (data) {
-                // If the user is a MERCHANT, we label them as 'Admin' for the UI
-                // If role is missing but they are in this app, they are likely Store Owner
-                const userData = {
-                    id: data.id,
-                    name: data.name || (authUser.user_metadata?.name) || 'Merchant User',
-                    email: data.email || authUser.email || '',
-                    phone: data.phone || '',
-                    role: data.role === 'MERCHANT' ? 'Admin' : (data.role || 'Store Owner')
-                };
-                setUser(userData);
-                setOriginalUser(userData);
-            } else {
-                // Fallback: Check merchants table directly
-                const { data: merchantData } = await supabase
-                    .from('merchants')
-                    .select('owner_name, phone, email')
-                    .eq('id', authUser.id)
-                    .single();
-
-                if (merchantData) {
-                    const userData = {
-                        id: authUser.id,
-                        name: merchantData.owner_name,
-                        email: merchantData.email,
-                        phone: merchantData.phone,
-                        role: 'Admin'
-                    };
-                    setUser(userData);
-                    setOriginalUser(userData);
-                }
-            }
-        } catch (error) {
-            console.error('Error fetching profile:', error);
-        } finally {
-            setLoading(false);
+        if (contextUser) {
+            setFormState({
+                name: contextUser.name || '',
+                phone: contextUser.phone || '',
+                email: contextUser.email || ''
+            });
         }
-    };
+    }, [contextUser]);
 
     const handleInitialSave = async () => {
         // Check if phone number changed
-        if (user.phone !== originalUser.phone) {
+        if (formState.phone !== contextUser?.phone) {
             // Trigger OTP Flow
             setOtpSent(true);
             Alert.alert('Verification Code Sent', 'A verification code has been sent to your new number (Mock: 123456)');
@@ -103,7 +56,7 @@ export default function ProfileScreen() {
     };
 
     const handleFinalSave = async () => {
-        if (!user.id) return;
+        if (!contextUser?.id) return;
         setSaving(true);
         setVerifying(true);
 
@@ -111,11 +64,11 @@ export default function ProfileScreen() {
             const { error } = await supabase
                 .from('User')
                 .update({
-                    name: user.name,
-                    email: user.email,
-                    phone: user.phone
+                    name: formState.name,
+                    email: formState.email,
+                    phone: formState.phone
                 })
-                .eq('id', user.id);
+                .eq('id', contextUser.id);
 
             if (error) throw error;
 
@@ -123,7 +76,6 @@ export default function ProfileScreen() {
             setModalVisible(false);
             setOtpSent(false);
             setOtp('');
-            setOriginalUser(user); // Update original state
             Alert.alert('Success', 'Profile updated successfully');
 
         } catch (error) {
@@ -139,8 +91,14 @@ export default function ProfileScreen() {
         setModalVisible(false);
         setOtpSent(false);
         setOtp('');
-        // Reset to original if cancelled? 
-        if (originalUser) setUser(originalUser);
+        // Reset to context user
+        if (contextUser) {
+            setFormState({
+                name: contextUser.name || '',
+                phone: contextUser.phone || '',
+                email: contextUser.email || ''
+            });
+        }
     };
 
     return (
@@ -156,32 +114,39 @@ export default function ProfileScreen() {
                 <View style={styles.avatarContainer}>
                     <View style={styles.avatar}>
                         <Text style={styles.avatarText}>
-                            {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
+                            {contextUser?.name ? contextUser.name.charAt(0).toUpperCase() : 'U'}
                         </Text>
                     </View>
-                    <Text style={styles.name}>{user.name || 'Set Name'}</Text>
-                    <Text style={styles.role}>{user.role}</Text>
+                    <Text style={styles.name}>{contextUser?.name || 'Set Name'}</Text>
+                    <Text style={styles.role}>{contextUser?.role || 'User'}</Text>
                 </View>
 
                 <View style={styles.infoCard}>
                     <View style={styles.infoRow}>
                         <Text style={styles.label}>Full Name</Text>
-                        <Text style={styles.value}>{user.name || '-'}</Text>
+                        <Text style={styles.value}>{contextUser?.name || '-'}</Text>
                     </View>
                     <View style={styles.separator} />
                     <View style={styles.infoRow}>
                         <Text style={styles.label}>Phone Number</Text>
-                        <Text style={styles.value}>{user.phone || '-'}</Text>
+                        <Text style={styles.value}>{contextUser?.phone || '-'}</Text>
                     </View>
                     <View style={styles.separator} />
                     <View style={styles.infoRow}>
                         <Text style={styles.label}>Email</Text>
-                        <Text style={styles.value}>{user.email || '-'}</Text>
+                        <Text style={styles.value}>{contextUser?.email || '-'}</Text>
                     </View>
                 </View>
 
                 <TouchableOpacity style={styles.editButton} onPress={() => {
-                    if (originalUser) setUser(originalUser); // Reset edits on open
+                    // Reset edits to current context on open
+                    if (contextUser) {
+                        setFormState({
+                            name: contextUser.name || '',
+                            phone: contextUser.phone || '',
+                            email: contextUser.email || ''
+                        });
+                    }
                     setModalVisible(true);
                 }}>
                     <Text style={styles.editButtonText}>Edit Profile</Text>
@@ -200,8 +165,8 @@ export default function ProfileScreen() {
                                 <Text style={styles.inputLabel}>Full Name</Text>
                                 <TextInput
                                     style={styles.input}
-                                    value={user.name}
-                                    onChangeText={t => setUser({ ...user, name: t })}
+                                    value={formState.name}
+                                    onChangeText={t => setFormState({ ...formState, name: t })}
                                     placeholder="Enter full name"
                                 />
                             </View>
@@ -209,7 +174,7 @@ export default function ProfileScreen() {
                                 <Text style={styles.inputLabel}>Role</Text>
                                 <TextInput
                                     style={[styles.input, { backgroundColor: '#F3F4F6', color: '#6B7280' }]}
-                                    value={user.role}
+                                    value={contextUser?.role || 'User'}
                                     editable={false}
                                 />
                             </View>
@@ -217,8 +182,8 @@ export default function ProfileScreen() {
                                 <Text style={styles.inputLabel}>Phone Number</Text>
                                 <TextInput
                                     style={styles.input}
-                                    value={user.phone}
-                                    onChangeText={t => setUser({ ...user, phone: t })}
+                                    value={formState.phone}
+                                    onChangeText={t => setFormState({ ...formState, phone: t })}
                                     placeholder="Enter phone number"
                                     keyboardType="phone-pad"
                                 />
@@ -227,8 +192,8 @@ export default function ProfileScreen() {
                                 <Text style={styles.inputLabel}>Email (Optional)</Text>
                                 <TextInput
                                     style={styles.input}
-                                    value={user.email}
-                                    onChangeText={t => setUser({ ...user, email: t })}
+                                    value={formState.email}
+                                    onChangeText={t => setFormState({ ...formState, email: t })}
                                     placeholder="Enter email"
                                     autoCapitalize="none"
                                     keyboardType="email-address"
@@ -245,7 +210,7 @@ export default function ProfileScreen() {
                                     disabled={saving}
                                 >
                                     <Text style={styles.modalSaveText}>
-                                        {user.phone !== originalUser?.phone ? 'Verify & Save' : 'Save Changes'}
+                                        {formState.phone !== contextUser?.phone ? 'Verify & Save' : 'Save Changes'}
                                     </Text>
                                 </TouchableOpacity>
                             </View>
@@ -253,7 +218,7 @@ export default function ProfileScreen() {
                     ) : (
                         <>
                             <Text style={{ textAlign: 'center', marginBottom: 20, color: '#666' }}>
-                                We've sent a verification code to {user.phone}. Please enter it below.
+                                We've sent a verification code to {formState.phone}. Please enter it below.
                             </Text>
                             <View style={styles.inputGroup}>
                                 <Text style={styles.inputLabel}>Verification Code (OTP)</Text>

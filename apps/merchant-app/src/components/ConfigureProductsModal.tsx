@@ -58,21 +58,55 @@ export default function ConfigureProductsModal({ visible, storeId, products, onC
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     useEffect(() => {
-        const initialConfig: any = {};
-        products.forEach(p => {
-            const variants = getVariantsForCategory(p.category);
-            initialConfig[p.id] = {};
-            variants.forEach(v => {
-                const calculatedDefaultPrice = Math.round((p.mrp || 0) * v.ratio);
-                initialConfig[p.id][v.label] = {
-                    price: calculatedDefaultPrice.toString(),
-                    stock: v.label === 'Standard' ? '10' : '0', // Pre-fill standard, others 0
-                    active: v.label === 'Standard' // Only standard active by default
-                };
+        let mounted = true;
+
+        const loadExistingConfig = async () => {
+            const productIds = products.map(p => p.id);
+            if (productIds.length === 0) return;
+
+            const { data: existingData } = await supabase
+                .from('StoreProduct')
+                .select('productId, variant, price, stock, active')
+                .eq('storeId', storeId)
+                .in('productId', productIds);
+
+            const initialConfig: any = {};
+
+            // Initialize base config structure
+            products.forEach(p => {
+                const variants = getVariantsForCategory(p.category);
+                initialConfig[p.id] = {};
+                variants.forEach(v => {
+                    const calculatedDefaultPrice = Math.round((p.mrp || 0) * v.ratio);
+                    initialConfig[p.id][v.label] = {
+                        price: calculatedDefaultPrice.toString(),
+                        stock: v.label === 'Standard' ? '10' : '0',
+                        active: v.label === 'Standard'
+                    };
+                });
             });
-        });
-        setConfig(initialConfig);
-    }, [products]);
+
+            // Overlay existing data
+            if (existingData) {
+                existingData.forEach((row: any) => {
+                    const vLabel = row.variant || 'Standard';
+                    if (initialConfig[row.productId] && initialConfig[row.productId][vLabel]) {
+                        initialConfig[row.productId][vLabel] = {
+                            price: row.price.toString(),
+                            stock: row.stock.toString(),
+                            active: row.active
+                        };
+                    }
+                });
+            }
+
+            if (mounted) setConfig(initialConfig);
+        };
+
+        loadExistingConfig();
+
+        return () => { mounted = false; };
+    }, [products, storeId]);
 
     const handleChange = (prodId: string, variantLabel: string, field: string, value: any) => {
         setConfig(prev => ({
@@ -87,22 +121,7 @@ export default function ConfigureProductsModal({ visible, storeId, products, onC
     const handleSave = async () => {
         if (!storeId) return;
 
-        // 1. Validation: Single Variant Check
-        const invalidProducts = products.filter(p => {
-            const activeVariants = Object.values(config[p.id] || {}).filter((v: any) => v.active);
-            return activeVariants.length > 1;
-        });
-
-        if (invalidProducts.length > 0) {
-            Alert.alert(
-                "Usage Limit",
-                "Currently, you can only select one active variant per product due to system limits. Please uncheck extra variants.",
-                [{ text: "OK" }]
-            );
-            return;
-        }
-
-        // 1.1 Validation: Price > MRP Check
+        // 1. Validation: Price > MRP Check
         let priceError = '';
         products.forEach(p => {
             Object.entries(config[p.id] || {}).forEach(([variantLabel, data]: [string, any]) => {
@@ -133,30 +152,32 @@ export default function ConfigureProductsModal({ visible, storeId, products, onC
             const productIds = products.map(p => p.id);
             const { data: existingData } = await supabase
                 .from('StoreProduct')
-                .select('id, productId')
+                .select('id, productId, variant') // Added variant
                 .eq('storeId', storeId)
                 .in('productId', productIds);
 
+            // Map using composite key: productId_variant
             const existingIdMap = new Map();
-            existingData?.forEach(row => existingIdMap.set(row.productId, row.id));
+            existingData?.forEach(row => existingIdMap.set(`${row.productId}_${row.variant || 'Standard'}`, row.id));
 
             const updates: any[] = [];
 
             products.forEach(p => {
                 Object.entries(config[p.id] || {}).forEach(([variantLabel, data]: [string, any]) => {
                     if (data.active) {
-                        const existingId = existingIdMap.get(p.id);
+                        const compositeKey = `${p.id}_${variantLabel}`;
+                        const existingId = existingIdMap.get(compositeKey);
 
                         updates.push({
-                            id: existingId || generateUUID(), // Use existing ID if update
+                            id: existingId || generateUUID(),
                             storeId,
                             productId: p.id,
+                            variant: variantLabel, // Save variant
                             price: parseFloat(data.price || '0'),
                             stock: parseInt(data.stock || '0'),
                             active: true,
                             createdAt: new Date().toISOString(),
                             updatedAt: new Date().toISOString()
-                            // meta: { variant: variantLabel } // Storing variant label not supported yet
                         });
                     }
                 });
@@ -164,7 +185,8 @@ export default function ConfigureProductsModal({ visible, storeId, products, onC
 
             if (updates.length > 0) {
                 // 3. Upsert
-                const { error } = await supabase.from('StoreProduct').upsert(updates, { onConflict: 'storeId, productId' });
+                // Modified onConflict to look at storeId,productId,variant due to new constraint
+                const { error } = await supabase.from('StoreProduct').upsert(updates, { onConflict: 'storeId, productId, variant' });
 
                 if (error) {
                     Alert.alert('Error', error.message);

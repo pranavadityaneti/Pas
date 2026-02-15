@@ -5,13 +5,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { supabase } from '../../../src/lib/supabase';
 import { Colors } from '../../../constants/Colors';
-import { useStore } from '../../../src/hooks/useStore';
+import { useStoreContext } from '../../../src/context/StoreContext';
+import { useUser } from '../../../src/context/UserContext';
+import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
 import Constants from 'expo-constants';
 
-const API_URL = Constants.expoConfig?.extra?.apiUrl || 'http://localhost:3000';
-
 export default function StoreDetailsScreen() {
-    const { storeId } = useStore();
+    const { store } = useStoreContext();
+    const { user } = useUser();
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
@@ -24,77 +25,58 @@ export default function StoreDetailsScreen() {
     });
     const [initialDetails, setInitialDetails] = useState<typeof details | null>(null);
 
+    // Realtime Merchant Extras (Photos, Category)
+    const { data: merchantDataList, loading: merchantLoading } = useRealtimeTable({
+        tableName: 'merchants',
+        select: 'category, store_photos, city',
+        filter: user?.email ? `email=eq.${user.email}` : undefined,
+        enabled: !!user?.email
+    });
+
     useEffect(() => {
-        if (storeId) fetchStoreDetails();
-    }, [storeId]);
+        if (merchantLoading) return;
 
-    const fetchStoreDetails = async () => {
-        try {
-            const { data: { user: authUser } } = await supabase.auth.getUser();
-            if (!authUser) return;
-
-            // 1. Try Store table
-            // explicitly cast to any to allow merging in later steps
-            let { data: storeData, error } = await supabase
-                .from('Store')
-                .select('name, address, cityId')
-                .eq('id', storeId || '')
-                .maybeSingle();
-
-            let finalData: any = storeData;
-
-            // 2. If not found, try merchants table using auth userId
-            if (!finalData) {
-                const { data: merchantData } = await supabase
-                    .from('merchants')
-                    .select('store_name, address, city, category, store_photos')
-                    .eq('id', authUser.id)
-                    .maybeSingle();
-
-                if (merchantData) {
-                    finalData = {
-                        name: merchantData.store_name,
-                        address: merchantData.address,
-                        cityId: merchantData.city, // city name as temporary ID or logic
-                        category: merchantData.category,
-                        photos: merchantData.store_photos || []
-                    };
-                }
-            } else {
-                // Fetch extra merchant details even if store exists for photos/category
-                const { data: merchantData } = await supabase
-                    .from('merchants')
-                    .select('category, store_photos')
-                    .eq('id', authUser.id)
-                    .maybeSingle();
-
-                if (merchantData) {
-                    finalData = {
-                        ...finalData,
-                        category: merchantData.category,
-                        photos: merchantData.store_photos || []
-                    };
-                }
-            }
-
-            if (finalData) {
-                const fetchedData = {
-                    name: finalData.name || '',
-                    address: finalData.address || '',
-                    cityId: finalData.cityId || '',
-                    category: finalData.category || '',
-                    photos: finalData.photos || []
-                };
-                setDetails(fetchedData);
-                setInitialDetails(fetchedData);
-            }
-        } catch (error) {
-            console.error('Error fetching store details:', error);
-            Alert.alert('Error', 'Failed to load store details');
-        } finally {
-            setLoading(false);
+        if (merchantDataList && merchantDataList.length > 0) {
+            const mData = merchantDataList[0];
+            setDetails(prev => ({
+                ...prev,
+                category: mData.category || '',
+                photos: mData.store_photos || [],
+                cityId: mData.city || ''
+            }));
         }
-    };
+        setLoading(false);
+    }, [merchantDataList, merchantLoading]);
+
+    // Sync with Store Context (Realtime)
+    useEffect(() => {
+        if (store) {
+            setDetails(prev => {
+                // Only update if changed to avoid cursor jumps if we were typing? 
+                // Actually, if we are typing, we don't want external updates to overwrite us immediately
+                // But for "Realtime", we generally expect latest server state.
+                // To keep it simple: We update local state if it differs from Store Context, 
+                // but we might want to check if the user is currently editing?
+                // For now, we will just sync. If user is typing and another device updates, it might jump.
+                // A better UX is to show a "New data available" toast, but requirements said "Realtime Sync".
+                // So we will overwrite.
+
+                const newDetails = {
+                    ...prev,
+                    name: store.name || prev.name,
+                    address: store.address || prev.address
+                };
+
+                // Update initial details to the new baseline so 'isDirty' works correctly
+                setInitialDetails(current => ({
+                    ...current,
+                    ...newDetails
+                } as typeof details));
+
+                return newDetails;
+            });
+        }
+    }, [store]);
 
     const isDirty = initialDetails && JSON.stringify(details) !== JSON.stringify(initialDetails);
 
@@ -104,25 +86,30 @@ export default function StoreDetailsScreen() {
             return;
         }
 
+        if (!store?.id) return;
+
         setSaving(true);
         try {
-            // Call our new API endpoint
-            const response = await fetch(`${API_URL}/stores/${storeId}`, {
-                method: 'PATCH',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(details),
-            });
+            // Updated to use Supabase directly (Fixing localhost issue)
+            const { error } = await supabase
+                .from('Store')
+                .update({
+                    name: details.name,
+                    address: details.address,
+                    // cityId and category are read-only or managed elsewhere
+                    // photos: details.photos // Photos update logic might need storage upload, skipped for now as per UI
+                })
+                .eq('id', store.id);
 
-            if (!response.ok) {
-                throw new Error('Failed to update store');
-            }
+            if (error) throw error;
 
             setInitialDetails(details); // Update initial state on success
             Alert.alert('Success', 'Store details updated successfully', [
                 { text: 'OK', onPress: () => router.back() }
             ]);
+
+            // Trigger refresh in context
+            // refreshStore(); // We can access refreshStore from hook if needed, but Realtime should handle it
         } catch (error) {
             console.error('Error saving store details:', error);
             Alert.alert('Error', 'Failed to save changes. Please try again.');

@@ -185,7 +185,7 @@ export function useOrders() {
             }));
 
             if (fetchedOrders.length === 0) {
-                setOrders(MOCK_ORDERS);
+                setOrders([]);
             } else {
                 setOrders(fetchedOrders);
             }
