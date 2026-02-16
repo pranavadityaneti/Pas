@@ -24,11 +24,17 @@ interface StoreContextType {
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
 
+const CACHE_KEY = 'cached_store_state';
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 2000;
+
 export function StoreProvider({ children }: { children: React.ReactNode }) {
     const [store, setStore] = useState<Store | null>(null);
     const [merchantId, setMerchantId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const heartbeatInterval = useRef<NodeJS.Timeout | null>(null);
+    const retryTimeout = useRef<NodeJS.Timeout | null>(null);
+    const retryCount = useRef(0);
 
     // Heartbeat logic constants
     const HEARTBEAT_INTERVAL = 5 * 60 * 1000;
@@ -86,32 +92,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
     }, [merchantId]);
 
-    // --- Initial Load ---
-    useEffect(() => {
-        let mounted = true;
-
-        const init = async () => {
-            try {
-                const cached = await AsyncStorage.getItem('cached_store_state');
-                if (cached && mounted) {
-                    setStore(JSON.parse(cached));
-                }
-            } catch (e) {
-                console.error('[StoreContext] Cache error:', e);
-            }
-
-            if (mounted) {
-                await fetchStore();
-            }
-        };
-
-        init();
-    }, []);
     // --- Data Fetching ---
-    const fetchStore = async () => {
+    const fetchStore = useCallback(async () => {
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
+                console.log('[StoreContext] No auth user yet, will retry on auth state change');
                 setLoading(false);
                 return;
             }
@@ -128,8 +114,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             if (storeError) console.error('[StoreContext] Store fetch error:', storeError);
             if (storeData) console.log('[StoreContext] Store found:', storeData.id);
             else console.log('[StoreContext] No store found for managerId:', user.id);
-
-
 
             // 2. Fetch Merchant ID (for heartbeat)
             const { data: merchantData } = await supabase
@@ -148,12 +132,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 console.log('[StoreContext] No merchant row found for email:', user.email);
             }
 
-            if (storeData) {
+            if (storeData && storeData.id) {
+                // Valid store with real ID — cache it and set state
                 setStore(storeData);
-                // Cache it
-                await AsyncStorage.setItem('cached_store_state', JSON.stringify(storeData));
+                retryCount.current = 0; // Reset retry counter on success
+                await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(storeData));
+                console.log('[StoreContext] Store cached successfully with ID:', storeData.id);
             } else if (merchantData) {
-                console.log('[StoreContext] Using fallback store (empty ID)');
+                console.log('[StoreContext] No Store row found, using fallback (empty ID)');
                 // Fallback for new merchants without Store row yet
                 const fallbackStore = {
                     id: '',
@@ -164,13 +150,90 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                     operating_hours: null
                 };
                 setStore(fallbackStore);
+
+                // DO NOT cache fallback stores — they have empty IDs and will cause
+                // "Store ID Unavailable" errors if loaded from cache on next restart
+                await AsyncStorage.removeItem(CACHE_KEY);
+                console.log('[StoreContext] Cleared cache — fallback store should not be cached');
+
+                // Retry: the Store row might be created shortly after merchant signup
+                if (retryCount.current < MAX_RETRY_ATTEMPTS) {
+                    retryCount.current += 1;
+                    console.log(`[StoreContext] Scheduling retry ${retryCount.current}/${MAX_RETRY_ATTEMPTS} in ${RETRY_DELAY_MS}ms`);
+                    if (retryTimeout.current) clearTimeout(retryTimeout.current);
+                    retryTimeout.current = setTimeout(() => {
+                        fetchStore();
+                    }, RETRY_DELAY_MS);
+                } else {
+                    console.warn('[StoreContext] Max retries reached — store row may not exist yet');
+                }
+            } else {
+                // No merchant data at all — clear any stale cache
+                await AsyncStorage.removeItem(CACHE_KEY);
             }
         } catch (e) {
             console.error('[StoreContext] Fetch exception:', e);
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
+
+    // --- Initial Load: Read cache, then fetch live data ---
+    useEffect(() => {
+        let mounted = true;
+
+        const init = async () => {
+            try {
+                const cached = await AsyncStorage.getItem(CACHE_KEY);
+                if (cached && mounted) {
+                    const parsedCache = JSON.parse(cached);
+                    // Only use cache if it has a valid (non-empty) store ID
+                    if (parsedCache?.id) {
+                        setStore(parsedCache);
+                        console.log('[StoreContext] Loaded valid cache with ID:', parsedCache.id);
+                    } else {
+                        console.log('[StoreContext] Ignoring stale cache with empty ID');
+                        await AsyncStorage.removeItem(CACHE_KEY);
+                    }
+                }
+            } catch (e) {
+                console.error('[StoreContext] Cache read error:', e);
+            }
+
+            if (mounted) {
+                await fetchStore();
+            }
+        };
+
+        init();
+
+        return () => {
+            mounted = false;
+            if (retryTimeout.current) clearTimeout(retryTimeout.current);
+        };
+    }, []);
+
+    // --- Auth State Change Listener ---
+    // Re-fetch store when auth session becomes available (critical for Android
+    // where session restoration from secure storage may be slower)
+    useEffect(() => {
+        const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+            console.log('[StoreContext] Auth state changed:', event);
+            if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+                // Session is now available — fetch store data
+                retryCount.current = 0; // Reset retries on fresh auth
+                fetchStore();
+            } else if (event === 'SIGNED_OUT') {
+                setStore(null);
+                setMerchantId(null);
+                AsyncStorage.removeItem(CACHE_KEY);
+            }
+        });
+
+        return () => {
+            authListener.subscription.unsubscribe();
+        };
+    }, [fetchStore]);
 
     // --- Realtime Subscription ---
     useEffect(() => {
@@ -203,8 +266,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // --- Actions ---
     const toggleStoreStatus = async (newStatus: boolean): Promise<{ success: boolean; error?: string }> => {
         if (!store?.id) {
-            console.error('[StoreContext] No store ID found in context');
-            return { success: false, error: 'Store ID unavailable. Please restart app.' };
+            console.error('[StoreContext] No store ID found in context, attempting re-fetch...');
+            // Instead of immediately failing, try one more fetch
+            await fetchStore();
+            // Check again after re-fetch
+            if (!store?.id) {
+                return { success: false, error: 'Store ID unavailable. Please try again or contact support.' };
+            }
         }
         try {
             // Optimistic update
