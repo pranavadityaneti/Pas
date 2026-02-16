@@ -27,15 +27,7 @@ export function BentoGrid() {
     const content = appMode === "customer" ? customerContent : merchantContent;
 
     return (
-        <motion.div
-            className="fixed inset-0 z-40 flex items-center justify-center p-8 bg-[#f8f8fa]"
-            initial={{ y: "100vh", opacity: 0 }}
-            animate={{
-                y: state === "bento" ? 0 : state === "footer" ? "-100vh" : "100vh",
-                opacity: (state === "bento" || state === "footer") ? 1 : 0
-            }}
-            transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }}
-        >
+        <div className="w-full min-h-screen flex items-center justify-center p-8 bg-[#f8f8fa]">
             <div className="grid grid-cols-4 grid-rows-3 gap-6 w-full h-full max-w-7xl max-h-[850px]">
                 {/* Row 1 */}
                 <BentoCard item={content[0]} className="col-span-2 row-span-1">
@@ -52,7 +44,7 @@ export function BentoGrid() {
 
                 <motion.div
                     onClick={() => setAppMode(appMode === "customer" ? "merchant" : "customer")}
-                    className="col-span-2 row-span-1 bg-[#FF4D00] rounded-[3rem] p-10 flex flex-col items-center justify-center text-white cursor-pointer group hover:scale-[1.01] active:scale-[0.99] transition-all duration-500 shadow-2xl relative overflow-hidden"
+                    className="col-span-2 row-span-1 bg-[#B52725] rounded-[3rem] p-10 flex flex-col items-center justify-center text-white cursor-pointer group hover:scale-[1.01] active:scale-[0.99] transition-all duration-500 shadow-2xl relative overflow-hidden"
                 >
                     <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent pointer-events-none" />
                     <div className="relative z-10 flex flex-col items-center gap-6">
@@ -60,7 +52,7 @@ export function BentoGrid() {
                         <div className="text-4xl font-normal text-center tracking-tight font-[family-name:var(--font-dm-sans)]">
                             {appMode === "customer" ? "For Customers" : "For Merchants"}
                         </div>
-                        <div className="px-6 py-2.5 rounded-full bg-white text-[#FF4D00] text-sm font-bold shadow-lg group-hover:bg-white/90 transition-all">
+                        <div className="px-6 py-2.5 rounded-full bg-white text-[#B52725] text-sm font-bold shadow-lg group-hover:bg-white/90 transition-all">
                             Explore {appMode === "customer" ? "Merchant" : "Customer"} Tools
                         </div>
                     </div>
@@ -78,7 +70,7 @@ export function BentoGrid() {
                     <MockupRetailStores appMode={appMode} />
                 </BentoCard>
             </div>
-        </motion.div>
+        </div>
     );
 }
 
@@ -163,16 +155,16 @@ function MockupMultiStore({ appMode }: { appMode: string }) {
                 </motion.div>
 
                 {/* Central Multi-Store Bag */}
-                <div className="relative w-28 h-32 bg-white rounded-[2rem] shadow-2xl border-2 border-[#FF4D00]/10 flex flex-col items-center justify-center p-4 z-20">
-                    <div className="w-12 h-12 bg-[#FF4D00]/5 rounded-full flex items-center justify-center mb-2">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FF4D00" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <div className="relative w-28 h-32 bg-white rounded-[2rem] shadow-2xl border-2 border-[#B52725]/10 flex flex-col items-center justify-center p-4 z-20">
+                    <div className="w-12 h-12 bg-[#B52725]/5 rounded-full flex items-center justify-center mb-2">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#B52725" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" /><path d="M3 6h18" /><path d="M16 10a4 4 0 0 1-8 0" />
                         </svg>
                     </div>
                     <div className="flex gap-1">
                         <div className="w-2 h-2 rounded-full bg-blue-500" />
                         <div className="w-2 h-2 rounded-full bg-amber-500" />
-                        <div className="w-2 h-2 rounded-full bg-[#FF4D00]" />
+                        <div className="w-2 h-2 rounded-full bg-[#B52725]" />
                     </div>
                 </div>
             </div>
@@ -191,7 +183,7 @@ function MockupAnalytics({ appMode }: { appMode: string }) {
             <div className="relative z-10 flex justify-between items-start">
                 <div className="text-xl font-bold text-black-shadow tracking-tight">Total orders</div>
                 <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-[#FF4D00]/10 text-[#FF4D00] text-[0.7rem] font-black">
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-[#B52725]/10 text-[#B52725] text-[0.7rem] font-black">
                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4">
                             <path d="M12 19V5M5 12l7-7 7 7" />
                         </svg>
@@ -210,7 +202,7 @@ function MockupAnalytics({ appMode }: { appMode: string }) {
             <div className="relative z-10 mt-6">
                 <div className="text-7xl font-black text-black-shadow tracking-tighter leading-none mb-1">1054</div>
                 <div className="flex items-center gap-1 text-[0.85rem] font-black">
-                    <span className="text-[#FF4D00]">+330</span>
+                    <span className="text-[#B52725]">+330</span>
                     <span className="text-black-shadow/20">today</span>
                 </div>
             </div>
@@ -220,8 +212,8 @@ function MockupAnalytics({ appMode }: { appMode: string }) {
                 <svg className="w-full h-full overflow-visible" viewBox="0 0 100 40" preserveAspectRatio="none">
                     <defs>
                         <linearGradient id="brand-grad-final" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#FF4D00" stopOpacity="0.2" />
-                            <stop offset="100%" stopColor="#FF4D00" stopOpacity="0" />
+                            <stop offset="0%" stopColor="#B52725" stopOpacity="0.2" />
+                            <stop offset="100%" stopColor="#B52725" stopOpacity="0" />
                         </linearGradient>
                     </defs>
                     {/* Fill Area */}
@@ -235,7 +227,7 @@ function MockupAnalytics({ appMode }: { appMode: string }) {
                     {/* The Line */}
                     <motion.path
                         d="M 0 40 Q 20 38, 40 32 T 70 15 T 100 5"
-                        stroke="#FF4D00"
+                        stroke="#B52725"
                         strokeWidth="2.5"
                         strokeLinecap="round"
                         fill="none"
@@ -246,14 +238,14 @@ function MockupAnalytics({ appMode }: { appMode: string }) {
                     {/* Indicator Line */}
                     <motion.line
                         x1="70" y1="15" x2="70" y2="40"
-                        stroke="#FF4D00" strokeWidth="1" strokeDasharray="4 4"
+                        stroke="#B52725" strokeWidth="1" strokeDasharray="4 4"
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 0.3 }}
                         transition={{ delay: 1.5 }}
                     />
                     {/* Focal point */}
                     <motion.circle
-                        cx="70" cy="15" r="3" fill="#FF4D00"
+                        cx="70" cy="15" r="3" fill="#B52725"
                         initial={{ scale: 0 }}
                         animate={{ scale: 1 }}
                         transition={{ delay: 1.8 }}
@@ -362,7 +354,7 @@ function MockupTracking({ appMode }: { appMode: string }) {
                         animate={{ opacity: 1, y: 0 }}
                         className="absolute right-4 top-4 bg-white rounded-lg shadow-sm border border-black/[0.03] px-2 py-1 flex items-center gap-2"
                     >
-                        <div className="w-1.5 h-1.5 rounded-full bg-[#FF4D00] animate-pulse" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-[#B52725] animate-pulse" />
                         <span className="text-[0.5rem] font-bold text-black-shadow">LIVE</span>
                     </motion.div>
                 </div>
@@ -412,7 +404,7 @@ function MockupWallet({ appMode }: { appMode: string }) {
     const isCustomer = appMode === "customer";
     return (
         <div className="absolute inset-0 flex flex-col items-center justify-center p-6 gap-4">
-            <div className={`w-full h-28 ${isCustomer ? 'bg-black' : 'bg-[#FF4D00]'} rounded-2xl shadow-xl p-4 flex flex-col justify-between overflow-hidden relative`}>
+            <div className={`w-full h-28 ${isCustomer ? 'bg-black' : 'bg-[#B52725]'} rounded-2xl shadow-xl p-4 flex flex-col justify-between overflow-hidden relative`}>
                 <div className="absolute -right-8 -bottom-8 w-24 h-24 bg-white/5 rounded-full" />
                 <div className="flex justify-between items-start">
                     <div className="text-[0.4rem] font-bold text-white/40 uppercase tracking-[0.2em]">{isCustomer ? 'Balance' : 'Payouts'}</div>
@@ -431,7 +423,7 @@ function MockupStreak({ appMode }: { appMode: string }) {
         <div className="relative flex flex-col items-start pt-4">
             {/* Middle: Big Stat */}
             <div className="flex items-center gap-4 mb-4">
-                <span className="text-7xl font-black tracking-tighter text-[#FF4D00] leading-none">
+                <span className="text-7xl font-black tracking-tighter text-[#B52725] leading-none">
                     {isCustomer ? "14" : "92"}
                 </span>
                 <div className="flex flex-col">
@@ -449,7 +441,7 @@ function MockupStreak({ appMode }: { appMode: string }) {
                         animate={{ scale: 1 }}
                         transition={{ delay: i * 0.01 }}
                         className={`w-2.5 h-2.5 rounded-full
-                            ${i < (isCustomer ? 14 : 12) ? 'bg-[#FF4D00]' : 'bg-black/[0.04]'}
+                            ${i < (isCustomer ? 14 : 12) ? 'bg-[#B52725]' : 'bg-black/[0.04]'}
                         `}
                     />
                 ))}
@@ -493,7 +485,7 @@ function MockupCurbside({ appMode }: { appMode: string }) {
                     initial={{ x: -100, opacity: 0 }}
                     animate={{ x: 106, opacity: 1 }}
                     transition={{ duration: 3, repeat: Infinity, repeatDelay: 1 }}
-                    className="absolute left-0 top-[34px] w-20 h-10 bg-[#FF4D00] rounded-lg shadow-xl flex items-center justify-center text-white"
+                    className="absolute left-0 top-[34px] w-20 h-10 bg-[#B52725] rounded-lg shadow-xl flex items-center justify-center text-white"
                 >
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2" />
@@ -511,8 +503,8 @@ function MockupCurbside({ appMode }: { appMode: string }) {
                 </motion.div>
 
                 <div className="mt-8 flex items-center justify-center gap-2">
-                    <div className="text-[0.6rem] font-bold uppercase tracking-widest text-[#FF4D00]">Ready for Pickup</div>
-                    <div className="w-1.5 h-1.5 rounded-full bg-[#FF4D00] animate-pulse" />
+                    <div className="text-[0.6rem] font-bold uppercase tracking-widest text-[#B52725]">Ready for Pickup</div>
+                    <div className="w-1.5 h-1.5 rounded-full bg-[#B52725] animate-pulse" />
                 </div>
             </div>
         </div>

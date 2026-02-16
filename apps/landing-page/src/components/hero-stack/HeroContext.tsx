@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, ReactNode } from "react";
 
-export type HeroState = "intro" | "fan" | "stack" | "descend" | "spread" | "showcase" | "bento" | "footer";
+export type HeroState = "intro" | "fan" | "stack" | "descend" | "spread" | "showcase" | "bento" | "expose" | "footer";
 
 interface HeroContextType {
     state: HeroState;
