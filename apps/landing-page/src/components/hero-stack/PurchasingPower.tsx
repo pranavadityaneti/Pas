@@ -21,7 +21,7 @@ const categories = [
 
 export function PurchasingPower() {
     return (
-        <div className="w-full bg-[#FAF9F6] py-32 px-4 flex flex-col items-center justify-center text-center">
+        <div className="w-full bg-[#FAF9F6] py-20 md:py-32 px-6 md:px-4 flex flex-col items-center justify-center text-center">
 
             {/* Headline */}
             <motion.div
@@ -31,7 +31,7 @@ export function PurchasingPower() {
                 viewport={{ once: true }}
                 className="max-w-4xl mb-20"
             >
-                <h2 className="text-6xl md:text-7xl text-[#1a1a1a] font-serif leading-[1.1] tracking-tight">
+                <h2 className="text-4xl md:text-7xl text-[#1a1a1a] font-serif leading-[1.1] tracking-tight">
                     Use your <br />
                     <span className="italic font-light">purchasing power</span> <br />
                     for <span className="italic font-light">positive change.</span>

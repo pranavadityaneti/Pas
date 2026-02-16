@@ -28,23 +28,23 @@ export function BentoGrid() {
 
     return (
         <div className="w-full min-h-screen flex items-center justify-center p-8 bg-[#f8f8fa]">
-            <div className="grid grid-cols-4 grid-rows-3 gap-6 w-full h-full max-w-7xl max-h-[850px]">
+            <div className="grid grid-cols-1 md:grid-cols-4 md:grid-rows-3 gap-6 w-full h-full max-w-7xl md:max-h-[850px]">
                 {/* Row 1 */}
-                <BentoCard item={content[0]} className="col-span-2 row-span-1">
+                <BentoCard item={content[0]} className="col-span-1 md:col-span-2 md:row-span-1 h-[300px] md:h-auto">
                     <MockupMultiStore appMode={appMode} />
                 </BentoCard>
-                <BentoCard item={content[1]} className="col-span-2 row-span-1">
+                <BentoCard item={content[1]} className="col-span-1 md:col-span-2 md:row-span-1 h-[300px] md:h-auto">
                     {appMode === "customer" ? <MockupTracking appMode={appMode} /> : <MockupAnalytics appMode={appMode} />}
                 </BentoCard>
 
                 {/* Row 2: CENTERED Switch */}
-                <BentoCard item={content[2]} className="col-span-1 row-span-1">
+                <BentoCard item={content[2]} className="col-span-1 md:col-span-1 md:row-span-1 h-[300px] md:h-auto">
                     <MockupWallet appMode={appMode} />
                 </BentoCard>
 
                 <motion.div
                     onClick={() => setAppMode(appMode === "customer" ? "merchant" : "customer")}
-                    className="col-span-2 row-span-1 bg-[#B52725] rounded-[3rem] p-10 flex flex-col items-center justify-center text-white cursor-pointer group hover:scale-[1.01] active:scale-[0.99] transition-all duration-500 shadow-2xl relative overflow-hidden"
+                    className="col-span-1 md:col-span-2 md:row-span-1 bg-[#B52725] rounded-[3rem] p-10 flex flex-col items-center justify-center text-white cursor-pointer group hover:scale-[1.01] active:scale-[0.99] transition-all duration-500 shadow-2xl relative overflow-hidden h-[300px] md:h-auto"
                 >
                     <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent pointer-events-none" />
                     <div className="relative z-10 flex flex-col items-center gap-6">
@@ -58,15 +58,15 @@ export function BentoGrid() {
                     </div>
                 </motion.div>
 
-                <BentoCard item={content[3]} className="col-span-1 row-span-1">
+                <BentoCard item={content[3]} className="col-span-1 md:col-span-1 md:row-span-1 h-[300px] md:h-auto">
                     <MockupStreak appMode={appMode} />
                 </BentoCard>
 
                 {/* Row 3 */}
-                <BentoCard item={content[4]} className="col-span-2 row-span-1">
+                <BentoCard item={content[4]} className="col-span-1 md:col-span-2 md:row-span-1 h-[300px] md:h-auto">
                     <MockupCurbside appMode={appMode} />
                 </BentoCard>
-                <BentoCard item={content[5]} className="col-span-2 row-span-1">
+                <BentoCard item={content[5]} className="col-span-1 md:col-span-2 md:row-span-1 h-[300px] md:h-auto">
                     <MockupRetailStores appMode={appMode} />
                 </BentoCard>
             </div>

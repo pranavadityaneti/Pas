@@ -9,8 +9,8 @@ const faqs = [
         answer: "Simply browse products from your favorite local stores, place an order through the app, and pick it up curbside or get it delivered. No hidden markups, just local goodness."
     },
     {
-        question: "Is there a membership fee?",
-        answer: "You can browse and buy for free! We also offer a premium membership for $9.99/month which unlocks exclusive deals and priority support."
+        question: "How quickly can I start selling?",
+        answer: "Once you sign up, you can list your products immediately. Our verification process typically takes less than 24 hours."
     },
     {
         question: "How do I sign up as a merchant?",
@@ -24,7 +24,7 @@ const faqs = [
 
 export function FAQSection() {
     return (
-        <div className="w-full bg-[#FAF9F6] px-8 pb-32 flex flex-col items-center">
+        <div className="w-full bg-[#FAF9F6] px-6 md:px-8 pb-20 md:pb-32 flex flex-col items-center">
 
             {/* Header */}
             <div className="text-center max-w-2xl mb-16">
@@ -47,12 +47,7 @@ export function FAQSection() {
             </div>
 
             {/* Bottom CTA */}
-            <div className="mt-20 text-center flex flex-col items-center gap-6">
-                <p className="text-black/60">Got any more questions?</p>
-                <button className="px-8 py-3 bg-[#B52725] hover:bg-[#C35451] text-white rounded-xl font-semibold transition-colors">
-                    Get in touch
-                </button>
-            </div>
+
         </div>
     );
 }

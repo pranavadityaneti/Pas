@@ -9,17 +9,16 @@ import { PurchasingPower } from "@/components/hero-stack/PurchasingPower";
 import { FAQSection } from "@/components/hero-stack/FAQSection";
 import { LottieSection } from "@/components/hero-stack/LottieSection";
 import { Footer } from "@/components/Footer";
+import { MobileHero } from "@/components/hero-stack/MobileHero";
 import { motion, useScroll, useMotionValueEvent, useTransform } from "framer-motion";
 import Image from "next/image";
 import { useEffect } from "react";
 
 function HeroController() {
   const { state, setState } = useHero();
-
   const { scrollY } = useScroll();
 
   useEffect(() => {
-    // Sync state with current scroll position on mount
     const current = scrollY.get();
     if (current >= 3000) setState("footer");
     else if (current >= 2000) setState("expose");
@@ -28,18 +27,15 @@ function HeroController() {
     else if (current >= 300) setState("descend");
     else if (current >= 100) setState("stack");
     else {
-      // Only play intro if we're at the top
       const startSequence = async () => {
         await new Promise(r => setTimeout(r, 1000));
-        // Re-check scroll before fanning (user might have scrolled during the wait)
         if (scrollY.get() < 100) setState("fan");
       };
       startSequence();
     }
-  }, [setState, scrollY]); // Dependencies remain constant (size 2)
+  }, [setState, scrollY]);
 
   useMotionValueEvent(scrollY, "change", (latest) => {
-    // Map scroll properties to states
     if (latest < 100) {
       if (state !== "fan" && state !== "intro") setState("fan");
     } else if (latest >= 100 && latest < 300) {
@@ -58,21 +54,19 @@ function HeroController() {
   });
 
   return (
-    // Wrapper for the whole page
     <div className="relative bg-vista-white">
+      {/* MOBILE HERO (Visible only on small screens) */}
+      <MobileHero />
 
-      {/* --- SECTION 1: HERO (Sticky) --- */}
-      {/* Height: 250vh ensures we have scroll space to play the animations */}
-      <div className="h-[250vh] relative z-10">
+      {/* DESKTOP HERO (Visible only on md+) */}
+      <div className="hidden md:block h-[250vh] relative z-10">
         <div className="sticky top-0 h-screen overflow-hidden flex flex-col items-center">
-          {/* Hero Nav & Content, reused from before but now inside sticky container */}
           <Nav />
 
           <motion.div
             className="absolute top-0 inset-x-0 h-screen flex flex-col items-center justify-center"
             style={{ opacity: useTransform(scrollY, [0, 200], [1, 0]) }}
           >
-            {/* Heading */}
             <div className="text-center mt-[-400px]">
               <motion.h1
                 initial={{ opacity: 0, y: 20 }}
@@ -83,7 +77,6 @@ function HeroController() {
               </motion.h1>
             </div>
 
-            {/* CTAs */}
             <motion.div
               className="absolute bottom-24 flex flex-col items-center gap-8 px-4 pointer-events-auto"
               initial={{ opacity: 0, y: 20 }}
@@ -94,23 +87,18 @@ function HeroController() {
               transition={{ delay: 0.2 }}
             >
               <p className="text-lg md:text-xl text-black-shadow/70 max-w-2xl text-center leading-relaxed">
-                The ultimate convenience for your daily needs. Order from your favorite neighborhood stores and pick up curbside in minutes.
+                The ultimate convenience for your daily needs. Order from your favorite neighborhood stores and pick at store in minutes.
               </p>
 
               <div className="flex gap-4">
                 <button className="px-8 py-3 bg-black text-white rounded-full font-semibold hover:bg-black/90 transition-colors shadow-lg">
-                  Join for $9.99/m
-                </button>
-                <button className="px-8 py-3 bg-gray-100 text-black border border-gray-200 rounded-full font-semibold hover:bg-gray-200 transition-colors">
-                  Read more
+                  Join as a partner
                 </button>
               </div>
             </motion.div>
           </motion.div>
 
-          {/* Cards (Main & Fan) */}
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none transition-opacity duration-500">
-            {/* Hide cards when Bento Grid fully covers them (approx 1500px) */}
             <motion.div
               className="relative w-full max-w-7xl h-[600px] flex items-center justify-center perspective-1000"
               style={{ opacity: useTransform(scrollY, [1400, 1600], [1, 0]) }}
@@ -120,7 +108,6 @@ function HeroController() {
             </motion.div>
           </div>
 
-          {/* Showcase Text ("Showcase, Sell...") - Appears during scroll */}
           <motion.div
             className="absolute inset-0 flex flex-col items-start justify-center p-20 z-30 pointer-events-none"
             animate={{
@@ -143,8 +130,7 @@ function HeroController() {
       </div>
 
       {/* --- SECTION 2: BENTO (Scrolls over) --- */}
-      {/* Reduced negative margin to -50vh so it arrives LATER, giving Showcase time to breathe */}
-      <div className="relative z-20 bg-[#f8f8fa] min-h-screen flex items-center py-20 -mt-[50vh]">
+      <div className="relative z-20 bg-[#f8f8fa] min-h-screen flex items-center py-20 mt-0 md:-mt-[50vh]">
         <BentoGrid />
       </div>
 
@@ -182,9 +168,6 @@ function Nav() {
         />
       </div>
       <div className="hidden md:flex items-center gap-8 font-medium text-black-shadow/80 ml-auto mr-8">
-        <a href="#" className="hover:text-store-red transition-colors">Start Selling</a>
-        <a href="#" className="hover:text-store-red transition-colors">Pricing</a>
-        <a href="#" className="hover:text-store-red transition-colors">Support</a>
       </div>
       <button className="px-5 py-2.5 bg-black text-white rounded-full text-sm font-semibold hover:bg-black/80 transition-colors">
         Get Started
