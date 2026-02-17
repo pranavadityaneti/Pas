@@ -16,7 +16,7 @@ export function MainCard() {
                 scale: state === "intro" ? 1 : state === "fan" ? 1 : (state === "spread" || state === "descend") ? 1.0 : 1, // Full size
                 opacity: 1,
                 // Spread: Diagonal Down (Bottom Right) - Extended
-                y: (state === "descend" || state === "spread") ? 320 : 0,
+                y: (state === "descend" || state === "spread") ? 380 : 0,
                 x: state === "spread" ? 500 : 0,
                 rotateX: 0,
                 rotate: state === "spread" ? 12 : 0,
@@ -30,7 +30,7 @@ export function MainCard() {
                 delay: 0.2
             }}
         >
-            <div className="relative w-[240px] h-[340px] md:w-[320px] md:h-[420px] rounded-[30px] md:rounded-[40px] overflow-hidden shadow-2xl border-[6px] border-white bg-white">
+            <div className="relative w-[220px] h-[300px] md:w-[280px] md:h-[380px] rounded-[30px] md:rounded-[40px] overflow-hidden shadow-2xl border-[6px] border-white bg-white">
                 <Image
                     src="https://images.unsplash.com/photo-1604719312563-8912e9223c6a?q=80&w=800&auto=format&fit=crop"
                     alt="Main Card"

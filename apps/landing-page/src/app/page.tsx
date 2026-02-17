@@ -67,7 +67,7 @@ function HeroController() {
             className="absolute top-0 inset-x-0 h-screen flex flex-col items-center justify-center"
             style={{ opacity: useTransform(scrollY, [0, 200], [1, 0]) }}
           >
-            <div className="text-center mt-[-45vh] md:mt-[-50vh]">
+            <div className="text-center mt-[-55vh] lg:mt-[-65vh]">
               <motion.h1
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -78,7 +78,7 @@ function HeroController() {
             </div>
 
             <motion.div
-              className="absolute bottom-24 flex flex-col items-center gap-8 px-4 pointer-events-auto"
+              className="absolute bottom-4 md:bottom-[8vh] lg:bottom-[10vh] flex flex-col items-center gap-8 px-4 pointer-events-auto z-50"
               initial={{ opacity: 0, y: 20 }}
               animate={{
                 opacity: 1,
@@ -86,10 +86,6 @@ function HeroController() {
               }}
               transition={{ delay: 0.2 }}
             >
-              <p className="text-lg md:text-xl text-black-shadow/70 max-w-2xl text-center leading-relaxed">
-                The ultimate convenience for your daily needs. Order exactly what you want from your favorite local shops and pick it up in minutes.
-              </p>
-
               <div className="flex gap-4">
                 <a
                   href="https://forms.gle/RY23cJjXmtGES3Zx9"
@@ -105,7 +101,7 @@ function HeroController() {
 
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none transition-opacity duration-500">
             <motion.div
-              className="relative w-full max-w-7xl h-[600px] flex items-center justify-center perspective-1000"
+              className="relative w-full max-w-7xl h-[450px] md:h-[500px] flex items-center justify-center perspective-1000"
               style={{ opacity: useTransform(scrollY, [1400, 1600], [1, 0]) }}
             >
               <MainCard />
@@ -123,7 +119,7 @@ function HeroController() {
               // as 'card' and 'index' are not defined here.
               // Applying the original 'y' value to maintain functionality.
               // If the intention was to change the 'y' value for this specific div,
-              // please provide a 'y' value that does not depend on 'card' or 'index'.
+              // please provide a 'y' value that does not depend on 'card'
               opacity: (state === "descend" || state === "spread" || state === "bento") ? 1 : 0
             }}
             transition={{ duration: 0.8 }}
