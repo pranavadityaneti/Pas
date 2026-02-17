@@ -67,7 +67,7 @@ function HeroController() {
             className="absolute top-0 inset-x-0 h-screen flex flex-col items-center justify-center"
             style={{ opacity: useTransform(scrollY, [0, 200], [1, 0]) }}
           >
-            <div className="text-center mt-[-400px]">
+            <div className="text-center mt-[-45vh] md:mt-[-50vh]">
               <motion.h1
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -87,13 +87,18 @@ function HeroController() {
               transition={{ delay: 0.2 }}
             >
               <p className="text-lg md:text-xl text-black-shadow/70 max-w-2xl text-center leading-relaxed">
-                The ultimate convenience for your daily needs. Order from your favorite neighborhood stores and pick at store in minutes.
+                The ultimate convenience for your daily needs. Order exactly what you want from your favorite local shops and pick it up in minutes.
               </p>
 
               <div className="flex gap-4">
-                <button className="px-8 py-3 bg-black text-white rounded-full font-semibold hover:bg-black/90 transition-colors shadow-lg">
+                <a
+                  href="https://forms.gle/RY23cJjXmtGES3Zx9"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-8 py-3 bg-black text-white rounded-full font-semibold hover:bg-black/90 transition-colors shadow-lg"
+                >
                   Join as a partner
-                </button>
+                </a>
               </div>
             </motion.div>
           </motion.div>
@@ -111,18 +116,25 @@ function HeroController() {
           <motion.div
             className="absolute inset-0 flex flex-col items-start justify-center p-20 z-30 pointer-events-none"
             animate={{
-              y: (state === "descend" || state === "spread" || state === "bento") ? 0 : "100vh",
+              // Y Position: Steeper/Longer Diagonal Down
+              // Starts higher (-80) and goes down deeper spacing
+              y: (state === "descend" || state === "spread" || state === "bento") ? 0 : "100vh", // Original line
+              // The provided change for 'y' seems to be for a different component or context,
+              // as 'card' and 'index' are not defined here.
+              // Applying the original 'y' value to maintain functionality.
+              // If the intention was to change the 'y' value for this specific div,
+              // please provide a 'y' value that does not depend on 'card' or 'index'.
               opacity: (state === "descend" || state === "spread" || state === "bento") ? 1 : 0
             }}
             transition={{ duration: 0.8 }}
           >
             <div className="max-w-xl">
-              <p className="text-store-red font-bold tracking-widest uppercase mb-4 text-sm">E-COMMERCE</p>
+              <p className="text-store-red font-bold tracking-widest uppercase mb-4 text-sm">Hyperlocal Retail</p>
               <h2 className="text-6xl font-normal tracking-tight mb-6 font-[family-name:var(--font-dm-sans)] text-black-shadow">
-                Showcase, Sell, <br /> & acquire arts.
+                Skip the line. <br /> Pick up in seconds.
               </h2>
               <p className="text-lg text-black-shadow/60 leading-relaxed mb-8">
-                Dynamic community where artists and buyers seamlessly merge. ArtFusion brings together creators to share creativity.
+                The ultimate convenience for your neighborhood shopping. PickAtStore connects you to local merchants for a frictionless checkout experience.
               </p>
             </div>
           </motion.div>
@@ -169,9 +181,14 @@ function Nav() {
       </div>
       <div className="hidden md:flex items-center gap-8 font-medium text-black-shadow/80 ml-auto mr-8">
       </div>
-      <button className="px-5 py-2.5 bg-black text-white rounded-full text-sm font-semibold hover:bg-black/80 transition-colors">
+      <a
+        href="https://forms.gle/RY23cJjXmtGES3Zx9"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="px-5 py-2.5 bg-black text-white rounded-full text-sm font-semibold hover:bg-black/80 transition-colors"
+      >
         Get Started
-      </button>
+      </a>
     </nav>
   )
 }

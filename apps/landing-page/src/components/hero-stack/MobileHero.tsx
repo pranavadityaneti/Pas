@@ -31,9 +31,14 @@ export function MobileHero() {
 
             {/* CTAs */}
             <div className="flex flex-col w-full gap-4 mb-16">
-                <button className="w-full py-4 bg-black text-white rounded-full font-semibold shadow-lg active:scale-95 transition-transform">
+                <a
+                    href="https://forms.gle/RY23cJjXmtGES3Zx9"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-4 bg-black text-white rounded-full font-semibold shadow-lg active:scale-95 transition-transform flex items-center justify-center"
+                >
                     Join as a partner
-                </button>
+                </a>
             </div>
 
             {/* Swipeable Card Stack */}

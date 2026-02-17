@@ -30,9 +30,9 @@ export function MainCard() {
                 delay: 0.2
             }}
         >
-            <div className="relative w-[320px] h-[320px] rounded-[40px] overflow-hidden shadow-2xl border-[6px] border-white bg-white">
+            <div className="relative w-[240px] h-[340px] md:w-[320px] md:h-[420px] rounded-[30px] md:rounded-[40px] overflow-hidden shadow-2xl border-[6px] border-white bg-white">
                 <Image
-                    src="https://images.unsplash.com/photo-1633511090164-b43840ea1607?q=80&w=800&auto=format&fit=crop"
+                    src="https://images.unsplash.com/photo-1604719312563-8912e9223c6a?q=80&w=800&auto=format&fit=crop"
                     alt="Main Card"
                     fill
                     className="object-cover"

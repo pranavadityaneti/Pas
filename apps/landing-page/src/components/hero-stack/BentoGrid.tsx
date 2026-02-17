@@ -5,10 +5,10 @@ import { useHero } from "./HeroContext";
 import Image from "next/image";
 
 const customerContent = [
-    { id: "c1", title: "Multi Store Checkout", desc: "Consolidate orders from multiple stores into one.", color: "bg-white", text: "text-black-shadow" },
-    { id: "c2", title: "Live Tracking", desc: "Real-time pick-up status updates.", color: "bg-white", text: "text-black-shadow" },
-    { id: "c3", title: "Smart Rewards", desc: "Earn points for every local purchase.", color: "bg-white", text: "text-black-shadow" },
-    { id: "c4", title: "Daily Streak", desc: "Support your community every day and build your streak.", color: "bg-white", text: "text-black-shadow" },
+    { id: "c1", title: "Smart Checkout", desc: "Consolidate your neighborhood orders into one fluid experience.", color: "bg-white", text: "text-black-shadow" },
+    { id: "c2", title: "Live Tracking", desc: "Real-time updates as your order is prepared for pick-up.", color: "bg-white", text: "text-black-shadow" },
+    { id: "c3", title: "Loyalty Points", desc: "Earn rewards for supporting your local community.", color: "bg-white", text: "text-black-shadow" },
+    { id: "c4", title: "Shopping Streak", desc: "Build consistency and unlock exclusive local offers.", color: "bg-white", text: "text-black-shadow" },
     { id: "c5", title: "Curbside Pickup", desc: "Fast service without leaving your car.", color: "bg-white", text: "text-black-shadow" },
     { id: "c6", title: "5000+ Retail Stores", desc: "From fashion to electronics, shop it all in one place.", color: "bg-white", text: "text-black-shadow" },
 ];
