@@ -18,18 +18,16 @@ interface BottomModalProps {
 export default function BottomModal({ visible, onClose, title, children, height }: BottomModalProps) {
     const insets = useSafeAreaInsets();
 
-    if (!visible) return null;
-
     return (
         <Modal
             visible={visible}
             transparent
-            animationType="fade"
+            animationType="slide"
             onRequestClose={onClose}
             statusBarTranslucent={true}
         >
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
                 style={{ flex: 1 }}
             >
                 <View style={styles.overlay}>
@@ -49,7 +47,11 @@ export default function BottomModal({ visible, onClose, title, children, height 
                             </TouchableOpacity>
                         </View>
 
-                        <ScrollView contentContainerStyle={styles.content}>
+                        <ScrollView
+                            contentContainerStyle={styles.content}
+                            keyboardShouldPersistTaps="handled"
+                            keyboardDismissMode="on-drag"
+                        >
                             {children}
                         </ScrollView>
                     </View>

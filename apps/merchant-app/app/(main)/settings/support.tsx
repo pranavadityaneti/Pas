@@ -7,15 +7,10 @@ import { router } from 'expo-router';
 export default function SupportScreen() {
 
     // Actions - These would open actual links/dials/emails
-    const handleCall = () => Linking.openURL('tel:+919876543210');
-    const handleEmail = () => Linking.openURL('mailto:support@pickatstore.com');
+    const handleCall = () => Linking.openURL('tel:+917842287373');
+    const handleEmail = () => Linking.openURL('mailto:support@pickatstore.io');
     const handleChat = () => alert('Live Chat feature coming soon!');
 
-    const FAQ_ITEMS = [
-        { label: 'Payment Settlements', route: '#' },
-        { label: 'Order Cancellation Policy', route: '#' },
-        { label: 'Updating Store Menu', route: '#' },
-    ];
 
     return (
         <SafeAreaView style={styles.container}>
@@ -46,7 +41,7 @@ export default function SupportScreen() {
                     </View>
                     <View style={styles.contactInfo}>
                         <Text style={styles.contactLabel}>Call Support</Text>
-                        <Text style={styles.contactValue}>+91 98765 43210</Text>
+                        <Text style={styles.contactValue}>+91 78422 87373</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={20} color="#ccc" />
                 </TouchableOpacity>
@@ -57,21 +52,12 @@ export default function SupportScreen() {
                     </View>
                     <View style={styles.contactInfo}>
                         <Text style={styles.contactLabel}>Email Us</Text>
-                        <Text style={styles.contactValue}>support@pickatstore.com</Text>
+                        <Text style={styles.contactValue}>support@pickatstore.io</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={20} color="#ccc" />
                 </TouchableOpacity>
 
-                <Text style={[styles.sectionTitle, { marginTop: 32 }]}>Common Topics</Text>
 
-                <View style={styles.faqList}>
-                    {FAQ_ITEMS.map((item, index) => (
-                        <TouchableOpacity key={index} style={[styles.faqItem, index !== FAQ_ITEMS.length - 1 && styles.borderBottom]}>
-                            <Text style={styles.faqText}>{item.label}</Text>
-                            <Ionicons name="chevron-forward" size={20} color="#ccc" />
-                        </TouchableOpacity>
-                    ))}
-                </View>
 
             </ScrollView>
         </SafeAreaView>

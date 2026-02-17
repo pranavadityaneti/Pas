@@ -17,13 +17,24 @@ import { router } from 'expo-router';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import MapView, { Marker } from 'react-native-maps';
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
 import axios from 'axios';
 import { supabase } from '../../src/lib/supabase';
 import { Colors } from '../../constants/Colors';
+import Constants from 'expo-constants';
 
-const STEPS = ['Identity', 'Store', 'Photos', 'Branches', 'KYC', 'Review'];
+let RazorpayCheckout: any = null;
+if (Constants.appOwnership !== 'expo') {
+    try {
+        RazorpayCheckout = require('react-native-razorpay').default;
+    } catch (e) {
+        console.warn('Razorpay not loaded (likely in dev/sim):', e);
+    }
+}
+
+
+const STEPS = ['Identity', 'Store', 'Photos', 'Branches', 'KYC', 'Subscription', 'Review'];
 
 const STORE_CATEGORIES = [
     'Grocery & Kirana',
@@ -90,6 +101,10 @@ export default function SignupScreen() {
     });
 
     const [storePhotos, setStorePhotos] = useState<string[]>([]);
+
+    // Step 6: Payment
+    const [paymentStatus, setPaymentStatus] = useState<'pending' | 'success'>('pending');
+    const [paymentDetails, setPaymentDetails] = useState<any>(null);
 
     const pickDocument = async (type: string) => {
         const result = await ImagePicker.launchImageLibraryAsync({
@@ -181,35 +196,88 @@ export default function SignupScreen() {
                 return false;
             }
 
-            // GSTIN Validation (Mandatory for > 20L)
-            if (kyc.turnoverRange !== '<20L') {
-                const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+            // GSTIN Validation (Mandatory for Everyone)
+            const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 
-                if (!kyc.gstNumber || !gstRegex.test(kyc.gstNumber)) {
-                    Alert.alert('Invalid GSTIN', 'Please enter a valid GSTIN format (e.g., 22AAAAA0000A1Z5).');
-                    return false;
-                }
-                if (!docFiles.gst) {
-                    Alert.alert('Error', 'GST Certificate upload is mandatory for turnover > 20L');
-                    return false;
-                }
-            } else {
-                // If provided voluntarily, still validate format
-                if (kyc.gstNumber && kyc.gstNumber.trim() !== '') {
-                    const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
-                    if (!gstRegex.test(kyc.gstNumber)) {
-                        Alert.alert('Invalid GSTIN', 'The entered GSTIN is invalid.');
-                        return false;
-                    }
-                }
+            if (!kyc.gstNumber || !gstRegex.test(kyc.gstNumber)) {
+                Alert.alert('Invalid GSTIN', 'Please enter a valid GSTIN format (e.g., 22AAAAA0000A1Z5).');
+                return false;
+            }
+            if (!docFiles.gst) {
+                Alert.alert('Error', 'Please upload your GST Certificate.');
+                return false;
+            }
+        }
+
+        if (step === 6) {
+            if (paymentStatus !== 'success') {
+                Alert.alert('Payment Required', 'Please complete the subscription payment to proceed.');
+                return false;
             }
         }
         return true;
     };
 
+    const handlePayment = async () => {
+        const options = {
+            description: 'Lifetime Partner Subscription',
+            image: 'https://pickatstore.com/logo.png', // Replace with real logo URL
+            currency: 'INR',
+            key: 'rzp_test_RnWZnS9NxCVC6V',
+            amount: 99900, // 999 * 100 paise
+            name: 'PickAtStore',
+            prefill: {
+                email: identity.email,
+                contact: identity.phone,
+                name: identity.ownerName
+            },
+            theme: { color: Colors.primary }
+        };
+
+        // Check if running in Expo Go or if Native Module is missing
+        if (Constants.appOwnership === 'expo' || !RazorpayCheckout) {
+            Alert.alert(
+                'Development Mode',
+                'Native Payment Module not available in Expo Go. Simulating successful payment for testing.',
+                [
+                    {
+                        text: 'Simulate Success',
+                        onPress: () => {
+                            console.log('Payment Simulated');
+                            setPaymentStatus('success');
+                            setPaymentDetails({
+                                paymentId: 'pay_simulated_123',
+                                orderId: 'order_simulated_123',
+                                signature: 'sig_simulated_123'
+                            });
+                        }
+                    },
+                    { text: 'Cancel', style: 'cancel' }
+                ]
+            );
+            return;
+        }
+
+        try {
+            const data = await RazorpayCheckout.open(options);
+            // On success
+            console.log('Payment Success:', data);
+            setPaymentStatus('success');
+            setPaymentDetails({
+                paymentId: data.razorpay_payment_id,
+                orderId: data.razorpay_order_id,
+                signature: data.razorpay_signature
+            });
+            Alert.alert('Success', 'Payment Successful! You can now proceed.');
+        } catch (error: any) {
+            console.error('Payment Error:', error);
+            Alert.alert('Error', `Payment failed: ${error.description || error.reason || 'Unknown error'}`);
+        }
+    };
+
     const handleNext = () => {
         if (!validateStep()) return;
-        if (step < 6) setStep(step + 1);
+        if (step < 7) setStep(step + 1);
         else handleSubmit();
     };
 
@@ -240,6 +308,9 @@ export default function SignupScreen() {
             }
 
             setLoading(true);
+            let authUser = null;
+            let finalAuthError = null;
+
             // 1. Create Auth User
             const { data: authData, error: authError } = await supabase.auth.signUp({
                 email: identity.email.trim(),
@@ -248,32 +319,79 @@ export default function SignupScreen() {
                     data: {
                         name: identity.ownerName,
                         role: 'MERCHANT'
-                    }
+                    },
+                    // Ensure auto-sign in if email confirmation is disabled
+                    emailRedirectTo: undefined
                 }
             });
 
             if (authError) {
-                console.error('[Signup] Auth Error:', authError);
-                throw authError;
-            }
-            if (!authData.user) throw new Error('Failed to create user');
+                // Check if user already exists
+                const isUserExistsError =
+                    authError.message.includes('User already registered') ||
+                    authError.message.includes('User_email_key') ||
+                    authError.message.includes('duplicate key') ||
+                    authError.message.includes('unique constraint') ||
+                    (authError as any).status === 422 ||
+                    (authError as any).status === 409;
 
-            const userId = authData.user.id;
-            console.log('[Signup] User created:', userId);
+                if (isUserExistsError) {
+                    console.log('[Signup] User exists (Error: ' + authError.message + '). Attempting Login...');
+                    // Attempt Login
+                    const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
+                        email: identity.email.trim(),
+                        password: identity.password,
+                    });
+
+                    if (loginError) {
+                        console.error('[Signup] Login Failed after User Exists:', loginError);
+                        if (loginError.message.includes('Invalid login credentials')) {
+                            throw new Error('Account exists but password does not match. Please use a different email or reset password.');
+                        }
+                        throw new Error('User account in inconsistent state. Please use a different email.');
+                    }
+                    authUser = loginData.user;
+                } else {
+                    console.error('[Signup] Auth Error:', authError);
+                    throw authError;
+                }
+            } else {
+                authUser = authData.user;
+            }
+
+            if (!authUser) throw new Error('Failed to create or retrieve user');
+
+            const userId = authUser.id;
+            console.log('[Signup] User verified:', userId);
 
             // 2. Upload Documents
             const uploadFile = async (uri: string, path: string) => {
+                if (!uri) return null;
                 try {
-                    const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
-                    const { error } = await supabase.storage.from('merchant-documents').upload(path, decode(base64), {
-                        contentType: 'image/jpeg',
-                        upsert: true,
-                    });
-                    if (error) throw error;
-                    const { data: { publicUrl } } = supabase.storage.from('merchant-documents').getPublicUrl(path);
+                    // Use fetch + blob for Expo/React Native
+                    const response = await fetch(uri);
+                    const blob = await response.blob();
+
+                    const { data, error } = await supabase.storage
+                        .from('merchant-docs') // Ensure bucket name is correct
+                        .upload(path, blob, {
+                            contentType: 'image/jpeg',
+                            upsert: true
+                        });
+
+                    if (error) {
+                        console.error('Upload Error:', error);
+                        throw error;
+                    }
+
+                    // Get Public URL
+                    const { data: { publicUrl } } = supabase.storage
+                        .from('merchant-docs')
+                        .getPublicUrl(path);
+
                     return publicUrl;
-                } catch (e) {
-                    console.error('[Signup] Upload failed for', path, e);
+                } catch (error) {
+                    console.error('File upload failed:', error);
                     return null;
                 }
             };
@@ -291,7 +409,7 @@ export default function SignupScreen() {
             );
 
             // 3. Insert Merchant Record
-            const { error: dbError } = await supabase.from('merchants').insert({
+            const { error: dbError } = await supabase.from('merchants').upsert({
                 id: userId,
                 owner_name: identity.ownerName,
                 email: identity.email.trim(),
@@ -325,13 +443,27 @@ export default function SignupScreen() {
                 throw dbError;
             }
 
+            // 4. Insert Subscription Record
+            if (paymentStatus === 'success' && paymentDetails) {
+                const { error: subError } = await supabase.from('subscriptions').insert({
+                    merchant_id: userId,
+                    amount: 999.00,
+                    currency: 'INR',
+                    status: 'success',
+                    provider: 'razorpay',
+                    transaction_id: paymentDetails.paymentId
+                });
+                if (subError) console.error('[Signup] Subscription Insert Error (Non-blocking):', subError);
+            }
+
             if (hasBranches && branches.length > 0) {
                 const branchRecords = branches.map(b => ({
                     merchant_id: userId,
                     branch_name: b.name,
                     address: b.address,
                 }));
-                await supabase.from('merchant_branches').insert(branchRecords);
+                // Use upsert or delete-then-insert if branch IDs are not preserved
+                await supabase.from('merchant_branches').upsert(branchRecords);
             }
 
             Alert.alert('Success!', 'Your application has been submitted.');
@@ -407,13 +539,14 @@ export default function SignupScreen() {
 
             <KeyboardAvoidingView
                 style={{ flex: 1 }}
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
                 keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
             >
                 <ScrollView
                     style={styles.content}
                     contentContainerStyle={styles.contentContainer}
                     keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="on-drag"
                 >
                     {step === 1 && (
                         <View style={styles.card}>
@@ -753,29 +886,25 @@ export default function SignupScreen() {
                                     />
                                 </View>
 
-                                {kyc.turnoverRange !== '<20L' && (
-                                    <>
-                                        <View style={styles.inputGroup}>
-                                            <Text style={styles.label}>Upload GST Certificate <Text style={styles.required}>*</Text></Text>
-                                            <TouchableOpacity style={styles.uploadButton} onPress={() => pickDocument('gst')}>
-                                                <Ionicons name={docFiles.gst ? "checkmark-circle" : "cloud-upload-outline"} size={22} color={docFiles.gst ? "#10B981" : "#6366F1"} />
-                                                <Text style={[styles.uploadText, docFiles.gst && { color: '#10B981' }]}>{docFiles.gst ? "GST Certificate Selected" : "Upload GST Certificate"}</Text>
-                                            </TouchableOpacity>
-                                        </View>
+                                <View style={styles.inputGroup}>
+                                    <Text style={styles.label}>Upload GST Certificate <Text style={styles.required}>*</Text></Text>
+                                    <TouchableOpacity style={styles.uploadButton} onPress={() => pickDocument('gst')}>
+                                        <Ionicons name={docFiles.gst ? "checkmark-circle" : "cloud-upload-outline"} size={22} color={docFiles.gst ? "#10B981" : "#6366F1"} />
+                                        <Text style={[styles.uploadText, docFiles.gst && { color: '#10B981' }]}>{docFiles.gst ? "GST Certificate Selected" : "Upload GST Certificate"}</Text>
+                                    </TouchableOpacity>
+                                </View>
 
-                                        <View style={styles.inputGroup}>
-                                            <Text style={styles.label}>GSTIN <Text style={styles.required}>*</Text></Text>
-                                            <TextInput
-                                                style={styles.input}
-                                                placeholder="22AAAAA0000A1Z5"
-                                                placeholderTextColor="#9CA3AF"
-                                                autoCapitalize="characters"
-                                                value={kyc.gstNumber}
-                                                onChangeText={(t) => setKyc({ ...kyc, gstNumber: t.toUpperCase() })}
-                                            />
-                                        </View>
-                                    </>
-                                )}
+                                <View style={styles.inputGroup}>
+                                    <Text style={styles.label}>GSTIN <Text style={styles.required}>*</Text></Text>
+                                    <TextInput
+                                        style={styles.input}
+                                        placeholder="22AAAAA0000A1Z5"
+                                        placeholderTextColor="#9CA3AF"
+                                        autoCapitalize="characters"
+                                        value={kyc.gstNumber}
+                                        onChangeText={(t) => setKyc({ ...kyc, gstNumber: t.toUpperCase() })}
+                                    />
+                                </View>
 
                                 <View style={styles.inputGroup}>
                                     <Text style={styles.label}>Upload MSME / Udyam Certificate (Optional)</Text>
@@ -825,6 +954,77 @@ export default function SignupScreen() {
                     )}
 
                     {step === 6 && (
+                        <View style={styles.card}>
+                            <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+                                <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#111827', marginBottom: 8 }}>Partner Subscription</Text>
+                                <Text style={{ fontSize: 14, color: '#6B7280', textAlign: 'center', marginBottom: 24 }}>Unlock generic analytics, premium support, and unlimited listings with lifetime access.</Text>
+
+                                <View style={{
+                                    backgroundColor: '#FFFFFF',
+                                    borderRadius: 16,
+                                    padding: 24,
+                                    width: '100%',
+                                    alignItems: 'center',
+                                    borderWidth: 1,
+                                    borderColor: '#E5E7EB',
+                                    shadowColor: '#000',
+                                    shadowOffset: { width: 0, height: 2 },
+                                    shadowOpacity: 0.05,
+                                    shadowRadius: 4,
+                                    elevation: 2
+                                }}>
+                                    <Text style={{ fontSize: 16, fontWeight: '600', color: Colors.primary, marginBottom: 12 }}>LIFETIME ACCESS</Text>
+
+                                    <View style={{ flexDirection: 'row', alignItems: 'baseline', marginBottom: 24 }}>
+                                        <Text style={{ fontSize: 20, color: '#9CA3AF', textDecorationLine: 'line-through', marginRight: 12 }}>₹2499</Text>
+                                        <Text style={{ fontSize: 40, fontWeight: '800', color: '#10B981' }}>₹999</Text>
+                                    </View>
+
+                                    <View style={{ width: '100%', paddingHorizontal: 10 }}>
+                                        {['Zero Commission', 'Unlimited Listings', 'Premium Support', 'Store Analytics'].map((feat, i) => (
+                                            <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                                                <Ionicons name="checkmark-circle" size={20} color="#10B981" style={{ marginRight: 10 }} />
+                                                <Text style={{ fontSize: 16, color: '#374151' }}>{feat}</Text>
+                                            </View>
+                                        ))}
+                                    </View>
+                                </View>
+
+                                {paymentStatus === 'success' ? (
+                                    <View style={{ marginTop: 24, alignItems: 'center' }}>
+                                        <Ionicons name="checkmark-circle" size={64} color="#10B981" />
+                                        <Text style={{ fontSize: 18, fontWeight: '600', color: '#10B981', marginTop: 12 }}>Payment Successful!</Text>
+                                        <Text style={{ color: '#6B7280', marginTop: 4 }}>Transaction ID: {paymentDetails?.paymentId}</Text>
+                                    </View>
+                                ) : (
+                                    <TouchableOpacity
+                                        style={{
+                                            backgroundColor: Colors.primary,
+                                            width: '100%',
+                                            paddingVertical: 16,
+                                            borderRadius: 12,
+                                            alignItems: 'center',
+                                            marginTop: 32,
+                                            flexDirection: 'row',
+                                            justifyContent: 'center'
+                                        }}
+                                        onPress={handlePayment}
+                                    >
+                                        <Ionicons name="lock-closed" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
+                                        <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: 'bold' }}>Pay & Unlock</Text>
+                                    </TouchableOpacity>
+                                )}
+
+                                <View style={{ marginTop: 16, flexDirection: 'row', alignItems: 'center' }}>
+                                    <View style={{ height: 1, backgroundColor: '#E5E7EB', flex: 1 }} />
+                                    <Text style={{ marginHorizontal: 10, color: '#9CA3AF', fontSize: 12 }}>Secure Payment via Razorpay</Text>
+                                    <View style={{ height: 1, backgroundColor: '#E5E7EB', flex: 1 }} />
+                                </View>
+                            </View>
+                        </View>
+                    )}
+
+                    {step === 7 && (
                         <>
                             <View style={[styles.card, styles.successCard]}>
                                 <Ionicons name="checkmark-circle" size={32} color="#10B981" />
@@ -890,7 +1090,7 @@ export default function SignupScreen() {
                     >
                         {loading ? (
                             <ActivityIndicator color="#FFFFFF" />
-                        ) : step === 6 ? (
+                        ) : step === 7 ? (
                             <>
                                 <Text style={styles.nextButtonText}>Submit</Text>
                                 <Ionicons name="checkmark" size={18} color="#FFFFFF" />

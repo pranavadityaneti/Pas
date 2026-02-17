@@ -21,6 +21,10 @@ enum OrderStatus {
   READY
   COMPLETED
   CANCELLED
+  RETURN_REQUESTED
+  RETURN_APPROVED
+  RETURN_REJECTED
+  REFUNDED
 }
 
 // --- Geographic Models ---
@@ -188,6 +192,7 @@ model Order {
   isPaid          Boolean     @default(false) @map("ispaid")
   otp             String?     // 4-digit PIN for pickup verification
   cancelledReason String?     @map("cancelled_reason")
+  returnReason    String?     @map("return_reason")
   
   metadata        Json?       @map("metadata") // For platform fees, taxes, loyalty pts
   
@@ -199,6 +204,21 @@ model Order {
   @@index([orderNumber])
   @@index([storeId])
   @@index([userId])
+}
+
+model Subscription {
+  id            String   @id @default(uuid())
+  merchantId    String   @map("merchant_id")
+  merchant      Merchant @relation(fields: [merchantId], references: [id])
+  amount        Float
+  currency      String   @default("INR")
+  status        String   // "pending", "success", "failed"
+  provider      String   // "razorpay"
+  transactionId String?  @map("transaction_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("subscriptions")
 }
 
 model OrderItem {
@@ -238,6 +258,8 @@ model Merchant {
   aadharNumber        String?  @map("aadhar_number")
   bankAccountNumber   String?  @map("bank_account_number")
   ifscCode            String?  @map("ifsc_code")
+  bankName            String?  @map("bank_name")
+  bankBeneficiaryName String?  @map("bank_beneficiary_name")
   
   panDocUrl           String?  @map("pan_doc_url")
   panDocumentUrl      String?  @map("pan_document_url")
@@ -257,6 +279,7 @@ model Merchant {
   updatedAt           DateTime? @updatedAt @map("updated_at")
 
   branches            MerchantBranch[]
+  subscriptions       Subscription[]
 
   @@map("merchants")
 }
@@ -279,3 +302,5 @@ model MerchantBranch {
 
   @@map("merchant_branches")
 }
+
+

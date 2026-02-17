@@ -156,7 +156,7 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
     return (
         <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
                 style={styles.overlay}
             >
                 <View style={styles.container}>
@@ -170,6 +170,7 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
                     <ScrollView
                         contentContainerStyle={styles.content}
                         keyboardShouldPersistTaps="handled"
+                        keyboardDismissMode="on-drag"
                     >
                         {/* Image Picker */}
                         <Text style={styles.label}>Product Photos (Min 1, Max 4) *</Text>

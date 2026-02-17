@@ -31,18 +31,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Fetch user profile from database
     const fetchUserProfile = async (supabaseUser: SupabaseUser): Promise<AdminUser | null> => {
-        const { data, error } = await supabase
-            .from('User')
-            .select('id, email, name, role')
-            .eq('email', supabaseUser.email)
-            .single();
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-        if (error || !data) {
-            console.error('Error fetching user profile:', error);
+        try {
+            // @ts-ignore
+            const { data, error } = await supabase
+                .from('User')
+                .select('id, email, name, role')
+                .eq('email', supabaseUser.email)
+                .single()
+                .abortSignal(controller.signal);
+
+            clearTimeout(timeoutId);
+
+            if (error) {
+                console.error('Error fetching user profile:', error);
+                return null;
+            }
+
+            return data as AdminUser;
+        } catch (e: any) {
+            clearTimeout(timeoutId);
+            if (e.name !== 'AbortError') {
+                console.error('Profile fetch exception:', e);
+            }
             return null;
         }
-
-        return data as AdminUser;
     };
 
     // Initialize auth state with timeout to prevent infinite loading
@@ -123,19 +138,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
             console.log('Attempting login for:', email);
 
-            // Add a timeout to the login call itself
-            const loginPromise = supabase.auth.signInWithPassword({
+            const { data, error } = await supabase.auth.signInWithPassword({
                 email,
                 password,
             });
-
-            const timeoutPromise = new Promise<{ data: any, error: any }>((_, reject) =>
-                setTimeout(() => reject(new Error('Login attempt timed out after 15s')), 15000)
-            );
-
-            console.log('Calling signInWithPassword...');
-            const { data, error } = await Promise.race([loginPromise, timeoutPromise]) as any;
-            console.log('signInWithPassword result:', { hasUser: !!data?.user, error });
 
             if (error) {
                 console.error('Sign in error:', error);

@@ -17,6 +17,7 @@ const TABS = [
     { label: 'Pending', value: 'pending' },
     { label: 'Processing', value: 'processing' },
     { label: 'Ready', value: 'ready' },
+    { label: 'Returns', value: 'returns' },
     { label: 'History', value: 'history' }
 ];
 
@@ -24,6 +25,7 @@ const STATUS_MAP: Record<string, OrderStatus[]> = {
     pending: ['PENDING'],
     processing: ['CONFIRMED', 'PREPARING'],
     ready: ['READY'],
+    returns: ['RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REFUNDED'],
     history: ['COMPLETED', 'CANCELLED']
 };
 
@@ -186,6 +188,26 @@ export default function OrdersScreen() {
                     {item.isPaid && isProcessing && (
                         <View style={styles.paidBadge}>
                             <Text style={styles.paidBadgeText}>PAID - START PACKING</Text>
+                        </View>
+                    )}
+                    {item.status === 'RETURN_REQUESTED' && (
+                        <View style={[styles.approvalBadge, { backgroundColor: '#F97316' }]}>
+                            <Text style={styles.approvalText}>RETURN REQUESTED</Text>
+                        </View>
+                    )}
+                    {item.status === 'RETURN_APPROVED' && (
+                        <View style={[styles.paidBadge, { backgroundColor: '#10B981' }]}>
+                            <Text style={styles.paidBadgeText}>RETURN APPROVED</Text>
+                        </View>
+                    )}
+                    {item.status === 'RETURN_REJECTED' && (
+                        <View style={[styles.approvalBadge, { backgroundColor: '#EF4444' }]}>
+                            <Text style={styles.approvalText}>RETURN REJECTED</Text>
+                        </View>
+                    )}
+                    {item.status === 'REFUNDED' && (
+                        <View style={[styles.approvalBadge, { backgroundColor: '#8B5CF6' }]}>
+                            <Text style={styles.approvalText}>REFUNDED</Text>
                         </View>
                     )}
                 </View>

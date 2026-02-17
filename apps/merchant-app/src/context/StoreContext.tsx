@@ -178,7 +178,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
     }, []);
 
-    // --- Initial Load: Read cache, then fetch live data ---
+    // --- Initial Load: Read cache only, auth listener will trigger fetchStore ---
     useEffect(() => {
         let mounted = true;
 
@@ -200,8 +200,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 console.error('[StoreContext] Cache read error:', e);
             }
 
+            // Try to fetch if auth session is already available
+            // (handles case where SIGNED_IN already fired before this effect)
             if (mounted) {
-                await fetchStore();
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                    await fetchStore();
+                } else {
+                    // Auth not ready yet — the auth state listener will handle it
+                    console.log('[StoreContext] Auth not ready on init, waiting for auth state change');
+                    setLoading(false);
+                }
             }
         };
 

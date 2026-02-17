@@ -11,6 +11,7 @@ import multer from 'multer';
 import * as xlsx from 'xlsx';
 import fs from 'fs';
 import { createClient } from '@supabase/supabase-js';
+import { smsService } from './services/sms.service';
 
 // --- Configuration ---
 const app = express();
@@ -24,7 +25,7 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 // --- Middleware ---
 app.use(helmet());
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
 // --- Helper Functions ---
@@ -894,6 +895,10 @@ app.patch('/orders/:id/status', async (req, res) => {
         // Generate 4-digit OTP when moving to READY
         if (status === 'READY') {
             data.otp = Math.floor(1000 + Math.random() * 9000).toString();
+            // Send OTP via SMS
+            // Need to fetch user first if we want to send it immediately, but 'update' returns it. 
+            // We can do it AFTER update.
+
         }
 
         const order = await prisma.order.update({
@@ -901,6 +906,10 @@ app.patch('/orders/:id/status', async (req, res) => {
             data,
             include: { user: true, items: { include: { storeProduct: { include: { product: true } } } }, store: { include: { manager: true } } }
         });
+
+        if (status === 'READY' && order.user?.phone && order.otp) {
+            smsService.sendOtp(order.user.phone, order.otp).catch(err => console.error('OTP SMS Failed:', err));
+        }
 
         // --- Notification & Stock Restoration on Cancellation ---
         if (status === 'CANCELLED') {
@@ -913,6 +922,23 @@ app.patch('/orders/:id/status', async (req, res) => {
                     `Order #${order.orderNumber} has been cancelled.`,
                     `/orders/${id}`
                 );
+
+                // --- SMS NOTIFICATION ---
+                if (newOrder.user?.phone) {
+                    const smsStatus = {
+                        'CONFIRMED': 'Confirmed',
+                        'PREPARING': 'Being Prepared',
+                        'READY': 'Ready for Pickup',
+                        'COMPLETED': 'Completed',
+                        'CANCELLED': 'Cancelled',
+                        'RETURN_APPROVED': 'Return Approved'
+                    }[status];
+
+                    if (smsStatus) {
+                        smsService.sendOrderUpdate(newOrder.user.phone, id, smsStatus).catch(err => console.error('SMS Failed:', err));
+                    }
+                }
+                // ------------------------
             }
 
             // 2. Restore Stock

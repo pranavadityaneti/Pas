@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, Keyboard } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -25,17 +25,8 @@ export default function ProfileScreen() {
         email: ''
     });
 
-    useEffect(() => {
-        if (contextUser) {
-            setFormState({
-                name: contextUser.name || '',
-                phone: contextUser.phone || '',
-                email: contextUser.email || ''
-            });
-        }
-    }, [contextUser]);
-
     const handleInitialSave = async () => {
+        Keyboard.dismiss();
         // Check if phone number changed
         if (formState.phone !== contextUser?.phone) {
             // Trigger OTP Flow
@@ -72,10 +63,15 @@ export default function ProfileScreen() {
 
             if (error) throw error;
 
-            // Success
+            // Close modal and reset state
             setModalVisible(false);
             setOtpSent(false);
             setOtp('');
+
+            // The realtime subscription in UserContext will automatically
+            // update contextUser when the User row changes — no need to
+            // call refreshUser() here (that was causing double-updates
+            // and rapid re-renders/flickering)
             Alert.alert('Success', 'Profile updated successfully');
 
         } catch (error) {
