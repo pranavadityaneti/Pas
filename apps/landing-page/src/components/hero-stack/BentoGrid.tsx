@@ -8,8 +8,8 @@ import { MousePointer2 } from "lucide-react";
 const customerContent = [
     { id: "c1", title: "Smart Checkout", desc: "Consolidate your neighborhood orders into one fluid experience.", color: "bg-white", text: "text-black-shadow" },
     { id: "c2", title: "Live Tracking", desc: "Real-time updates as your order is prepared for pick-up.", color: "bg-white", text: "text-black-shadow" },
-    { id: "c3", title: "Loyalty Points", desc: "Earn rewards for supporting your local community.", color: "bg-white", text: "text-black-shadow" },
-    { id: "c4", title: "Shopping Streak", desc: "Build consistency and unlock exclusive local offers.", color: "bg-white", text: "text-black-shadow" },
+    { id: "c3", title: "No Delivery Fees", desc: "Save money on shipping costs, every single time.", color: "bg-white", text: "text-black-shadow" },
+    { id: "c4", title: "Search Locally", desc: "Find exactly which nearby store has what you need.", color: "bg-white", text: "text-black-shadow" },
     { id: "c5", title: "Pickup at Store", desc: "Fast service without leaving your car.", color: "bg-white", text: "text-black-shadow" },
     { id: "c6", title: "5000+ Retail Stores", desc: "From fashion to electronics, shop it all in one place.", color: "bg-white", text: "text-black-shadow" },
 ];
@@ -40,7 +40,7 @@ export function BentoGrid() {
 
                 {/* Row 2: CENTERED Switch */}
                 <BentoCard item={content[2]} className="col-span-1 md:col-span-1 md:row-span-1 h-[300px] md:h-auto">
-                    <MockupWallet appMode={appMode} />
+                    {appMode === "customer" ? <MockupNoFees appMode={appMode} /> : <MockupWallet appMode={appMode} />}
                 </BentoCard>
 
                 <motion.div
@@ -67,7 +67,7 @@ export function BentoGrid() {
                 </motion.div>
 
                 <BentoCard item={content[3]} className="col-span-1 md:col-span-1 md:row-span-1 h-[300px] md:h-auto">
-                    <MockupStreak appMode={appMode} />
+                    {appMode === "customer" ? <MockupSearch appMode={appMode} /> : <MockupStreak appMode={appMode} />}
                 </BentoCard>
 
                 {/* Row 3 */}
@@ -460,6 +460,96 @@ function MockupStreak({ appMode }: { appMode: string }) {
 
 function MockupInbox({ appMode }: { appMode: string }) {
     return null; // Deprecated
+}
+
+function MockupNoFees({ appMode }: { appMode: string }) {
+    return (
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-6">
+            <div className="relative w-full h-32 bg-white rounded-2xl border border-black/[0.03] shadow-lg flex flex-col items-center justify-center overflow-hidden">
+                <div className="absolute inset-0 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] opacity-20" />
+
+                <div className="flex items-center gap-3 z-10">
+                    <div className="flex flex-col items-end">
+                        <div className="text-sm font-bold text-gray-400 line-through decoration-red-500/50 decoration-2">
+                            ₹40.00
+                        </div>
+                        <div className="text-xs text-gray-400 font-medium">Delivery</div>
+                    </div>
+
+                    <div className="w-px h-8 bg-gray-200" />
+
+                    <div className="flex flex-col items-start">
+                        <div className="text-3xl font-black text-[#B52725] tracking-tighter">
+                            ₹0
+                        </div>
+                        <div className="text-xs font-bold text-[#B52725] uppercase tracking-wider">
+                            Fees
+                        </div>
+                    </div>
+                </div>
+
+                <div className="absolute bottom-3 flex gap-1">
+                    <div className="w-1 h-1 rounded-full bg-gray-300" />
+                    <div className="w-1 h-1 rounded-full bg-gray-300" />
+                    <div className="w-1 h-1 rounded-full bg-gray-300" />
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function MockupSearch({ appMode }: { appMode: string }) {
+    return (
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-6 overflow-hidden">
+            {/* Map Background */}
+            <div className="absolute inset-0 opacity-20 filter grayscale contrast-125">
+                <svg width="100%" height="100%">
+                    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                        <path d="M 40 0 L 0 0 0 40" fill="none" stroke="currentColor" strokeWidth="1" />
+                    </pattern>
+                    <rect width="100%" height="100%" fill="url(#grid)" />
+                </svg>
+            </div>
+
+            <div className="relative w-full max-w-[280px] bg-white rounded-xl shadow-xl border border-black/[0.04] p-3 flex flex-col gap-3 z-10">
+                {/* Search Bar */}
+                <div className="w-full h-8 bg-gray-50 rounded-lg border border-black/[0.03] flex items-center px-3 gap-2">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="text-gray-400">
+                        <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                    <div className="text-[10px] text-gray-400 font-medium">Headphones near me...</div>
+                </div>
+
+                {/* Results */}
+                <div className="flex flex-col gap-2">
+                    {[1, 2].map((i) => (
+                        <div key={i} className="flex items-center gap-3 p-1.5 rounded-lg hover:bg-gray-50 transition-colors">
+                            <div className="w-8 h-8 rounded-md bg-gray-100 flex items-center justify-center">
+                                <div className="w-4 h-4 rounded-full bg-gray-300" />
+                            </div>
+                            <div className="flex flex-col">
+                                <div className="w-20 h-2 bg-gray-800 rounded-full mb-1" />
+                                <div className="w-12 h-1.5 bg-gray-300 rounded-full" />
+                            </div>
+                            <div className="ml-auto text-[10px] font-bold text-[#B52725]">0.8 km</div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            {/* Location Pin */}
+            <motion.div
+                initial={{ y: -10, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.5, duration: 0.5 }}
+                className="absolute top-1/2 right-4 w-8 h-8 bg-[#B52725] rounded-full flex items-center justify-center text-white shadow-lg z-20"
+            >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" />
+                </svg>
+            </motion.div>
+        </div>
+    );
 }
 
 function MockupCurbside({ appMode }: { appMode: string }) {
