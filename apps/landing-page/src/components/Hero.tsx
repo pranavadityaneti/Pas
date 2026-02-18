@@ -27,7 +27,7 @@ export function Hero() {
                     initial={{ opacity: 0, y: 30 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.1 }}
-                    className="text-5xl md:text-7xl lg:text-8xl font-bold tracking-tighter leading-[1.1] max-w-5xl mx-auto"
+                    className="text-4xl md:text-6xl lg:text-7xl font-bold tracking-tighter leading-[1.1] max-w-5xl mx-auto"
                 >
                     Skip the Queue. <br className="hidden md:block" />
                     <span className="relative inline-block text-store-red">
@@ -45,20 +45,12 @@ export function Hero() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ delay: 0.2 }}
-                        className="text-lg md:text-xl text-black-shadow/70 leading-relaxed"
+                        className="text-base md:text-lg text-black-shadow/70 leading-relaxed"
                     >
                         The ultimate convenience for your daily needs. Order from your favorite neighborhood stores and pick up curbside in minutes.
                     </motion.p>
 
-                    {/* Hand-drawn Arrow Left */}
-                    <div className="hidden md:block absolute -left-24 top-2 transform -rotate-12">
-                        {/* Simple SVG Arrow */}
-                        <svg width="60" height="60" viewBox="0 0 60 60" className="text-store-red-40">
-                            <path d="M50 10 Q 10 30 10 50 M 10 50 L 20 40 M 10 50 L 25 55" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                        </svg>
-                    </div>
-                    {/* Text for Arrow */}
-                    <span className="hidden md:block absolute -left-40 -top-4 font-handwriting text-store-red-60 transform -rotate-12 font-script text-sm font-medium">Save time!</span>
+
                 </div>
 
                 {/* CTA Button */}
@@ -68,17 +60,14 @@ export function Hero() {
                     transition={{ delay: 0.3 }}
                     className="mt-10 relative group"
                 >
-                    <button className="bg-store-red text-white px-8 py-4 rounded-full text-lg font-semibold shadow-lg shadow-store-red-40/50 hover:shadow-xl hover:scale-105 hover:bg-store-red-80 transition-all flex items-center gap-2">
-                        Start Shopping
-                        <ArrowRight size={20} />
-                    </button>
-
-                    {/* "It's free" Scribble */}
-                    <div className="absolute -bottom-10 -left-12 rotate-[-15deg] hidden md:block">
-                        <span className="text-black-shadow/60 font-medium text-sm">No extra fees</span>
-                        <svg width="40" height="20" viewBox="0 0 40 20" className="text-location-yellow ml-2 -mt-1">
-                            <path d="M10 0 Q 20 20 35 5" fill="none" stroke="currentColor" strokeWidth="1.5" />
-                        </svg>
+                    <div className="flex gap-4 items-center justify-center">
+                        <button className="bg-store-red text-white px-6 py-3 rounded-full text-base font-semibold shadow-lg shadow-store-red-40/50 hover:shadow-xl hover:scale-105 hover:bg-store-red-80 transition-all flex items-center gap-2">
+                            Get Started
+                            <ArrowRight size={18} />
+                        </button>
+                        <button className="bg-location-yellow text-black border border-location-yellow-120 px-6 py-3 rounded-full text-base font-semibold hover:bg-location-yellow-60 transition-all flex items-center gap-2">
+                            Take Small Survey
+                        </button>
                     </div>
                 </motion.div>
 

@@ -8,46 +8,30 @@ export function Header() {
                 <div className="flex justify-between items-center h-20">
                     {/* Logo */}
                     <div className="flex-shrink-0 flex items-center gap-2">
-                        <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center transform -rotate-6">
-                            <span className="text-white font-bold text-lg">P</span>
-                        </div>
-                        <span className="font-bold text-xl tracking-tight text-gray-900">PasLayout</span>
+                        <img
+                            src="/Pas_Logo_App.png"
+                            alt="PickAtStore Logo"
+                            className="h-10 w-auto object-contain"
+                        />
+                        <span className="font-bold text-xl tracking-tight text-gray-900">PickAtStore</span>
                     </div>
 
-                    {/* Desktop Nav */}
-                    <nav className="hidden md:flex space-x-8">
-                        {["Brands", "Creators", "Pricing", "Use Cases", "Contact"].map((item) => (
-                            <Link
-                                key={item}
-                                href="#"
-                                className="text-sm font-medium text-gray-600 hover:text-black transition-colors"
-                            >
-                                {item}
-                            </Link>
-                        ))}
-                    </nav>
-
-                    {/* Auth Buttons */}
-                    <div className="hidden md:flex items-center space-x-4">
-                        <Link
-                            href="#"
-                            className="text-sm font-medium text-gray-900 hover:text-black"
-                        >
-                            Log in
+                    {/* App Store Buttons */}
+                    <div className="flex items-center gap-4">
+                        <Link href="#" className="hover:opacity-80 transition-opacity">
+                            <img
+                                src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg"
+                                alt="Get it on Google Play"
+                                className="h-10 w-auto"
+                            />
                         </Link>
-                        <Link
-                            href="#"
-                            className="bg-gray-900 text-white px-5 py-2.5 rounded-full text-sm font-medium hover:bg-black transition-all hover:scale-105"
-                        >
-                            Sign up
+                        <Link href="#" className="hover:opacity-80 transition-opacity">
+                            <img
+                                src="https://upload.wikimedia.org/wikipedia/commons/3/3c/Download_on_the_App_Store_Badge.svg"
+                                alt="Download on the App Store"
+                                className="h-10 w-auto"
+                            />
                         </Link>
-                    </div>
-
-                    {/* Mobile Menu Button */}
-                    <div className="md:hidden">
-                        <button className="text-gray-900 p-2">
-                            <Menu size={24} />
-                        </button>
                     </div>
                 </div>
             </div>
