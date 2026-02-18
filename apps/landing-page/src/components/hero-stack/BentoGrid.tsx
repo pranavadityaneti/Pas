@@ -3,6 +3,7 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { useHero } from "./HeroContext";
 import Image from "next/image";
+import { MousePointer2 } from "lucide-react";
 
 const customerContent = [
     { id: "c1", title: "Smart Checkout", desc: "Consolidate your neighborhood orders into one fluid experience.", color: "bg-white", text: "text-black-shadow" },
@@ -55,6 +56,13 @@ export function BentoGrid() {
                         <div className="px-6 py-2.5 rounded-full bg-white text-[#B52725] text-sm font-bold shadow-lg group-hover:bg-white/90 transition-all">
                             Explore {appMode === "customer" ? "Merchant" : "Customer"} Tools
                         </div>
+                        <motion.div
+                            className="mt-6 text-white/40"
+                            animate={{ scale: [1, 1.1, 1], y: [0, 2, 0] }}
+                            transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                        >
+                            <MousePointer2 size={24} className="fill-white/20 rotate-12" />
+                        </motion.div>
                     </div>
                 </motion.div>
 
