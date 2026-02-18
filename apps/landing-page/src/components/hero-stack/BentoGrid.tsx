@@ -464,46 +464,52 @@ function MockupInbox({ appMode }: { appMode: string }) {
 
 function MockupQueue({ appMode }: { appMode: string }) {
     return (
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-6">
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-6 overflow-hidden">
             <div className="relative w-full h-32 bg-white rounded-2xl border border-black/[0.03] shadow-lg flex items-center justify-center overflow-hidden">
                 <div className="absolute inset-0 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] opacity-20" />
 
-                {/* The Line (Queue) */}
-                <div className="absolute bottom-4 left-6 flex items-end gap-1 opacity-40">
-                    {[1, 2, 3].map((i) => (
-                        <div key={i} className="w-3 h-8 bg-gray-300 rounded-t-sm" />
-                    ))}
+                {/* Lane Dividers */}
+                <div className="absolute inset-0 flex">
+                    <div className="w-1/2 h-full border-r border-dashed border-black/5 bg-gray-50/50" />
+                    <div className="w-1/2 h-full bg-[#B52725]/[0.02]" />
                 </div>
 
-                {/* The VIP Path */}
-                <div className="relative z-10 flex flex-col items-center gap-2">
-                    <motion.div
-                        initial={{ x: -50, opacity: 0 }}
-                        animate={{ x: 0, opacity: 1 }}
-                        transition={{ duration: 0.8, ease: "backOut" }}
-                        className="flex items-center gap-2 bg-[#B52725] text-white px-4 py-2 rounded-full shadow-xl"
-                    >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                {/* Left Lane: Slow Queue */}
+                <div className="absolute left-[15%] top-0 bottom-0 flex flex-col items-center justify-center gap-2 opacity-40">
+                    <div className="text-[0.5rem] font-bold uppercase tracking-widest text-black-shadow/60 mb-1">Queue</div>
+                    {[1, 2, 3].map((i) => (
+                        <div key={i} className="w-8 h-2 bg-gray-300 rounded-full" />
+                    ))}
+                    <div className="w-8 h-2 bg-gray-300 rounded-full opacity-50" />
+                </div>
+
+                {/* Right Lane: Fast Track */}
+                <div className="absolute right-[15%] top-0 bottom-0 flex flex-col items-center justify-center">
+                    <div className="text-[0.5rem] font-bold uppercase tracking-widest text-[#B52725] mb-2 flex items-center gap-1">
+                        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
                         </svg>
-                        <span className="text-xs font-bold tracking-wider uppercase">Priority</span>
-                    </motion.div>
+                        Fast Track
+                    </div>
 
                     <motion.div
-                        initial={{ opacity: 0, y: 5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.5 }}
-                        className="flex items-center gap-1.5"
+                        animate={{ y: [40, -40] }}
+                        transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+                        className="relative z-10"
                     >
-                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        <span className="text-[10px] font-bold text-emerald-600">Ready for Pickup</span>
+                        <div className="w-8 h-12 bg-[#B52725] rounded-lg shadow-lg flex items-center justify-center">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M20 6L9 17l-5-5" />
+                            </svg>
+                        </div>
+                        {/* Speed lines */}
+                        <div className="absolute top-full left-0 right-0 flex justify-center gap-1 mt-1">
+                            <div className="w-0.5 h-4 bg-[#B52725]/20 rounded-full" />
+                            <div className="w-0.5 h-6 bg-[#B52725]/40 rounded-full" />
+                            <div className="w-0.5 h-4 bg-[#B52725]/20 rounded-full" />
+                        </div>
                     </motion.div>
                 </div>
-
-                {/* Dashed Path */}
-                <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ opacity: 0.1 }}>
-                    <path d="M 20 80 Q 60 20 120 40" fill="none" stroke="black" strokeWidth="2" strokeDasharray="4 4" />
-                </svg>
             </div>
         </div>
     );
