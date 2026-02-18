@@ -60,12 +60,12 @@ export function Hero() {
                     transition={{ delay: 0.3 }}
                     className="mt-10 relative group"
                 >
-                    <div className="flex gap-4 items-center justify-center">
-                        <button className="bg-store-red text-white px-6 py-3 rounded-full text-base font-semibold shadow-lg shadow-store-red-40/50 hover:shadow-xl hover:scale-105 hover:bg-store-red-80 transition-all flex items-center gap-2">
+                    <div className="flex gap-4 items-center justify-center flex-wrap md:flex-nowrap">
+                        <button className="bg-store-red text-white px-4 py-2 md:px-6 md:py-3 rounded-full text-sm md:text-base font-semibold shadow-lg shadow-store-red-40/50 hover:shadow-xl hover:scale-105 hover:bg-store-red-80 transition-all flex items-center gap-2 whitespace-nowrap">
                             Get Started
                             <ArrowRight size={18} />
                         </button>
-                        <button className="bg-location-yellow text-black border border-location-yellow-120 px-6 py-3 rounded-full text-base font-semibold hover:bg-location-yellow-60 transition-all flex items-center gap-2">
+                        <button className="bg-location-yellow text-black border border-location-yellow-120 px-4 py-2 md:px-6 md:py-3 rounded-full text-sm md:text-base font-semibold hover:bg-location-yellow-60 transition-all flex items-center gap-2 whitespace-nowrap">
                             Take Small Survey
                         </button>
                     </div>

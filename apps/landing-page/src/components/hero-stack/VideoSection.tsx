@@ -7,14 +7,14 @@ export function VideoSection() {
         <div className="w-full bg-[#FAF9F6] py-20 px-6 md:px-8 flex justify-center">
             <div className="w-full max-w-7xl flex flex-col gap-12">
                 {/* Header Section */}
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-8">
-                    <div className="max-w-2xl">
-                        <h2 className="text-4xl md:text-6xl font-medium tracking-tight text-black-shadow font-[family-name:var(--font-dm-sans)]">
+                <div className="flex flex-col md:flex-row justify-between items-center md:items-end gap-8">
+                    <div className="max-w-2xl w-full">
+                        <h2 className="text-4xl md:text-6xl font-medium tracking-tight text-black-shadow font-[family-name:var(--font-dm-sans)] text-center md:text-left">
                             See how it works.
                         </h2>
                     </div>
 
-                    <div className="flex flex-col items-start md:items-end gap-4 max-w-md text-left md:text-right">
+                    <div className="flex flex-col items-center md:items-end gap-4 max-w-md text-center md:text-right">
                         <div className="flex gap-4">
                             <button className="bg-location-yellow text-black border border-location-yellow-120 px-6 py-3 rounded-full text-base font-semibold hover:bg-location-yellow-60 transition-all">
                                 Get Started
@@ -23,7 +23,7 @@ export function VideoSection() {
                                 Learn More
                             </button>
                         </div>
-                        <p className="text-sm text-black-shadow/60 leading-relaxed">
+                        <p className="text-sm text-black-shadow/60 leading-relaxed text-center md:text-right">
                             Discover how PickAtStore connects you with the best local merchants for a seamless shopping experience.
                         </p>
                     </div>

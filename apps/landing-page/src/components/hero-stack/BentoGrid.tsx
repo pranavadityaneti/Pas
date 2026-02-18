@@ -45,7 +45,7 @@ export function BentoGrid() {
 
                 <motion.div
                     onClick={() => setAppMode(appMode === "customer" ? "merchant" : "customer")}
-                    className="col-span-1 md:col-span-2 md:row-span-1 bg-[#B52725] rounded-[3rem] p-10 flex flex-col items-center justify-center text-white cursor-pointer group hover:scale-[1.01] active:scale-[0.99] transition-all duration-500 shadow-2xl relative overflow-hidden h-[300px] md:h-auto"
+                    className="col-span-1 md:col-span-2 md:row-span-1 bg-[#B52725] rounded-[3rem] p-10 flex flex-col items-center justify-center text-white cursor-pointer group hover:scale-[1.01] active:scale-[0.99] transition-all duration-500 shadow-2xl relative overflow-hidden h-[300px] md:h-auto order-first md:order-none"
                 >
                     <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent pointer-events-none" />
                     <div className="relative z-10 flex flex-col items-center gap-6">

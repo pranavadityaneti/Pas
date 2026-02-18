@@ -19,7 +19,7 @@ export function Footer() {
                         height={32}
                         className="grayscale opacity-50"
                     />
-                    <p className="text-sm text-black-shadow/40 font-medium">© 2026 PAS Retail Networks</p>
+                    <p className="text-sm text-black-shadow/40 font-medium">© 2026 PAS Retail Networks PVT LTD</p>
                 </div>
 
                 {/* App Store Badges */}
