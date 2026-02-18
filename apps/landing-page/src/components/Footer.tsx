@@ -22,6 +22,24 @@ export function Footer() {
                     <p className="text-sm text-black-shadow/40 font-medium">© 2026 PAS Retail Networks</p>
                 </div>
 
+                {/* App Store Badges */}
+                <div className="flex items-center gap-4">
+                    <a href="#" className="hover:opacity-80 transition-opacity">
+                        <img
+                            src="/google-play-badge.png"
+                            alt="Get it on Google Play"
+                            className="h-8 w-auto"
+                        />
+                    </a>
+                    <a href="#" className="hover:opacity-80 transition-opacity">
+                        <img
+                            src="/app-store-badge.png"
+                            alt="Download on the App Store"
+                            className="h-8 w-auto"
+                        />
+                    </a>
+                </div>
+
                 <div className="flex items-center gap-6">
                     <a href="/privacypolicy" className="text-sm font-bold text-black-shadow/60 hover:text-store-red transition-colors mr-4">Privacy Policy</a>
                     <a href="https://www.youtube.com/@pickatstore" target="_blank" rel="noopener noreferrer" className="text-black-shadow/60 hover:text-store-red transition-colors">

@@ -7,13 +7,15 @@ export function Header() {
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="flex justify-between items-center h-20">
                     {/* Logo */}
-                    <div className="flex-shrink-0 flex items-center gap-2">
-                        <img
-                            src="/Pas_Logo_App.png"
-                            alt="PickAtStore Logo"
-                            className="h-10 w-auto object-contain"
-                        />
-                        <span className="font-bold text-xl tracking-tight text-gray-900">PickAtStore</span>
+                    {/* Logo */}
+                    <div className="flex-shrink-0 flex items-center">
+                        <Link href="/" className="flex items-center">
+                            <img
+                                src="/PAS_Logo-Horizontal.png"
+                                alt="PickAtStore"
+                                className="h-12 w-auto object-contain"
+                            />
+                        </Link>
                     </div>
 
                     {/* App Store Buttons */}
