@@ -114,7 +114,7 @@ export default function ProfileScreen() {
                         </Text>
                     </View>
                     <Text style={styles.name}>{contextUser?.name || 'Set Name'}</Text>
-                    <Text style={styles.role}>{contextUser?.role || 'User'}</Text>
+                    <Text style={styles.role}>{contextUser?.role === 'MERCHANT' ? 'Merchant Partner' : (contextUser?.role || 'User')}</Text>
                 </View>
 
                 <View style={styles.infoCard}>

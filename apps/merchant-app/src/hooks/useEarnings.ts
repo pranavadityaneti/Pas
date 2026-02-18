@@ -24,8 +24,8 @@ export function useEarnings() {
                 // Fetch all orders for this store (except CANCELLED for some stats, but let's get all to be safe)
                 const { data, error } = await supabase
                     .from('Order')
-                    .select('totalAmount, createdAt, status')
-                    .eq('storeId', storeId);
+                    .select('total_amount, created_at, status')
+                    .eq('store_id', storeId);
 
                 if (error) throw error;
 
@@ -41,7 +41,7 @@ export function useEarnings() {
                 let pendingCount = 0;
 
                 data.forEach(order => {
-                    const orderTime = new Date(order.createdAt).getTime();
+                    const orderTime = new Date(order.created_at).getTime();
 
                     // Today's Orders (all non-cancelled)
                     if (orderTime >= todayStart && order.status !== 'CANCELLED') {
@@ -49,10 +49,10 @@ export function useEarnings() {
                     }
 
                     if (order.status === 'COMPLETED') {
-                        totalSum += order.totalAmount;
+                        totalSum += order.total_amount;
                         completedCount++;
-                        if (orderTime >= todayStart) todaySum += order.totalAmount;
-                        if (orderTime >= weekStart) weeklySum += order.totalAmount;
+                        if (orderTime >= todayStart) todaySum += order.total_amount;
+                        if (orderTime >= weekStart) weeklySum += order.total_amount;
                     } else if (order.status !== 'CANCELLED' && order.status !== 'COMPLETED') {
                         pendingCount++;
                     }
@@ -82,7 +82,7 @@ export function useEarnings() {
                 event: '*',
                 schema: 'public',
                 table: 'Order',
-                filter: `storeId=eq.${storeId}`
+                filter: `store_id=eq.${storeId}`
             }, () => {
                 fetchStats();
             })

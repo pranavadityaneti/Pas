@@ -149,9 +149,9 @@ export function useOrders() {
                 .select(`
                     id,
                     status,
-                    totalAmount,
+                    total_amount,
                     ispaid,
-                    createdAt,
+                    created_at,
                     user:User (name, phone),
                     items:OrderItem (
                         id,
@@ -163,8 +163,8 @@ export function useOrders() {
                         )
                     )
                 `)
-                .eq('storeId', storeId)
-                .order('createdAt', { ascending: false });
+                .eq('store_id', storeId)
+                .order('created_at', { ascending: false });
 
             if (error) throw error;
 
@@ -172,9 +172,9 @@ export function useOrders() {
                 id: order.id,
                 displayId: formatId(order.id),
                 status: order.status,
-                totalAmount: order.totalAmount,
+                totalAmount: order.total_amount,
                 isPaid: order.ispaid,
-                createdAt: order.createdAt,
+                createdAt: order.created_at,
                 user: Array.isArray(order.user) ? order.user[0] : order.user,
                 items: (order.items || []).map((item: any) => ({
                     id: item.id,
@@ -211,7 +211,7 @@ export function useOrders() {
                     event: '*',
                     schema: 'public',
                     table: 'Order',
-                    filter: `storeId=eq.${storeId}`
+                    filter: `store_id=eq.${storeId}`
                 }, (payload) => {
                     console.log('Real-time order update:', payload);
                     fetchOrders();

@@ -8,7 +8,7 @@ import { MousePointer2 } from "lucide-react";
 const customerContent = [
     { id: "c1", title: "Smart Checkout", desc: "Consolidate your neighborhood orders into one fluid experience.", color: "bg-white", text: "text-black-shadow" },
     { id: "c2", title: "Live Tracking", desc: "Real-time updates as your order is prepared for pick-up.", color: "bg-white", text: "text-black-shadow" },
-    { id: "c3", title: "No Delivery Fees", desc: "Save money on shipping costs, every single time.", color: "bg-white", text: "text-black-shadow" },
+    { id: "c3", title: "Skip the Queue", desc: "Your order is packed and ready when you arrive.", color: "bg-white", text: "text-black-shadow" },
     { id: "c4", title: "Search Locally", desc: "Find exactly which nearby store has what you need.", color: "bg-white", text: "text-black-shadow" },
     { id: "c5", title: "Pickup at Store", desc: "Fast service without leaving your car.", color: "bg-white", text: "text-black-shadow" },
     { id: "c6", title: "5000+ Retail Stores", desc: "From fashion to electronics, shop it all in one place.", color: "bg-white", text: "text-black-shadow" },
@@ -40,7 +40,7 @@ export function BentoGrid() {
 
                 {/* Row 2: CENTERED Switch */}
                 <BentoCard item={content[2]} className="col-span-1 md:col-span-1 md:row-span-1 h-[300px] md:h-auto">
-                    {appMode === "customer" ? <MockupNoFees appMode={appMode} /> : <MockupWallet appMode={appMode} />}
+                    {appMode === "customer" ? <MockupQueue appMode={appMode} /> : <MockupWallet appMode={appMode} />}
                 </BentoCard>
 
                 <motion.div
@@ -462,37 +462,48 @@ function MockupInbox({ appMode }: { appMode: string }) {
     return null; // Deprecated
 }
 
-function MockupNoFees({ appMode }: { appMode: string }) {
+function MockupQueue({ appMode }: { appMode: string }) {
     return (
         <div className="absolute inset-0 flex flex-col items-center justify-center p-6">
-            <div className="relative w-full h-32 bg-white rounded-2xl border border-black/[0.03] shadow-lg flex flex-col items-center justify-center overflow-hidden">
+            <div className="relative w-full h-32 bg-white rounded-2xl border border-black/[0.03] shadow-lg flex items-center justify-center overflow-hidden">
                 <div className="absolute inset-0 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] opacity-20" />
 
-                <div className="flex items-center gap-3 z-10">
-                    <div className="flex flex-col items-end">
-                        <div className="text-sm font-bold text-gray-400 line-through decoration-red-500/50 decoration-2">
-                            ₹40.00
-                        </div>
-                        <div className="text-xs text-gray-400 font-medium">Delivery</div>
-                    </div>
-
-                    <div className="w-px h-8 bg-gray-200" />
-
-                    <div className="flex flex-col items-start">
-                        <div className="text-3xl font-black text-[#B52725] tracking-tighter">
-                            ₹0
-                        </div>
-                        <div className="text-xs font-bold text-[#B52725] uppercase tracking-wider">
-                            Fees
-                        </div>
-                    </div>
+                {/* The Line (Queue) */}
+                <div className="absolute bottom-4 left-6 flex items-end gap-1 opacity-40">
+                    {[1, 2, 3].map((i) => (
+                        <div key={i} className="w-3 h-8 bg-gray-300 rounded-t-sm" />
+                    ))}
                 </div>
 
-                <div className="absolute bottom-3 flex gap-1">
-                    <div className="w-1 h-1 rounded-full bg-gray-300" />
-                    <div className="w-1 h-1 rounded-full bg-gray-300" />
-                    <div className="w-1 h-1 rounded-full bg-gray-300" />
+                {/* The VIP Path */}
+                <div className="relative z-10 flex flex-col items-center gap-2">
+                    <motion.div
+                        initial={{ x: -50, opacity: 0 }}
+                        animate={{ x: 0, opacity: 1 }}
+                        transition={{ duration: 0.8, ease: "backOut" }}
+                        className="flex items-center gap-2 bg-[#B52725] text-white px-4 py-2 rounded-full shadow-xl"
+                    >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                        </svg>
+                        <span className="text-xs font-bold tracking-wider uppercase">Priority</span>
+                    </motion.div>
+
+                    <motion.div
+                        initial={{ opacity: 0, y: 5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.5 }}
+                        className="flex items-center gap-1.5"
+                    >
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <span className="text-[10px] font-bold text-emerald-600">Ready for Pickup</span>
+                    </motion.div>
                 </div>
+
+                {/* Dashed Path */}
+                <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ opacity: 0.1 }}>
+                    <path d="M 20 80 Q 60 20 120 40" fill="none" stroke="black" strokeWidth="2" strokeDasharray="4 4" />
+                </svg>
             </div>
         </div>
     );

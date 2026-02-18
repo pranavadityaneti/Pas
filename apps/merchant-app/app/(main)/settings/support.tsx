@@ -9,6 +9,7 @@ export default function SupportScreen() {
     // Actions - These would open actual links/dials/emails
     const handleCall = () => Linking.openURL('tel:+917842287373');
     const handleEmail = () => Linking.openURL('mailto:support@pickatstore.io');
+    const handleWhatsApp = () => Linking.openURL('https://wa.me/917842287373?text=Hi%20PickAtStore%20Support,%20I%20need%20help%20with...');
     const handleChat = () => alert('Live Chat feature coming soon!');
 
 
@@ -28,16 +29,27 @@ export default function SupportScreen() {
                     <Text style={styles.heroTitle}>How can we help?</Text>
                     <Text style={styles.heroText}>Our support team is available 24/7 to assist you with any issues.</Text>
                     <TouchableOpacity style={styles.chatButton} onPress={handleChat}>
-                        <Ionicons name="chatbubble-outline" size={20} color="#000" style={{ marginRight: 8 }} />
+                        <Ionicons name="chatbubble-ellipses-outline" size={20} color="#000" style={{ marginRight: 8 }} />
                         <Text style={styles.chatButtonText}>Start Live Chat</Text>
                     </TouchableOpacity>
                 </View>
 
-                <Text style={styles.sectionTitle}>Contact Us</Text>
+                <Text style={styles.sectionTitle}>Direct Assistance</Text>
 
-                <TouchableOpacity style={styles.contactItem} onPress={handleCall}>
-                    <View style={styles.iconCircle}>
-                        <Ionicons name="call-outline" size={24} color="#374151" />
+                <TouchableOpacity style={styles.contactItem} onPress={handleWhatsApp}>
+                    <View style={[styles.iconCircle, { backgroundColor: '#E8F5E9' }]}>
+                        <Ionicons name="logo-whatsapp" size={24} color="#25D366" />
+                    </View>
+                    <View style={styles.contactInfo}>
+                        <Text style={styles.contactLabel}>WhatsApp Support</Text>
+                        <Text style={styles.contactValue}>Instant resolution via chat</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color="#ccc" />
+                </TouchableOpacity>
+
+                <TouchableOpacity style={[styles.contactItem, { marginTop: 12 }]} onPress={handleCall}>
+                    <View style={[styles.iconCircle, { backgroundColor: '#E3F2FD' }]}>
+                        <Ionicons name="call-outline" size={24} color="#2196F3" />
                     </View>
                     <View style={styles.contactInfo}>
                         <Text style={styles.contactLabel}>Call Support</Text>
@@ -47,8 +59,8 @@ export default function SupportScreen() {
                 </TouchableOpacity>
 
                 <TouchableOpacity style={[styles.contactItem, { marginTop: 12 }]} onPress={handleEmail}>
-                    <View style={styles.iconCircle}>
-                        <Ionicons name="mail-outline" size={24} color="#374151" />
+                    <View style={[styles.iconCircle, { backgroundColor: '#F3E5F5' }]}>
+                        <Ionicons name="mail-outline" size={24} color="#9C27B0" />
                     </View>
                     <View style={styles.contactInfo}>
                         <Text style={styles.contactLabel}>Email Us</Text>

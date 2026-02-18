@@ -7,7 +7,7 @@ async function runMigration() {
     const client = new Client({ connectionString });
     try {
         await client.connect();
-        const sql = fs.readFileSync('add_gst_photos.sql', 'utf8');
+        const sql = fs.readFileSync('add_user_trigger.sql', 'utf8');
         console.log('Running migration...');
         await client.query(sql);
         console.log('Migration completed successfully.');
