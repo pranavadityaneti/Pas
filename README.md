@@ -3,7 +3,15 @@
 ## 1. Project Overview
 **Pick At Store** is a massive hyperlocal commerce platform designed to bridge the gap between Consumers and their local neighborhood Merchants. It empowers consumers to find products in nearby stores, place orders instantly, and track them in real-time. For merchants and administrators, it provides a unified "Command Center" to manage catalogs, track inventory, and oversee the entire fulfillment network.
 
-**Current Status**: **Phase 2 Complete (Advanced Admin Ecosystem)**.
+**Current Status**: **Phase 3 Focus (Merchant App Stability & Refinement)**.
+- **Recent Fixes**:
+    - **Signup Flow**: Fixed Category dropdowns, FSSAI/KYC logic, and Banking details persistence.
+    - **Layout**: Implemented robust keyboard handling for "Add Product" (Sticky Footer) and "Login" screens.
+    - **Schema**: Updated `merchant_branches` and `store` tables for better data integrity.
+
+### Known Issues
+- **Product Category**: Validated that category/name cannot be edited after creation (Feature Request pending).
+- **Expo Connectivity**: Occasionally requires `npx expo start --clear --tunnel` to reset connection.
 
 ### Core Philosophy
 We rejected the "simple CRUD app" approach. This is a complex, **event-driven ecosystem** built on:
