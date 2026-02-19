@@ -99,7 +99,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             if (!user) {
                 console.log('[StoreContext] No auth user yet, will retry on auth state change');
                 setLoading(false);
-                return;
+                return null;
             }
 
             // 1. Fetch Store
@@ -138,6 +138,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 retryCount.current = 0; // Reset retry counter on success
                 await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(storeData));
                 console.log('[StoreContext] Store cached successfully with ID:', storeData.id);
+                return storeData;
             } else if (merchantData) {
                 console.log('[StoreContext] No Store row found, using fallback (empty ID)');
                 // Fallback for new merchants without Store row yet
@@ -167,12 +168,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 } else {
                     console.warn('[StoreContext] Max retries reached — store row may not exist yet');
                 }
+                return fallbackStore;
             } else {
                 // No merchant data at all — clear any stale cache
                 await AsyncStorage.removeItem(CACHE_KEY);
+                return null;
             }
         } catch (e) {
             console.error('[StoreContext] Fetch exception:', e);
+            return null;
         } finally {
             setLoading(false);
         }
@@ -274,12 +278,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     // --- Actions ---
     const toggleStoreStatus = async (newStatus: boolean): Promise<{ success: boolean; error?: string }> => {
-        if (!store?.id) {
+        let currentStore = store;
+
+        if (!currentStore?.id) {
             console.error('[StoreContext] No store ID found in context, attempting re-fetch...');
-            // Instead of immediately failing, try one more fetch
-            await fetchStore();
-            // Check again after re-fetch
-            if (!store?.id) {
+            // Instead of immediately failing, try one more fetch and use the RESULT
+            const fetched = await fetchStore();
+            if (fetched && fetched.id) {
+                currentStore = fetched;
+            } else {
                 return { success: false, error: 'Store ID unavailable. Please try again or contact support.' };
             }
         }

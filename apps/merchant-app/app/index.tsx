@@ -50,6 +50,12 @@ export default function Index() {
         }
     };
 
+    useEffect(() => {
+        if (session && merchantStatus && merchantStatus !== 'active') {
+            supabase.auth.signOut();
+        }
+    }, [session, merchantStatus]);
+
     if (loading) {
         return (
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F9FAFB' }}>
@@ -58,19 +64,13 @@ export default function Index() {
         );
     }
 
+    if (merchantStatus === 'active') {
+        return <Redirect href="/(main)/dashboard" />;
+    }
+
     if (!session) {
         console.log('[Index] Redirecting to login');
         return <Redirect href="/(auth)/login" />;
-    }
-
-    useEffect(() => {
-        if (session && merchantStatus && merchantStatus !== 'active') {
-            supabase.auth.signOut();
-        }
-    }, [session, merchantStatus]);
-
-    if (merchantStatus === 'active') {
-        return <Redirect href="/(main)/dashboard" />;
     }
 
     return <Redirect href="/(auth)/login" />;

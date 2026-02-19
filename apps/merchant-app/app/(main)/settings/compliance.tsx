@@ -13,7 +13,7 @@ export default function ComplianceScreen() {
     // Realtime Compliance Details
     const { data: merchants, loading: tableLoading } = useRealtimeTable({
         tableName: 'merchants',
-        select: 'pan_number, aadhar_number, gst_number, turnover_range, pan_document_url, aadhar_front_url, aadhar_back_url, gst_certificate_url',
+        select: 'pan_number, aadhar_number, gst_number, turnover_range, pan_document_url, aadhar_front_url, aadhar_back_url, gst_certificate_url, fssai_number, fssai_certificate_url',
         filter: user?.id ? `id=eq.${user.id}` : undefined,
         enabled: !!user?.id
     });
@@ -25,22 +25,26 @@ export default function ComplianceScreen() {
                 panNumber: data.pan_number || 'Not Provided',
                 aadharNumber: data.aadhar_number || 'Not Provided',
                 gstNumber: data.gst_number || 'Not Provided',
+                fssaiNumber: data.fssai_number || 'Not Provided',
                 turnoverRange: data.turnover_range || 'Not Specified',
                 panDocUrl: data.pan_document_url,
                 aadharFrontUrl: data.aadhar_front_url,
                 aadharBackUrl: data.aadhar_back_url,
-                gstCertificateUrl: data.gst_certificate_url
+                gstCertificateUrl: data.gst_certificate_url,
+                fssaiCertificateUrl: data.fssai_certificate_url
             };
         }
         return {
             panNumber: '',
             aadharNumber: '',
             gstNumber: '',
+            fssaiNumber: '',
             turnoverRange: '',
             panDocUrl: '',
             aadharFrontUrl: '',
             aadharBackUrl: '',
-            gstCertificateUrl: ''
+            gstCertificateUrl: '',
+            fssaiCertificateUrl: ''
         };
     }, [merchants]);
 
@@ -58,12 +62,21 @@ export default function ComplianceScreen() {
         </View>
     );
 
+    const [selectedDoc, setSelectedDoc] = useState<{ url: string, label: string } | null>(null);
+
     const DocCard = ({ label, url }: { label: string, url: string | null }) => (
-        <View style={styles.docCard}>
+        <TouchableOpacity
+            style={styles.docCard}
+            onPress={() => url ? setSelectedDoc({ url, label }) : null}
+            activeOpacity={url ? 0.7 : 1}
+        >
             <Text style={styles.docLabel}>{label}</Text>
             {url ? (
                 <View style={styles.docImageContainer}>
                     <Image source={{ uri: url }} style={styles.docImage} resizeMode="cover" />
+                    <View style={styles.zoomOverlay}>
+                        <Ionicons name="scan-outline" size={20} color="#FFFFFF" />
+                    </View>
                 </View>
             ) : (
                 <View style={styles.noDocBox}>
@@ -71,7 +84,7 @@ export default function ComplianceScreen() {
                     <Text style={styles.noDocText}>Document not uploaded</Text>
                 </View>
             )}
-        </View>
+        </TouchableOpacity>
     );
 
     if (loading) {
@@ -115,6 +128,8 @@ export default function ComplianceScreen() {
                         <InfoRow label="GST Number" value={kyc.gstNumber} icon="file-certificate-outline" />
                         <View style={styles.divider} />
                         <InfoRow label="Annual Turnover" value={kyc.turnoverRange} icon="chart-areaspline" />
+                        <View style={styles.divider} />
+                        <InfoRow label="FSSAI Number" value={kyc.fssaiNumber} icon="food-variant" />
                     </View>
                 </View>
 
@@ -123,6 +138,7 @@ export default function ComplianceScreen() {
                     <View style={styles.docsGrid}>
                         <DocCard label="PAN Card" url={kyc.panDocUrl} />
                         <DocCard label="GST Certificate" url={kyc.gstCertificateUrl} />
+                        <DocCard label="FSSAI License" url={kyc.fssaiCertificateUrl} />
                         <DocCard label="Aadhaar Front" url={kyc.aadharFrontUrl} />
                         <DocCard label="Aadhaar Back" url={kyc.aadharBackUrl} />
                     </View>
@@ -133,6 +149,28 @@ export default function ComplianceScreen() {
                     <Text style={styles.footerNoteText}>Your details are encrypted and securely stored for compliance purposes.</Text>
                 </View>
             </ScrollView>
+
+            {/* Document Viewer Modal */}
+            {selectedDoc && (
+                <View style={styles.modalOverlay}>
+                    <SafeAreaView style={styles.modalContainer}>
+                        <View style={styles.modalHeader}>
+                            <TouchableOpacity onPress={() => setSelectedDoc(null)} style={styles.closeButton}>
+                                <Ionicons name="close" size={24} color="#FFFFFF" />
+                            </TouchableOpacity>
+                            <Text style={styles.modalTitle}>{selectedDoc.label}</Text>
+                            <View style={{ width: 40 }} />
+                        </View>
+                        <View style={styles.modalContent}>
+                            <Image
+                                source={{ uri: selectedDoc.url }}
+                                style={styles.fullImage}
+                                resizeMode="contain"
+                            />
+                        </View>
+                    </SafeAreaView>
+                </View>
+            )}
         </SafeAreaView>
     );
 }
@@ -156,10 +194,20 @@ const styles = StyleSheet.create({
     docsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
     docCard: { backgroundColor: '#fff', borderRadius: 12, padding: 12, width: '48%', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
     docLabel: { fontSize: 12, fontWeight: '600', color: '#374151', marginBottom: 8 },
-    docImageContainer: { height: 100, borderRadius: 8, overflow: 'hidden', backgroundColor: '#F3F4F6' },
+    docImageContainer: { height: 100, borderRadius: 8, overflow: 'hidden', backgroundColor: '#F3F4F6', position: 'relative' },
     docImage: { width: '100%', height: '100%' },
+    zoomOverlay: { position: 'absolute', right: 8, bottom: 8, backgroundColor: 'rgba(0,0,0,0.5)', padding: 4, borderRadius: 6 },
     noDocBox: { height: 100, borderRadius: 8, backgroundColor: '#F9FAFB', borderStyle: 'dashed', borderWidth: 1, borderColor: '#D1D5DB', justifyContent: 'center', alignItems: 'center' },
     noDocText: { fontSize: 10, color: '#9CA3AF', marginTop: 4, textAlign: 'center' },
     footerNote: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 10, gap: 8 },
-    footerNoteText: { fontSize: 11, color: '#6B7280', textAlign: 'center' }
+    footerNoteText: { fontSize: 11, color: '#6B7280', textAlign: 'center' },
+
+    // Modal Styles
+    modalOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#000000', zIndex: 1000 },
+    modalContainer: { flex: 1 },
+    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
+    closeButton: { padding: 8, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20 },
+    modalTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: '600' },
+    modalContent: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+    fullImage: { width: '100%', height: '100%' }
 });

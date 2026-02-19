@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useStore } from './useStore';
 import Constants from 'expo-constants';
@@ -33,94 +33,65 @@ export interface Order {
         phone: string;
     };
     items: OrderItem[];
+    cancelledReason?: string; // Added for cancellation reason
+    returnReason?: string; // Added for return reason
+    returnImages?: string[]; // Added for return proof
 }
 
-const MOCK_ORDERS: Order[] = [
+// MOCK DATA DEFINITION
+const INITIAL_MOCK_ORDERS: Order[] = [
+    // --- PENDING ORDERS ---
+    { id: 'mock-p1', displayId: 'PAS-M001', status: 'PENDING', totalAmount: 450, isPaid: true, createdAt: new Date().toISOString(), user: { name: 'Rohan Gupta', phone: '9876500001' }, items: [{ id: 'mi-1', quantity: 1, price: 450, storeProduct: { stock: 10, product: { name: 'Basmati Rice 5kg', image: '', gstRate: 0 } } }] },
+    { id: 'mock-p2', displayId: 'PAS-M002', status: 'PENDING', totalAmount: 120, isPaid: true, createdAt: new Date(Date.now() - 60000).toISOString(), user: { name: 'Sneha Reddy', phone: '9876500002' }, items: [{ id: 'mi-2', quantity: 2, price: 60, storeProduct: { stock: 20, product: { name: 'Amul Milk', image: '', gstRate: 0 } } }] },
+    { id: 'mock-p3', displayId: 'PAS-M003', status: 'PENDING', totalAmount: 890, isPaid: false, createdAt: new Date(Date.now() - 120000).toISOString(), user: { name: 'Amit Kumar', phone: '9876500003' }, items: [{ id: 'mi-3', quantity: 1, price: 890, storeProduct: { stock: 5, product: { name: 'Sunflower Oil 5L', image: '', gstRate: 5 } } }] },
+
+    // --- PROCESSING ORDERS ---
+    { id: 'mock-pr1', displayId: 'PAS-M004', status: 'CONFIRMED', totalAmount: 340, isPaid: true, createdAt: new Date(Date.now() - 3600000).toISOString(), user: { name: 'Priya Singh', phone: '9876500004' }, items: [{ id: 'mi-4', quantity: 2, price: 170, storeProduct: { stock: 15, product: { name: 'Tata Tea', image: '', gstRate: 5 } } }] },
+    { id: 'mock-pr2', displayId: 'PAS-M005', status: 'PREPARING', totalAmount: 1500, isPaid: true, createdAt: new Date(Date.now() - 7200000).toISOString(), user: { name: 'Vikram Malhotra', phone: '9876500005' }, items: [{ id: 'mi-5', quantity: 3, price: 500, storeProduct: { stock: 8, product: { name: 'Whey Protein', image: '', gstRate: 18 } } }] },
+
+    // --- READY ORDERS ---
+    { id: 'mock-r1', displayId: 'PAS-M006', status: 'READY', totalAmount: 220, isPaid: true, createdAt: new Date(Date.now() - 10000000).toISOString(), user: { name: 'Anjali Das', phone: '9876500006' }, items: [{ id: 'mi-6', quantity: 4, price: 55, storeProduct: { stock: 30, product: { name: 'Dettol Soap', image: '', gstRate: 12 } } }] },
+
+    // --- RETURNS REQUESTED ---
     {
-        id: 'mock-1',
-        displayId: 'PAS-4022',
-        status: 'PENDING',
-        totalAmount: 645,
-        isPaid: false,
-        createdAt: new Date(Date.now() - 30000).toISOString(), // 30s ago
-        user: { name: 'Rahul Sharma', phone: '9876543210' },
-        items: [
-            { id: 'mi-1', quantity: 2, price: 50, storeProduct: { stock: 50, product: { name: 'Amul Butter', image: '', gstRate: 5 } } },
-            { id: 'mi-2', quantity: 3, price: 14, storeProduct: { stock: 3, product: { name: 'Maggi Noodles', image: '', gstRate: 12 } } },
-            { id: 'mi-3', quantity: 1, price: 180, storeProduct: { stock: 25, product: { name: 'Tata Tea Gold', image: '', gstRate: 5 } } },
-            { id: 'mi-4', quantity: 2, price: 45, storeProduct: { stock: 15, product: { name: 'Parle-G 200g', image: '', gstRate: 18 } } },
-            { id: 'mi-5', quantity: 1, price: 210, storeProduct: { stock: 8, product: { name: 'Surf Excel 1kg', image: '', gstRate: 12 } } }
-        ]
-    },
-    {
-        id: 'mock-2',
-        displayId: 'PAS-4023',
-        status: 'PENDING',
-        totalAmount: 890,
+        id: 'mock-ret1',
+        displayId: 'PAS-M007',
+        status: 'RETURN_REQUESTED',
+        totalAmount: 550,
         isPaid: true,
-        createdAt: new Date(Date.now() - 60000).toISOString(), // 60s ago
-        user: { name: 'Anita Singh', phone: '9988776655' },
-        items: [
-            { id: 'mi-6', quantity: 4, price: 30, storeProduct: { stock: 100, product: { name: 'Britannia Biscuits', image: '', gstRate: 18 } } },
-            { id: 'mi-7', quantity: 1, price: 450, storeProduct: { stock: 2, product: { name: 'Basmati Rice 2kg', image: '', gstRate: 5 } } },
-            { id: 'mi-8', quantity: 2, price: 160, storeProduct: { stock: 20, product: { name: 'Aashirvaad Atta', image: '', gstRate: 0 } } }
-        ]
+        createdAt: new Date(Date.now() - 86400000).toISOString(),
+        returnReason: 'Damaged item',
+        returnImages: ['https://placehold.co/300x300/red/white?text=Broken+Seal', 'https://placehold.co/300x300/orange/white?text=Leaking'],
+        user: { name: 'Karan Johar', phone: '9876500007' },
+        items: [{ id: 'mi-7', quantity: 1, price: 550, storeProduct: { stock: 12, product: { name: 'Mixer Grinder', image: '', gstRate: 18 } } }]
     },
     {
-        id: 'mock-3',
-        displayId: 'PAS-4024',
-        status: 'PENDING',
-        totalAmount: 1250,
-        isPaid: false,
-        createdAt: new Date(Date.now() - 45000).toISOString(), // 45s ago
-        user: { name: 'Vikram Roy', phone: '9123456789' },
-        items: [
-            { id: 'mi-9', quantity: 1, price: 850, storeProduct: { stock: 10, product: { name: 'Cooking Oil 5L', image: '', gstRate: 5 } } },
-            { id: 'mi-10', quantity: 5, price: 40, storeProduct: { stock: 45, product: { name: 'Toor Dal 500g', image: '', gstRate: 5 } } },
-            { id: 'mi-11', quantity: 2, price: 100, storeProduct: { stock: 12, product: { name: 'Sugar 1kg', image: '', gstRate: 5 } } }
-        ]
-    },
-    {
-        id: 'mock-4',
-        displayId: 'PAS-4025',
-        status: 'PENDING',
-        totalAmount: 420,
+        id: 'mock-ret2',
+        displayId: 'PAS-M008',
+        status: 'RETURN_REQUESTED',
+        totalAmount: 120,
         isPaid: true,
-        createdAt: new Date(Date.now() - 15000).toISOString(), // 15s ago
-        user: { name: 'Priya Patel', phone: '9898989898' },
-        items: [
-            { id: 'mi-12', quantity: 6, price: 20, storeProduct: { stock: 60, product: { name: 'Milk Bread', image: '', gstRate: 0 } } },
-            { id: 'mi-13', quantity: 2, price: 110, storeProduct: { stock: 4, product: { name: 'Peanut Butter', image: '', gstRate: 12 } } },
-            { id: 'mi-14', quantity: 4, price: 20, storeProduct: { stock: 30, product: { name: 'Curd 200g', image: '', gstRate: 5 } } }
-        ]
+        createdAt: new Date(Date.now() - 90000000).toISOString(),
+        returnReason: 'Expired product',
+        returnImages: ['https://placehold.co/300x300/black/white?text=Expiry+Date'],
+        user: { name: 'Simran Kaur', phone: '9876500008' },
+        items: [{ id: 'mi-8', quantity: 2, price: 60, storeProduct: { stock: 25, product: { name: 'Bread', image: '', gstRate: 0 } } }]
     },
-    {
-        id: 'mock-5',
-        displayId: 'PAS-4026',
-        status: 'PENDING',
-        totalAmount: 1845,
-        isPaid: false,
-        createdAt: new Date(Date.now() - 90000).toISOString(), // 90s ago
-        user: { name: 'Arjun Mehra', phone: '9765432109' },
-        items: [
-            { id: 'mi-15', quantity: 2, price: 55, storeProduct: { stock: 25, product: { name: 'Dettol Soap', image: '', gstRate: 18 } } },
-            { id: 'mi-16', quantity: 1, price: 120, storeProduct: { stock: 14, product: { name: 'Colgate 200g', image: '', gstRate: 18 } } },
-            { id: 'mi-17', quantity: 4, price: 20, storeProduct: { stock: 8, product: { name: 'Washing Soap', image: '', gstRate: 12 } } },
-            { id: 'mi-18', quantity: 1, price: 45, storeProduct: { stock: 100, product: { name: 'Dishwash Bar', image: '', gstRate: 18 } } },
-            { id: 'mi-19', quantity: 2, price: 75, storeProduct: { stock: 2, product: { name: 'Floor Cleaner', image: '', gstRate: 18 } } },
-            { id: 'mi-20', quantity: 6, price: 10, storeProduct: { stock: 40, product: { name: 'Matches Box', image: '', gstRate: 5 } } },
-            { id: 'mi-21', quantity: 1, price: 299, storeProduct: { stock: 5, product: { name: 'Honey 500g', image: '', gstRate: 0 } } },
-            { id: 'mi-22', quantity: 2, price: 150, storeProduct: { stock: 12, product: { name: 'Nescafe Classic', image: '', gstRate: 18 } } },
-            { id: 'mi-23', quantity: 3, price: 85, storeProduct: { stock: 30, product: { name: 'Peanut Butter Mini', image: '', gstRate: 12 } } },
-            { id: 'mi-24', quantity: 5, price: 40, storeProduct: { stock: 20, product: { name: 'Cadbury Dairy Milk', image: '', gstRate: 12 } } },
-            { id: 'mi-25', quantity: 1, price: 180, storeProduct: { stock: 15, product: { name: 'Ghee 200g', image: '', gstRate: 12 } } },
-            { id: 'mi-26', quantity: 2, price: 65, storeProduct: { stock: 6, product: { name: 'Tomato Ketchup', image: '', gstRate: 12 } } }
-        ]
-    }
+    { id: 'mock-ret3', displayId: 'PAS-M009', status: 'RETURN_REQUESTED', totalAmount: 2100, isPaid: true, createdAt: new Date(Date.now() - 95000000).toISOString(), returnReason: 'Wrong item delivered', user: { name: 'Raj Malhotra', phone: '9876500009' }, items: [{ id: 'mi-9', quantity: 1, price: 2100, storeProduct: { stock: 4, product: { name: 'Bluetooth Speaker', image: '', gstRate: 18 } } }] },
+
+    // --- RETURNS APPROVED (For Refund) ---
+    { id: 'mock-ref1', displayId: 'PAS-M010', status: 'RETURN_APPROVED', totalAmount: 800, isPaid: true, createdAt: new Date(Date.now() - 172800000).toISOString(), user: { name: 'Tina Ambani', phone: '9876500010' }, items: [{ id: 'mi-10', quantity: 1, price: 800, storeProduct: { stock: 7, product: { name: 'Dinner Set', image: '', gstRate: 12 } } }] },
+
+    // --- HISTORY ---
+    { id: 'mock-h1', displayId: 'PAS-M011', status: 'COMPLETED', totalAmount: 300, isPaid: true, createdAt: new Date(Date.now() - 200000000).toISOString(), user: { name: 'Old Customer', phone: '9876500011' }, items: [{ id: 'mi-11', quantity: 3, price: 100, storeProduct: { stock: 10, product: { name: 'Notebooks', image: '', gstRate: 5 } } }] },
+    { id: 'mock-h2', displayId: 'PAS-M012', status: 'REFUNDED', totalAmount: 450, isPaid: false, createdAt: new Date(Date.now() - 250000000).toISOString(), user: { name: 'Refunded Guy', phone: '9876500012' }, items: [{ id: 'mi-12', quantity: 1, price: 450, storeProduct: { stock: 2, product: { name: 'Failed Item', image: '', gstRate: 12 } } }] }
 ];
 
 export function useOrders() {
     const { storeId } = useStore();
+    // Use REF to persist mock state across re-renders and refetches
+    const mockOrdersRef = React.useRef<Order[]>(INITIAL_MOCK_ORDERS);
+
     const [orders, setOrders] = useState<Order[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -134,7 +105,7 @@ export function useOrders() {
 
     const fetchOrders = useCallback(async (isRefresh = false) => {
         if (!storeId) {
-            setOrders(MOCK_ORDERS);
+            setOrders([...mockOrdersRef.current]);
             setLoading(false);
             setRefreshing(false);
             return;
@@ -147,19 +118,13 @@ export function useOrders() {
             const { data, error } = await supabase
                 .from('Order')
                 .select(`
-                    id,
-                    status,
-                    total_amount,
-                    ispaid,
-                    created_at,
-                    user:User (name, phone),
-                    items:OrderItem (
-                        id,
-                        quantity,
-                        price,
-                        storeProduct:StoreProduct (
+                    *,
+                    user:User!Order_user_id_fkey(name, phone),
+                    items:OrderItem(
+                        id, quantity, price,
+                        storeProduct:StoreProduct(
                             stock,
-                            product:Product (name, image, gstRate)
+                            product:Product(name, image, gstRate)
                         )
                     )
                 `)
@@ -168,33 +133,32 @@ export function useOrders() {
 
             if (error) throw error;
 
-            const fetchedOrders: Order[] = (data as any[] || []).map(order => ({
-                id: order.id,
-                displayId: formatId(order.id),
-                status: order.status,
-                totalAmount: order.total_amount,
-                isPaid: order.ispaid,
-                createdAt: order.created_at,
-                user: Array.isArray(order.user) ? order.user[0] : order.user,
-                items: (order.items || []).map((item: any) => ({
+            // MERGE: Real Data + Persistent Mock Data
+            const realOrders = (data || []).map((o: any) => ({
+                id: o.id,
+                displayId: formatId(o.id), // Use formatId for real orders too
+                status: o.status,
+                totalAmount: o.total_amount,
+                isPaid: o.ispaid,
+                createdAt: o.created_at,
+                user: Array.isArray(o.user) ? o.user[0] : o.user,
+                items: (o.items || []).map((item: any) => ({
                     id: item.id,
                     quantity: item.quantity,
                     price: item.price,
                     storeProduct: Array.isArray(item.storeProduct) ? item.storeProduct[0] : item.storeProduct
-                }))
+                })),
+                cancelledReason: o.cancelled_reason, // Map cancelled_reason
+                returnReason: o.return_reason, // Map return_reason
+                returnImages: o.return_images || [] // Map return_images
             }));
 
-            if (fetchedOrders.length === 0) {
-                setOrders([]);
-            } else {
-                setOrders(fetchedOrders);
-            }
+            setOrders([...mockOrdersRef.current, ...realOrders]);
+
         } catch (error) {
             console.error('Error fetching orders:', error);
-            // Only use mock fallback if we have NO storeId (demo mode)
-            if (!storeId) {
-                setOrders(MOCK_ORDERS);
-            }
+            // On error, still show mocks
+            setOrders([...mockOrdersRef.current]);
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -224,23 +188,30 @@ export function useOrders() {
         }
     }, [storeId, fetchOrders]);
 
-    const updateOrderStatus = async (orderId: string, status: OrderStatus, reason?: string) => {
+    const updateOrderStatus = async (orderId: string, status: OrderStatus, cancellationReason?: string) => {
+        // Handle MOCK IDs locally
         if (orderId.startsWith('mock-')) {
-            setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status, cancelledReason: reason } : o));
+            // Update the Ref so change persists on next fetch
+            mockOrdersRef.current = mockOrdersRef.current.map(o =>
+                o.id === orderId ? { ...o, status, cancelledReason: cancellationReason } : o
+            );
+            // Update State for immediate UI reflection
+            setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status, cancelledReason: cancellationReason } : o));
             return { success: true };
         }
 
         try {
-            const body: any = { status };
-            if (reason) body.reason = reason;
-
             const response = await fetch(`${API_URL}/orders/${orderId}/status`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
+                body: JSON.stringify({ status, cancellationReason })
             });
 
-            if (!response.ok) throw new Error('Failed to update status');
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                console.error('[useOrders] Backend Error:', errorData);
+                throw new Error(errorData.error || errorData.details || 'Failed to update status');
+            }
 
             const updatedOrder = await response.json();
             setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: updatedOrder.status, cancelledReason: updatedOrder.cancelledReason } : o));
@@ -281,12 +252,52 @@ export function useOrders() {
         }
     };
 
+    const refundOrder = async (orderId: string, amount?: number, reason?: string) => {
+        if (orderId.startsWith('mock-')) {
+            setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'REFUNDED' } : o));
+            return { success: true };
+        }
+
+        try {
+            const body: any = {};
+            if (amount) body.amount = amount;
+            if (reason) body.reason = reason;
+
+            const response = await fetch(`${API_URL}/orders/${orderId}/refund`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+
+            if (!response.ok) {
+                const text = await response.text();
+                let err;
+                try {
+                    err = JSON.parse(text);
+                } catch (e) {
+                    err = { error: `Server Error (${response.status}): ${text.substring(0, 100)}...` };
+                }
+                throw new Error(err.error || err.details || 'Refund failed');
+            }
+
+            const result = await response.json();
+            if (result.order) {
+                setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: result.order.status } : o));
+            }
+            return { success: true };
+        } catch (error: any) {
+            console.error('Error refunding order:', error);
+            return { success: false, error: error.message };
+        }
+    };
+
     return {
         orders,
         loading,
         refreshing,
         refetch: () => fetchOrders(true),
         updateOrderStatus,
-        verifyOTP
+        verifyOTP,
+        refundOrder
     };
 }

@@ -30,12 +30,12 @@ enum OrderStatus {
 // --- Geographic Models ---
 
 model City {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  stores    Store[]
+  id           String        @id @default(uuid())
+  name         String        @unique
+  active       Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  stores       Store[]
   serviceAreas ServiceArea[]
 }
 
@@ -51,36 +51,36 @@ model ServiceArea {
 // --- User & Store Models ---
 
 model User {
-  id            String   @id @default(uuid())
-  email         String   @unique
-  passwordHash  String
-  role          Role     @default(CONSUMER)
-  name          String?
-  phone         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String?
+  role         Role     @default(CONSUMER)
+  name         String?
+  phone        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
   // Relations
-  orders          Order[]  @relation("CustomerOrders")
-  handledOrders   Order[]  @relation("StaffHandledOrders")
-  managedStore    Store?   @relation("StoreManager")
-  
-  notificationPreferences Json? @map("notification_preferences")
+  orders        Order[] @relation("CustomerOrders")
+  handledOrders Order[] @relation("StaffHandledOrders")
+  managedStore  Store?  @relation("StoreManager")
+
+  notificationPreferences Json?          @map("notification_preferences")
   notifications           Notification[]
 }
 
 model Notification {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  user      User     @relation(fields: [userId], references: [id])
-  
-  type      String   // "ORDER", "SYSTEM", "INVENTORY"
-  title     String
-  message   String
-  isRead    Boolean  @default(false) @map("is_read")
-  link      String?  // Deep link, e.g. "/orders/123"
-  metadata  Json?
-  
+  id     String @id @default(uuid())
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id])
+
+  type     String // "ORDER", "SYSTEM", "INVENTORY"
+  title    String
+  message  String
+  isRead   Boolean @default(false) @map("is_read")
+  link     String? // Deep link, e.g. "/orders/123"
+  metadata Json?
+
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([userId])
@@ -88,23 +88,23 @@ model Notification {
 }
 
 model Store {
-  id          String   @id @default(uuid())
-  name        String
-  cityId      String
-  city        City     @relation(fields: [cityId], references: [id])
-  address     String?
-  image       String?
-  managerId   String?  @unique
-  manager     User?    @relation("StoreManager", fields: [managerId], references: [id])
-  merchantId  String?  @map("merchant_id")
-  active      Boolean  @default(true)
-  operatingHours Json? @map("operating_hours")
-  operatingDays String[] @map("operating_days")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id             String   @id @default(uuid())
+  name           String
+  cityId         String
+  city           City     @relation(fields: [cityId], references: [id])
+  address        String?
+  image          String?
+  managerId      String?  @unique
+  manager        User?    @relation("StoreManager", fields: [managerId], references: [id])
+  merchantId     String?  @map("merchant_id")
+  active         Boolean  @default(true)
+  operatingHours Json?    @map("operating_hours")
+  operatingDays  String[] @map("operating_days")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  products    StoreProduct[]
-  orders      Order[]
+  products StoreProduct[]
+  orders   Order[]
 
   @@index([merchantId])
 }
@@ -113,7 +113,7 @@ model Store {
 
 // Global Master Catalog
 model Product {
-  id          String   @id @default(uuid())
+  id          String  @id @default(uuid())
   name        String
   description String?
   image       String?
@@ -121,16 +121,16 @@ model Product {
   category    String
   brand       String?
 
-  ean         String?
+  ean              String?
   createdByStoreId String? // Null = Global, Value = Private to Store
-  
+
   // Specs for Commerce
-  unitType    String?   // "ml", "L", "kg", "g", "pc"
-  unitValue   Float?    // 500
-  hsnCode     String?   // "0401"
-  gstRate     Float?    // 5.0
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  unitType  String? // "ml", "L", "kg", "g", "pc"
+  unitValue Float? // 500
+  hsnCode   String? // "0401"
+  gstRate   Float? // 5.0
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   storeProducts StoreProduct[]
   auditLogs     ProductAuditLog[]
@@ -142,7 +142,7 @@ model ProductImage {
   productId String
   product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   url       String
-  name      String?  // e.g. "Front View", "Back View"
+  name      String? // e.g. "Front View", "Back View"
   isPrimary Boolean  @default(false)
   createdAt DateTime @default(now())
 }
@@ -151,57 +151,70 @@ model ProductAuditLog {
   id        String   @id @default(uuid())
   productId String
   product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  action    String   // "UPDATE", "CREATE", "DELETE"
-  field     String?  // "mrp", "name", etc.
+  action    String // "UPDATE", "CREATE", "DELETE"
+  field     String? // "mrp", "name", etc.
   oldValue  String?
   newValue  String?
   changedAt DateTime @default(now())
-  changedBy String?  // User ID or Email
+  changedBy String? // User ID or Email
 }
 
 // Store Specific Inventory (Price & Stock)
 model StoreProduct {
-  id          String   @id @default(uuid())
-  storeId     String
-  store       Store    @relation(fields: [storeId], references: [id])
-  productId   String
-  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  
-  price       Float    // Selling Price
-  stock       Int      @default(0)
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String  @id @default(uuid())
+  storeId   String
+  store     Store   @relation(fields: [storeId], references: [id])
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-  @@unique([storeId, productId])
-  orderItems OrderItem[]
+  // CRITICAL: Do not remove 'price'. It is the store-specific selling price.
+  price          Float // Selling Price
+  stock          Int         @default(0)
+  active         Boolean     @default(true)
+
+  // CRITICAL: 'is_best_seller' is required for the Inventory Query filters. 
+  // Removing this will break the inventory loading on the app.
+  is_best_seller Boolean     @default(false)
+
+  // CRITICAL: 'variant' is required to support multiple sizes of the same product (e.g. 500ml vs 1L).
+  // It is part of the composite unique key.
+  variant        String      @default("Standard")
+
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  orderItems     OrderItem[]
+
+  // CRITICAL: This unique constraint ensures a store can have the same product multiple times 
+  // ONLY if they are different variants. Do not revert to [storeId, productId].
+  @@unique([storeId, productId, variant])
 }
 
 // --- Transaction Models ---
 
 model Order {
-  id              String      @id @default(uuid())
-  orderNumber     String      @unique @map("order_number") // PAS-YYYYMMDD-XXXX
-  userId          String      @map("user_id")
-  user            User        @relation("CustomerOrders", fields: [userId], references: [id])
-  storeId         String      @map("store_id")
-  store           Store       @relation(fields: [storeId], references: [id])
-  staffId         String?     @map("staff_id")
-  staff           User?       @relation("StaffHandledOrders", fields: [staffId], references: [id])
-  
+  id          String  @id @default(uuid())
+  orderNumber String  @unique @map("order_number") // PAS-YYYYMMDD-XXXX
+  userId      String  @map("user_id")
+  user        User    @relation("CustomerOrders", fields: [userId], references: [id])
+  storeId     String  @map("store_id")
+  store       Store   @relation(fields: [storeId], references: [id])
+  staffId     String? @map("staff_id")
+  staff       User?   @relation("StaffHandledOrders", fields: [staffId], references: [id])
+
   status          OrderStatus @default(PENDING)
   totalAmount     Float       @map("total_amount")
   isPaid          Boolean     @default(false) @map("ispaid")
-  otp             String?     // 4-digit PIN for pickup verification
+  otp             String? // 4-digit PIN for pickup verification
   cancelledReason String?     @map("cancelled_reason")
   returnReason    String?     @map("return_reason")
-  
-  metadata        Json?       @map("metadata") // For platform fees, taxes, loyalty pts
-  
-  items           OrderItem[]
-  
-  createdAt       DateTime    @default(now()) @map("created_at")
-  updatedAt       DateTime    @updatedAt @map("updated_at")
+  returnImages    String[]    @map("return_images")
+
+  metadata Json? @map("metadata") // For platform fees, taxes, loyalty pts
+
+  items OrderItem[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([orderNumber])
   @@index([storeId])
@@ -214,8 +227,8 @@ model Subscription {
   merchant      Merchant @relation(fields: [merchantId], references: [id])
   amount        Float
   currency      String   @default("INR")
-  status        String   // "pending", "success", "failed"
-  provider      String   // "razorpay"
+  status        String // "pending", "success", "failed"
+  provider      String // "razorpay"
   transactionId String?  @map("transaction_id")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
@@ -229,80 +242,81 @@ model OrderItem {
   order          Order        @relation(fields: [orderId], references: [id])
   storeProductId String       @map("store_product_id")
   storeProduct   StoreProduct @relation(fields: [storeProductId], references: [id])
-  
-  quantity       Int
-  price          Float       @map("price")
+
+  quantity Int
+  price    Float @map("price")
 }
 
 // --- Legacy & Merchant Management ---
 
 model Merchant {
-  id                  String   @id @default(uuid())
-  storeName           String   @map("store_name")
-  branchName          String?  @map("branch_name")
-  ownerName           String   @map("owner_name")
-  email               String
-  phone               String
-  city                String?
-  address             String?
-  latitude            Float?
-  longitude           Float?
-  hasBranches         Boolean? @map("has_branches")
-  kycStatus           String?  @map("kyc_status")
-  status              String?
-  rating              Float?
-  commissionRate      Float?   @map("commission_rate")
-  operatingHours      String?  @map("operating_hours")
-  operatingDays       String[] @map("operating_days")
-  
-  // Compliance & KYC
-  panNumber           String?  @map("pan_number")
-  aadharNumber        String?  @map("aadhar_number")
-  bankAccountNumber   String?  @map("bank_account_number")
-  ifscCode            String?  @map("ifsc_code")
-  bankName            String?  @map("bank_name")
-  bankBeneficiaryName String?  @map("bank_beneficiary_name")
-  
-  panDocUrl           String?  @map("pan_doc_url")
-  panDocumentUrl      String?  @map("pan_document_url")
-  aadharFrontUrl      String?  @map("aadhar_front_url")
-  aadharBackUrl       String?  @map("aadhar_back_url")
-  gstNumber           String?  @map("gst_number")
-  gstCertificateUrl   String?  @map("gst_certificate_url")
-  msmeNumber          String?  @map("msme_number")
-  msmeCertificateUrl  String?  @map("msme_certificate_url")
-  storePhotos         String[] @map("store_photos")
-  
-  category            String?
-  kycRejectionReason  String?  @map("kyc_rejection_reason")
-  turnoverRange       String?  @map("turnover_range")
-  
-  createdAt           DateTime? @default(now()) @map("created_at")
-  updatedAt           DateTime? @updatedAt @map("updated_at")
+  id             String   @id @default(uuid())
+  storeName      String   @map("store_name")
+  branchName     String?  @map("branch_name")
+  ownerName      String   @map("owner_name")
+  email          String
+  phone          String
+  city           String?
+  address        String?
+  latitude       Float?
+  longitude      Float?
+  hasBranches    Boolean? @map("has_branches")
+  kycStatus      String?  @map("kyc_status")
+  status         String?
+  rating         Float?
+  commissionRate Float?   @map("commission_rate")
+  operatingHours String?  @map("operating_hours")
+  operatingDays  String[] @map("operating_days")
 
-  branches            MerchantBranch[]
-  subscriptions       Subscription[]
+  // Compliance & KYC
+  panNumber           String? @map("pan_number")
+  aadharNumber        String? @map("aadhar_number")
+  bankAccountNumber   String? @map("bank_account_number")
+  ifscCode            String? @map("ifsc_code")
+  bankName            String? @map("bank_name")
+  bankBeneficiaryName String? @map("bank_beneficiary_name")
+
+  panDocUrl          String?  @map("pan_doc_url")
+  panDocumentUrl     String?  @map("pan_document_url")
+  aadharFrontUrl     String?  @map("aadhar_front_url")
+  aadharBackUrl      String?  @map("aadhar_back_url")
+  gstNumber          String?  @map("gst_number")
+  gstCertificateUrl  String?  @map("gst_certificate_url")
+  msmeNumber         String?  @map("msme_number")
+  msmeCertificateUrl String?  @map("msme_certificate_url")
+  fssaiNumber        String?  @map("fssai_number")
+  fssaiCertificateUrl String?  @map("fssai_certificate_url")
+  storePhotos        String[] @map("store_photos")
+
+  category           String?
+  kycRejectionReason String? @map("kyc_rejection_reason")
+  turnoverRange      String? @map("turnover_range")
+
+  createdAt DateTime? @default(now()) @map("created_at")
+  updatedAt DateTime? @updatedAt @map("updated_at")
+
+  branches      MerchantBranch[]
+  subscriptions Subscription[]
 
   @@map("merchants")
 }
 
 model MerchantBranch {
-  id          String   @id @default(uuid())
-  merchantId  String?  @map("merchant_id")
+  id          String    @id @default(uuid())
+  merchantId  String?   @map("merchant_id")
   merchant    Merchant? @relation(fields: [merchantId], references: [id])
-  branchName  String   @map("branch_name")
-  managerName String?  @map("manager_name")
+  branchName  String    @map("branch_name")
+  managerName String?   @map("manager_name")
   phone       String?
   email       String?
   address     String?
   city        String?
   latitude    Float?
   longitude   Float?
-  isActive    Boolean? @map("is_active")
+  isActive    Boolean?  @map("is_active")
   createdAt   DateTime? @default(now()) @map("created_at")
   updatedAt   DateTime? @updatedAt @map("updated_at")
 
+  @@unique([merchantId, branchName])
   @@map("merchant_branches")
 }
-
-

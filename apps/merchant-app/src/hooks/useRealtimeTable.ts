@@ -84,7 +84,12 @@ export function useRealtimeTable<T extends Record<string, any> = any>({
 
                     if (payload.eventType === 'INSERT') {
                         // Prepend new items (assuming newest first for UI)
-                        setData(prev => [payload.new as T, ...prev]);
+                        setData(prev => {
+                            // Prevent duplicates if already added via optimistic update or double event
+                            // @ts-ignore
+                            if (prev.some(item => item.id === payload.new.id)) return prev;
+                            return [payload.new as T, ...prev];
+                        });
                     } else if (payload.eventType === 'UPDATE') {
                         setData(prev => prev.map(item =>
                             // @ts-ignore - assuming 'id' exists

@@ -5,13 +5,12 @@ import {
     TextInput,
     TouchableOpacity,
     StyleSheet,
-    KeyboardAvoidingView,
     Platform,
-    ScrollView,
     ActivityIndicator,
     Alert,
     Image,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -79,93 +78,92 @@ export default function LoginScreen() {
 
     return (
         <SafeAreaView style={styles.container}>
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-                style={styles.keyboardView}
+            {/* @ts-ignore: Library type definition missing children prop */}
+            <KeyboardAwareScrollView
+                contentContainerStyle={styles.scrollContent}
+                enableOnAndroid={true}
+                extraScrollHeight={100}
+                enableAutomaticScroll={true}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+                showsVerticalScrollIndicator={false}
             >
-                <ScrollView
-                    contentContainerStyle={styles.scrollContent}
-                    keyboardShouldPersistTaps="handled"
-                    keyboardDismissMode="on-drag"
-                >
-                    <View style={styles.logoContainer}>
-                        <View style={styles.logoBox}>
-                            <Image source={require('../../assets/logo.png')} style={styles.logo} resizeMode="contain" />
-                        </View>
-                        <Text style={styles.title}>Partner Portal</Text>
-                        <Text style={styles.subtitle}>Manage your store, orders, and inventory</Text>
+                <View style={styles.logoContainer}>
+                    <View style={styles.logoBox}>
+                        <Image source={require('../../assets/logo.png')} style={styles.logo} resizeMode="contain" />
+                    </View>
+                    <Text style={styles.title}>Partner Portal</Text>
+                    <Text style={styles.subtitle}>Manage your store, orders, and inventory</Text>
+                </View>
+
+                <View style={styles.formContainer}>
+                    <View style={styles.inputContainer}>
+                        <Text style={styles.label}>Email</Text>
+                        <TextInput
+                            style={styles.input}
+                            placeholder="store@example.com"
+                            placeholderTextColor="#9CA3AF"
+                            value={email}
+                            onChangeText={setEmail}
+                            keyboardType="email-address"
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                        />
                     </View>
 
-                    <View style={styles.formContainer}>
-                        <View style={styles.inputContainer}>
-                            <Text style={styles.label}>Email</Text>
+                    <View style={styles.inputContainer}>
+                        <Text style={styles.label}>Password</Text>
+                        <View style={styles.passwordContainer}>
                             <TextInput
-                                style={styles.input}
-                                placeholder="store@example.com"
+                                style={styles.passwordInput}
+                                placeholder="••••••••"
                                 placeholderTextColor="#9CA3AF"
-                                value={email}
-                                onChangeText={setEmail}
-                                keyboardType="email-address"
+                                value={password}
+                                onChangeText={setPassword}
+                                secureTextEntry={!showPassword}
                                 autoCapitalize="none"
-                                autoCorrect={false}
                             />
-                        </View>
-
-                        <View style={styles.inputContainer}>
-                            <Text style={styles.label}>Password</Text>
-                            <View style={styles.passwordContainer}>
-                                <TextInput
-                                    style={styles.passwordInput}
-                                    placeholder="••••••••"
-                                    placeholderTextColor="#9CA3AF"
-                                    value={password}
-                                    onChangeText={setPassword}
-                                    secureTextEntry={!showPassword}
-                                    autoCapitalize="none"
+                            <TouchableOpacity
+                                style={styles.eyeButton}
+                                onPress={() => setShowPassword(!showPassword)}
+                            >
+                                <Ionicons
+                                    name={showPassword ? 'eye-off' : 'eye'}
+                                    size={20}
+                                    color="#9CA3AF"
                                 />
-                                <TouchableOpacity
-                                    style={styles.eyeButton}
-                                    onPress={() => setShowPassword(!showPassword)}
-                                >
-                                    <Ionicons
-                                        name={showPassword ? 'eye-off' : 'eye'}
-                                        size={20}
-                                        color="#9CA3AF"
-                                    />
-                                </TouchableOpacity>
-                            </View>
+                            </TouchableOpacity>
                         </View>
-
-                        <TouchableOpacity
-                            style={[styles.button, loading && styles.buttonDisabled]}
-                            onPress={handleLogin}
-                            disabled={loading}
-                        >
-                            {loading ? (
-                                <ActivityIndicator color="#FFFFFF" />
-                            ) : (
-                                <Text style={styles.buttonText}>Access Dashboard</Text>
-                            )}
-                        </TouchableOpacity>
-
-                        <View style={styles.divider}>
-                            <View style={styles.dividerLine} />
-                            <Text style={styles.dividerText}>New to Pick At Store?</Text>
-                            <View style={styles.dividerLine} />
-                        </View>
-
-                        <TouchableOpacity
-                            style={styles.signupButton}
-                            onPress={() => router.push('/(auth)/signup')}
-                        >
-                            <Text style={styles.signupButtonText}>Apply as Partner</Text>
-                        </TouchableOpacity>
                     </View>
 
-                    <Text style={styles.footer}>Protected by Pick At Store Secure Gateway</Text>
-                </ScrollView>
-            </KeyboardAvoidingView>
+                    <TouchableOpacity
+                        style={[styles.button, loading && styles.buttonDisabled]}
+                        onPress={handleLogin}
+                        disabled={loading}
+                    >
+                        {loading ? (
+                            <ActivityIndicator color="#FFFFFF" />
+                        ) : (
+                            <Text style={styles.buttonText}>Access Dashboard</Text>
+                        )}
+                    </TouchableOpacity>
+
+                    <View style={styles.divider}>
+                        <View style={styles.dividerLine} />
+                        <Text style={styles.dividerText}>New to Pick At Store?</Text>
+                        <View style={styles.dividerLine} />
+                    </View>
+
+                    <TouchableOpacity
+                        style={styles.signupButton}
+                        onPress={() => router.push('/(auth)/signup')}
+                    >
+                        <Text style={styles.signupButtonText}>Apply as Partner</Text>
+                    </TouchableOpacity>
+                </View>
+
+                <Text style={styles.footer}>Protected by Pick At Store Secure Gateway</Text>
+            </KeyboardAwareScrollView>
         </SafeAreaView>
     );
 }

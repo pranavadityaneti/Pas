@@ -42,42 +42,11 @@ const ExpoSecureStoreAdapter = {
     },
 };
 
-import axios from 'axios';
-
-// Custom fetch implementation using Axios to bypass RN fetch issues
-const axiosFetch = async (url: string | any, options: any = {}) => {
-    try {
-        const response = await axios({
-            url: url.toString(),
-            method: options.method ? options.method : 'GET',
-            headers: options.headers ? options.headers : {},
-            data: options.body ? options.body : undefined,
-            validateStatus: () => true, // Don't throw on error status
-        });
-
-        return {
-            ok: response.status >= 200 && response.status < 300,
-            status: response.status,
-            statusText: response.statusText,
-            headers: new Headers(response.headers as any),
-            json: async () => response.data,
-            text: async () => typeof response.data === 'string' ? response.data : JSON.stringify(response.data),
-            blob: async () => response.data,
-        } as unknown as Response;
-    } catch (error: any) {
-        console.error('Supabase Axios Fetch Error:', error);
-        throw new TypeError('Network request failed');
-    }
-};
-
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
-        // storage: ExpoSecureStoreAdapter, // Keep disabled for now
+        storage: ExpoSecureStoreAdapter,
         autoRefreshToken: true,
-        persistSession: false,
+        persistSession: true,
         detectSessionInUrl: false,
     },
-    global: {
-        fetch: axiosFetch, // Use our valid axios adapter
-    }
 });

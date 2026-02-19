@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Animated, Dimensions, Pressable, TextInput } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Animated, Dimensions, Pressable, TextInput, Keyboard, TouchableWithoutFeedback } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
@@ -188,7 +189,12 @@ export default function FilterModal({ visible, onClose, onApply, initialFilters,
 
             case 'price':
                 return (
-                    <View style={styles.optionList}>
+                    /* @ts-ignore */
+                    <KeyboardAwareScrollView
+                        contentContainerStyle={styles.optionList}
+                        keyboardShouldPersistTaps="handled"
+                        enableOnAndroid={true}
+                    >
                         <Text style={styles.sectionTitle}>Price Range (₹)</Text>
                         <View style={styles.priceRow}>
                             <View style={styles.priceInputWrap}>
@@ -220,7 +226,7 @@ export default function FilterModal({ visible, onClose, onApply, initialFilters,
                             </View>
                         </View>
                         <Text style={styles.helperText}>Shows products between ₹{filters.priceRange[0]} and ₹{filters.priceRange[1]}</Text>
-                    </View>
+                    </KeyboardAwareScrollView>
                 );
 
             default:

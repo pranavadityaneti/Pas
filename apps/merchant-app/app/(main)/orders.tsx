@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator, RefreshControl, ScrollView, Animated, LayoutAnimation, Platform, UIManager } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator, RefreshControl, ScrollView, Animated, LayoutAnimation, Platform, UIManager, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
 import { useOrders, Order, OrderStatus } from '../../src/hooks/useOrders';
+import { useFocusEffect } from 'expo-router';
 import { useStore } from '../../src/hooks/useStore';
 import OTPVerificationModal from '../../src/components/OTPVerificationModal';
 import ReceiptSummaryModal from '../../src/components/ReceiptSummaryModal';
@@ -17,7 +18,6 @@ const TABS = [
     { label: 'Pending', value: 'pending' },
     { label: 'Processing', value: 'processing' },
     { label: 'Ready', value: 'ready' },
-    { label: 'Returns', value: 'returns' },
     { label: 'History', value: 'history' }
 ];
 
@@ -25,8 +25,7 @@ const STATUS_MAP: Record<string, OrderStatus[]> = {
     pending: ['PENDING'],
     processing: ['CONFIRMED', 'PREPARING'],
     ready: ['READY'],
-    returns: ['RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REFUNDED'],
-    history: ['COMPLETED', 'CANCELLED']
+    history: ['COMPLETED', 'CANCELLED', 'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REFUNDED']
 };
 
 export default function OrdersScreen() {
@@ -45,6 +44,12 @@ export default function OrdersScreen() {
         }, 1000);
         return () => clearInterval(interval);
     }, []);
+
+    useFocusEffect(
+        useCallback(() => {
+            refetch();
+        }, [])
+    );
 
     // Modal states
     const [showOTPModal, setShowOTPModal] = useState(false);
@@ -120,7 +125,7 @@ export default function OrdersScreen() {
     const handleConfirmRejection = async (reason: string) => {
         if (!rejectionOrder) return;
 
-        const res = await updateOrderStatus(rejectionOrder.id, 'CANCELLED');
+        const res = await updateOrderStatus(rejectionOrder.id, 'CANCELLED', reason);
         if (res.success) {
             setShowRejectionModal(false);
             showToast(`Order #${rejectionOrder.displayId} Rejected: ${reason}`);
@@ -188,6 +193,16 @@ export default function OrdersScreen() {
                     {item.isPaid && isProcessing && (
                         <View style={styles.paidBadge}>
                             <Text style={styles.paidBadgeText}>PAID - START PACKING</Text>
+                        </View>
+                    )}
+                    {item.status === 'COMPLETED' && (
+                        <View style={[styles.paidBadge, { backgroundColor: '#10B981' }]}>
+                            <Text style={styles.paidBadgeText}>COMPLETED</Text>
+                        </View>
+                    )}
+                    {item.status === 'CANCELLED' && (
+                        <View style={[styles.approvalBadge, { backgroundColor: '#EF4444' }]}>
+                            <Text style={styles.approvalText}>CANCELLED</Text>
                         </View>
                     )}
                     {item.status === 'RETURN_REQUESTED' && (
@@ -590,6 +605,42 @@ const styles = StyleSheet.create({
         gap: 8,
         justifyContent: 'center',
         alignItems: 'center'
+    },
+    reasonContainer: {
+        backgroundColor: '#FEF2F2',
+        padding: 12,
+        borderRadius: 12,
+        marginBottom: 20,
+        borderWidth: 1,
+        borderColor: '#FECACA'
+    },
+    reasonHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginBottom: 8
+    },
+    reasonTitle: {
+        fontSize: 14,
+        fontWeight: 'bold',
+        color: '#991B1B'
+    },
+    reasonText: {
+        fontSize: 14,
+        color: '#7F1D1D',
+        lineHeight: 20
+    },
+    imageScroll: {
+        marginTop: 12
+    },
+    evidenceImage: {
+        width: 80,
+        height: 80,
+        borderRadius: 8,
+        marginRight: 8,
+        backgroundColor: '#E5E7EB',
+        borderWidth: 1,
+        borderColor: '#E5E7EB'
     },
     kotBtnText: { fontSize: 16, fontWeight: 'bold', color: '#111827' },
     readyBtn: {

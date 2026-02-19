@@ -1,6 +1,9 @@
 
 import axios from 'axios';
 
+// CRITICAL: This service handles SMS notifications. 
+// Do NOT delete or modify without ensuring alternative SMS handling is in place.
+// Credentials and templates are specific to the DLT provider (smslogin.co).
 class SmsService {
     private readonly baseUrl = 'https://smslogin.co/v3/api.php';
     private readonly username = 'PICKAT';

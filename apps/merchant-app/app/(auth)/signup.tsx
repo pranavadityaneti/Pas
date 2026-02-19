@@ -10,7 +10,11 @@ import {
     Alert,
     KeyboardAvoidingView,
     Platform,
+    Modal,
+    TouchableWithoutFeedback,
+    Image,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -47,6 +51,13 @@ const STORE_CATEGORIES = [
     'Home & Lifestyle',
     'Beauty & Personal Care',
     'Other',
+];
+
+const FSSAI_CATEGORIES = [
+    'Grocery & Kirana',
+    'Supermarket',
+    'Restaurant & Cafe',
+    'Bakery & Sweets',
 ];
 
 interface Branch {
@@ -90,6 +101,8 @@ export default function SignupScreen() {
         ifsc: '',
         turnoverRange: '<20L',
         gstNumber: '',
+        fssaiNumber: '',
+        beneficiaryName: '',
     });
 
     const [docFiles, setDocFiles] = useState<{ [key: string]: string | null }>({
@@ -98,6 +111,7 @@ export default function SignupScreen() {
         aadharBack: null,
         msme: null,
         gst: null,
+        fssai: null,
     });
 
     const [storePhotos, setStorePhotos] = useState<string[]>([]);
@@ -205,6 +219,24 @@ export default function SignupScreen() {
             }
             if (!docFiles.gst) {
                 Alert.alert('Error', 'Please upload your GST Certificate.');
+                return false;
+            }
+
+            // FSSAI Validation
+            if (FSSAI_CATEGORIES.includes(store.category)) {
+                if (!kyc.fssaiNumber) {
+                    Alert.alert('Required', 'FSSAI License Number is required for your category.');
+                    return false;
+                }
+                if (!docFiles.fssai) {
+                    Alert.alert('Required', 'Please upload your FSSAI License.');
+                    return false;
+                }
+            }
+
+            // Banking Validation
+            if (!kyc.bankAccount || !kyc.ifsc || !kyc.beneficiaryName) {
+                Alert.alert('Required', 'Please enter all bank details (Account No, IFSC, Beneficiary Name).');
                 return false;
             }
         }
@@ -336,8 +368,7 @@ export default function SignupScreen() {
                     (authError as any).status === 409;
 
                 if (isUserExistsError) {
-                    console.log('[Signup] User exists (Error: ' + authError.message + '). Attempting Login...');
-                    // Attempt Login
+                    console.log('[Signup] User exists. Attempting Login...');
                     const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
                         email: identity.email.trim(),
                         password: identity.password,
@@ -402,6 +433,7 @@ export default function SignupScreen() {
                 aadharBack: docFiles.aadharBack ? await uploadFile(docFiles.aadharBack, `${userId}/aadhar_back.jpg`) : null,
                 msme: docFiles.msme ? await uploadFile(docFiles.msme, `${userId}/msme.jpg`) : null,
                 gst: docFiles.gst ? await uploadFile(docFiles.gst, `${userId}/gst.jpg`) : null,
+                fssai: docFiles.fssai ? await uploadFile(docFiles.fssai, `${userId}/fssai.jpg`) : null,
             };
 
             const storePhotoUrls = await Promise.all(
@@ -428,6 +460,7 @@ export default function SignupScreen() {
                 msme_number: kyc.msmeNumber,
                 bank_account_number: kyc.bankAccount,
                 ifsc_code: kyc.ifsc,
+                bank_beneficiary_name: kyc.beneficiaryName,
                 turnover_range: kyc.turnoverRange,
                 pan_document_url: docUrls.pan,
                 aadhar_front_url: docUrls.aadharFront,
@@ -435,6 +468,8 @@ export default function SignupScreen() {
                 msme_certificate_url: docUrls.msme,
                 gst_certificate_url: docUrls.gst,
                 gst_number: kyc.gstNumber,
+                fssai_number: kyc.fssaiNumber,
+                fssai_certificate_url: docUrls.fssai,
                 store_photos: storePhotoUrls.filter(url => url !== null),
             });
 
@@ -463,8 +498,13 @@ export default function SignupScreen() {
                     address: b.address,
                 }));
                 // Use upsert or delete-then-insert if branch IDs are not preserved
-                await supabase.from('merchant_branches').upsert(branchRecords);
+                const { error: branchError } = await supabase.from('merchant_branches').insert(branchRecords);
+                if (branchError) {
+                    console.error('[Signup] Branch Insert Error:', branchError);
+                    Alert.alert('Warning', 'Merchant created but failed to save branches. Please add them in Settings.');
+                }
             }
+
 
             Alert.alert('Success!', 'Your application has been submitted.');
             router.replace('/(auth)/pending');
@@ -537,574 +577,631 @@ export default function SignupScreen() {
                 {renderStepIndicator()}
             </View>
 
-            <KeyboardAvoidingView
-                style={{ flex: 1 }}
-                behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+            <KeyboardAwareScrollView
+                style={styles.content}
+                contentContainerStyle={styles.contentContainer}
+                enableOnAndroid={true}
+                extraScrollHeight={100}
+                enableAutomaticScroll={true}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+                showsVerticalScrollIndicator={false}
             >
-                <ScrollView
-                    style={styles.content}
-                    contentContainerStyle={styles.contentContainer}
-                    keyboardShouldPersistTaps="handled"
-                    keyboardDismissMode="on-drag"
-                >
-                    {step === 1 && (
+                {step === 1 && (
+                    <View style={styles.card}>
+                        <View style={styles.cardHeader}>
+                            <Ionicons name="person-outline" size={20} color={Colors.primary} />
+                            <Text style={styles.cardTitle}>Owner Details</Text>
+                        </View>
+
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.label}>Owner Name <Text style={styles.required}>*</Text></Text>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="John Doe"
+                                placeholderTextColor="#9CA3AF"
+                                value={identity.ownerName}
+                                onChangeText={(t) => setIdentity({ ...identity, ownerName: t })}
+                            />
+                        </View>
+
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.label}>Phone <Text style={styles.required}>*</Text></Text>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="+91 98765 43210"
+                                placeholderTextColor="#9CA3AF"
+                                keyboardType="phone-pad"
+                                value={identity.phone}
+                                onChangeText={(t) => setIdentity({ ...identity, phone: t })}
+                            />
+                        </View>
+
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.label}>Email <Text style={styles.required}>*</Text></Text>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="owner@store.com"
+                                placeholderTextColor="#9CA3AF"
+                                keyboardType="email-address"
+                                autoCapitalize="none"
+                                value={identity.email}
+                                onChangeText={(t) => setIdentity({ ...identity, email: t })}
+                            />
+                        </View>
+
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.label}>Password <Text style={styles.required}>*</Text></Text>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="••••••••"
+                                placeholderTextColor="#9CA3AF"
+                                secureTextEntry
+                                value={identity.password}
+                                onChangeText={(t) => setIdentity({ ...identity, password: t })}
+                            />
+                        </View>
+                    </View>
+                )}
+
+                {step === 2 && (
+                    <>
                         <View style={styles.card}>
                             <View style={styles.cardHeader}>
-                                <Ionicons name="person-outline" size={20} color={Colors.primary} />
-                                <Text style={styles.cardTitle}>Owner Details</Text>
+                                <Ionicons name="storefront-outline" size={20} color={Colors.primary} />
+                                <Text style={styles.cardTitle}>Store Information</Text>
                             </View>
 
                             <View style={styles.inputGroup}>
-                                <Text style={styles.label}>Owner Name <Text style={styles.required}>*</Text></Text>
+                                <Text style={styles.label}>Store Name <Text style={styles.required}>*</Text></Text>
                                 <TextInput
                                     style={styles.input}
-                                    placeholder="John Doe"
+                                    placeholder="My Kirana Store"
                                     placeholderTextColor="#9CA3AF"
-                                    value={identity.ownerName}
-                                    onChangeText={(t) => setIdentity({ ...identity, ownerName: t })}
+                                    value={store.storeName}
+                                    onChangeText={(t) => setStore({ ...store, storeName: t })}
                                 />
                             </View>
 
                             <View style={styles.inputGroup}>
-                                <Text style={styles.label}>Phone <Text style={styles.required}>*</Text></Text>
-                                <TextInput
-                                    style={styles.input}
-                                    placeholder="+91 98765 43210"
-                                    placeholderTextColor="#9CA3AF"
-                                    keyboardType="phone-pad"
-                                    value={identity.phone}
-                                    onChangeText={(t) => setIdentity({ ...identity, phone: t })}
-                                />
-                            </View>
-
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.label}>Email <Text style={styles.required}>*</Text></Text>
-                                <TextInput
-                                    style={styles.input}
-                                    placeholder="owner@store.com"
-                                    placeholderTextColor="#9CA3AF"
-                                    keyboardType="email-address"
-                                    autoCapitalize="none"
-                                    value={identity.email}
-                                    onChangeText={(t) => setIdentity({ ...identity, email: t })}
-                                />
-                            </View>
-
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.label}>Password <Text style={styles.required}>*</Text></Text>
-                                <TextInput
-                                    style={styles.input}
-                                    placeholder="••••••••"
-                                    placeholderTextColor="#9CA3AF"
-                                    secureTextEntry
-                                    value={identity.password}
-                                    onChangeText={(t) => setIdentity({ ...identity, password: t })}
-                                />
-                            </View>
-                        </View>
-                    )}
-
-                    {step === 2 && (
-                        <>
-                            <View style={styles.card}>
-                                <View style={styles.cardHeader}>
-                                    <Ionicons name="storefront-outline" size={20} color={Colors.primary} />
-                                    <Text style={styles.cardTitle}>Store Information</Text>
-                                </View>
-
-                                <View style={styles.inputGroup}>
-                                    <Text style={styles.label}>Store Name <Text style={styles.required}>*</Text></Text>
-                                    <TextInput
-                                        style={styles.input}
-                                        placeholder="My Kirana Store"
-                                        placeholderTextColor="#9CA3AF"
-                                        value={store.storeName}
-                                        onChangeText={(t) => setStore({ ...store, storeName: t })}
-                                    />
-                                </View>
-
-                                <View style={styles.inputGroup}>
-                                    <Text style={styles.label}>Category <Text style={styles.required}>*</Text></Text>
-                                    <TouchableOpacity
-                                        style={styles.selectInput}
-                                        onPress={() => setShowCategoryPicker(!showCategoryPicker)}
-                                    >
-                                        <Text style={store.category ? styles.selectText : styles.selectPlaceholder}>
-                                            {store.category || 'Select category'}
-                                        </Text>
-                                        <Ionicons name="chevron-down" size={20} color="#6B7280" />
-                                    </TouchableOpacity>
-                                    {showCategoryPicker && (
-                                        <View style={styles.pickerContainer}>
-                                            <ScrollView style={{ maxHeight: 200 }}>
-                                                {STORE_CATEGORIES.map((cat) => (
-                                                    <TouchableOpacity
-                                                        key={cat}
-                                                        style={styles.pickerItem}
-                                                        onPress={() => {
-                                                            setStore({ ...store, category: cat });
-                                                            setShowCategoryPicker(false);
-                                                        }}
-                                                    >
-                                                        <Text style={styles.pickerItemText}>{cat}</Text>
-                                                    </TouchableOpacity>
-                                                ))}
-                                            </ScrollView>
-                                        </View>
-                                    )}
-                                </View>
-
-                                <View style={styles.inputGroup}>
-                                    <Text style={styles.label}>City</Text>
-                                    <TextInput
-                                        style={styles.input}
-                                        value={store.city}
-                                        onChangeText={(t) => setStore({ ...store, city: t })}
-                                    />
-                                </View>
-                            </View>
-
-                            <View style={styles.card}>
-                                <View style={styles.cardHeader}>
-                                    <Ionicons name="location-outline" size={20} color={Colors.primary} />
-                                    <Text style={styles.cardTitle}>Store Location</Text>
-                                </View>
-
-                                <TouchableOpacity style={styles.locationButton} onPress={requestLocation}>
-                                    <Ionicons name="navigate" size={20} color={Colors.primary} />
-                                    <Text style={styles.locationButtonText}>Use My Current Location</Text>
-                                </TouchableOpacity>
-
-                                <View style={{ height: 200, borderRadius: 12, overflow: 'hidden', marginVertical: 12 }}>
-                                    <MapView
-                                        style={{ flex: 1 }}
-                                        region={{
-                                            latitude: store.latitude,
-                                            longitude: store.longitude,
-                                            latitudeDelta: 0.005,
-                                            longitudeDelta: 0.005,
-                                        }}
-                                    >
-                                        <Marker coordinate={{ latitude: store.latitude, longitude: store.longitude }} />
-                                    </MapView>
-                                </View>
-                                <Text style={styles.coordinatesText}>
-                                    📍 {store.latitude.toFixed(5)}, {store.longitude.toFixed(5)}
-                                </Text>
-
-                                <View style={styles.inputGroup}>
-                                    <Text style={styles.label}>Full Address</Text>
-                                    <TextInput
-                                        style={[styles.input, styles.textArea]}
-                                        placeholder="Shop No, Street, Landmark..."
-                                        placeholderTextColor="#9CA3AF"
-                                        multiline
-                                        numberOfLines={3}
-                                        value={store.address}
-                                        onChangeText={(t) => setStore({ ...store, address: t })}
-                                    />
-                                </View>
-                            </View>
-                        </>
-                    )}
-
-                    {step === 3 && (
-                        <View style={styles.card}>
-                            <View style={styles.cardHeader}>
-                                <Ionicons name="images-outline" size={20} color={Colors.primary} />
-                                <Text style={styles.cardTitle}>Store Photos <Text style={styles.required}>*</Text></Text>
-                            </View>
-                            <Text style={styles.label}>Please upload at least 2 photos of your store (Front view, Inside view, etc.)</Text>
-
-                            <View style={styles.photoGrid}>
-                                {storePhotos.map((uri, idx) => (
-                                    <View key={idx} style={styles.photoWrapper}>
-                                        <View style={styles.photoBox}>
-                                            <Ionicons name="image" size={32} color="#E5E7EB" />
-                                        </View>
-                                        <TouchableOpacity style={styles.removePhoto} onPress={() => removeStorePhoto(idx)}>
-                                            <Ionicons name="close-circle" size={20} color="#EF4444" />
-                                        </TouchableOpacity>
-                                    </View>
-                                ))}
-                                {storePhotos.length < 5 && (
-                                    <TouchableOpacity style={styles.addPhotoBox} onPress={pickStorePhoto}>
-                                        <Ionicons name="add" size={32} color={Colors.primary} />
-                                        <Text style={styles.addPhotoText}>Add Photo</Text>
-                                    </TouchableOpacity>
-                                )}
-                            </View>
-                            <Text style={styles.photoCounter}>{storePhotos.length} / 5 photos selected</Text>
-                        </View>
-                    )}
-
-                    {step === 4 && (
-                        <>
-                            <View style={styles.card}>
+                                <Text style={styles.label}>Category <Text style={styles.required}>*</Text></Text>
                                 <TouchableOpacity
-                                    style={styles.checkboxRow}
-                                    onPress={() => setHasBranches(!hasBranches)}
+                                    style={styles.selectInput}
+                                    onPress={() => setShowCategoryPicker(true)}
                                 >
-                                    <View style={[styles.checkbox, hasBranches && styles.checkboxChecked]}>
-                                        {hasBranches && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
-                                    </View>
-                                    <View>
-                                        <Text style={styles.checkboxLabel}>Do you have other branches?</Text>
-                                        <Text style={styles.checkboxHint}>Enable if you manage multiple outlets</Text>
-                                    </View>
+                                    <Text style={store.category ? styles.selectText : styles.selectPlaceholder}>
+                                        {store.category || 'Select category'}
+                                    </Text>
+                                    <Ionicons name="chevron-down" size={20} color="#6B7280" />
                                 </TouchableOpacity>
+
+                                <Modal
+                                    visible={showCategoryPicker}
+                                    transparent={true}
+                                    animationType="fade"
+                                    onRequestClose={() => setShowCategoryPicker(false)}
+                                >
+                                    <TouchableWithoutFeedback onPress={() => setShowCategoryPicker(false)}>
+                                        <View style={styles.modalOverlay}>
+                                            <View style={styles.modalContent}>
+                                                <Text style={styles.modalTitle}>Select Category</Text>
+                                                <ScrollView style={{ maxHeight: 300 }}>
+                                                    {STORE_CATEGORIES.map((cat) => (
+                                                        <TouchableOpacity
+                                                            key={cat}
+                                                            style={styles.modalItem}
+                                                            onPress={() => {
+                                                                setStore({ ...store, category: cat });
+                                                                setShowCategoryPicker(false);
+                                                            }}
+                                                        >
+                                                            <Text style={[
+                                                                styles.modalItemText,
+                                                                store.category === cat && styles.modalItemTextActive
+                                                            ]}>{cat}</Text>
+                                                            {store.category === cat && <Ionicons name="checkmark" size={20} color={Colors.primary} />}
+                                                        </TouchableOpacity>
+                                                    ))}
+                                                </ScrollView>
+                                                <TouchableOpacity
+                                                    style={styles.modalCloseBtn}
+                                                    onPress={() => setShowCategoryPicker(false)}
+                                                >
+                                                    <Text style={styles.modalCloseText}>Close</Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                        </View>
+                                    </TouchableWithoutFeedback>
+                                </Modal>
                             </View>
 
-                            {hasBranches && (
-                                <View style={styles.card}>
-                                    <View style={styles.cardHeader}>
-                                        <Ionicons name="git-branch-outline" size={20} color={Colors.primary} />
-                                        <Text style={styles.cardTitle}>Branches</Text>
-                                        <TouchableOpacity style={styles.addButton} onPress={addBranch}>
-                                            <Ionicons name="add" size={18} color={Colors.primary} />
-                                            <Text style={styles.addButtonText}>Add</Text>
-                                        </TouchableOpacity>
-                                    </View>
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.label}>City</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    value={store.city}
+                                    onChangeText={(t) => setStore({ ...store, city: t })}
+                                />
+                            </View>
+                        </View>
 
-                                    {branches.length === 0 ? (
-                                        <View style={styles.emptyState}>
-                                            <Text style={styles.emptyText}>No branches added yet</Text>
-                                        </View>
-                                    ) : (
-                                        branches.map((branch, i) => (
-                                            <View key={i} style={styles.branchCard}>
-                                                <View style={styles.branchHeader}>
-                                                    <Text style={styles.branchTitle}>Branch {i + 1}</Text>
-                                                    <TouchableOpacity onPress={() => removeBranch(i)}>
-                                                        <Ionicons name="trash-outline" size={18} color="#EF4444" />
-                                                    </TouchableOpacity>
-                                                </View>
-                                                <TextInput
-                                                    style={styles.input}
-                                                    placeholder="Branch Name"
-                                                    placeholderTextColor="#9CA3AF"
-                                                    value={branch.name}
-                                                    onChangeText={(t) => updateBranch(i, 'name', t)}
-                                                />
-                                                <TextInput
-                                                    style={[styles.input, { marginTop: 8 }]}
-                                                    placeholder="Branch Address"
-                                                    placeholderTextColor="#9CA3AF"
-                                                    value={branch.address}
-                                                    onChangeText={(t) => updateBranch(i, 'address', t)}
-                                                />
-                                            </View>
-                                        ))
-                                    )}
+                        <View style={styles.card}>
+                            <View style={styles.cardHeader}>
+                                <Ionicons name="location-outline" size={20} color={Colors.primary} />
+                                <Text style={styles.cardTitle}>Store Location</Text>
+                            </View>
+
+                            <TouchableOpacity style={styles.locationButton} onPress={requestLocation}>
+                                <Ionicons name="navigate" size={20} color={Colors.primary} />
+                                <Text style={styles.locationButtonText}>Use My Current Location</Text>
+                            </TouchableOpacity>
+
+                            <View style={{ height: 200, borderRadius: 12, overflow: 'hidden', marginVertical: 12 }}>
+                                <MapView
+                                    style={{ flex: 1 }}
+                                    region={{
+                                        latitude: store.latitude,
+                                        longitude: store.longitude,
+                                        latitudeDelta: 0.005,
+                                        longitudeDelta: 0.005,
+                                    }}
+                                >
+                                    <Marker coordinate={{ latitude: store.latitude, longitude: store.longitude }} />
+                                </MapView>
+                            </View>
+                            <Text style={styles.coordinatesText}>
+                                📍 {store.latitude.toFixed(5)}, {store.longitude.toFixed(5)}
+                            </Text>
+
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.label}>Full Address</Text>
+                                <TextInput
+                                    style={[styles.input, styles.textArea]}
+                                    placeholder="Shop No, Street, Landmark..."
+                                    placeholderTextColor="#9CA3AF"
+                                    multiline
+                                    numberOfLines={3}
+                                    value={store.address}
+                                    onChangeText={(t) => setStore({ ...store, address: t })}
+                                />
+                            </View>
+                        </View>
+                    </>
+                )}
+
+                {step === 3 && (
+                    <View style={styles.card}>
+                        <View style={styles.cardHeader}>
+                            <Ionicons name="images-outline" size={20} color={Colors.primary} />
+                            <Text style={styles.cardTitle}>Store Photos <Text style={styles.required}>*</Text></Text>
+                        </View>
+                        <Text style={styles.label}>Please upload at least 2 photos of your store (Front view, Inside view, etc.)</Text>
+
+                        <View style={styles.photoGrid}>
+                            {storePhotos.map((uri, idx) => (
+                                <View key={idx} style={styles.photoWrapper}>
+                                    <Image source={{ uri }} style={styles.photoBox} resizeMode="cover" />
+                                    <TouchableOpacity style={styles.removePhoto} onPress={() => removeStorePhoto(idx)}>
+                                        <Ionicons name="close-circle" size={20} color="#EF4444" />
+                                    </TouchableOpacity>
                                 </View>
+                            ))}
+                            {storePhotos.length < 5 && (
+                                <TouchableOpacity style={styles.addPhotoBox} onPress={pickStorePhoto}>
+                                    <Ionicons name="add" size={32} color={Colors.primary} />
+                                    <Text style={styles.addPhotoText}>Add Photo</Text>
+                                </TouchableOpacity>
                             )}
+                        </View>
+                        <Text style={styles.photoCounter}>{storePhotos.length} / 5 photos selected</Text>
+                    </View>
+                )}
 
-                            {!hasBranches && (
-                                <View style={styles.emptyCard}>
-                                    <Ionicons name="storefront-outline" size={48} color="#E5E7EB" />
-                                    <Text style={styles.emptyCardTitle}>Single Store Operation</Text>
+                {step === 4 && (
+                    <>
+                        <View style={styles.card}>
+                            <TouchableOpacity
+                                style={styles.checkboxRow}
+                                onPress={() => setHasBranches(!hasBranches)}
+                            >
+                                <View style={[styles.checkbox, hasBranches && styles.checkboxChecked]}>
+                                    {hasBranches && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
                                 </View>
-                            )}
-                        </>
-                    )}
+                                <View>
+                                    <Text style={styles.checkboxLabel}>Do you have other branches?</Text>
+                                    <Text style={styles.checkboxHint}>Enable if you manage multiple outlets</Text>
+                                </View>
+                            </TouchableOpacity>
+                        </View>
 
-                    {step === 5 && (
-                        <>
+                        {hasBranches && (
                             <View style={styles.card}>
                                 <View style={styles.cardHeader}>
-                                    <Ionicons name="shield-checkmark-outline" size={20} color={Colors.primary} />
-                                    <Text style={styles.cardTitle}>KYC Details</Text>
-                                </View>
-
-                                <View style={styles.inputGroup}>
-                                    <Text style={styles.label}>Annual Turnover <Text style={styles.required}>*</Text></Text>
-                                    <View style={styles.turnoverGrid}>
-                                        {['<20L', '20L-40L', '40L-1Cr', '>1Cr'].map((range) => (
-                                            <TouchableOpacity
-                                                key={range}
-                                                style={[
-                                                    styles.turnoverButton,
-                                                    kyc.turnoverRange === range && styles.turnoverButtonActive
-                                                ]}
-                                                onPress={() => setKyc({ ...kyc, turnoverRange: range })}
-                                            >
-                                                <Text style={[
-                                                    styles.turnoverTextOption,
-                                                    kyc.turnoverRange === range && styles.turnoverTextActive
-                                                ]}>{range}</Text>
-                                            </TouchableOpacity>
-                                        ))}
-                                    </View>
-                                </View>
-
-                                <View style={styles.inputGroup}>
-                                    <Text style={styles.label}>Upload PAN Card <Text style={styles.required}>*</Text></Text>
-                                    <TouchableOpacity style={styles.uploadButton} onPress={() => pickDocument('pan')}>
-                                        <Ionicons name={docFiles.pan ? "checkmark-circle" : "cloud-upload-outline"} size={22} color={docFiles.pan ? "#10B981" : Colors.primary} />
-                                        <Text style={[styles.uploadText, docFiles.pan && { color: '#10B981' }]}>{docFiles.pan ? "PAN Image Selected" : "Tap to Upload PAN"}</Text>
+                                    <Ionicons name="git-branch-outline" size={20} color={Colors.primary} />
+                                    <Text style={styles.cardTitle}>Branches</Text>
+                                    <TouchableOpacity style={styles.addButton} onPress={addBranch}>
+                                        <Ionicons name="add" size={18} color={Colors.primary} />
+                                        <Text style={styles.addButtonText}>Add</Text>
                                     </TouchableOpacity>
                                 </View>
 
-                                <View style={styles.inputGroup}>
-                                    <Text style={styles.label}>PAN Number <Text style={styles.required}>*</Text></Text>
-                                    <TextInput
-                                        style={styles.input}
-                                        placeholder="ABCDE1234F"
-                                        placeholderTextColor="#9CA3AF"
-                                        autoCapitalize="characters"
-                                        value={kyc.panNumber}
-                                        onChangeText={(t) => setKyc({ ...kyc, panNumber: t.toUpperCase() })}
-                                    />
-                                </View>
-
-                                <View style={styles.inputGroup}>
-                                    <Text style={styles.label}>Upload Aadhaar (Front) <Text style={styles.required}>*</Text></Text>
-                                    <TouchableOpacity style={styles.uploadButton} onPress={() => pickDocument('aadharFront')}>
-                                        <Ionicons name={docFiles.aadharFront ? "checkmark-circle" : "cloud-upload-outline"} size={22} color={docFiles.aadharFront ? "#10B981" : "#6366F1"} />
-                                        <Text style={[styles.uploadText, docFiles.aadharFront && { color: '#10B981' }]}>{docFiles.aadharFront ? "Front Selected" : "Upload Front Side"}</Text>
-                                    </TouchableOpacity>
-                                </View>
-
-                                <View style={styles.inputGroup}>
-                                    <Text style={styles.label}>Upload Aadhaar (Back) <Text style={styles.required}>*</Text></Text>
-                                    <TouchableOpacity style={styles.uploadButton} onPress={() => pickDocument('aadharBack')}>
-                                        <Ionicons name={docFiles.aadharBack ? "checkmark-circle" : "cloud-upload-outline"} size={22} color={docFiles.aadharBack ? "#10B981" : "#6366F1"} />
-                                        <Text style={[styles.uploadText, docFiles.aadharBack && { color: '#10B981' }]}>{docFiles.aadharBack ? "Back Selected" : "Upload Back Side"}</Text>
-                                    </TouchableOpacity>
-                                </View>
-
-                                <View style={styles.inputGroup}>
-                                    <Text style={styles.label}>Aadhaar Number <Text style={styles.required}>*</Text></Text>
-                                    <TextInput
-                                        style={styles.input}
-                                        placeholder="1234 5678 9012"
-                                        placeholderTextColor="#9CA3AF"
-                                        keyboardType="numeric"
-                                        value={kyc.aadharNumber}
-                                        onChangeText={(t) => setKyc({ ...kyc, aadharNumber: t })}
-                                    />
-                                </View>
-
-                                <View style={styles.inputGroup}>
-                                    <Text style={styles.label}>Upload GST Certificate <Text style={styles.required}>*</Text></Text>
-                                    <TouchableOpacity style={styles.uploadButton} onPress={() => pickDocument('gst')}>
-                                        <Ionicons name={docFiles.gst ? "checkmark-circle" : "cloud-upload-outline"} size={22} color={docFiles.gst ? "#10B981" : "#6366F1"} />
-                                        <Text style={[styles.uploadText, docFiles.gst && { color: '#10B981' }]}>{docFiles.gst ? "GST Certificate Selected" : "Upload GST Certificate"}</Text>
-                                    </TouchableOpacity>
-                                </View>
-
-                                <View style={styles.inputGroup}>
-                                    <Text style={styles.label}>GSTIN <Text style={styles.required}>*</Text></Text>
-                                    <TextInput
-                                        style={styles.input}
-                                        placeholder="22AAAAA0000A1Z5"
-                                        placeholderTextColor="#9CA3AF"
-                                        autoCapitalize="characters"
-                                        value={kyc.gstNumber}
-                                        onChangeText={(t) => setKyc({ ...kyc, gstNumber: t.toUpperCase() })}
-                                    />
-                                </View>
-
-                                <View style={styles.inputGroup}>
-                                    <Text style={styles.label}>Upload MSME / Udyam Certificate (Optional)</Text>
-                                    <TouchableOpacity style={styles.uploadButton} onPress={() => pickDocument('msme')}>
-                                        <Ionicons name={docFiles.msme ? "checkmark-circle" : "cloud-upload-outline"} size={22} color={docFiles.msme ? "#10B981" : "#6366F1"} />
-                                        <Text style={[styles.uploadText, docFiles.msme && { color: '#10B981' }]}>{docFiles.msme ? "Certificate Selected" : "Upload Certificate"}</Text>
-                                    </TouchableOpacity>
-                                </View>
-
-                                <View style={styles.inputGroup}>
-                                    <Text style={styles.label}>MSME Number (Optional)</Text>
-                                    <TextInput
-                                        style={styles.input}
-                                        placeholder="UDYAM-XX-00-0000000"
-                                        placeholderTextColor="#9CA3AF"
-                                        autoCapitalize="characters"
-                                        value={kyc.msmeNumber}
-                                        onChangeText={(t) => setKyc({ ...kyc, msmeNumber: t.toUpperCase() })}
-                                    />
-                                </View>
-
-                                <View style={styles.inputGroup}>
-                                    <Text style={styles.label}>Bank Account Number</Text>
-                                    <TextInput
-                                        style={styles.input}
-                                        placeholder="Enter account number"
-                                        placeholderTextColor="#9CA3AF"
-                                        keyboardType="numeric"
-                                        value={kyc.bankAccount}
-                                        onChangeText={(t) => setKyc({ ...kyc, bankAccount: t })}
-                                    />
-                                </View>
-
-                                <View style={styles.inputGroup}>
-                                    <Text style={styles.label}>IFSC Code</Text>
-                                    <TextInput
-                                        style={styles.input}
-                                        placeholder="SBIN0001234"
-                                        placeholderTextColor="#9CA3AF"
-                                        autoCapitalize="characters"
-                                        value={kyc.ifsc}
-                                        onChangeText={(t) => setKyc({ ...kyc, ifsc: t.toUpperCase() })}
-                                    />
-                                </View>
-                            </View>
-                        </>
-                    )}
-
-                    {step === 6 && (
-                        <View style={styles.card}>
-                            <View style={{ alignItems: 'center', paddingVertical: 20 }}>
-                                <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#111827', marginBottom: 8 }}>Partner Subscription</Text>
-                                <Text style={{ fontSize: 14, color: '#6B7280', textAlign: 'center', marginBottom: 24 }}>Unlock generic analytics, premium support, and unlimited listings with lifetime access.</Text>
-
-                                <View style={{
-                                    backgroundColor: '#FFFFFF',
-                                    borderRadius: 16,
-                                    padding: 24,
-                                    width: '100%',
-                                    alignItems: 'center',
-                                    borderWidth: 1,
-                                    borderColor: '#E5E7EB',
-                                    shadowColor: '#000',
-                                    shadowOffset: { width: 0, height: 2 },
-                                    shadowOpacity: 0.05,
-                                    shadowRadius: 4,
-                                    elevation: 2
-                                }}>
-                                    <Text style={{ fontSize: 16, fontWeight: '600', color: Colors.primary, marginBottom: 12 }}>LIFETIME ACCESS</Text>
-
-                                    <View style={{ flexDirection: 'row', alignItems: 'baseline', marginBottom: 24 }}>
-                                        <Text style={{ fontSize: 20, color: '#9CA3AF', textDecorationLine: 'line-through', marginRight: 12 }}>₹2499</Text>
-                                        <Text style={{ fontSize: 40, fontWeight: '800', color: '#10B981' }}>₹999</Text>
-                                    </View>
-
-                                    <View style={{ width: '100%', paddingHorizontal: 10 }}>
-                                        {['Zero Commission', 'Unlimited Listings', 'Premium Support', 'Store Analytics'].map((feat, i) => (
-                                            <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                                                <Ionicons name="checkmark-circle" size={20} color="#10B981" style={{ marginRight: 10 }} />
-                                                <Text style={{ fontSize: 16, color: '#374151' }}>{feat}</Text>
-                                            </View>
-                                        ))}
-                                    </View>
-                                </View>
-
-                                {paymentStatus === 'success' ? (
-                                    <View style={{ marginTop: 24, alignItems: 'center' }}>
-                                        <Ionicons name="checkmark-circle" size={64} color="#10B981" />
-                                        <Text style={{ fontSize: 18, fontWeight: '600', color: '#10B981', marginTop: 12 }}>Payment Successful!</Text>
-                                        <Text style={{ color: '#6B7280', marginTop: 4 }}>Transaction ID: {paymentDetails?.paymentId}</Text>
+                                {branches.length === 0 ? (
+                                    <View style={styles.emptyState}>
+                                        <Text style={styles.emptyText}>No branches added yet</Text>
                                     </View>
                                 ) : (
-                                    <TouchableOpacity
-                                        style={{
-                                            backgroundColor: Colors.primary,
-                                            width: '100%',
-                                            paddingVertical: 16,
-                                            borderRadius: 12,
-                                            alignItems: 'center',
-                                            marginTop: 32,
-                                            flexDirection: 'row',
-                                            justifyContent: 'center'
-                                        }}
-                                        onPress={handlePayment}
-                                    >
-                                        <Ionicons name="lock-closed" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
-                                        <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: 'bold' }}>Pay & Unlock</Text>
-                                    </TouchableOpacity>
+                                    branches.map((branch, i) => (
+                                        <View key={i} style={styles.branchCard}>
+                                            <View style={styles.branchHeader}>
+                                                <Text style={styles.branchTitle}>Branch {i + 1}</Text>
+                                                <TouchableOpacity onPress={() => removeBranch(i)}>
+                                                    <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                                                </TouchableOpacity>
+                                            </View>
+                                            <TextInput
+                                                style={styles.input}
+                                                placeholder="Branch Name"
+                                                placeholderTextColor="#9CA3AF"
+                                                value={branch.name}
+                                                onChangeText={(t) => updateBranch(i, 'name', t)}
+                                            />
+                                            <TextInput
+                                                style={[styles.input, { marginTop: 8 }]}
+                                                placeholder="Branch Address"
+                                                placeholderTextColor="#9CA3AF"
+                                                value={branch.address}
+                                                onChangeText={(t) => updateBranch(i, 'address', t)}
+                                            />
+                                        </View>
+                                    ))
                                 )}
+                            </View>
+                        )}
 
-                                <View style={{ marginTop: 16, flexDirection: 'row', alignItems: 'center' }}>
-                                    <View style={{ height: 1, backgroundColor: '#E5E7EB', flex: 1 }} />
-                                    <Text style={{ marginHorizontal: 10, color: '#9CA3AF', fontSize: 12 }}>Secure Payment via Razorpay</Text>
-                                    <View style={{ height: 1, backgroundColor: '#E5E7EB', flex: 1 }} />
+                        {!hasBranches && (
+                            <View style={styles.emptyCard}>
+                                <Ionicons name="storefront-outline" size={48} color="#E5E7EB" />
+                                <Text style={styles.emptyCardTitle}>Single Store Operation</Text>
+                            </View>
+                        )}
+                    </>
+                )}
+
+                {step === 5 && (
+                    <>
+                        <View style={styles.card}>
+                            <View style={styles.cardHeader}>
+                                <Ionicons name="shield-checkmark-outline" size={20} color={Colors.primary} />
+                                <Text style={styles.cardTitle}>KYC Details</Text>
+                            </View>
+
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.label}>Annual Turnover <Text style={styles.required}>*</Text></Text>
+                                <View style={styles.turnoverGrid}>
+                                    {['<20L', '20L-40L', '40L-1Cr', '>1Cr'].map((range) => (
+                                        <TouchableOpacity
+                                            key={range}
+                                            style={[
+                                                styles.turnoverButton,
+                                                kyc.turnoverRange === range && styles.turnoverButtonActive
+                                            ]}
+                                            onPress={() => setKyc({ ...kyc, turnoverRange: range })}
+                                        >
+                                            <Text style={[
+                                                styles.turnoverTextOption,
+                                                kyc.turnoverRange === range && styles.turnoverTextActive
+                                            ]}>{range}</Text>
+                                        </TouchableOpacity>
+                                    ))}
                                 </View>
+                            </View>
+
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.label}>Upload PAN Card <Text style={styles.required}>*</Text></Text>
+                                <TouchableOpacity style={styles.uploadButton} onPress={() => pickDocument('pan')}>
+                                    <Ionicons name={docFiles.pan ? "checkmark-circle" : "cloud-upload-outline"} size={22} color={docFiles.pan ? "#10B981" : Colors.primary} />
+                                    <Text style={[styles.uploadText, docFiles.pan && { color: '#10B981' }]}>{docFiles.pan ? "PAN Image Selected" : "Tap to Upload PAN"}</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.label}>PAN Number <Text style={styles.required}>*</Text></Text>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="ABCDE1234F"
+                                    placeholderTextColor="#9CA3AF"
+                                    autoCapitalize="characters"
+                                    value={kyc.panNumber}
+                                    onChangeText={(t) => setKyc({ ...kyc, panNumber: t.toUpperCase() })}
+                                />
+                            </View>
+
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.label}>Upload Aadhaar (Front) <Text style={styles.required}>*</Text></Text>
+                                <TouchableOpacity style={styles.uploadButton} onPress={() => pickDocument('aadharFront')}>
+                                    <Ionicons name={docFiles.aadharFront ? "checkmark-circle" : "cloud-upload-outline"} size={22} color={docFiles.aadharFront ? "#10B981" : "#6366F1"} />
+                                    <Text style={[styles.uploadText, docFiles.aadharFront && { color: '#10B981' }]}>{docFiles.aadharFront ? "Front Selected" : "Upload Front Side"}</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.label}>Upload Aadhaar (Back) <Text style={styles.required}>*</Text></Text>
+                                <TouchableOpacity style={styles.uploadButton} onPress={() => pickDocument('aadharBack')}>
+                                    <Ionicons name={docFiles.aadharBack ? "checkmark-circle" : "cloud-upload-outline"} size={22} color={docFiles.aadharBack ? "#10B981" : "#6366F1"} />
+                                    <Text style={[styles.uploadText, docFiles.aadharBack && { color: '#10B981' }]}>{docFiles.aadharBack ? "Back Selected" : "Upload Back Side"}</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.label}>Aadhaar Number <Text style={styles.required}>*</Text></Text>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="1234 5678 9012"
+                                    placeholderTextColor="#9CA3AF"
+                                    keyboardType="numeric"
+                                    value={kyc.aadharNumber}
+                                    onChangeText={(t) => setKyc({ ...kyc, aadharNumber: t })}
+                                />
+                            </View>
+
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.label}>Upload GST Certificate <Text style={styles.required}>*</Text></Text>
+                                <TouchableOpacity style={styles.uploadButton} onPress={() => pickDocument('gst')}>
+                                    <Ionicons name={docFiles.gst ? "checkmark-circle" : "cloud-upload-outline"} size={22} color={docFiles.gst ? "#10B981" : "#6366F1"} />
+                                    <Text style={[styles.uploadText, docFiles.gst && { color: '#10B981' }]}>{docFiles.gst ? "GST Certificate Selected" : "Upload GST Certificate"}</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.label}>GSTIN <Text style={styles.required}>*</Text></Text>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="22AAAAA0000A1Z5"
+                                    placeholderTextColor="#9CA3AF"
+                                    autoCapitalize="characters"
+                                    value={kyc.gstNumber}
+                                    onChangeText={(t) => setKyc({ ...kyc, gstNumber: t.toUpperCase() })}
+                                />
+                            </View>
+
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.label}>Upload MSME / Udyam Certificate (Optional)</Text>
+                                <TouchableOpacity style={styles.uploadButton} onPress={() => pickDocument('msme')}>
+                                    <Ionicons name={docFiles.msme ? "checkmark-circle" : "cloud-upload-outline"} size={22} color={docFiles.msme ? "#10B981" : "#6366F1"} />
+                                    <Text style={[styles.uploadText, docFiles.msme && { color: '#10B981' }]}>{docFiles.msme ? "Certificate Selected" : "Upload Certificate"}</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.label}>MSME Number (Optional)</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="UDYAM-XX-00-0000000"
+                                    placeholderTextColor="#9CA3AF"
+                                    autoCapitalize="characters"
+                                    value={kyc.msmeNumber}
+                                    onChangeText={(t) => setKyc({ ...kyc, msmeNumber: t.toUpperCase() })}
+                                />
+                            </View>
+
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.label}>Bank Account Number <Text style={styles.required}>*</Text></Text>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="Enter account number"
+                                    placeholderTextColor="#9CA3AF"
+                                    keyboardType="numeric"
+                                    value={kyc.bankAccount}
+                                    onChangeText={(t) => setKyc({ ...kyc, bankAccount: t })}
+                                />
+                            </View>
+
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.label}>IFSC Code <Text style={styles.required}>*</Text></Text>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="SBIN0001234"
+                                    placeholderTextColor="#9CA3AF"
+                                    autoCapitalize="characters"
+                                    value={kyc.ifsc}
+                                    onChangeText={(t) => setKyc({ ...kyc, ifsc: t.toUpperCase() })}
+                                />
+                            </View>
+
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.label}>Beneficiary Name <Text style={styles.required}>*</Text></Text>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="Name as per bank records"
+                                    placeholderTextColor="#9CA3AF"
+                                    value={kyc.beneficiaryName}
+                                    onChangeText={(t) => setKyc({ ...kyc, beneficiaryName: t })}
+                                />
+                            </View>
+
+                            {FSSAI_CATEGORIES.includes(store.category) && (
+                                <>
+                                    <View style={styles.divider} />
+                                    <Text style={styles.sectionHeader}>Food Safety (FSSAI)</Text>
+
+                                    <View style={styles.inputGroup}>
+                                        <Text style={styles.label}>FSSAI License Number <Text style={styles.required}>*</Text></Text>
+                                        <TextInput
+                                            style={styles.input}
+                                            placeholder="14-digit License Number"
+                                            placeholderTextColor="#9CA3AF"
+                                            keyboardType="numeric"
+                                            maxLength={14}
+                                            value={kyc.fssaiNumber}
+                                            onChangeText={(t) => setKyc({ ...kyc, fssaiNumber: t })}
+                                        />
+                                    </View>
+
+                                    <View style={styles.inputGroup}>
+                                        <Text style={styles.label}>Upload FSSAI License <Text style={styles.required}>*</Text></Text>
+                                        <TouchableOpacity style={styles.uploadButton} onPress={() => pickDocument('fssai')}>
+                                            <Ionicons name={docFiles.fssai ? "checkmark-circle" : "cloud-upload-outline"} size={22} color={docFiles.fssai ? "#10B981" : "#6366F1"} />
+                                            <Text style={[styles.uploadText, docFiles.fssai && { color: '#10B981' }]}>{docFiles.fssai ? "License Selected" : "Upload License"}</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                </>
+                            )}
+                        </View>
+                    </>
+                )}
+
+                {step === 6 && (
+                    <View style={styles.card}>
+                        <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+                            <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#111827', marginBottom: 8 }}>Partner Subscription</Text>
+                            <Text style={{ fontSize: 14, color: '#6B7280', textAlign: 'center', marginBottom: 24 }}>Unlock generic analytics, premium support, and unlimited listings with lifetime access.</Text>
+
+                            <View style={{
+                                backgroundColor: '#FFFFFF',
+                                borderRadius: 16,
+                                padding: 24,
+                                width: '100%',
+                                alignItems: 'center',
+                                borderWidth: 1,
+                                borderColor: '#E5E7EB',
+                                shadowColor: '#000',
+                                shadowOffset: { width: 0, height: 2 },
+                                shadowOpacity: 0.05,
+                                shadowRadius: 4,
+                                elevation: 2
+                            }}>
+                                <Text style={{ fontSize: 16, fontWeight: '600', color: Colors.primary, marginBottom: 12 }}>LIFETIME ACCESS</Text>
+
+                                <View style={{ flexDirection: 'row', alignItems: 'baseline', marginBottom: 24 }}>
+                                    <Text style={{ fontSize: 20, color: '#9CA3AF', textDecorationLine: 'line-through', marginRight: 12 }}>₹2499</Text>
+                                    <Text style={{ fontSize: 40, fontWeight: '800', color: '#10B981' }}>₹999</Text>
+                                </View>
+
+                                <View style={{ width: '100%', paddingHorizontal: 10 }}>
+                                    {['Zero Commission', 'Unlimited Listings', 'Premium Support', 'Store Analytics'].map((feat, i) => (
+                                        <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                                            <Ionicons name="checkmark-circle" size={20} color="#10B981" style={{ marginRight: 10 }} />
+                                            <Text style={{ fontSize: 16, color: '#374151' }}>{feat}</Text>
+                                        </View>
+                                    ))}
+                                </View>
+                            </View>
+
+                            {paymentStatus === 'success' ? (
+                                <View style={{ marginTop: 24, alignItems: 'center' }}>
+                                    <Ionicons name="checkmark-circle" size={64} color="#10B981" />
+                                    <Text style={{ fontSize: 18, fontWeight: '600', color: '#10B981', marginTop: 12 }}>Payment Successful!</Text>
+                                    <Text style={{ color: '#6B7280', marginTop: 4 }}>Transaction ID: {paymentDetails?.paymentId}</Text>
+                                </View>
+                            ) : (
+                                <TouchableOpacity
+                                    style={{
+                                        backgroundColor: Colors.primary,
+                                        width: '100%',
+                                        paddingVertical: 16,
+                                        borderRadius: 12,
+                                        alignItems: 'center',
+                                        marginTop: 32,
+                                        flexDirection: 'row',
+                                        justifyContent: 'center'
+                                    }}
+                                    onPress={handlePayment}
+                                >
+                                    <Ionicons name="lock-closed" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
+                                    <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: 'bold' }}>Pay & Unlock</Text>
+                                </TouchableOpacity>
+                            )}
+
+                            <View style={{ marginTop: 16, flexDirection: 'row', alignItems: 'center' }}>
+                                <View style={{ height: 1, backgroundColor: '#E5E7EB', flex: 1 }} />
+                                <Text style={{ marginHorizontal: 10, color: '#9CA3AF', fontSize: 12 }}>Secure Payment via Razorpay</Text>
+                                <View style={{ height: 1, backgroundColor: '#E5E7EB', flex: 1 }} />
                             </View>
                         </View>
-                    )}
+                    </View>
+                )}
 
-                    {step === 7 && (
+                {step === 7 && (
+                    <>
+                        <View style={[styles.card, styles.successCard]}>
+                            <Ionicons name="checkmark-circle" size={32} color="#10B981" />
+                            <Text style={styles.successTitle}>Ready to Submit!</Text>
+                            <Text style={styles.successText}>
+                                Your application will be reviewed within 24-48 hours.
+                            </Text>
+                        </View>
+
+                        <View style={styles.card}>
+                            <Text style={styles.reviewTitle}>Summary</Text>
+                            <View style={styles.reviewRow}>
+                                <Text style={styles.reviewLabel}>Owner</Text>
+                                <Text style={styles.reviewValue}>{identity.ownerName}</Text>
+                            </View>
+                            <View style={styles.reviewRow}>
+                                <Text style={styles.reviewLabel}>Store</Text>
+                                <Text style={styles.reviewValue}>{store.storeName}</Text>
+                            </View>
+                            <View style={styles.reviewRow}>
+                                <Text style={styles.reviewLabel}>Category</Text>
+                                <Text style={styles.reviewValue}>{store.category}</Text>
+                            </View>
+                            <View style={styles.reviewRow}>
+                                <Text style={styles.reviewLabel}>City</Text>
+                                <Text style={styles.reviewValue}>{store.city}</Text>
+                            </View>
+                            <View style={styles.reviewRow}>
+                                <Text style={styles.reviewLabel}>Email</Text>
+                                <Text style={styles.reviewValue}>{identity.email}</Text>
+                            </View>
+                            <View style={styles.reviewRow}>
+                                <Text style={styles.reviewLabel}>PAN</Text>
+                                <Text style={styles.reviewValue}>{kyc.panNumber || '-'}</Text>
+                            </View>
+                            {kyc.gstNumber && (
+                                <View style={styles.reviewRow}>
+                                    <Text style={styles.reviewLabel}>GSTIN</Text>
+                                    <Text style={styles.reviewValue}>{kyc.gstNumber}</Text>
+                                </View>
+                            )}
+                            <View style={styles.reviewRow}>
+                                <Text style={styles.reviewLabel}>Store Photos</Text>
+                                <Text style={styles.reviewValue}>{storePhotos.length} uploaded</Text>
+                            </View>
+                        </View>
+                    </>
+                )}
+            </KeyboardAwareScrollView>
+
+            <View style={styles.footer}>
+                <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+                    <Ionicons name="chevron-back" size={20} color="#6B7280" />
+                    <Text style={styles.backButtonText}>Back</Text>
+                </TouchableOpacity>
+
+                <Text style={styles.stepCounter}>Step {step} of 6</Text>
+
+                <TouchableOpacity
+                    style={[styles.nextButton, loading && styles.buttonDisabled]}
+                    onPress={handleNext}
+                    disabled={loading}
+                >
+                    {loading ? (
+                        <ActivityIndicator color="#FFFFFF" />
+                    ) : step === 7 ? (
                         <>
-                            <View style={[styles.card, styles.successCard]}>
-                                <Ionicons name="checkmark-circle" size={32} color="#10B981" />
-                                <Text style={styles.successTitle}>Ready to Submit!</Text>
-                                <Text style={styles.successText}>
-                                    Your application will be reviewed within 24-48 hours.
-                                </Text>
-                            </View>
-
-                            <View style={styles.card}>
-                                <Text style={styles.reviewTitle}>Summary</Text>
-                                <View style={styles.reviewRow}>
-                                    <Text style={styles.reviewLabel}>Owner</Text>
-                                    <Text style={styles.reviewValue}>{identity.ownerName}</Text>
-                                </View>
-                                <View style={styles.reviewRow}>
-                                    <Text style={styles.reviewLabel}>Store</Text>
-                                    <Text style={styles.reviewValue}>{store.storeName}</Text>
-                                </View>
-                                <View style={styles.reviewRow}>
-                                    <Text style={styles.reviewLabel}>Category</Text>
-                                    <Text style={styles.reviewValue}>{store.category}</Text>
-                                </View>
-                                <View style={styles.reviewRow}>
-                                    <Text style={styles.reviewLabel}>City</Text>
-                                    <Text style={styles.reviewValue}>{store.city}</Text>
-                                </View>
-                                <View style={styles.reviewRow}>
-                                    <Text style={styles.reviewLabel}>Email</Text>
-                                    <Text style={styles.reviewValue}>{identity.email}</Text>
-                                </View>
-                                <View style={styles.reviewRow}>
-                                    <Text style={styles.reviewLabel}>PAN</Text>
-                                    <Text style={styles.reviewValue}>{kyc.panNumber || '-'}</Text>
-                                </View>
-                                {kyc.gstNumber && (
-                                    <View style={styles.reviewRow}>
-                                        <Text style={styles.reviewLabel}>GSTIN</Text>
-                                        <Text style={styles.reviewValue}>{kyc.gstNumber}</Text>
-                                    </View>
-                                )}
-                                <View style={styles.reviewRow}>
-                                    <Text style={styles.reviewLabel}>Store Photos</Text>
-                                    <Text style={styles.reviewValue}>{storePhotos.length} uploaded</Text>
-                                </View>
-                            </View>
+                            <Text style={styles.nextButtonText}>Submit</Text>
+                            <Ionicons name="checkmark" size={18} color="#FFFFFF" />
+                        </>
+                    ) : (
+                        <>
+                            <Text style={styles.nextButtonText}>Next</Text>
+                            <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
                         </>
                     )}
-                </ScrollView>
+                </TouchableOpacity>
+            </View>
 
-                <View style={styles.footer}>
-                    <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-                        <Ionicons name="chevron-back" size={20} color="#6B7280" />
-                        <Text style={styles.backButtonText}>Back</Text>
-                    </TouchableOpacity>
-
-                    <Text style={styles.stepCounter}>Step {step} of 6</Text>
-
-                    <TouchableOpacity
-                        style={[styles.nextButton, loading && styles.buttonDisabled]}
-                        onPress={handleNext}
-                        disabled={loading}
-                    >
-                        {loading ? (
-                            <ActivityIndicator color="#FFFFFF" />
-                        ) : step === 7 ? (
-                            <>
-                                <Text style={styles.nextButtonText}>Submit</Text>
-                                <Ionicons name="checkmark" size={18} color="#FFFFFF" />
-                            </>
-                        ) : (
-                            <>
-                                <Text style={styles.nextButtonText}>Next</Text>
-                                <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
-                            </>
-                        )}
-                    </TouchableOpacity>
-                </View>
-            </KeyboardAvoidingView>
-        </SafeAreaView>
+        </SafeAreaView >
     );
 }
 
@@ -1160,7 +1257,17 @@ const styles = StyleSheet.create({
     reviewRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
     reviewLabel: { fontSize: 14, color: '#6B7280' },
     reviewValue: { fontSize: 14, fontWeight: '600', color: '#111827' },
-    footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
+    footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
+    modalContent: { backgroundColor: '#fff', borderRadius: 16, padding: 20, maxHeight: 400 },
+    modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 16, textAlign: 'center' },
+    modalItem: { paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    modalItemText: { fontSize: 16, color: '#374151' },
+    modalItemTextActive: { color: Colors.primary, fontWeight: '600' },
+    modalCloseBtn: { marginTop: 16, padding: 12, backgroundColor: '#F3F4F6', borderRadius: 12, alignItems: 'center' },
+    modalCloseText: { fontWeight: '600', color: '#374151' },
+    divider: { height: 1, backgroundColor: '#E5E7EB', marginVertical: 20 },
+    sectionHeader: { fontSize: 16, fontWeight: '600', color: '#111827', marginBottom: 16 },
     backButton: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 4 },
     backButtonText: { fontSize: 15, color: '#6B7280', marginLeft: 4 },
     stepCounter: { fontSize: 13, color: '#9CA3AF' },

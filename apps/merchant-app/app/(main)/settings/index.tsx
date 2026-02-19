@@ -120,6 +120,13 @@ export default function SettingsScreen() {
             iconType: 'MaterialCommunityIcons'
         },
         {
+            icon: 'refresh',
+            label: 'Returns & Refunds',
+            subtitle: 'Manage requests & approvals',
+            route: '/(main)/settings/returns',
+            iconType: 'MaterialCommunityIcons'
+        },
+        {
             icon: 'clock-outline',
             label: 'Store Timings',
             subtitle: 'Manage opening & closing hours',
@@ -145,6 +152,13 @@ export default function SettingsScreen() {
             label: 'Store Details',
             subtitle: 'Edit name, address & info',
             route: '/(main)/settings/store-details',
+            iconType: 'MaterialCommunityIcons'
+        },
+        {
+            icon: 'source-branch',
+            label: 'Branch Management',
+            subtitle: 'Add or manage store branches',
+            route: '/(main)/settings/branches',
             iconType: 'MaterialCommunityIcons'
         },
         {

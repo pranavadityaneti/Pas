@@ -28,8 +28,10 @@ export default function InventoryScreen() {
     // Refetch on Focus
     useFocusEffect(
         useCallback(() => {
+            // CRITICAL: refetch MUST be in the dependency array to ensure the screen updates 
+            // when navigating back from adding products. verify useInventory.ts has memoized it.
             refetch();
-        }, [])
+        }, [refetch])
     );
     const [search, setSearch] = useState('');
     const [filterVisible, setFilterVisible] = useState(false);

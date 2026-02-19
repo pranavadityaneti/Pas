@@ -9,6 +9,7 @@ export interface InventoryItem {
     stock: number;
     price: number;
     active: boolean;
+    variant: string;
     is_best_seller: boolean; // Added real field
     product: {
         name: string;
@@ -31,6 +32,7 @@ export function useInventory() {
     const { storeId, loading: storeLoading } = useStore();
 
     const fetchInventory = useCallback(async () => {
+        console.log('[useInventory] fetchInventory called. StoreId:', storeId);
         if (!storeId) {
             setLoading(false);
             return;
@@ -41,7 +43,8 @@ export function useInventory() {
                 .from('StoreProduct')
                 .select(`
                     *,
-                    is_best_seller,
+                    variant, 
+                    is_best_seller, 
                     product:Product (
                         name,
                         image,
@@ -50,8 +53,15 @@ export function useInventory() {
                         brand
                     )
                 `)
+                // CRITICAL: Ensure 'variant' and 'is_best_seller' are selected above.
+                // Missing these will cause silent failures in the UI.
                 .eq('storeId', storeId)
                 .order('updatedAt', { ascending: false });
+
+            if (error) {
+                console.error('[useInventory] Supabase Error:', JSON.stringify(error, null, 2));
+                throw error;
+            }
 
             if (data) {
                 setInventory(data as unknown as InventoryItem[]);
@@ -128,11 +138,20 @@ export function useInventory() {
         updateItem(id, { active: !currentStatus });
     };
 
+    // CRITICAL: refetch must be memoized with useCallback.
+    // Passing a raw function to the dependency array of a useEffect (like in InventoryScreen) 
+    // will cause infinite loops or stale closures if not memoized.
+    // will cause infinite loops or stale closures if not memoized.
+    const refetch = useCallback(() => {
+        setRefreshing(true);
+        fetchInventory();
+    }, [fetchInventory]);
+
     return {
         inventory,
         loading,
         refreshing,
-        refetch: () => { setRefreshing(true); fetchInventory(); },
+        refetch,
         updateItem,
         deleteItem,
         toggleStatus,

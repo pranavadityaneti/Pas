@@ -30,9 +30,9 @@ export default function PayoutsScreen() {
     const bankDetails = React.useMemo(() => {
         if (merchants && merchants.length > 0) {
             const data = merchants[0];
-            if (data.bank_account_number && data.bank_account_number.trim().length > 0 && data.bank_name && data.bank_name.trim().length > 0) {
+            if (data.bank_account_number && data.bank_account_number.trim().length > 0) {
                 return {
-                    bankName: data.bank_name,
+                    bankName: data.bank_name || 'Bank',
                     accountNumber: `**** **** **** ${data.bank_account_number.slice(-4)}`,
                     ifsc: data.ifsc_code || '',
                     beneficiary: data.bank_beneficiary_name || data.owner_name || '',

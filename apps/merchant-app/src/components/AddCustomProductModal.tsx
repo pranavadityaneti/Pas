@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, ActivityIndicator, ScrollView, Alert, KeyboardAvoidingView, Platform, Image, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, ActivityIndicator, Alert, Platform, Image, Dimensions, ScrollView, Keyboard, KeyboardAvoidingView } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors } from '../../constants/Colors';
 import { supabase } from '../lib/supabase';
+import uuid from 'react-native-uuid';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -106,15 +108,18 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
             const mainImage = uploadedUrls[0]; // First image is main
 
             // 2. Create Product in Global Table (Private to Store)
+            const productId = uuid.v4(); // Generate ID client-side
             const { data: productData, error: productError } = await supabase
                 .from('Product')
                 .insert({
+                    id: productId, // Explicitly set ID
                     name: name.trim(),
                     mrp: parseFloat(mrp),
                     category: category.trim(),
                     description: description.trim(),
                     createdByStoreId: storeId, // CRITICAL: Marks it as custom/private
-                    image: mainImage
+                    image: mainImage,
+                    updatedAt: new Date().toISOString(), // Explicitly set to avoid null error
                 })
                 .select()
                 .single();
@@ -122,14 +127,19 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
             if (productError) throw productError;
 
             // 3. Link to Store Inventory (StoreProduct)
+            const storeProductId = uuid.v4();
             const { error: storeProductError } = await supabase
                 .from('StoreProduct')
                 .insert({
+                    id: storeProductId,
                     storeId: storeId,
                     productId: productData.id,
                     price: parseFloat(mrp), // Default selling price = MRP
                     stock: 0,
-                    active: true
+                    active: true,
+                    updatedAt: new Date().toISOString(),
+                    variant: "Standard", // CRITICAL: Required for composite key
+                    is_best_seller: false // CRITICAL: Required for filters
                 });
 
             if (storeProductError) throw storeProductError;
@@ -155,11 +165,11 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
 
     return (
         <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
-                style={styles.overlay}
-            >
-                <View style={styles.container}>
+            <View style={styles.overlay}>
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    style={styles.container}
+                >
                     <View style={styles.header}>
                         <Text style={styles.title}>Add Custom Product</Text>
                         <TouchableOpacity onPress={onClose}>
@@ -167,10 +177,12 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
                         </TouchableOpacity>
                     </View>
 
+                    {/* Form Content - Using Standard ScrollView inside KeyboardAvoidingView */}
                     <ScrollView
-                        contentContainerStyle={styles.content}
+                        style={{ flex: 1 }}
+                        contentContainerStyle={[styles.content, { paddingBottom: 150 }]}
                         keyboardShouldPersistTaps="handled"
-                        keyboardDismissMode="on-drag"
+                        showsVerticalScrollIndicator={false}
                     >
                         {/* Image Picker */}
                         <Text style={styles.label}>Product Photos (Min 1, Max 4) *</Text>
@@ -214,7 +226,10 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
                                 <Text style={styles.label}>Category *</Text>
                                 <TouchableOpacity
                                     style={[styles.input, styles.dropdownBtn]}
-                                    onPress={() => setShowCategoryDropdown(!showCategoryDropdown)}
+                                    onPress={() => {
+                                        Keyboard.dismiss();
+                                        setShowCategoryDropdown(!showCategoryDropdown);
+                                    }}
                                 >
                                     <Text style={{ color: category ? '#000' : '#aaa' }}>
                                         {category || "Select..."}
@@ -251,10 +266,11 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
                             onChangeText={setDescription}
                             multiline
                             numberOfLines={3}
+                            onFocus={() => setShowCategoryDropdown(false)}
                         />
-
                     </ScrollView>
 
+                    {/* Sticky Footer */}
                     <View style={styles.footer}>
                         <TouchableOpacity style={[styles.btn, styles.cancelBtn]} onPress={onClose}>
                             <Text style={styles.cancelText}>Cancel</Text>
@@ -267,8 +283,8 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
                             {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>Create & Add</Text>}
                         </TouchableOpacity>
                     </View>
-                </View>
-            </KeyboardAvoidingView>
+                </KeyboardAvoidingView>
+            </View>
         </Modal>
     );
 }

@@ -29,10 +29,10 @@ export function useNotifications(user: any) {
             }
 
             const { data, error } = await supabase
-                .from('notification')
+                .from('notifications')
                 .select('*')
-                .eq('merchantId', user.id)
-                .order('createdAt', { ascending: false })
+                .eq('user_id', user.id)
+                .order('created_at', { ascending: false })
                 .limit(50);
 
             if (data) {
@@ -72,8 +72,8 @@ export function useNotifications(user: any) {
                 .on('postgres_changes', {
                     event: 'INSERT',
                     schema: 'public',
-                    table: 'notification',
-                    filter: `merchantId=eq.${user.id}`
+                    table: 'notifications',
+                    filter: `user_id=eq.${user.id}`
                 }, (payload) => {
                     const newNotif = payload.new as Notification;
 
@@ -121,7 +121,7 @@ export function useNotifications(user: any) {
 
     const markAsRead = async (notificationId: string) => {
         const { error } = await supabase
-            .from('notification')
+            .from('notifications')
             .update({ read: true })
             .eq('id', notificationId);
 
@@ -138,9 +138,9 @@ export function useNotifications(user: any) {
         if (!user) return;
 
         const { error } = await supabase
-            .from('notification')
+            .from('notifications')
             .update({ read: true })
-            .eq('merchantId', user.id)
+            .eq('user_id', user.id)
             .eq('read', false);
 
         if (!error) {
