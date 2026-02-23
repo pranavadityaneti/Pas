@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { AppScreenshotCarousel } from "@/components/AppScreenshotCarousel";
 
 export function VideoSection() {
     return (
@@ -47,6 +48,9 @@ export function VideoSection() {
                         allowFullScreen
                     ></iframe>
                 </motion.div>
+
+                {/* App Screenshot Carousel */}
+                <AppScreenshotCarousel />
             </div>
         </div>
     );
