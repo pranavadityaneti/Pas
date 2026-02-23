@@ -288,24 +288,24 @@ function MockupTracking({ appMode }: { appMode: string }) {
                     <div className="flex items-start gap-2">
                         <div className="w-2 h-2 rounded-full bg-blue-500 mt-1 shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
                         <div className="flex flex-col">
-                            <div className="text-[0.5rem] font-bold text-black-shadow uppercase tracking-wider opacity-40">Destination</div>
-                            <div className="text-[0.6rem] font-bold text-black-shadow truncate">Store #42</div>
+                            <div className="text-[0.5rem] font-bold text-black-shadow uppercase tracking-wider opacity-40">Status</div>
+                            <div className="text-[0.6rem] font-bold text-blue-500 truncate">Approved</div>
                         </div>
                     </div>
 
                     <div className="flex items-start gap-2">
                         <div className="w-2 h-2 rounded-full border-2 border-blue-500 bg-white mt-1" />
                         <div className="flex flex-col">
-                            <div className="text-[0.5rem] font-bold text-black-shadow uppercase tracking-wider opacity-40">Next Step</div>
-                            <div className="text-[0.6rem] font-bold text-black-shadow truncate">Turn Right</div>
+                            <div className="text-[0.5rem] font-bold text-black-shadow uppercase tracking-wider opacity-40">Status</div>
+                            <div className="text-[0.6rem] font-bold text-black-shadow truncate">Processing</div>
                         </div>
                     </div>
 
                     <div className="flex items-start gap-2">
                         <div className="w-2 h-2 rounded-full bg-blue-500/20 mt-1" />
                         <div className="flex flex-col">
-                            <div className="text-[0.5rem] font-bold text-black-shadow uppercase tracking-wider opacity-40">Speed</div>
-                            <div className="text-[0.6rem] font-bold text-black-shadow truncate">24 km/h</div>
+                            <div className="text-[0.5rem] font-bold text-black-shadow uppercase tracking-wider opacity-40">Status</div>
+                            <div className="text-[0.6rem] font-bold text-black-shadow/40 truncate">Ready</div>
                         </div>
                     </div>
 
