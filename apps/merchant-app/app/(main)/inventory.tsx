@@ -259,6 +259,8 @@ export default function InventoryScreen() {
                 contentContainerStyle={styles.list}
                 refreshing={refreshing}
                 onRefresh={refetch}
+                keyboardDismissMode="on-drag"
+                keyboardShouldPersistTaps="handled"
                 ListHeaderComponent={<View style={{ height: 10 }} />}
                 ListEmptyComponent={
                     <View style={styles.listEmpty}>

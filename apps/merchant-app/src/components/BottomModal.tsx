@@ -1,5 +1,6 @@
 import React from 'react';
-import { Modal, View, Text, StyleSheet, TouchableOpacity, TouchableWithoutFeedback, KeyboardAvoidingView, Platform, ScrollView, DimensionValue } from 'react-native';
+import { Modal, View, Text, StyleSheet, TouchableOpacity, TouchableWithoutFeedback, Platform, DimensionValue } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Ionicons } from '@expo/vector-icons';
@@ -26,37 +27,37 @@ export default function BottomModal({ visible, onClose, title, children, height 
             onRequestClose={onClose}
             statusBarTranslucent={true}
         >
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
-                style={{ flex: 1 }}
-            >
-                <View style={styles.overlay}>
-                    <TouchableWithoutFeedback onPress={onClose}>
-                        <View style={styles.backdrop} />
-                    </TouchableWithoutFeedback>
+            <View style={styles.overlay}>
+                <TouchableWithoutFeedback onPress={onClose}>
+                    <View style={styles.backdrop} />
+                </TouchableWithoutFeedback>
 
-                    <View style={[styles.modalContent, {
-                        paddingBottom: Math.max(insets.bottom, 20)
-                    }]}>
-                        <View style={styles.handle} />
+                <View style={[styles.modalContent, {
+                    paddingBottom: Math.max(insets.bottom, 20)
+                }]}>
+                    <View style={styles.handle} />
 
-                        <View style={styles.header}>
-                            <Text style={styles.title}>{title}</Text>
-                            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-                                <Ionicons name="close" size={20} color="#666" />
-                            </TouchableOpacity>
-                        </View>
-
-                        <ScrollView
-                            contentContainerStyle={styles.content}
-                            keyboardShouldPersistTaps="handled"
-                            keyboardDismissMode="on-drag"
-                        >
-                            {children}
-                        </ScrollView>
+                    <View style={styles.header}>
+                        <Text style={styles.title}>{title}</Text>
+                        <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                            <Ionicons name="close" size={20} color="#666" />
+                        </TouchableOpacity>
                     </View>
+
+                    {/* @ts-ignore: Library type definition missing children prop */}
+                    <KeyboardAwareScrollView
+                        contentContainerStyle={styles.content}
+                        keyboardShouldPersistTaps="handled"
+                        keyboardDismissMode="on-drag"
+                        enableOnAndroid={true}
+                        extraScrollHeight={80}
+                        enableAutomaticScroll={true}
+                        showsVerticalScrollIndicator={false}
+                    >
+                        {children}
+                    </KeyboardAwareScrollView>
                 </View>
-            </KeyboardAvoidingView>
+            </View>
         </Modal>
     );
 }

@@ -16,12 +16,14 @@ export function VideoSection() {
 
                     <div className="flex flex-col items-center md:items-end gap-4 max-w-md text-center md:text-right">
                         <div className="flex gap-4">
-                            <button className="bg-location-yellow text-black border border-location-yellow-120 px-6 py-3 rounded-full text-base font-semibold hover:bg-location-yellow-60 transition-all">
+                            <a
+                                href="https://forms.gle/RY23cJjXmtGES3Zx9"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="bg-location-yellow text-black border border-location-yellow-120 px-6 py-3 rounded-full text-base font-semibold hover:bg-location-yellow-60 transition-all"
+                            >
                                 Get Started
-                            </button>
-                            <button className="bg-transparent text-black border border-gray-300 px-6 py-3 rounded-full text-base font-semibold hover:bg-gray-50 transition-all">
-                                Learn More
-                            </button>
+                            </a>
                         </div>
                         <p className="text-sm text-black-shadow/60 leading-relaxed text-center md:text-right">
                             Discover how PickAtStore connects you with the best local merchants for a seamless shopping experience.

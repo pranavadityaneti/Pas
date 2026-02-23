@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator, ScrollView, Image, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator, ScrollView, Image } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -143,85 +144,87 @@ export default function StoreDetailsScreen() {
                 <Text style={styles.headerTitle}>Store Details</Text>
             </View>
 
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
-                style={{ flex: 1 }}
-                keyboardVerticalOffset={100}
+            {/* @ts-ignore: Library type definition missing children prop */}
+            <KeyboardAwareScrollView
+                contentContainerStyle={styles.content}
+                enableOnAndroid={true}
+                extraScrollHeight={80}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+                showsVerticalScrollIndicator={false}
             >
-                <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-                    <View style={styles.formGroup}>
-                        <Text style={styles.label}>Store Name</Text>
-                        <TextInput
-                            style={styles.input}
-                            value={details.name}
-                            onChangeText={(t) => setDetails({ ...details, name: t })}
-                            placeholder="Enter store name"
-                        />
-                    </View>
+                <View style={styles.formGroup}>
+                    <Text style={styles.label}>Store Name</Text>
+                    <TextInput
+                        style={styles.input}
+                        value={details.name}
+                        onChangeText={(t) => setDetails({ ...details, name: t })}
+                        placeholder="Enter store name"
+                    />
+                </View>
 
-                    <View style={styles.formGroup}>
-                        <Text style={styles.label}>Address</Text>
-                        <TextInput
-                            style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
-                            value={details.address}
-                            onChangeText={(t) => setDetails({ ...details, address: t })}
-                            placeholder="Enter full address"
-                            multiline
-                            numberOfLines={3}
-                        />
-                    </View>
+                <View style={styles.formGroup}>
+                    <Text style={styles.label}>Address</Text>
+                    <TextInput
+                        style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
+                        value={details.address}
+                        onChangeText={(t) => setDetails({ ...details, address: t })}
+                        placeholder="Enter full address"
+                        multiline
+                        numberOfLines={3}
+                    />
+                </View>
 
-                    {/* City ID is often fixed or needs a selector, keeping simple for now */}
-                    <View style={styles.formGroup}>
-                        <Text style={styles.label}>Category</Text>
-                        <TextInput
-                            style={[styles.input, { backgroundColor: '#F3F4F6', color: '#666' }]}
-                            value={details.category}
-                            editable={false}
-                            placeholder="Not Specified"
-                        />
-                    </View>
+                {/* City ID is often fixed or needs a selector, keeping simple for now */}
+                <View style={styles.formGroup}>
+                    <Text style={styles.label}>Category</Text>
+                    <TextInput
+                        style={[styles.input, { backgroundColor: '#F3F4F6', color: '#666' }]}
+                        value={details.category}
+                        editable={false}
+                        placeholder="Not Specified"
+                    />
+                </View>
 
-                    {/* Store Photos */}
-                    <View style={[styles.formGroup, { marginTop: 10 }]}>
-                        <Text style={styles.label}>Store Photos ({details.photos.length})</Text>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photosScroll}>
-                            {details.photos.map((photo, index) => (
-                                <View key={index} style={styles.photoWrapper}>
-                                    <Image source={{ uri: photo }} style={styles.photo} />
-                                </View>
-                            ))}
-                            {details.photos.length === 0 && (
-                                <View style={styles.noPhotoBox}>
-                                    <Ionicons name="image-outline" size={24} color="#9CA3AF" />
-                                    <Text style={styles.noPhotoText}>No photos provided</Text>
-                                </View>
-                            )}
-                        </ScrollView>
-                    </View>
-
-                    <View style={styles.formGroup}>
-                        <Text style={[styles.label, { color: '#999' }]}>City (Read Only)</Text>
-                        <TextInput
-                            style={[styles.input, { backgroundColor: '#F3F4F6', color: '#666' }]}
-                            value={details.cityId}
-                            editable={false}
-                        />
-                    </View>
-
-                    <TouchableOpacity
-                        style={[styles.saveButton, (saving || !isDirty) && { opacity: 0.7 }]}
-                        onPress={handleSave}
-                        disabled={saving || !isDirty}
-                    >
-                        {saving ? (
-                            <ActivityIndicator color="#fff" />
-                        ) : (
-                            <Text style={styles.saveButtonText}>Save Changes</Text>
+                {/* Store Photos */}
+                <View style={[styles.formGroup, { marginTop: 10 }]}>
+                    <Text style={styles.label}>Store Photos ({details.photos.length})</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photosScroll}>
+                        {details.photos.map((photo, index) => (
+                            <View key={index} style={styles.photoWrapper}>
+                                <Image source={{ uri: photo }} style={styles.photo} />
+                            </View>
+                        ))}
+                        {details.photos.length === 0 && (
+                            <View style={styles.noPhotoBox}>
+                                <Ionicons name="image-outline" size={24} color="#9CA3AF" />
+                                <Text style={styles.noPhotoText}>No photos provided</Text>
+                            </View>
                         )}
-                    </TouchableOpacity>
-                </ScrollView>
-            </KeyboardAvoidingView>
+                    </ScrollView>
+                </View>
+
+                <View style={styles.formGroup}>
+                    <Text style={[styles.label, { color: '#999' }]}>City (Read Only)</Text>
+                    <TextInput
+                        style={[styles.input, { backgroundColor: '#F3F4F6', color: '#666' }]}
+                        value={details.cityId}
+                        editable={false}
+                    />
+                </View>
+
+                <TouchableOpacity
+                    style={[styles.saveButton, (saving || !isDirty) && { opacity: 0.7 }]}
+                    onPress={handleSave}
+                    disabled={saving || !isDirty}
+                >
+                    {saving ? (
+                        <ActivityIndicator color="#fff" />
+                    ) : (
+                        <Text style={styles.saveButtonText}>Save Changes</Text>
+                    )}
+                </TouchableOpacity>
+            </KeyboardAwareScrollView>
         </SafeAreaView>
     );
 }
