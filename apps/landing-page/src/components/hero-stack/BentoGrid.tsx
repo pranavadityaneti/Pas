@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useHero } from "./HeroContext";
 import Image from "next/image";
@@ -19,7 +20,7 @@ const merchantContent = [
     { id: "m2", title: "Sales Analytics", desc: "Deep insights into performance.", color: "bg-white", text: "text-black-shadow" },
     { id: "m3", title: "Staff Controls", desc: "Manage roles and permissions easily.", color: "bg-white", text: "text-black-shadow" },
     { id: "m4", title: "Order Momentum", desc: "Track consecutive days of high-volume sales.", color: "bg-white", text: "text-black-shadow" },
-    { id: "m5", title: "Fast Payouts", desc: "Receive earnings within 24 hours.", color: "bg-white", text: "text-black-shadow" },
+    { id: "m5", title: "Fast Payouts", desc: "Receive earnings in T+2 days.", color: "bg-white", text: "text-black-shadow" },
     { id: "m6", title: "Verified Vendors", desc: "Join an elite network of 5000+ top retailers.", color: "bg-white", text: "text-black-shadow" },
 ];
 
@@ -40,7 +41,7 @@ export function BentoGrid() {
 
                 {/* Row 2: CENTERED Switch */}
                 <BentoCard item={content[2]} className="col-span-1 md:col-span-1 md:row-span-1 h-[300px] md:h-auto">
-                    {appMode === "customer" ? <MockupQueue appMode={appMode} /> : <MockupWallet appMode={appMode} />}
+                    {appMode === "customer" ? <MockupQueue appMode={appMode} /> : <MockupStaff appMode={appMode} />}
                 </BentoCard>
 
                 <motion.div
@@ -72,7 +73,7 @@ export function BentoGrid() {
 
                 {/* Row 3 */}
                 <BentoCard item={content[4]} className="col-span-1 md:col-span-2 md:row-span-1 h-[300px] md:h-auto">
-                    <MockupCurbside appMode={appMode} />
+                    {appMode === "customer" ? <MockupCurbside appMode={appMode} /> : <MockupFastPayouts />}
                 </BentoCard>
                 <BentoCard item={content[5]} className="col-span-1 md:col-span-2 md:row-span-1 h-[300px] md:h-auto">
                     <MockupRetailStores appMode={appMode} />
@@ -182,24 +183,24 @@ function MockupMultiStore({ appMode }: { appMode: string }) {
 
 function MockupAnalytics({ appMode }: { appMode: string }) {
     return (
-        <div className="absolute inset-0 flex flex-col p-8 overflow-hidden">
-            {/* Background Dot Mesh - pinned to fill entire card */}
-            <div className="absolute inset-x-0 bottom-0 top-12 opacity-[0.04] pointer-events-none"
+        <div className="absolute inset-0 flex flex-col p-5 overflow-hidden">
+            {/* Background Dot Mesh */}
+            <div className="absolute inset-x-0 bottom-0 top-10 opacity-[0.04] pointer-events-none"
                 style={{ backgroundImage: 'radial-gradient(circle, black 1px, transparent 1px)', backgroundSize: '16px 16px' }} />
 
             {/* Top Row: Label + Growth + Dropdown */}
             <div className="relative z-10 flex justify-between items-start">
-                <div className="text-xl font-bold text-black-shadow tracking-tight">Total orders</div>
-                <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-[#B52725]/10 text-[#B52725] text-[0.7rem] font-black">
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4">
+                <div className="text-base font-bold text-black-shadow tracking-tight">Total orders</div>
+                <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#B52725]/10 text-[#B52725] text-[0.65rem] font-black">
+                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4">
                             <path d="M12 19V5M5 12l7-7 7 7" />
                         </svg>
                         56.4%
                     </div>
-                    <div className="flex items-center gap-1 text-[0.7rem] font-black text-black-shadow/20">
+                    <div className="flex items-center gap-1 text-[0.65rem] font-black text-black-shadow/20">
                         Past 30 days
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
                             <path d="m6 9 6 6 6-6" />
                         </svg>
                     </div>
@@ -207,9 +208,9 @@ function MockupAnalytics({ appMode }: { appMode: string }) {
             </div>
 
             {/* Mid: Stats */}
-            <div className="relative z-10 mt-6">
-                <div className="text-7xl font-black text-black-shadow tracking-tighter leading-none mb-1">1054</div>
-                <div className="flex items-center gap-1 text-[0.85rem] font-black">
+            <div className="relative z-10 mt-3">
+                <div className="text-5xl font-black text-black-shadow tracking-tighter leading-none mb-1">1,054</div>
+                <div className="flex items-center gap-1 text-[0.75rem] font-black">
                     <span className="text-[#B52725]">+330</span>
                     <span className="text-black-shadow/20">today</span>
                 </div>
@@ -569,22 +570,90 @@ function MockupSearch({ appMode }: { appMode: string }) {
     );
 }
 
-function MockupCurbside({ appMode }: { appMode: string }) {
-    const isCustomer = appMode === "customer";
-
-    if (!isCustomer) return (
-        <div className="absolute inset-0 flex items-center justify-center gap-6 overflow-hidden px-8">
-            {[1, 2, 3, 4].map(i => (
-                <div key={i} className="w-16 h-16 bg-white rounded-2xl border border-black/[0.03] shadow-sm flex flex-col items-center justify-center gap-1">
-                    <div className="w-8 h-8 bg-black/5 rounded-lg flex items-center justify-center">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
+function MockupFastPayouts() {
+    return (
+        <div className="absolute inset-0 flex items-center justify-center p-4 overflow-hidden">
+            <div className="w-full bg-gray-50/80 rounded-2xl p-3 flex flex-col gap-2">
+                {/* Header row */}
+                <div className="flex justify-between items-center">
+                    <div className="text-[0.55rem] font-bold text-black-shadow/40 uppercase tracking-widest">Settlement</div>
+                    <div className="text-[0.55rem] font-bold text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">T+2 Days</div>
+                </div>
+                {/* Amount */}
+                <div className="text-2xl font-black text-black-shadow tracking-tight">₹8,502</div>
+                {/* Timeline */}
+                <div className="flex items-center gap-1">
+                    {["Order", "T+1", "Bank"].map((step, i) => (
+                        <React.Fragment key={step}>
+                            <div className="flex flex-col items-center gap-0.5">
+                                <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[0.45rem] font-bold ${i < 2 ? 'bg-[#B52725] text-white' : 'bg-gray-200 text-black-shadow/30'
+                                    }`}>
+                                    {i < 2 ? '✓' : ''}
+                                </div>
+                                <div className="text-[0.45rem] text-black-shadow/40 font-bold whitespace-nowrap">{step}</div>
+                            </div>
+                            {i < 2 && <div className={`flex-1 h-0.5 mb-3 ${i === 0 ? 'bg-[#B52725]' : 'bg-gray-200'}`} />}
+                        </React.Fragment>
+                    ))}
+                </div>
+                {/* Bank row */}
+                <div className="flex items-center gap-2 bg-white rounded-xl p-2 border border-black/[0.04] shadow-sm">
+                    <div className="w-6 h-6 bg-[#B52725]/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#B52725" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" />
                         </svg>
                     </div>
+                    <div className="flex-1 min-w-0">
+                        <div className="text-[0.5rem] font-bold text-black-shadow/40 uppercase tracking-wider">Credited to</div>
+                        <div className="text-[0.65rem] font-bold text-black-shadow">HDFC ·· 4821</div>
+                    </div>
+                    <motion.div
+                        animate={{ opacity: [0.5, 1, 0.5] }}
+                        transition={{ duration: 2, repeat: Infinity }}
+                        className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0"
+                    />
                 </div>
+            </div>
+        </div>
+    );
+}
+
+function MockupStaff({ appMode }: { appMode: string }) {
+    const staff = [
+        { initials: "RS", name: "Rahul S.", role: "Manager", color: "bg-blue-500", active: true },
+        { initials: "PM", name: "Priya M.", role: "Cashier", color: "bg-purple-500", active: true },
+        { initials: "AK", name: "Arjun K.", role: "Inventory", color: "bg-amber-500", active: false },
+    ];
+    return (
+        <div className="absolute inset-0 flex flex-col justify-center px-3 gap-1.5 overflow-hidden">
+            {staff.map((s, i) => (
+                <motion.div
+                    key={s.name}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: i * 0.1 }}
+                    className="flex items-center gap-2 bg-gray-50/80 rounded-xl p-2 border border-black/[0.03]"
+                >
+                    <div className={`w-7 h-7 ${s.color} rounded-full flex items-center justify-center text-white text-[0.55rem] font-bold flex-shrink-0`}>
+                        {s.initials}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <div className="text-[0.65rem] font-bold text-black-shadow truncate">{s.name}</div>
+                        <div className="text-[0.5rem] text-black-shadow/40 font-medium">{s.role}</div>
+                    </div>
+                    {/* Toggle */}
+                    <div className={`w-8 h-[18px] rounded-full flex items-center px-0.5 transition-colors flex-shrink-0 ${s.active ? 'bg-[#B52725] justify-end' : 'bg-gray-200 justify-start'
+                        }`}>
+                        <div className="w-3.5 h-3.5 bg-white rounded-full shadow-sm" />
+                    </div>
+                </motion.div>
             ))}
         </div>
     );
+}
+
+function MockupCurbside({ appMode }: { appMode: string }) {
+    const isCustomer = appMode === "customer";
 
     return (
         <div className="absolute inset-0 flex items-center justify-center p-6">
