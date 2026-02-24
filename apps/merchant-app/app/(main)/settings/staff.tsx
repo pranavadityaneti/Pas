@@ -9,7 +9,7 @@ import { supabase } from '../../../src/lib/supabase';
 import { useStore } from '../../../src/hooks/useStore';
 import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
 
-const MOCK_BRANCHES = ['Main Store', 'Downtown Branch', 'Airport Branch'];
+
 
 interface StaffMember {
     id: string;
@@ -28,7 +28,7 @@ export default function StaffScreen() {
 
     // Realtime Data Hook
     const { data: rawStaff, loading: tableLoading, setData } = useRealtimeTable({
-        tableName: 'StoreStaff',
+        tableName: 'store_staff',
         filter: storeId ? `store_id=eq.${storeId}` : undefined,
         orderBy: { column: 'created_at', ascending: false },
         enabled: !!storeId
@@ -52,7 +52,7 @@ export default function StaffScreen() {
     const [name, setName] = useState('');
     const [role, setRole] = useState('');
     const [phone, setPhone] = useState('');
-    const [branch, setBranch] = useState(MOCK_BRANCHES[0]);
+    const [branch, setBranch] = useState('');
     const [activities, setActivities] = useState<string[]>([]);
     const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -61,7 +61,6 @@ export default function StaffScreen() {
 
     const ACTIVITY_OPTIONS = [
         'Order Management',
-        'Inventory Management',
         'Analytics & Reports',
         'Settings & Profile',
         'Staff Management'
@@ -72,7 +71,7 @@ export default function StaffScreen() {
         setName('');
         setRole('');
         setPhone('');
-        setBranch(MOCK_BRANCHES[0]);
+        setBranch('');
         setActivities([]);
         setModalVisible(true);
     };
@@ -82,7 +81,7 @@ export default function StaffScreen() {
         setName(member.name);
         setRole(member.role);
         setPhone(member.phone);
-        setBranch(member.branch || MOCK_BRANCHES[0]);
+        setBranch(member.branch || '');
         // @ts-ignore: assuming activities exists in member or I need to update fetch
         setActivities(member.activities || []);
         setModalVisible(true);
@@ -123,7 +122,7 @@ export default function StaffScreen() {
 
                 // Update Existing
                 const { error } = await supabase
-                    .from('StoreStaff')
+                    .from('store_staff')
                     .update({
                         name,
                         role,
@@ -143,7 +142,7 @@ export default function StaffScreen() {
 
                 // Add New
                 const { data: newStaff, error } = await supabase
-                    .from('StoreStaff')
+                    .from('store_staff')
                     .insert([payload])
                     .select()
                     .single();
@@ -283,7 +282,7 @@ export default function StaffScreen() {
                         <View style={styles.inputGroup}>
                             <Text style={styles.inputLabel}>Assign Branch</Text>
                             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.branchScroll}>
-                                {MOCK_BRANCHES.map(b => (
+                                {['Main Store'].map(b => (
                                     <TouchableOpacity
                                         key={b}
                                         style={[styles.branchPill, branch === b && styles.branchPillActive]}

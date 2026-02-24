@@ -90,7 +90,7 @@ function CarouselItem({ src, label, index, containerRef }: { src: string, label:
             <motion.div
                 className="absolute inset-0"
                 variants={{
-                    normal: { filter: "grayscale(1) contrast(1.25)", scale: 1 },
+                    normal: { filter: "grayscale(0) contrast(1)", scale: 1 },
                     hovered: { filter: "grayscale(0) contrast(1)", scale: 1.05 },
                 }}
                 transition={{ duration: 0.4, ease: "easeOut" }}

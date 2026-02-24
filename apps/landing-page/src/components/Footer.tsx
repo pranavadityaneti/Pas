@@ -41,18 +41,20 @@ export function Footer() {
                 </div>
 
                 <div className="flex items-center gap-6">
+                    <a href="tel:+917842287373" className="text-black-shadow/60 hover:text-store-red transition-colors font-medium mr-4">
+                        <Phone size={20} className="md:hidden" />
+                        <span className="hidden md:block">+91 78422 87373</span>
+                    </a>
+                    <a href="mailto:contact@pickatstore.in" className="text-black-shadow/60 hover:text-store-red transition-colors font-medium mr-6">
+                        <Mail size={20} className="md:hidden" />
+                        <span className="hidden md:block">contact@pickatstore.in</span>
+                    </a>
                     <a href="/privacypolicy" className="text-sm font-bold text-black-shadow/60 hover:text-store-red transition-colors mr-4">Privacy Policy</a>
                     <a href="https://www.youtube.com/@pickatstore" target="_blank" rel="noopener noreferrer" className="text-black-shadow/60 hover:text-store-red transition-colors">
                         <Youtube size={20} />
                     </a>
                     <a href="https://www.instagram.com/pickatstore.in/" target="_blank" rel="noopener noreferrer" className="text-black-shadow/60 hover:text-store-red transition-colors">
                         <Instagram size={20} />
-                    </a>
-                    <a href="tel:+918888888888" className="text-black-shadow/60 hover:text-store-red transition-colors">
-                        <Phone size={20} />
-                    </a>
-                    <a href="mailto:contact@pickatstore.in" className="text-black-shadow/60 hover:text-store-red transition-colors">
-                        <Mail size={20} />
                     </a>
                 </div>
             </div>

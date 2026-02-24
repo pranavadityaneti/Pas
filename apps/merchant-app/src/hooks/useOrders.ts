@@ -39,53 +39,7 @@ export interface Order {
 }
 
 // MOCK DATA DEFINITION
-const INITIAL_MOCK_ORDERS: Order[] = [
-    // --- PENDING ORDERS ---
-    { id: 'mock-p1', displayId: 'PAS-M001', status: 'PENDING', totalAmount: 450, isPaid: true, createdAt: new Date().toISOString(), user: { name: 'Rohan Gupta', phone: '9876500001' }, items: [{ id: 'mi-1', quantity: 1, price: 450, storeProduct: { stock: 10, product: { name: 'Basmati Rice 5kg', image: '', gstRate: 0 } } }] },
-    { id: 'mock-p2', displayId: 'PAS-M002', status: 'PENDING', totalAmount: 120, isPaid: true, createdAt: new Date(Date.now() - 60000).toISOString(), user: { name: 'Sneha Reddy', phone: '9876500002' }, items: [{ id: 'mi-2', quantity: 2, price: 60, storeProduct: { stock: 20, product: { name: 'Amul Milk', image: '', gstRate: 0 } } }] },
-    { id: 'mock-p3', displayId: 'PAS-M003', status: 'PENDING', totalAmount: 890, isPaid: false, createdAt: new Date(Date.now() - 120000).toISOString(), user: { name: 'Amit Kumar', phone: '9876500003' }, items: [{ id: 'mi-3', quantity: 1, price: 890, storeProduct: { stock: 5, product: { name: 'Sunflower Oil 5L', image: '', gstRate: 5 } } }] },
-
-    // --- PROCESSING ORDERS ---
-    { id: 'mock-pr1', displayId: 'PAS-M004', status: 'CONFIRMED', totalAmount: 340, isPaid: true, createdAt: new Date(Date.now() - 3600000).toISOString(), user: { name: 'Priya Singh', phone: '9876500004' }, items: [{ id: 'mi-4', quantity: 2, price: 170, storeProduct: { stock: 15, product: { name: 'Tata Tea', image: '', gstRate: 5 } } }] },
-    { id: 'mock-pr2', displayId: 'PAS-M005', status: 'PREPARING', totalAmount: 1500, isPaid: true, createdAt: new Date(Date.now() - 7200000).toISOString(), user: { name: 'Vikram Malhotra', phone: '9876500005' }, items: [{ id: 'mi-5', quantity: 3, price: 500, storeProduct: { stock: 8, product: { name: 'Whey Protein', image: '', gstRate: 18 } } }] },
-
-    // --- READY ORDERS ---
-    { id: 'mock-r1', displayId: 'PAS-M006', status: 'READY', totalAmount: 220, isPaid: true, createdAt: new Date(Date.now() - 10000000).toISOString(), user: { name: 'Anjali Das', phone: '9876500006' }, items: [{ id: 'mi-6', quantity: 4, price: 55, storeProduct: { stock: 30, product: { name: 'Dettol Soap', image: '', gstRate: 12 } } }] },
-
-    // --- RETURNS REQUESTED ---
-    {
-        id: 'mock-ret1',
-        displayId: 'PAS-M007',
-        status: 'RETURN_REQUESTED',
-        totalAmount: 550,
-        isPaid: true,
-        createdAt: new Date(Date.now() - 86400000).toISOString(),
-        returnReason: 'Damaged item',
-        returnImages: ['https://placehold.co/300x300/red/white?text=Broken+Seal', 'https://placehold.co/300x300/orange/white?text=Leaking'],
-        user: { name: 'Karan Johar', phone: '9876500007' },
-        items: [{ id: 'mi-7', quantity: 1, price: 550, storeProduct: { stock: 12, product: { name: 'Mixer Grinder', image: '', gstRate: 18 } } }]
-    },
-    {
-        id: 'mock-ret2',
-        displayId: 'PAS-M008',
-        status: 'RETURN_REQUESTED',
-        totalAmount: 120,
-        isPaid: true,
-        createdAt: new Date(Date.now() - 90000000).toISOString(),
-        returnReason: 'Expired product',
-        returnImages: ['https://placehold.co/300x300/black/white?text=Expiry+Date'],
-        user: { name: 'Simran Kaur', phone: '9876500008' },
-        items: [{ id: 'mi-8', quantity: 2, price: 60, storeProduct: { stock: 25, product: { name: 'Bread', image: '', gstRate: 0 } } }]
-    },
-    { id: 'mock-ret3', displayId: 'PAS-M009', status: 'RETURN_REQUESTED', totalAmount: 2100, isPaid: true, createdAt: new Date(Date.now() - 95000000).toISOString(), returnReason: 'Wrong item delivered', user: { name: 'Raj Malhotra', phone: '9876500009' }, items: [{ id: 'mi-9', quantity: 1, price: 2100, storeProduct: { stock: 4, product: { name: 'Bluetooth Speaker', image: '', gstRate: 18 } } }] },
-
-    // --- RETURNS APPROVED (For Refund) ---
-    { id: 'mock-ref1', displayId: 'PAS-M010', status: 'RETURN_APPROVED', totalAmount: 800, isPaid: true, createdAt: new Date(Date.now() - 172800000).toISOString(), user: { name: 'Tina Ambani', phone: '9876500010' }, items: [{ id: 'mi-10', quantity: 1, price: 800, storeProduct: { stock: 7, product: { name: 'Dinner Set', image: '', gstRate: 12 } } }] },
-
-    // --- HISTORY ---
-    { id: 'mock-h1', displayId: 'PAS-M011', status: 'COMPLETED', totalAmount: 300, isPaid: true, createdAt: new Date(Date.now() - 200000000).toISOString(), user: { name: 'Old Customer', phone: '9876500011' }, items: [{ id: 'mi-11', quantity: 3, price: 100, storeProduct: { stock: 10, product: { name: 'Notebooks', image: '', gstRate: 5 } } }] },
-    { id: 'mock-h2', displayId: 'PAS-M012', status: 'REFUNDED', totalAmount: 450, isPaid: false, createdAt: new Date(Date.now() - 250000000).toISOString(), user: { name: 'Refunded Guy', phone: '9876500012' }, items: [{ id: 'mi-12', quantity: 1, price: 450, storeProduct: { stock: 2, product: { name: 'Failed Item', image: '', gstRate: 12 } } }] }
-];
+const INITIAL_MOCK_ORDERS: Order[] = [];
 
 export function useOrders() {
     const { storeId } = useStore();
@@ -153,12 +107,12 @@ export function useOrders() {
                 returnImages: o.return_images || [] // Map return_images
             }));
 
-            setOrders([...mockOrdersRef.current, ...realOrders]);
+            setOrders(realOrders);
 
         } catch (error) {
             console.error('Error fetching orders:', error);
-            // On error, still show mocks
-            setOrders([...mockOrdersRef.current]);
+            // On error, clear orders or keep previous
+            setOrders([]);
         } finally {
             setLoading(false);
             setRefreshing(false);

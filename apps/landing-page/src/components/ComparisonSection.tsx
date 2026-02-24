@@ -106,9 +106,9 @@ export function ComparisonSection() {
                                     {/* Fee breakdown */}
                                     <div className="flex flex-col gap-2">
                                         {c.fees.map(f => (
-                                            <div key={f.label} className="flex items-center justify-between gap-1">
-                                                <span className="text-xs text-black-shadow/50 leading-tight">{f.label}</span>
-                                                <span className="text-xs font-semibold text-black-shadow whitespace-nowrap">{f.value}</span>
+                                            <div key={f.label} className="flex flex-col xs:flex-row xs:items-center justify-between gap-1">
+                                                <span className="text-xs text-black-shadow/50 leading-snug break-words">{f.label}</span>
+                                                <span className="text-xs font-semibold text-black-shadow whitespace-nowrap self-start xs:self-auto">{f.value}</span>
                                             </div>
                                         ))}
                                     </div>
@@ -143,9 +143,6 @@ export function ComparisonSection() {
                             PickAtStore
                         </p>
                         <div className="bg-store-red rounded-2xl p-8 flex flex-col items-center gap-4 shadow-lg shadow-store-red/30 h-full min-h-[300px] justify-center">
-                            <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
-                                <ArrowUpRight className="w-5 h-5 text-white" />
-                            </div>
                             <p className="text-xs font-bold text-white/60 tracking-[0.2em] uppercase">PickAtStore</p>
                             <motion.p
                                 initial={{ opacity: 0, scale: 0.7 }}

@@ -24,6 +24,7 @@ import MapView, { Marker } from 'react-native-maps';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
 import axios from 'axios';
+import uuid from 'react-native-uuid';
 import { supabase } from '../../src/lib/supabase';
 import { Colors } from '../../constants/Colors';
 import Constants from 'expo-constants';
@@ -481,6 +482,7 @@ export default function SignupScreen() {
             // 4. Insert Subscription Record
             if (paymentStatus === 'success' && paymentDetails) {
                 const { error: subError } = await supabase.from('subscriptions').insert({
+                    id: uuid.v4(),
                     merchant_id: userId,
                     amount: 999.00,
                     currency: 'INR',
@@ -493,6 +495,7 @@ export default function SignupScreen() {
 
             if (hasBranches && branches.length > 0) {
                 const branchRecords = branches.map(b => ({
+                    id: uuid.v4(),
                     merchant_id: userId,
                     branch_name: b.name,
                     address: b.address,

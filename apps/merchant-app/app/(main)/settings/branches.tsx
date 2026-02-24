@@ -9,6 +9,7 @@ import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
 import { supabase } from '../../../src/lib/supabase';
 import { Colors } from '../../../constants/Colors';
 import BottomModal from '../../../src/components/BottomModal';
+import uuid from 'react-native-uuid';
 
 interface Branch {
     id: string;
@@ -71,6 +72,7 @@ export default function BranchesScreen() {
         setSaving(true);
         try {
             const payload = {
+                id: uuid.v4(),
                 merchant_id: user.id,
                 branch_name: form.name.trim(),
                 address: form.address.trim() || null,

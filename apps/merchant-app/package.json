@@ -55,6 +55,7 @@
     "eas-cli": "^18.0.1",
     "expo-print": "^15.0.8",
     "expo-sharing": "^14.0.8",
+    "react-refresh": "^0.18.0",
     "semver": "^7.7.4",
     "typescript": "~5.9.2"
   },

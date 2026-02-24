@@ -11,7 +11,7 @@ const customerContent = [
     { id: "c2", title: "Live Tracking", desc: "Real-time updates as your order is prepared for pick-up.", color: "bg-white", text: "text-black-shadow" },
     { id: "c3", title: "Skip the Queue", desc: "Your order is packed and ready when you arrive.", color: "bg-white", text: "text-black-shadow" },
     { id: "c4", title: "Search Locally", desc: "Find exactly which nearby store has what you need.", color: "bg-white", text: "text-black-shadow" },
-    { id: "c5", title: "Pickup at Store", desc: "Fast service without leaving your car.", color: "bg-white", text: "text-black-shadow" },
+    { id: "c5", title: "Pickup at Store", desc: "Order Online, pick up at store securely.", color: "bg-white", text: "text-black-shadow" },
     { id: "c6", title: "5000+ Retail Stores", desc: "From fashion to electronics, shop it all in one place.", color: "bg-white", text: "text-black-shadow" },
 ];
 
