@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, useScroll, useTransform, useMotionValue, useAnimationFrame } from "framer-motion";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
 
@@ -22,9 +22,11 @@ const infiniteCards = [...cards, ...cards, ...cards];
 export function CurvedCarousel() {
     const containerRef = useRef<HTMLDivElement>(null);
     const scrollX = useMotionValue(0);
+    const [isHovered, setIsHovered] = useState(false);
 
     // Auto-scroll logic
     useAnimationFrame((time, delta) => {
+        if (isHovered) return; // Pause animation
         // Move faster: 1.0px per frame (was 0.5)
         const moveBy = 1.2 * (delta / 16);
         // Reset when we've scrolled past the first set width (approx)
@@ -42,6 +44,8 @@ export function CurvedCarousel() {
             ref={containerRef}
             className="relative w-full overflow-hidden py-20 perspective-1000"
             style={{ perspective: "1000px" }}
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => setIsHovered(false)}
         >
             <motion.div
                 className="flex gap-8 pl-[50vw]" // Start from center-ish
