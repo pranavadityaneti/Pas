@@ -244,118 +244,118 @@ export default function StaffScreen() {
                 onClose={() => setModalVisible(false)}
                 title={editingId ? "Edit Staff" : "Add New Staff"}
             >
-                <ScrollView style={{ maxHeight: '80%' }}>
-                    <View style={styles.form}>
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.inputLabel}>Full Name <Text style={{ color: '#EF4444' }}>*</Text></Text>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="e.g. Ravi Kumar"
-                                placeholderTextColor={Colors.textSecondary}
-                                value={name || ''} // Safety guard
-                                onChangeText={setName}
-                            />
-                        </View>
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.inputLabel}>Role <Text style={{ color: '#EF4444' }}>*</Text></Text>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="e.g. Store Manager"
-                                placeholderTextColor={Colors.textSecondary}
-                                value={role || ''} // Safety guard
-                                onChangeText={setRole}
-                            />
-                        </View>
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.inputLabel}>Phone Number <Text style={{ color: '#EF4444' }}>*</Text></Text>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="+91 XXXXX XXXXX"
-                                placeholderTextColor={Colors.textSecondary}
-                                keyboardType="phone-pad"
-                                value={phone || ''} // Safety guard
-                                onChangeText={setPhone}
-                            />
-                        </View>
 
-                        {/* Conditional Branch Selector */}
-                        {hasBranches && (
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.inputLabel}>Assign Branch</Text>
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.branchScroll}>
-                                    {MOCK_BRANCHES.map(b => (
-                                        <TouchableOpacity
-                                            key={b}
-                                            style={[styles.branchPill, branch === b && styles.branchPillActive]}
-                                            onPress={() => setBranch(b)}
-                                        >
-                                            <Text style={[styles.branchText, branch === b && styles.branchTextActive]}>{b}</Text>
-                                        </TouchableOpacity>
-                                    ))}
-                                </ScrollView>
-                            </View>
-                        )}
+                <View style={styles.form}>
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Full Name <Text style={{ color: '#EF4444' }}>*</Text></Text>
+                        <TextInput
+                            style={styles.input}
+                            placeholder="e.g. Ravi Kumar"
+                            placeholderTextColor={Colors.textSecondary}
+                            value={name || ''} // Safety guard
+                            onChangeText={setName}
+                        />
+                    </View>
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Role <Text style={{ color: '#EF4444' }}>*</Text></Text>
+                        <TextInput
+                            style={styles.input}
+                            placeholder="e.g. Store Manager"
+                            placeholderTextColor={Colors.textSecondary}
+                            value={role || ''} // Safety guard
+                            onChangeText={setRole}
+                        />
+                    </View>
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Phone Number <Text style={{ color: '#EF4444' }}>*</Text></Text>
+                        <TextInput
+                            style={styles.input}
+                            placeholder="+91 XXXXX XXXXX"
+                            placeholderTextColor={Colors.textSecondary}
+                            keyboardType="phone-pad"
+                            value={phone || ''} // Safety guard
+                            onChangeText={setPhone}
+                        />
+                    </View>
 
+                    {/* Conditional Branch Selector */}
+                    {hasBranches && (
                         <View style={styles.inputGroup}>
-                            <Text style={styles.inputLabel}>Allowed Activities</Text>
-                            <Text style={{ fontSize: 12, color: Colors.textSecondary, marginBottom: 8 }}>Select what this staff member can access</Text>
-                            <View style={{ gap: 8 }}>
-                                {ACTIVITY_OPTIONS.map((activity) => {
-                                    const isSelected = activities.includes(activity);
-                                    return (
-                                        <TouchableOpacity
-                                            key={activity}
-                                            style={{
-                                                flexDirection: 'row',
-                                                alignItems: 'center',
-                                                padding: 12,
-                                                borderRadius: 12,
-                                                backgroundColor: isSelected ? Colors.text + '10' : Colors.white,
-                                                borderWidth: 1,
-                                                borderColor: isSelected ? Colors.text : Colors.border
-                                            }}
-                                            onPress={() => toggleActivity(activity)}
-                                        >
-                                            <View style={{
-                                                width: 20,
-                                                height: 20,
-                                                borderRadius: 6,
-                                                borderWidth: 1.5,
-                                                borderColor: isSelected ? Colors.text : Colors.textSecondary,
-                                                backgroundColor: isSelected ? Colors.text : 'transparent',
-                                                justifyContent: 'center',
-                                                alignItems: 'center',
-                                                marginRight: 12
-                                            }}>
-                                                {isSelected && <Ionicons name="checkmark" size={14} color="#FFF" />}
-                                            </View>
-                                            <Text style={{
-                                                fontSize: 14,
-                                                fontWeight: isSelected ? '600' : '500',
-                                                color: Colors.text
-                                            }}>{activity}</Text>
-                                        </TouchableOpacity>
-                                    );
-                                })}
-                            </View>
+                            <Text style={styles.inputLabel}>Assign Branch</Text>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.branchScroll}>
+                                {MOCK_BRANCHES.map(b => (
+                                    <TouchableOpacity
+                                        key={b}
+                                        style={[styles.branchPill, branch === b && styles.branchPillActive]}
+                                        onPress={() => setBranch(b)}
+                                    >
+                                        <Text style={[styles.branchText, branch === b && styles.branchTextActive]}>{b}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </ScrollView>
                         </View>
+                    )}
 
-                        <View style={styles.modalActions}>
-                            <TouchableOpacity style={styles.modalCancel} onPress={() => setModalVisible(false)}>
-                                <Text style={styles.modalCancelText}>Cancel</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={[styles.modalSave, actionLoading && { opacity: 0.7 }]}
-                                onPress={handleSave}
-                                disabled={actionLoading}
-                            >
-                                <Text style={styles.modalSaveText}>
-                                    {actionLoading ? 'Saving...' : (editingId ? 'Update Staff' : 'Add Staff')}
-                                </Text>
-                            </TouchableOpacity>
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Allowed Activities</Text>
+                        <Text style={{ fontSize: 12, color: Colors.textSecondary, marginBottom: 8 }}>Select what this staff member can access</Text>
+                        <View style={{ gap: 8 }}>
+                            {ACTIVITY_OPTIONS.map((activity) => {
+                                const isSelected = activities.includes(activity);
+                                return (
+                                    <TouchableOpacity
+                                        key={activity}
+                                        style={{
+                                            flexDirection: 'row',
+                                            alignItems: 'center',
+                                            padding: 12,
+                                            borderRadius: 12,
+                                            backgroundColor: isSelected ? Colors.text + '10' : Colors.white,
+                                            borderWidth: 1,
+                                            borderColor: isSelected ? Colors.text : Colors.border
+                                        }}
+                                        onPress={() => toggleActivity(activity)}
+                                    >
+                                        <View style={{
+                                            width: 20,
+                                            height: 20,
+                                            borderRadius: 6,
+                                            borderWidth: 1.5,
+                                            borderColor: isSelected ? Colors.text : Colors.textSecondary,
+                                            backgroundColor: isSelected ? Colors.text : 'transparent',
+                                            justifyContent: 'center',
+                                            alignItems: 'center',
+                                            marginRight: 12
+                                        }}>
+                                            {isSelected && <Ionicons name="checkmark" size={14} color="#FFF" />}
+                                        </View>
+                                        <Text style={{
+                                            fontSize: 14,
+                                            fontWeight: isSelected ? '600' : '500',
+                                            color: Colors.text
+                                        }}>{activity}</Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
                         </View>
                     </View>
-                </ScrollView>
+
+                    <View style={styles.modalActions}>
+                        <TouchableOpacity style={styles.modalCancel} onPress={() => setModalVisible(false)}>
+                            <Text style={styles.modalCancelText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.modalSave, actionLoading && { opacity: 0.7 }]}
+                            onPress={handleSave}
+                            disabled={actionLoading}
+                        >
+                            <Text style={styles.modalSaveText}>
+                                {actionLoading ? 'Saving...' : (editingId ? 'Update Staff' : 'Add Staff')}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+
             </BottomModal >
         </SafeAreaView >
     );

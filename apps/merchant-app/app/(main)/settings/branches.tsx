@@ -209,7 +209,7 @@ export default function BranchesScreen() {
                 onClose={() => setModalVisible(false)}
                 title={editingBranch ? "Edit Branch" : "Add New Branch"}
             >
-                <ScrollView contentContainerStyle={styles.form}>
+                <View style={styles.form}>
                     <View style={styles.inputGroup}>
                         <Text style={styles.label}>Branch Name <Text style={{ color: '#EF4444' }}>*</Text></Text>
                         <TextInput
@@ -261,7 +261,7 @@ export default function BranchesScreen() {
                     >
                         {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Save Branch</Text>}
                     </TouchableOpacity>
-                </ScrollView>
+                </View>
             </BottomModal>
         </SafeAreaView>
     );

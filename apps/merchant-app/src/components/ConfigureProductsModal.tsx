@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, ScrollView, Image, Dimensions, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, ScrollView, Image, Dimensions, Platform, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { supabase } from '../lib/supabase';
 import { Colors } from '../../constants/Colors';
 
@@ -222,89 +223,88 @@ export default function ConfigureProductsModal({ visible, storeId, products, onC
                     <View style={{ width: 40 }} />
                 </View>
 
-                <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-                    <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-                        {products.map(product => {
-                            const variantDefs = getVariantsForCategory(product.category);
-                            const productConfig = config[product.id] || {};
-                            const displayName = cleanName(product.name);
+                {/* @ts-ignore */}
+                <KeyboardAwareScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" enableOnAndroid={true} extraScrollHeight={80} style={{ flex: 1 }}>
+                    {products.map(product => {
+                        const variantDefs = getVariantsForCategory(product.category);
+                        const productConfig = config[product.id] || {};
+                        const displayName = cleanName(product.name);
 
-                            return (
-                                <View key={product.id} style={styles.card}>
-                                    {/* Product Header */}
-                                    <View style={styles.productHeader}>
-                                        <Image source={{ uri: product.image || 'https://placehold.co/100x100' }} style={styles.image} />
-                                        <View style={styles.info}>
-                                            <Text style={styles.name}>{displayName}</Text>
-                                            <Text style={styles.category}>{product.category}</Text>
-                                            {/* Global MRP Removed - Contextual MRP used below */}
-                                        </View>
-                                    </View>
-
-                                    <View style={styles.divider} />
-
-                                    {/* Variants */}
-                                    <View style={styles.variantsContainer}>
-                                        {variantDefs.map((def) => {
-                                            const data = productConfig[def.label];
-                                            if (!data) return null; // Should not happen
-
-                                            const variantMrp = Math.round((product.mrp || 0) * def.ratio);
-
-                                            return (
-                                                <View key={def.label} style={styles.variantBlock}>
-                                                    {/* Variant Checkbox Row */}
-                                                    <TouchableOpacity
-                                                        style={styles.checkboxRow}
-                                                        activeOpacity={0.7}
-                                                        onPress={() => handleChange(product.id, def.label, 'active', !data.active)}
-                                                    >
-                                                        <View style={[styles.checkbox, data.active && styles.checkboxActive]}>
-                                                            {data.active && <Ionicons name="checkmark" size={14} color="#fff" />}
-                                                        </View>
-                                                        <Text style={styles.variantName}>
-                                                            {def.label} <Text style={styles.inlineMrp}>(MRP: ₹{variantMrp})</Text>
-                                                        </Text>
-                                                    </TouchableOpacity>
-
-                                                    {/* Inputs (Only if Active) */}
-                                                    {data.active && (
-                                                        <View style={styles.inputsRow}>
-                                                            <View style={styles.inputGroup}>
-                                                                <Text style={styles.label}>Your Selling Price</Text>
-                                                                <View style={styles.inputWrapper}>
-                                                                    <Text style={styles.currencyPrefix}>₹</Text>
-                                                                    <TextInput
-                                                                        style={styles.input}
-                                                                        value={data.price}
-                                                                        keyboardType="numeric"
-                                                                        onChangeText={t => handleChange(product.id, def.label, 'price', t)}
-                                                                    />
-                                                                </View>
-                                                            </View>
-
-                                                            <View style={styles.inputGroup}>
-                                                                <Text style={styles.label}>Initial Stock</Text>
-                                                                <View style={styles.inputWrapper}>
-                                                                    <TextInput
-                                                                        style={styles.input}
-                                                                        value={data.stock}
-                                                                        keyboardType="numeric"
-                                                                        onChangeText={t => handleChange(product.id, def.label, 'stock', t)}
-                                                                    />
-                                                                </View>
-                                                            </View>
-                                                        </View>
-                                                    )}
-                                                </View>
-                                            );
-                                        })}
+                        return (
+                            <View key={product.id} style={styles.card}>
+                                {/* Product Header */}
+                                <View style={styles.productHeader}>
+                                    <Image source={{ uri: product.image || 'https://placehold.co/100x100' }} style={styles.image} />
+                                    <View style={styles.info}>
+                                        <Text style={styles.name}>{displayName}</Text>
+                                        <Text style={styles.category}>{product.category}</Text>
+                                        {/* Global MRP Removed - Contextual MRP used below */}
                                     </View>
                                 </View>
-                            );
-                        })}
-                    </ScrollView>
-                </KeyboardAvoidingView>
+
+                                <View style={styles.divider} />
+
+                                {/* Variants */}
+                                <View style={styles.variantsContainer}>
+                                    {variantDefs.map((def) => {
+                                        const data = productConfig[def.label];
+                                        if (!data) return null; // Should not happen
+
+                                        const variantMrp = Math.round((product.mrp || 0) * def.ratio);
+
+                                        return (
+                                            <View key={def.label} style={styles.variantBlock}>
+                                                {/* Variant Checkbox Row */}
+                                                <TouchableOpacity
+                                                    style={styles.checkboxRow}
+                                                    activeOpacity={0.7}
+                                                    onPress={() => handleChange(product.id, def.label, 'active', !data.active)}
+                                                >
+                                                    <View style={[styles.checkbox, data.active && styles.checkboxActive]}>
+                                                        {data.active && <Ionicons name="checkmark" size={14} color="#fff" />}
+                                                    </View>
+                                                    <Text style={styles.variantName}>
+                                                        {def.label} <Text style={styles.inlineMrp}>(MRP: ₹{variantMrp})</Text>
+                                                    </Text>
+                                                </TouchableOpacity>
+
+                                                {/* Inputs (Only if Active) */}
+                                                {data.active && (
+                                                    <View style={styles.inputsRow}>
+                                                        <View style={styles.inputGroup}>
+                                                            <Text style={styles.label}>Your Selling Price</Text>
+                                                            <View style={styles.inputWrapper}>
+                                                                <Text style={styles.currencyPrefix}>₹</Text>
+                                                                <TextInput
+                                                                    style={styles.input}
+                                                                    value={data.price}
+                                                                    keyboardType="numeric"
+                                                                    onChangeText={t => handleChange(product.id, def.label, 'price', t)}
+                                                                />
+                                                            </View>
+                                                        </View>
+
+                                                        <View style={styles.inputGroup}>
+                                                            <Text style={styles.label}>Initial Stock</Text>
+                                                            <View style={styles.inputWrapper}>
+                                                                <TextInput
+                                                                    style={styles.input}
+                                                                    value={data.stock}
+                                                                    keyboardType="numeric"
+                                                                    onChangeText={t => handleChange(product.id, def.label, 'stock', t)}
+                                                                />
+                                                            </View>
+                                                        </View>
+                                                    </View>
+                                                )}
+                                            </View>
+                                        );
+                                    })}
+                                </View>
+                            </View>
+                        );
+                    })}
+                </KeyboardAwareScrollView>
 
                 {/* Footer */}
                 <View style={styles.footer}>

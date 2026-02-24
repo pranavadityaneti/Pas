@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, ActivityIndicator, Alert, Platform, Image, Dimensions, ScrollView, Keyboard, KeyboardAvoidingView } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, ActivityIndicator, Alert, Platform, Image, Dimensions, ScrollView, Keyboard } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -166,10 +166,7 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
     return (
         <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
             <View style={styles.overlay}>
-                <KeyboardAvoidingView
-                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                    style={styles.container}
-                >
+                <View style={styles.container}>
                     <View style={styles.header}>
                         <Text style={styles.title}>Add Custom Product</Text>
                         <TouchableOpacity onPress={onClose}>
@@ -177,12 +174,14 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
                         </TouchableOpacity>
                     </View>
 
-                    {/* Form Content - Using Standard ScrollView inside KeyboardAvoidingView */}
-                    <ScrollView
+                    {/* @ts-ignore */}
+                    <KeyboardAwareScrollView
                         style={{ flex: 1 }}
                         contentContainerStyle={[styles.content, { paddingBottom: 150 }]}
                         keyboardShouldPersistTaps="handled"
                         showsVerticalScrollIndicator={false}
+                        enableOnAndroid={true}
+                        extraScrollHeight={100}
                     >
                         {/* Image Picker */}
                         <Text style={styles.label}>Product Photos (Min 1, Max 4) *</Text>
@@ -268,7 +267,7 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
                             numberOfLines={3}
                             onFocus={() => setShowCategoryDropdown(false)}
                         />
-                    </ScrollView>
+                    </KeyboardAwareScrollView>
 
                     {/* Sticky Footer */}
                     <View style={styles.footer}>
@@ -283,7 +282,7 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
                             {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>Create & Add</Text>}
                         </TouchableOpacity>
                     </View>
-                </KeyboardAvoidingView>
+                </View>
             </View>
         </Modal>
     );
