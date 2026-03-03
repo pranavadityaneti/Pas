@@ -87,6 +87,24 @@ model Notification {
   @@map("notifications")
 }
 
+// --- Coupon Enums ---
+
+enum DiscountType {
+  PERCENTAGE
+  FLAT
+}
+
+enum FundingSource {
+  PLATFORM
+  MERCHANT
+}
+
+enum TargetAudience {
+  ALL
+  NEW_USERS
+  INACTIVE_USERS
+}
+
 model Store {
   id             String   @id @default(uuid())
   name           String
@@ -105,8 +123,40 @@ model Store {
 
   products StoreProduct[]
   orders   Order[]
+  coupons  Coupon[]
 
   @@index([merchantId])
+}
+
+// --- Coupon Model ---
+
+model Coupon {
+  id              String         @id @default(uuid())
+  code            String         @unique
+  discountType    DiscountType   @map("discount_type")
+  discountValue   Float          @map("discount_value")
+  maxDiscountCap  Float?         @map("max_discount_cap")
+  fundingSource   FundingSource  @map("funding_source")
+  targetAudience  TargetAudience @map("target_audience")
+
+  // Null storeId = App-Wide coupon (Super Admin only)
+  // Set storeId = Store-specific coupon
+  storeId         String?        @map("store_id")
+  store           Store?         @relation(fields: [storeId], references: [id])
+
+  isActive        Boolean        @default(true) @map("is_active")
+  usageLimit      Int?           @map("usage_limit")
+  usedCount       Int            @default(0) @map("used_count")
+
+  startDate       DateTime       @default(now()) @map("start_date")
+  endDate         DateTime?      @map("end_date")
+
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  @@index([code])
+  @@index([storeId])
+  @@map("coupons")
 }
 
 // --- Catalog Models ---

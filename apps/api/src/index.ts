@@ -1377,6 +1377,220 @@ app.patch('/stores/:id', async (req, res) => {
     }
 });
 
+// --- Coupon Routes ---
+
+// List Coupons (with filtering)
+app.get('/coupons', async (req, res) => {
+    try {
+        const { storeId, isActive, fundingSource, search } = req.query;
+
+        const where: any = {};
+        if (storeId) where.storeId = String(storeId);
+        if (isActive !== undefined) where.isActive = isActive === 'true';
+        if (fundingSource) where.fundingSource = String(fundingSource).toUpperCase();
+        if (search) {
+            where.code = { contains: String(search).toUpperCase(), mode: 'insensitive' };
+        }
+
+        const coupons = await prisma.coupon.findMany({
+            where,
+            include: { store: { select: { id: true, name: true } } },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        res.json({ data: coupons });
+    } catch (error) {
+        console.error('List Coupons Error:', error);
+        res.status(500).json({ error: 'Failed to fetch coupons' });
+    }
+});
+
+// Create Coupon
+app.post('/coupons', async (req, res) => {
+    try {
+        const {
+            code,
+            discountType,
+            discountValue,
+            maxDiscountCap,
+            fundingSource,
+            targetAudience,
+            storeId,
+            usageLimit,
+            startDate,
+            endDate
+        } = req.body;
+
+        // Validation
+        if (!code || !discountType || !discountValue || !fundingSource || !targetAudience) {
+            return res.status(400).json({ error: 'Missing required fields: code, discountType, discountValue, fundingSource, targetAudience' });
+        }
+
+        // Check for duplicate code
+        const existing = await prisma.coupon.findUnique({ where: { code: code.toUpperCase() } });
+        if (existing) {
+            return res.status(409).json({ error: `Coupon code "${code}" already exists.` });
+        }
+
+        // If storeId is provided, verify it exists
+        if (storeId) {
+            const store = await prisma.store.findUnique({ where: { id: storeId } });
+            if (!store) {
+                return res.status(404).json({ error: 'Store not found' });
+            }
+        }
+
+        const coupon = await prisma.coupon.create({
+            data: {
+                code: code.toUpperCase(),
+                discountType: discountType.toUpperCase(),
+                discountValue: Number(discountValue),
+                maxDiscountCap: maxDiscountCap ? Number(maxDiscountCap) : null,
+                fundingSource: fundingSource.toUpperCase(),
+                targetAudience: targetAudience.toUpperCase(),
+                storeId: storeId || null,
+                usageLimit: usageLimit ? Number(usageLimit) : null,
+                startDate: startDate ? new Date(startDate) : new Date(),
+                endDate: endDate ? new Date(endDate) : null,
+            },
+            include: { store: { select: { id: true, name: true } } }
+        });
+
+        res.status(201).json(coupon);
+    } catch (error) {
+        console.error('Create Coupon Error:', error);
+        res.status(500).json({ error: 'Failed to create coupon' });
+    }
+});
+
+// Update Coupon
+app.patch('/coupons/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const updateData: any = {};
+
+        const allowedFields = ['code', 'discountType', 'discountValue', 'maxDiscountCap',
+            'fundingSource', 'targetAudience', 'storeId', 'isActive', 'usageLimit', 'startDate', 'endDate'];
+
+        for (const field of allowedFields) {
+            if (req.body[field] !== undefined) {
+                let value = req.body[field];
+                if (['discountType', 'fundingSource', 'targetAudience'].includes(field)) {
+                    value = String(value).toUpperCase();
+                }
+                if (field === 'code') value = String(value).toUpperCase();
+                if (['discountValue', 'maxDiscountCap', 'usageLimit'].includes(field)) {
+                    value = value === null ? null : Number(value);
+                }
+                if (['startDate', 'endDate'].includes(field)) {
+                    value = value === null ? null : new Date(value);
+                }
+                updateData[field] = value;
+            }
+        }
+
+        const coupon = await prisma.coupon.update({
+            where: { id },
+            data: updateData,
+            include: { store: { select: { id: true, name: true } } }
+        });
+
+        res.json(coupon);
+    } catch (error) {
+        console.error('Update Coupon Error:', error);
+        res.status(500).json({ error: 'Failed to update coupon' });
+    }
+});
+
+// Delete Coupon
+app.delete('/coupons/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await prisma.coupon.delete({ where: { id } });
+        res.json({ message: 'Coupon deleted successfully' });
+    } catch (error) {
+        console.error('Delete Coupon Error:', error);
+        res.status(500).json({ error: 'Failed to delete coupon' });
+    }
+});
+
+// Validate Coupon (for Consumer Checkout)
+app.post('/checkout/validate-coupon', async (req, res) => {
+    try {
+        const { code, cartTotal, storeId, userId } = req.body;
+
+        if (!code || !cartTotal) {
+            return res.status(400).json({ error: 'code and cartTotal are required' });
+        }
+
+        const coupon = await prisma.coupon.findUnique({ where: { code: String(code).toUpperCase() } });
+
+        if (!coupon) {
+            return res.status(404).json({ valid: false, error: 'Invalid coupon code' });
+        }
+
+        // Check active
+        if (!coupon.isActive) {
+            return res.status(400).json({ valid: false, error: 'This coupon is no longer active' });
+        }
+
+        // Check expiration
+        if (coupon.endDate && new Date() > coupon.endDate) {
+            return res.status(400).json({ valid: false, error: 'This coupon has expired' });
+        }
+
+        // Check start date
+        if (new Date() < coupon.startDate) {
+            return res.status(400).json({ valid: false, error: 'This coupon is not yet active' });
+        }
+
+        // Check usage limit
+        if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
+            return res.status(400).json({ valid: false, error: 'This coupon has reached its usage limit' });
+        }
+
+        // Check store-specific restriction
+        if (coupon.storeId && storeId && coupon.storeId !== storeId) {
+            return res.status(400).json({ valid: false, error: 'This coupon is not valid for this store' });
+        }
+
+        // Check audience (requires userId for NEW_USERS check)
+        if (coupon.targetAudience === 'NEW_USERS' && userId) {
+            const orderCount = await prisma.order.count({ where: { userId } });
+            if (orderCount > 0) {
+                return res.status(400).json({ valid: false, error: 'This coupon is only for new users' });
+            }
+        }
+
+        // Calculate discount
+        let discount = 0;
+        if (coupon.discountType === 'PERCENTAGE') {
+            discount = (Number(cartTotal) * coupon.discountValue) / 100;
+            if (coupon.maxDiscountCap) {
+                discount = Math.min(discount, coupon.maxDiscountCap);
+            }
+        } else {
+            discount = coupon.discountValue;
+        }
+
+        // Don't let discount exceed cart total
+        discount = Math.min(discount, Number(cartTotal));
+
+        res.json({
+            valid: true,
+            couponId: coupon.id,
+            code: coupon.code,
+            discount: Math.round(discount * 100) / 100,
+            discountType: coupon.discountType,
+            discountValue: coupon.discountValue,
+            maxDiscountCap: coupon.maxDiscountCap
+        });
+    } catch (error) {
+        console.error('Validate Coupon Error:', error);
+        res.status(500).json({ error: 'Failed to validate coupon' });
+    }
+});
+
 // --- DEBUG: Fix DB Route ---
 // --- DEBUG: Fix DB Route ---
 app.post('/debug/fix-db', async (req, res) => {
