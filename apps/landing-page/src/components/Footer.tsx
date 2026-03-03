@@ -51,7 +51,7 @@ export function Footer() {
                     <a href="tel:+918888888888" className="text-black-shadow/60 hover:text-store-red transition-colors">
                         <Phone size={20} />
                     </a>
-                    <a href="mailto:contact@pickatstore.in" className="text-black-shadow/60 hover:text-store-red transition-colors">
+                    <a href="mailto:contact@pickatstore.in,Krishnaonguru@gmail.com" className="text-black-shadow/60 hover:text-store-red transition-colors">
                         <Mail size={20} />
                     </a>
                 </div>
