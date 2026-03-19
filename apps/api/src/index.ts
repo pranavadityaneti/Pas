@@ -13,6 +13,7 @@ import fs from 'fs';
 import { createClient } from '@supabase/supabase-js';
 import { smsService } from './services/sms.service';
 import { watiService } from './services/wati.service';
+import { apifyService } from './services/apify.service';
 
 // --- Configuration ---
 const app = express();
@@ -41,7 +42,7 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
 // --- Middleware ---
 app.use(helmet());
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 // --- Helper Functions ---
 async function logAudit(productId: string, action: string, field: string | null, oldValue: any, newValue: any, changedBy: string = 'System') {
@@ -166,6 +167,67 @@ const addMockImage = (productId: string, url: string, name: string, isPrimary: b
 };
 
 // --- Routes ---
+
+const crypto = require('crypto');
+const Razorpay = require('razorpay');
+let razorpayInstance: any = null;
+if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+    razorpayInstance = new Razorpay({
+        key_id: process.env.RAZORPAY_KEY_ID,
+        key_secret: process.env.RAZORPAY_KEY_SECRET
+    });
+}
+
+app.post('/payments/create-order', async (req, res) => {
+    try {
+        if (!razorpayInstance) return res.status(500).json({ error: 'Razorpay not configured' });
+        
+        const { amount, type = 'consumer', userId = 'unknown', notes = {} } = req.body;
+        if (!amount || isNaN(amount)) return res.status(400).json({ error: 'Valid amount is required' });
+
+        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        const randomStr = Math.floor(100 + Math.random() * 900);
+        const prefix = type === 'merchant' ? 'SUB' : 'PAS';
+        const receipt = `${prefix}-${dateStr}-${String(userId).slice(0, 4).toUpperCase()}-${randomStr}`;
+
+        const options = {
+            amount: Math.round(Number(amount) * 100), // convert to paise
+            currency: 'INR',
+            receipt,
+            notes
+        };
+
+        const order = await razorpayInstance.orders.create(options);
+        res.json({ order_id: order.id, receipt, amount: options.amount, currency: options.currency, details: order });
+    } catch (error: any) {
+        console.error('Failed to create Razorpay order:', error);
+        res.status(500).json({ error: 'Order creation failed', details: error.message });
+    }
+});
+
+app.post('/payments/verify', (req, res) => {
+    try {
+        const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+        
+        if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+            return res.status(400).json({ error: 'Missing required signature payload' });
+        }
+
+        const body = razorpay_order_id + "|" + razorpay_payment_id;
+        const expectedSignature = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET || '')
+            .update(body.toString())
+            .digest('hex');
+
+        if (expectedSignature === razorpay_signature) {
+            res.json({ success: true, message: 'Payment verified successfully' });
+        } else {
+            res.status(400).json({ success: false, error: 'Invalid signature' });
+        }
+    } catch (error: any) {
+        console.error('Signature verification failed:', error);
+        res.status(500).json({ error: 'Verification failed', details: error.message });
+    }
+});
 
 app.get('/', (req, res) => {
     res.send('PickAtStore API is running 🚀');
@@ -496,6 +558,383 @@ app.post('/products/upload-image', upload.single('file'), async (req, res) => {
     }
 });
 
+// --- Catalog Sync (Live Sync) ---
+
+// Memory lock to prevent race conditions where webhook and polling process the same dataset concurrently
+const processedDatasets = new Set<string>();
+
+async function processScraperDataset(datasetId: string) {
+    if (processedDatasets.has(datasetId)) {
+        console.log(`[Sync] Dataset ${datasetId} already processed. Skipping to prevent race conditions.`);
+        return { status: 'SUCCEEDED', itemsCount: 0, itemsAdded: 0, message: 'Dataset already processed.' };
+    }
+    processedDatasets.add(datasetId);
+
+    const items = await apifyService.getDatasetItems(datasetId);
+    
+    // Helper to remove \u0000 unicode characters from strings that crash Prisma/Postgres
+    const sanitizeNullBytes = (str: string | null | undefined): string | null => {
+        if (!str) return str as any;
+        return str.replace(/\u0000/g, '');
+    };
+
+    // Master Catalog Categories
+    const validCategories = [
+        'Dairy', 'Bakery', 'Snacks', 'Staples', 'Condiments', 
+        'Confectionery', 'Grocery', 'Beverages', 'Personal Care', 
+        'Home Essentials', 'Fashion', 'Pharmacy', 'Meat', 'Fruits & Vegetables'
+    ];
+
+    const mapCategory = (rawCategory: string | null): string => {
+        if (!rawCategory) return 'Uncategorized';
+        const lowerCat = rawCategory.toLowerCase();
+        
+        // High specific priority (prevents adjective bleeding like "Fruit Juice" -> Fruits)
+        if (lowerCat.includes('staple') || lowerCat.includes('rice') || lowerCat.includes('dal') || lowerCat.includes('flour') || lowerCat.includes('atta') || lowerCat.includes('masala') || lowerCat.includes('spice')) return 'Staples';
+        if (lowerCat.includes('biscuit') || lowerCat.includes('snack') || lowerCat.includes('chip') || lowerCat.includes('namkeen') || lowerCat.includes('munchies') || lowerCat.includes('dry fruit')) return 'Snacks';
+        if (lowerCat.includes('beverage') || lowerCat.includes('drink') || lowerCat.includes('soda') || lowerCat.includes('juice') || lowerCat.includes('coffee') || lowerCat.includes('tea')) return 'Beverages';
+        if (lowerCat.includes('bake') || lowerCat.includes('bread') || lowerCat.includes('cake') || lowerCat.includes('pizza')) return 'Bakery';
+        if (lowerCat.includes('condiment') || lowerCat.includes('sauce') || lowerCat.includes('spread') || lowerCat.includes('jam')) return 'Condiments';
+        if (lowerCat.includes('dairy') || lowerCat.includes('milk') || lowerCat.includes('paneer') || lowerCat.includes('cheese') || lowerCat.includes('egg')) return 'Dairy';
+        if (lowerCat.includes('meat') || lowerCat.includes('chicken') || lowerCat.includes('fish') || lowerCat.includes('seafood')) return 'Meat';
+        if (lowerCat.includes('confectionery') || lowerCat.includes('chocolate') || lowerCat.includes('candy') || lowerCat.includes('sweet')) return 'Confectionery';
+        if (lowerCat.includes('care') || lowerCat.includes('bath') || lowerCat.includes('hair') || lowerCat.includes('skin') || lowerCat.includes('beauty')) return 'Personal Care';
+        if (lowerCat.includes('home') || lowerCat.includes('clean') || lowerCat.includes('detergent')) return 'Home Essentials';
+        if (lowerCat.includes('pharma') || lowerCat.includes('medicine') || lowerCat.includes('health') || lowerCat.includes('wellness') || lowerCat.includes('sexual')) return 'Pharmacy';
+        
+        // Lower priority fallbacks
+        if (lowerCat.includes('fruit') || lowerCat.includes('veg') || lowerCat.includes('produce')) return 'Fruits & Vegetables';
+        
+        // Fallback attempt
+        for (const valid of validCategories) {
+            if (lowerCat.includes(valid.toLowerCase())) return valid;
+        }
+        
+        return 'Grocery'; // Default catch-all instead of 'Uncategorized' for a better UX
+    };
+
+    const sanitizeScraperData = (obj: any): any => {
+        if (typeof obj === 'string') return sanitizeNullBytes(obj);
+        if (Array.isArray(obj)) return obj.map(sanitizeScraperData);
+        if (obj !== null && typeof obj === 'object') {
+            const cleanObj: any = {};
+            for (const [k, v] of Object.entries(obj)) {
+                cleanObj[k] = sanitizeScraperData(v);
+            }
+            return cleanObj;
+        }
+        return obj;
+    };
+
+    let itemsAdded = 0;
+    for (const itemDataRaw of items) {
+        try {
+            const itemData = sanitizeScraperData(itemDataRaw);
+            // Scraper payload has a nested `item` structure
+            const entry = itemData?.item || itemData;
+            const productData = entry?.product || entry;
+            
+            const name = sanitizeNullBytes(productData?.name) || 'Unknown';
+            
+            // Brand Normalization
+            let rawBrand = sanitizeNullBytes(productData?.brand) || sanitizeNullBytes(productData?.brand_name) || null;
+            const junkBrands = ['fruits', 'vegetables', 'fresh', 'cut', 'chilean kiwi', 'indian', 'imported', 'organic'];
+            let brand = 'Unbranded';
+            if (rawBrand && !junkBrands.includes(rawBrand.toLowerCase().trim())) {
+                brand = rawBrand;
+            }
+
+            // Packsize Extraction
+            const packsize = sanitizeNullBytes(entry?.productVariant?.formattedPacksize) || 
+                             sanitizeNullBytes(productData?.formattedPacksize) || 
+                             sanitizeNullBytes(itemData?.formatted_packsize) || 
+                             sanitizeNullBytes(entry?.quantity ? `${entry.quantity} ${entry.unitOfMeasure || ''}` : null) || 
+                             null;
+            
+            // MRP Logic
+            let rawMrp = entry?.mrp || entry?.price?.mrp || 0;
+            let rawSp = entry?.sellingPrice || entry?.discountedSellingPrice || entry?.price?.sp || 0;
+            const mrp = rawMrp > 1000 ? rawMrp / 100 : rawMrp;
+            const sellingPrice = rawSp > 1000 ? rawSp / 100 : rawSp;
+
+            const rawCategory = sanitizeNullBytes(entry?.primaryCategoryName) || sanitizeNullBytes(productData?.category);
+            const category = mapCategory(rawCategory);
+            const subcategory = sanitizeNullBytes(entry?.primarySubcategoryName) || sanitizeNullBytes(productData?.subcategory) || null;
+            const sourceProductId = String(productData?.id || itemData?.sku_id || itemData?.id);
+            
+            if (!sourceProductId || sourceProductId === 'undefined') continue;
+
+            // Extract image
+            let image = null;
+            if (entry?.productVariant?.images && entry.productVariant.images.length > 0) {
+                const imgPath = entry.productVariant.images[0].path;
+                image = imgPath ? `https://cdn.zeptonow.com/production/${imgPath}` : null;
+            } else if (itemData?.images && itemData.images.length > 0) {
+                const imgPath = itemData.images[0];
+                if (imgPath && !imgPath.startsWith('http')) {
+                    image = `https://cdn.zeptonow.com/production/${imgPath}`;
+                } else {
+                    image = imgPath;
+                }
+            }
+
+            // Raw data insertion for Phase 2
+            await prisma.syncQueue.upsert({
+                where: { sourceProductId },
+                update: { 
+                    status: 'PENDING',
+                    name,
+                    brand,
+                    mrp: mrp > 0 ? mrp : sellingPrice,
+                    category,
+                    subcategory,
+                    packsize,
+                    image,
+                    metadata: itemData as any
+                },
+                create: {
+                    name,
+                    brand,
+                    mrp: mrp > 0 ? mrp : sellingPrice,
+                    category,
+                    subcategory,
+                    packsize,
+                    image,
+                    sourceProductId,
+                    status: 'PENDING',
+                    metadata: itemData as any
+                }
+            });
+            itemsAdded++;
+        } catch (dbError) {
+            console.error('Failed to queue item:', itemDataRaw?.item?.product?.name || itemDataRaw?.name, dbError);
+        }
+    }
+
+    return { 
+        status: 'SUCCEEDED', 
+        itemsCount: items.length,
+        itemsAdded,
+        message: `Successfully processed ${itemsAdded} items into the sync queue.`
+    };
+}
+
+// Trigger a new sync run
+app.post('/catalog/sync/trigger', async (req, res) => {
+    try {
+        const { queries, location = 'Mumbai', limit = 20 } = req.body;
+        
+        if (!queries || !Array.isArray(queries) || queries.length === 0) {
+            return res.status(400).json({ error: 'At least one search query is required' });
+        }
+
+        // Phase 8: Smart Category Sync
+        // If a query matches a Smart Category key, we expand it into a massive array of specific keywords
+        // to bypass the 20-keyword limit and 0-hit broad keyword limit.
+        const SMART_CATEGORIES: Record<string, string[]> = {
+            '[SMART] Medicines': [
+                'Paracetamol', 'Dolo', 'Vicks', 'Band Aid', 'Digene', 'Eno', 'Volini', 
+                'Saridon', 'Revital', 'ORSL', 'Electral', 'Pudin Hara', 'Hajmola', 'Zandu',
+                'Moov', 'Iodex', 'Amrutanjan', 'Strepsils', 'Honitus', 'Benadryl', 'Crocin',
+                'Combiflam', 'B-Complex', 'Vitamin C', 'Zincovit', 'Becosules', 'Cough Syrup',
+                'Betadine', 'Savlon', 'Dettol', 'Thermometer', 'Pregnancy Test', 'Odomos'
+            ],
+            '[SMART] Fruits & Vegetables': [
+                'Apple', 'Banana', 'Mango', 'Orange', 'Papaya', 'Watermelon', 'Grapes', 'Pomegranate',
+                'Onion', 'Potato', 'Tomato', 'Garlic', 'Ginger', 'Chilli', 'Lemon', 'Carrot', 
+                'Cucumber', 'Capsicum', 'Cabbage', 'Cauliflower', 'Brinjal', 'Bhindi', 'Okra',
+                'Spinach', 'Palak', 'Coriander', 'Mint', 'Methi', 'Bottle Gourd', 'Bitter Gourd',
+                'Coconut', 'Mushroom', 'Sweet Corn', 'Avocado', 'Kiwi', 'Strawberry', 'Broccoli'
+            ],
+            '[SMART] Spices & Masalas': [
+                'Turmeric', 'Haldi', 'Red Chilli', 'Lal Mirch', 'Coriander Powder', 'Dhaniya', 
+                'Jeera', 'Cumin', 'Garam Masala', 'Mustard Seeds', 'Rai', 'Black Pepper', 'Kali Mirch',
+                'Cardamom', 'Elaichi', 'Cinnamon', 'Dalchini', 'Cloves', 'Laung', 'Hing', 'Asafoetida',
+                'Fenugreek', 'Methi Seeds', 'Fennel', 'Saunf', 'Meat Masala', 'Chicken Masala',
+                'Kitchen King', 'Chat Masala', 'Pav Bhaji Masala', 'Chhole Masala', 'Sambar Powder'
+            ],
+            '[SMART] Staples & Pulses': [
+                'Atta', 'Wheat Flour', 'Maida', 'Besan', 'Sooji', 'Rawa', 'Sugar', 'Jaggery', 'Salt',
+                'Toor Dal', 'Arhar Dal', 'Moong Dal', 'Urad Dal', 'Chana Dal', 'Masoor Dal', 
+                'Rajma', 'Kabuli Chana', 'Soya Chunks', 'Poha', 'Murmura', 'Rice', 'Basmati Rice',
+                'Sona Masoori', 'Idli Rice', 'Brown Rice', 'Peanuts', 'Mungfali', 'Mustard Oil',
+                'Sunflower Oil', 'Groundnut Oil', 'Olive Oil', 'Ghee'
+            ]
+        };
+
+        // Expand queries
+        let expandedQueries: string[] = [];
+        let isSmartSync = false;
+        for (const q of queries) {
+            if (SMART_CATEGORIES[q]) {
+                expandedQueries.push(...SMART_CATEGORIES[q]);
+                isSmartSync = true;
+            } else {
+                expandedQueries.push(q);
+            }
+        }
+
+        // Deduplicate just in case
+        expandedQueries = [...new Set(expandedQueries)];
+
+        // Force limit to 20 ONLY for smart syncs to maximize total distinct yield per Apify actor rules without timing out
+        const finalLimit = isSmartSync ? 20 : limit;
+
+        const run = await apifyService.triggerLiveSync(expandedQueries, location, finalLimit);
+        const runData = run.data || run;
+        
+        res.json({ 
+            success: true, 
+            message: 'Live sync triggered successfully',
+            runId: runData.id,
+            status: runData.status
+        });
+    } catch (error: any) {
+        console.error('Sync Trigger Error:', error);
+        res.status(500).json({ error: 'Failed to trigger sync', details: error.message });
+    }
+});
+
+// Get run status and fetch results to queue
+app.get('/catalog/sync/status/:runId', async (req, res) => {
+    try {
+        const { runId } = req.params;
+        const result = await apifyService.getRunStatus(runId);
+        const run = result?.data || result; // Handle Apify's { data: { ... } } response wrapper
+
+        if (run.status === 'SUCCEEDED') {
+            const datasetId = run.defaultDatasetId;
+            const result = await processScraperDataset(datasetId);
+            return res.json(result);
+        }
+
+        res.json({ status: run.status, progress: run.status });
+    } catch (error: any) {
+        console.error('Sync Status Error:', error);
+        res.status(500).json({ error: 'Failed to fetch sync status', details: error.message });
+    }
+});
+
+// Webhook listener for Apify
+app.post('/catalog/sync/webhook', async (req, res) => {
+    try {
+        const { eventType, resource } = req.body;
+        // Check if it's the specific SUCCEEDED event from Apify
+        if (eventType === 'ACTOR.RUN.SUCCEEDED' && resource?.defaultDatasetId) {
+            console.log(`[Webhook] Processing successful scrape for dataset ${resource.defaultDatasetId}`);
+            await processScraperDataset(resource.defaultDatasetId);
+        }
+        res.status(200).send('OK');
+    } catch (error) {
+        console.error('Webhook Error:', error);
+        res.status(500).send('Server Error');
+    }
+});
+
+// Get current sync queue
+app.get('/catalog/sync/queue', async (req, res) => {
+    try {
+        const queue = await prisma.syncQueue.findMany({
+            where: { status: 'PENDING' },
+            orderBy: { createdAt: 'desc' }
+        });
+        res.json(queue);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch sync queue' });
+    }
+});
+
+// Approve items from sync queue to master catalog
+app.post('/catalog/sync/approve', async (req, res) => {
+    try {
+        const { items } = req.body;
+        
+        if (!items || !Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({ error: 'No items provided for approval' });
+        }
+
+        let approvedCount = 0;
+
+        for (const item of items) {
+            try {
+                const ean = item.metadata?.ean || item.metadata?.barcode || null;
+                const sourceProductId = item.sourceProductId;
+                
+                // Upsert to Global Catalog (prevent duplicates if same ID is approved again)
+                await prisma.product.upsert({
+                    where: { sourceProductId },
+                    update: {
+                        name: item.name,
+                        brand: item.brand,
+                        category: item.category,
+                        mrp: Number(item.mrp),
+                        image: item.image,
+                        ean,
+                        subcategory: item.subcategory,
+                        uom: item.packsize,
+                    },
+                    create: {
+                        name: item.name,
+                        brand: item.brand,
+                        category: item.category,
+                        mrp: Number(item.mrp),
+                        image: item.image,
+                        sourceProductId,
+                        source: 'live_sync',
+                        ean,
+                        subcategory: item.subcategory,
+                        uom: item.packsize,
+                        unitType: 'pc',
+                        unitValue: 1,
+                        gstRate: 0,
+                    }
+                });
+
+                // Delete from SyncQueue
+                await prisma.syncQueue.delete({
+                    where: { id: item.id }
+                });
+
+                approvedCount++;
+            } catch (itemError) {
+                console.error(`Failed to approve item ${item.id}:`, itemError);
+            }
+        }
+
+        res.json({ 
+            success: true, 
+            message: `Successfully approved and imported ${approvedCount} products!`,
+            approvedCount
+        });
+    } catch (error: any) {
+        console.error('Approve Sync Error:', error);
+        res.status(500).json({ error: 'Failed to approve sync items', details: error.message });
+    }
+});
+
+// Reject and delete junk items from sync queue
+app.post('/catalog/sync/reject', async (req, res) => {
+    try {
+        const { ids } = req.body;
+        
+        if (!ids || !Array.isArray(ids) || ids.length === 0) {
+            return res.status(400).json({ error: 'No items provided for rejection' });
+        }
+
+        const result = await prisma.syncQueue.deleteMany({
+            where: { id: { in: ids } }
+        });
+
+        res.json({ 
+            success: true, 
+            message: `Successfully deleted ${result.count} items from queue.`
+        });
+    } catch (error: any) {
+        console.error('Reject Sync Error:', error);
+        res.status(500).json({ error: 'Failed to reject sync items', details: error.message });
+    }
+});
+
 // Bulk Import
 app.post('/products/bulk', upload.single('file'), async (req, res) => {
     try {
@@ -814,6 +1253,394 @@ app.patch('/products/images/:imageId', async (req, res) => {
         res.json(image);
     } catch (error) {
         res.status(500).json({ error: 'Failed to update image' });
+    }
+});
+
+// --- JSON Bulk Import for Purchased Catalog Data ---
+
+// POST /products/bulk-import-json
+// Accepts JSON array of products from purchased catalog
+// Supports field mapping, batch processing, and merge deduplication
+app.post('/products/bulk-import-json', express.json({ limit: '100mb' }), async (req, res) => {
+    try {
+        const { products, fieldMapping, source = 'purchased_catalog' } = req.body;
+
+        if (!Array.isArray(products) || products.length === 0) {
+            return res.status(400).json({ error: 'No products provided. Expected { products: [...] }' });
+        }
+
+        // Default field mapping (can be customized via request)
+        const mapping = fieldMapping || {
+            product_id: 'sourceProductId',
+            product_name: 'name',
+            image_url: 'image',
+            product_price: 'mrp',
+            category_hierarchy: 'category', // Will be parsed for category + subcategory
+            avg_rating: 'avgRating',
+            number_of_ratings: 'numberOfRatings',
+            is_sold_out: 'isSoldOut',
+            product_url: 'productUrl',
+            country_code: 'countryCode',
+            catalog_name: 'catalogName',
+            unit_price: 'unitPrice',
+            UOM: 'uom',
+            shipping_charges: 'shippingCharges',
+            source: 'source',
+            others: 'extraData',
+        };
+
+        const BATCH_SIZE = 500;
+        let inserted = 0;
+        let updated = 0;
+        let skipped = 0;
+        const errors: { row: number; name: string; reason: string }[] = [];
+
+        // Process in batches
+        for (let batchStart = 0; batchStart < products.length; batchStart += BATCH_SIZE) {
+            const batch = products.slice(batchStart, batchStart + BATCH_SIZE);
+
+            for (let i = 0; i < batch.length; i++) {
+                const raw = batch[i];
+                const rowNum = batchStart + i + 1;
+
+                try {
+                    // Apply field mapping
+                    const mapped: any = {};
+                    for (const [srcField, destField] of Object.entries(mapping)) {
+                        if (raw[srcField] !== undefined && raw[srcField] !== null && raw[srcField] !== '') {
+                            mapped[destField as string] = raw[srcField];
+                        }
+                    }
+
+                    // Parse category_hierarchy into category + subcategory
+                    if (raw.category_hierarchy) {
+                        const parts = String(raw.category_hierarchy).split(/[>\/|,]/).map((s: string) => s.trim()).filter(Boolean);
+                        mapped.category = parts[0] || 'Uncategorized';
+                        mapped.subcategory = parts.length > 1 ? parts[1] : null;
+                    }
+
+                    // Validate required fields
+                    const productName = mapped.name || raw.product_name || raw.name;
+                    if (!productName) {
+                        errors.push({ row: rowNum, name: 'Unknown', reason: 'Missing product name' });
+                        skipped++;
+                        continue;
+                    }
+                    mapped.name = String(productName).trim();
+
+                    // Parse numeric fields safely
+                    const mrp = parseFloat(mapped.mrp || raw.product_price || raw.mrp || 0);
+                    if (isNaN(mrp) || mrp <= 0) {
+                        errors.push({ row: rowNum, name: mapped.name, reason: `Invalid price: ${mapped.mrp}` });
+                        skipped++;
+                        continue;
+                    }
+                    mapped.mrp = mrp;
+
+                    if (mapped.avgRating) mapped.avgRating = parseFloat(mapped.avgRating) || null;
+                    if (mapped.numberOfRatings) mapped.numberOfRatings = parseInt(mapped.numberOfRatings) || null;
+                    if (mapped.unitPrice) mapped.unitPrice = parseFloat(mapped.unitPrice) || null;
+                    if (mapped.shippingCharges) mapped.shippingCharges = parseFloat(mapped.shippingCharges) || null;
+                    if (mapped.isSoldOut) mapped.isSoldOut = mapped.isSoldOut === true || mapped.isSoldOut === 'true' || mapped.isSoldOut === 1;
+
+                    // Handle extraData (others + any unmapped fields)
+                    const knownFields = new Set(Object.keys(mapping));
+                    const extraFields: any = {};
+                    for (const [key, value] of Object.entries(raw)) {
+                        if (!knownFields.has(key) && value !== null && value !== undefined && value !== '') {
+                            extraFields[key] = value;
+                        }
+                    }
+                    if (raw.others) {
+                        try {
+                            const othersData = typeof raw.others === 'string' ? JSON.parse(raw.others) : raw.others;
+                            Object.assign(extraFields, othersData);
+                        } catch {
+                            extraFields.others_raw = raw.others;
+                        }
+                    }
+                    if (Object.keys(extraFields).length > 0) {
+                        mapped.extraData = extraFields;
+                    }
+
+                    // Set source
+                    mapped.source = source;
+
+                    // Build Prisma data object
+                    const productData: any = {
+                        name: mapped.name,
+                        mrp: mapped.mrp,
+                        category: mapped.category || 'Uncategorized',
+                        image: mapped.image || null,
+                        subcategory: mapped.subcategory || null,
+                        source: mapped.source,
+                        sourceProductId: mapped.sourceProductId ? String(mapped.sourceProductId) : null,
+                        avgRating: mapped.avgRating || null,
+                        numberOfRatings: mapped.numberOfRatings || null,
+                        isSoldOut: mapped.isSoldOut || false,
+                        productUrl: mapped.productUrl || null,
+                        countryCode: mapped.countryCode || null,
+                        catalogName: mapped.catalogName || null,
+                        unitPrice: mapped.unitPrice || null,
+                        uom: mapped.uom || null,
+                        shippingCharges: mapped.shippingCharges || null,
+                        extraData: mapped.extraData || null,
+                    };
+
+                    // Merge strategy: upsert by sourceProductId if available
+                    if (productData.sourceProductId) {
+                        await prisma.product.upsert({
+                            where: { sourceProductId: productData.sourceProductId },
+                            update: { ...productData, updatedAt: new Date() },
+                            create: productData,
+                        });
+
+                        // Check if it was an update or insert by querying
+                        const existing = await prisma.product.findUnique({
+                            where: { sourceProductId: productData.sourceProductId },
+                            select: { createdAt: true, updatedAt: true }
+                        });
+                        if (existing && existing.createdAt.getTime() !== existing.updatedAt.getTime()) {
+                            updated++;
+                        } else {
+                            inserted++;
+                        }
+                    } else {
+                        // No sourceProductId — just insert
+                        await prisma.product.create({ data: productData });
+                        inserted++;
+                    }
+
+                } catch (err: any) {
+                    const productName = raw.product_name || raw.name || 'Unknown';
+                    errors.push({ row: rowNum, name: productName, reason: err.message?.substring(0, 100) || 'Database error' });
+                    skipped++;
+                }
+            }
+
+            // Log batch progress
+            console.log(`[Bulk Import] Processed ${Math.min(batchStart + BATCH_SIZE, products.length)}/${products.length}`);
+        }
+
+        res.json({
+            message: `Import complete. Inserted: ${inserted}, Updated: ${updated}, Skipped: ${skipped}`,
+            inserted,
+            updated,
+            skipped,
+            total: products.length,
+            errors: errors.slice(0, 50), // Return first 50 errors max
+            hasMoreErrors: errors.length > 50,
+        });
+
+    } catch (error: any) {
+        console.error('JSON Bulk import failed:', error);
+        res.status(500).json({ error: 'Bulk import failed', details: error.message });
+    }
+});
+
+// --- Consumer-Facing APIs (for Consumer App) ---
+
+// GET /consumer/stores - List stores with inventory
+// Returns stores that have at least 1 active product
+app.get('/consumer/stores', async (req, res) => {
+    try {
+        const { category, search, limit = 50, page = 1 } = req.query;
+        const skip = (Number(page) - 1) * Number(limit);
+        const take = Number(limit);
+
+        const where: any = { active: true };
+
+        if (category) {
+            // Filter stores that have products in the given category
+            where.products = {
+                some: {
+                    active: true,
+                    product: { category: String(category) }
+                }
+            };
+        } else {
+            // Only show stores with at least 1 active product
+            where.products = { some: { active: true } };
+        }
+
+        if (search) {
+            where.OR = [
+                { name: { contains: String(search), mode: 'insensitive' } },
+                { address: { contains: String(search), mode: 'insensitive' } }
+            ];
+        }
+
+        const [stores, total] = await Promise.all([
+            prisma.store.findMany({
+                where,
+                skip,
+                take,
+                include: {
+                    city: { select: { name: true } },
+                    _count: { select: { products: { where: { active: true } } } }
+                },
+                orderBy: { name: 'asc' }
+            }),
+            prisma.store.count({ where })
+        ]);
+
+        // Format response for consumer app
+        const formatted = stores.map(store => ({
+            id: store.id,
+            name: store.name,
+            address: store.address,
+            image: store.image,
+            city: store.city?.name || null,
+            active: store.active,
+            operatingHours: store.operatingHours,
+            operatingDays: store.operatingDays,
+            productCount: store._count.products,
+        }));
+
+        res.json({
+            data: formatted,
+            pagination: { total, page: Number(page), limit: take, totalPages: Math.ceil(total / take) }
+        });
+    } catch (error: any) {
+        console.error('Consumer stores error:', error);
+        res.status(500).json({ error: 'Failed to fetch stores', details: error.message });
+    }
+});
+
+// GET /consumer/stores/:id - Store detail with products
+app.get('/consumer/stores/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { category, search } = req.query;
+
+        const store = await prisma.store.findUnique({
+            where: { id },
+            include: {
+                city: { select: { name: true } },
+            }
+        });
+
+        if (!store) {
+            return res.status(404).json({ error: 'Store not found' });
+        }
+
+        // Build product filter
+        const productWhere: any = { storeId: id, active: true };
+        if (category) {
+            productWhere.product = { category: String(category) };
+        }
+        if (search) {
+            productWhere.product = {
+                ...productWhere.product,
+                name: { contains: String(search), mode: 'insensitive' }
+            };
+        }
+
+        const storeProducts = await prisma.storeProduct.findMany({
+            where: productWhere,
+            include: {
+                product: {
+                    include: { images: { where: { isPrimary: true }, take: 1 } }
+                }
+            },
+            orderBy: { product: { name: 'asc' } }
+        });
+
+        // Group products by category/subcategory for the storefront
+        const groupedByCategory: Record<string, any[]> = {};
+        for (const sp of storeProducts) {
+            const cat = sp.product.subcategory || sp.product.category || 'Other';
+            if (!groupedByCategory[cat]) groupedByCategory[cat] = [];
+            groupedByCategory[cat].push({
+                id: sp.id,
+                productId: sp.product.id,
+                name: sp.product.name,
+                image: sp.product.image,
+                mrp: sp.product.mrp,
+                price: sp.price,
+                stock: sp.stock,
+                active: sp.active,
+                variant: sp.variant,
+                isBestSeller: sp.is_best_seller,
+                category: sp.product.category,
+                subcategory: sp.product.subcategory,
+                brand: sp.product.brand,
+                uom: sp.product.uom || sp.product.unitType ? `${sp.product.unitValue || ''}${sp.product.unitType || ''}` : null,
+                avgRating: sp.product.avgRating,
+                discount: sp.product.mrp > sp.price ? Math.round(((sp.product.mrp - sp.price) / sp.product.mrp) * 100) : 0,
+            });
+        }
+
+        // Convert to sections array
+        const sections = Object.entries(groupedByCategory).map(([title, items]) => ({
+            title,
+            data: items
+        }));
+
+        res.json({
+            store: {
+                id: store.id,
+                name: store.name,
+                address: store.address,
+                image: store.image,
+                city: store.city?.name || null,
+                operatingHours: store.operatingHours,
+                operatingDays: store.operatingDays,
+            },
+            sections,
+            totalProducts: storeProducts.length,
+        });
+    } catch (error: any) {
+        console.error('Consumer store detail error:', error);
+        res.status(500).json({ error: 'Failed to fetch store details', details: error.message });
+    }
+});
+
+// GET /consumer/products/search - Search products across all stores
+app.get('/consumer/products/search', async (req, res) => {
+    try {
+        const { q, category, limit = 30 } = req.query;
+
+        if (!q) {
+            return res.status(400).json({ error: 'Search query (q) is required' });
+        }
+
+        const storeProducts = await prisma.storeProduct.findMany({
+            where: {
+                active: true,
+                store: { active: true },
+                product: {
+                    name: { contains: String(q), mode: 'insensitive' },
+                    ...(category ? { category: String(category) } : {})
+                }
+            },
+            include: {
+                product: true,
+                store: { select: { id: true, name: true, address: true, image: true } }
+            },
+            take: Number(limit),
+            orderBy: { product: { name: 'asc' } }
+        });
+
+        const results = storeProducts.map(sp => ({
+            storeProductId: sp.id,
+            product: {
+                id: sp.product.id,
+                name: sp.product.name,
+                image: sp.product.image,
+                mrp: sp.product.mrp,
+                category: sp.product.category,
+                brand: sp.product.brand,
+            },
+            price: sp.price,
+            stock: sp.stock,
+            store: sp.store,
+        }));
+
+        res.json({ data: results, total: results.length });
+    } catch (error: any) {
+        console.error('Product search error:', error);
+        res.status(500).json({ error: 'Search failed', details: error.message });
     }
 });
 
@@ -1165,10 +1992,12 @@ const startAutoRejectTimer = () => {
 
                 // Restore Stock
                 for (const item of cancelled.items) {
-                    await prisma.storeProduct.update({
-                        where: { id: item.storeProductId },
-                        data: { stock: { increment: item.quantity } }
-                    }).catch(e => console.error('Failed to restore stock', e));
+                    if (item.storeProductId) {
+                        await prisma.storeProduct.update({
+                            where: { id: item.storeProductId },
+                            data: { stock: { increment: item.quantity } }
+                        }).catch(e => console.error('Failed to restore stock', e));
+                    }
                 }
 
                 io.emit('order_updated', cancelled);
@@ -1688,10 +2517,31 @@ app.get('/debug/list-users', async (req, res) => {
  */
 app.post('/auth/send-otp', async (req, res) => {
     try {
-        const { phone } = req.body;
+        const { phone, isSignup, isLogin } = req.body;
 
         if (!phone || !/^91\d{10}$/.test(phone)) {
             return res.status(400).json({ error: 'Valid Indian phone number required (format: 91XXXXXXXXXX)' });
+        }
+
+        // Early duplicate/lookup checks to save WATI costs
+        const barePhone = phone.replace(/^91/, '');
+        
+        if (isSignup || isLogin) {
+            const { data: existingMerchants } = await supabaseAdmin
+                .from('merchants')
+                .select('id')
+                .eq('phone', barePhone)
+                .limit(1);
+
+            const existingMerchant = existingMerchants && existingMerchants.length > 0 ? existingMerchants[0] : null;
+
+            if (isSignup && existingMerchant) {
+                return res.status(409).json({ error: 'This phone number is already registered. Please login instead.' });
+            }
+
+            if (isLogin && !existingMerchant) {
+                return res.status(404).json({ error: 'No merchant account found for this number. Please apply as partner first.' });
+            }
         }
 
         // Rate limit: max 3 OTPs per phone in 10 minutes
@@ -1739,12 +2589,14 @@ app.post('/auth/send-otp', async (req, res) => {
  */
 app.post('/auth/verify-otp', async (req, res) => {
     try {
+        console.log(`[Auth] POST /auth/verify-otp hit`);
         const { phone, otp } = req.body;
 
         if (!phone || !otp) {
             return res.status(400).json({ error: 'Phone and OTP are required' });
         }
 
+        console.log(`[Auth] Looking for unverified OTP for phone: ${phone}`);
         // Find the latest unverified OTP for this phone
         const record = await prisma.otpVerification.findFirst({
             where: {
@@ -1783,17 +2635,20 @@ app.post('/auth/verify-otp', async (req, res) => {
 
         // Format phone for Supabase (needs +91 prefix)
         const formattedPhone = `+${phone}`;
+        const syntheticEmail = `${phone}@phone.pickatstore.app`;
         let isNewUser = false;
 
+        console.log(`[Auth] Querying Supabase auth.users for ${formattedPhone} OR ${syntheticEmail}`);
         // Check if user already exists in Supabase Auth via direct SQL (bypasses listUsers pagination)
-        const authUsers: any[] = await prisma.$queryRaw`SELECT id, email, phone FROM auth.users WHERE phone = ${formattedPhone} OR phone = ${phone}`;
+        const authUsers: any[] = await prisma.$queryRaw`SELECT id, email, phone FROM auth.users WHERE phone = ${formattedPhone} OR phone = ${phone} OR email = ${syntheticEmail}`;
         let existingUser = authUsers.length > 0 ? authUsers[0] : null;
         let tempPassword = '';
-        let signInEmail = '';
+        let signInEmail = syntheticEmail;
+
+        console.log(`[Auth] Existing user:`, existingUser?.id || 'None');
 
         if (!existingUser) {
             // Create new user with email and password to bypass disabled Phone provider
-            signInEmail = `${phone}@phone.pickatstore.app`;
             tempPassword = `PAS_OTP_${phone}_${Date.now()}_${Math.random().toString(36)}`;
             
             const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
@@ -1824,10 +2679,9 @@ app.post('/auth/verify-otp', async (req, res) => {
             tempPassword = `PAS_OTP_${phone}_${Date.now()}_${Math.random().toString(36)}`;
             signInEmail = existingUser.email || `${phone}@phone.pickatstore.app`;
 
-            const updatePayload: any = { password: tempPassword };
+            const updatePayload: any = { password: tempPassword, email_confirm: true };
             if (!existingUser.email) {
                 updatePayload.email = signInEmail;
-                updatePayload.email_confirm = true;
             }
 
             const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(existingUser.id, updatePayload);
@@ -1837,12 +2691,14 @@ app.post('/auth/verify-otp', async (req, res) => {
             }
         }
 
+        console.log(`[Auth] Attempting Supabase signInWithPassword...`);
         // Sign in with temporary password to get session tokens
         const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
             email: signInEmail,
             password: tempPassword
         });
 
+        console.log(`[Auth] signInWithPassword completed.`);
         if (signInError || !signInData.session) {
             console.error('[Auth] Sign-in error:', signInError);
             return res.status(500).json({ error: 'Failed to create session' });
@@ -1865,6 +2721,7 @@ app.post('/auth/verify-otp', async (req, res) => {
             },
             isNewUser
         });
+        console.log(`[Auth] verify-otp response sent successfully.`);
     } catch (error: any) {
         console.error('[Auth] Verify OTP Error:', error);
         res.status(500).json({ error: 'OTP verification failed' });

@@ -1,7 +1,10 @@
-import { useState, ImgHTMLAttributes } from 'react';
+import { useState, useEffect, ImgHTMLAttributes } from 'react';
 import { Image } from 'lucide-react';
 
 interface ImageWithFallbackProps extends ImgHTMLAttributes<HTMLImageElement> {
+    src?: string;
+    alt?: string;
+    className?: string;
     fallbackSrc?: string;
 }
 
@@ -13,6 +16,7 @@ export function ImageWithFallback({
     ...props
 }: ImageWithFallbackProps) {
     const [error, setError] = useState(false);
+    useEffect(() => { setError(false); }, [src]);
 
     if (error || !src) {
         return (

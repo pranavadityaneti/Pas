@@ -6,7 +6,7 @@ import { ShoppingBag, ArrowRight } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RootStackParamList } from '../navigation/RootNavigator';
+import { RootStackParamList } from '../navigation/types';
 
 interface CartSummaryBarProps {
     itemCount: number;
@@ -20,12 +20,13 @@ export default function CartSummaryBar({ itemCount, totalAmount }: CartSummaryBa
 
     const handlePress = () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        navigation.navigate('Cart' as any);
+        navigation.navigate('Main', { screen: 'Cart' } as any);
     };
 
     return (
         <View className="absolute bottom-6 left-5 right-5 z-50">
             <TouchableOpacity
+                delayPressIn={0}
                 onPress={handlePress}
                 activeOpacity={0.9}
                 className="bg-brand h-16 rounded-2xl flex-row items-center px-5 shadow-xl shadow-brand/30"

@@ -1,7 +1,7 @@
 // @lock — Do NOT overwrite. Approved redesign as of Feb 27, 2026.
 // Dining Screen: Spotlights, 4 category carousels, All Restaurants vertical list.
 import React, { useEffect, useState, useMemo } from 'react';
-import { View, Text, ScrollView, Image, TouchableOpacity, TextInput, Dimensions } from 'react-native';
+import { View, Text, ScrollView, Image, TouchableOpacity, TextInput, Dimensions, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Search, ChevronRight, Star, Clock, Sparkles, BadgeCheck, Mic, User, Calendar, UtensilsCrossed, X, Check } from 'lucide-react-native';
 import { RESTAURANTS } from '../lib/data';
@@ -10,22 +10,22 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocation } from '../context/LocationContext';
-import { supabase } from '../lib/supabase';
 import * as Haptics from 'expo-haptics';
+import { supabase } from '../lib/supabase';
+import { useCart } from '../context/CartContext';
 import CartSummaryBar from '../components/CartSummaryBar';
 import BookingModal from '../components/BookingModal';
-import { Modal } from 'react-native';
 
 const { width } = Dimensions.get('window');
 
 // --- Spotlight Cards Data ---
-const DINING_SPOTLIGHTS = [
+export const DINING_SPOTLIGHTS = [
     {
         id: 1,
         title: 'Weekend Special',
         subtitle: '20% OFF on all bookings',
         badge: 'Limited Offer',
-        badgeColor: '#1F2937',
+        badgeColor: '#B52725',
         image: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=800&q=80',
     },
     {
@@ -33,7 +33,7 @@ const DINING_SPOTLIGHTS = [
         title: 'Premium Tables',
         subtitle: 'Book your exclusive experience',
         badge: 'VIP',
-        badgeColor: '#1F2937',
+        badgeColor: '#EAB308',
         image: 'https://images.unsplash.com/photo-1559339352-11d035aa65de?auto=format&fit=crop&w=800&q=80',
     },
     {
@@ -41,7 +41,7 @@ const DINING_SPOTLIGHTS = [
         title: 'Pre-Order Meals',
         subtitle: 'Skip the wait, order ahead',
         badge: 'Pre-Order',
-        badgeColor: '#1F2937',
+        badgeColor: '#B52725',
         image: 'https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=800&q=80',
     },
     {
@@ -49,7 +49,7 @@ const DINING_SPOTLIGHTS = [
         title: "Chef's Table",
         subtitle: 'Curated 5-course experiences',
         badge: 'Exclusive',
-        badgeColor: '#1F2937',
+        badgeColor: '#EAB308',
         image: 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?auto=format&fit=crop&w=800&q=80',
     },
     {
@@ -57,7 +57,7 @@ const DINING_SPOTLIGHTS = [
         title: 'Group Dining',
         subtitle: 'Perfect for parties & celebrations',
         badge: 'Group',
-        badgeColor: '#1F2937',
+        badgeColor: '#B52725',
         image: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=800&q=80',
     },
     {
@@ -65,7 +65,7 @@ const DINING_SPOTLIGHTS = [
         title: 'Late Night Bites',
         subtitle: 'Open past midnight',
         badge: 'Night Owl',
-        badgeColor: '#1F2937',
+        badgeColor: '#B52725',
         image: 'https://images.unsplash.com/photo-1590846406792-0adc7f938f1d?auto=format&fit=crop&w=800&q=80',
     },
 ];
@@ -76,6 +76,7 @@ const CUISINE_FILTERS = ['All', 'North Indian', 'South Indian', 'Chinese', 'Stre
 export default function DiningScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const { activeLocation } = useLocation();
+    const { getItemCount, getTotal } = useCart();
     const [profile, setProfile] = useState<any>(null);
     const [searchText, setSearchText] = useState('');
     const [selectedCuisine, setSelectedCuisine] = useState('All');
@@ -108,19 +109,29 @@ export default function DiningScreen() {
 
     const fetchProfile = async () => {
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            const { data: { session } } = await supabase.auth.getSession();
+            
+            if (!session) {
+                setProfile(null);
+                return;
+            }
 
-            const { data, error } = await supabase
-                .from('profiles')
-                .select('avatar_url')
-                .eq('id', user.id)
-                .single();
+            const timeout = (ms: number) => new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms));
+
+            const { data, error } = await Promise.race([
+                supabase
+                    .from('profiles')
+                    .select('avatar_url')
+                    .eq('id', session.user.id)
+                    .single(),
+                timeout(5000)
+            ]) as any;
 
             if (error) throw error;
             setProfile(data);
         } catch (error) {
             console.error('Error fetching profile avatar:', error);
+            setProfile(null);
         }
     };
 
@@ -413,7 +424,10 @@ export default function DiningScreen() {
                         {DINING_SPOTLIGHTS.map((spot) => (
                             <TouchableOpacity
                                 key={spot.id}
-                                onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)}
+                                onPress={() => {
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                                    navigation.navigate('SpotlightDetail', { spotlightId: spot.id });
+                                }}
                                 className="mr-4 rounded-[20px] overflow-hidden"
                                 style={{ width: width * 0.44, height: 240 }}
                                 activeOpacity={0.9}
@@ -498,10 +512,10 @@ export default function DiningScreen() {
                         )}
                     </View>
                 </View>
-
+                <View style={{ height: 100 }} />
             </ScrollView>
 
-            <CartSummaryBar itemCount={2} totalAmount={459} />
+            <CartSummaryBar itemCount={getItemCount()} totalAmount={getTotal()} />
 
             {bookingRestaurant && (
                 <BookingModal

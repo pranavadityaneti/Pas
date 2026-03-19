@@ -1,18 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
-    View,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    StyleSheet,
-    ScrollView,
-    ActivityIndicator,
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    Modal,
-    TouchableWithoutFeedback,
-    Image,
+    View, Text, TextInput, TouchableOpacity, StyleSheet,
+    Platform, ActivityIndicator, Image, ScrollView, Modal, TouchableWithoutFeedback, Alert
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,11 +9,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
-import MapView, { Marker } from 'react-native-maps';
-import * as FileSystem from 'expo-file-system';
-import { decode } from 'base64-arraybuffer';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import axios from 'axios';
-import { supabase } from '../../src/lib/supabase';
+import { supabase, setSessionFromTokens } from '../../src/lib/supabase';
 import { Colors } from '../../constants/Colors';
 import Constants from 'expo-constants';
 
@@ -41,28 +28,41 @@ if (Constants.appOwnership !== 'expo') {
 const STEPS = ['Identity', 'Store', 'Photos', 'Branches', 'KYC', 'Subscription', 'Review'];
 
 const STORE_CATEGORIES = [
-    'Grocery & Kirana',
-    'Supermarket',
-    'Restaurant & Cafe',
-    'Bakery & Sweets',
-    'Pharmacy',
-    'Electronics',
-    'Fashion & Apparel',
-    'Home & Lifestyle',
+    'Restaurants & Cafes',
+    'Bakeries & Desserts',
+    'Fast Food & Quick Bites',
+    'Sweet Shops & Namkeen',
+    'Fresh Groceries & Supermarkets',
+    'Fresh Meat & Seafood',
+    'Pharmacy & Wellness',
+    'Electronics & Accessories',
+    'Books & Stationery',
+    'Pet Care & Supplies',
     'Beauty & Personal Care',
-    'Other',
+    'Fashion & Apparel',
+    'Home & Lifestyle'
 ];
 
 const FSSAI_CATEGORIES = [
-    'Grocery & Kirana',
-    'Supermarket',
-    'Restaurant & Cafe',
-    'Bakery & Sweets',
+    'Restaurants & Cafes',
+    'Bakeries & Desserts',
+    'Fast Food & Quick Bites',
+    'Sweet Shops & Namkeen',
+    'Fresh Groceries & Supermarkets',
+    'Fresh Meat & Seafood'
+];
+
+const PREMIUM_CATEGORIES = [
+    'Restaurants & Cafes',
+    'Bakeries & Desserts',
+    'Fast Food & Quick Bites'
 ];
 
 interface Branch {
     name: string;
     address: string;
+    manager_name: string;
+    phone: string;
 }
 
 export default function SignupScreen() {
@@ -74,8 +74,122 @@ export default function SignupScreen() {
         ownerName: '',
         phone: '',
         email: '',
-        password: '',
     });
+
+    // Inline OTP State
+    const [otpSent, setOtpSent] = useState(false);
+    const [otpVerified, setOtpVerified] = useState(false);
+    const [otpValues, setOtpValues] = useState(['', '', '', '', '', '']);
+    const [resendTimer, setResendTimer] = useState(0);
+    const otpRefs = useRef<(TextInput | null)[]>([]);
+
+    const getApiUrl = () => {
+        if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
+        return __DEV__ ? 'http://192.168.29.171:3000' : 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
+    };
+
+    const fetchWithTimeout = async (resource: string, options: any = {}) => {
+        const { timeout = 15000, ...fetchOptions } = options;
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), timeout);
+        try {
+            const response = await fetch(resource, { ...fetchOptions, signal: controller.signal as any });
+            clearTimeout(id);
+            return response;
+        } catch (error: any) {
+            clearTimeout(id);
+            if (error.name === 'AbortError') throw new Error('Network timeout.');
+            throw error;
+        }
+    };
+
+    useEffect(() => {
+        if (resendTimer > 0) {
+            const timer = setTimeout(() => setResendTimer(prev => prev - 1), 1000);
+            return () => clearTimeout(timer);
+        }
+    }, [resendTimer]);
+
+    const handleSendOtp = async () => {
+        const cleaned = identity.phone.replace(/\s/g, '');
+        if (cleaned.length !== 10) {
+            Alert.alert('Invalid Number', 'Please enter a valid 10-digit phone number.');
+            return;
+        }
+        setLoading(true);
+        try {
+            const response = await fetchWithTimeout(`${getApiUrl()}/auth/send-otp`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: `91${cleaned}`, isSignup: true })
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Failed to send OTP');
+            setOtpSent(true);
+            setResendTimer(60);
+            setOtpValues(['', '', '', '', '', '']);
+        } catch (error: any) {
+            Alert.alert('Error', error.message || 'Failed to send OTP.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleVerifyOtp = async () => {
+        const otp = otpValues.join('');
+        if (otp.length !== 6) {
+            Alert.alert('Invalid OTP', 'Please enter the complete 6-digit OTP.');
+            return;
+        }
+        const cleaned = identity.phone.replace(/\s/g, '');
+        setLoading(true);
+        try {
+            const response = await fetchWithTimeout(`${getApiUrl()}/auth/verify-otp`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: `91${cleaned}`, otp })
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'OTP verification failed');
+            // Mount their session to securely query the DB
+            await setSessionFromTokens(data.session.access_token, data.session.refresh_token);
+            
+            // Check if merchant already exists to prevent duplicate signups
+            const { data: existingMerchant } = await supabase
+                .from('merchants')
+                .select('status')
+                .eq('id', data.user.id)
+                .maybeSingle();
+
+            if (existingMerchant) {
+                Alert.alert('Already Registered', 'An application with this phone number already exists. Please login instead.');
+                await supabase.auth.signOut();
+                router.replace('/(auth)/login');
+                return;
+            }
+
+            setOtpVerified(true);
+            Alert.alert('Success', 'Phone number verified successfully!');
+        } catch (error: any) {
+            console.error('[Signup] Verify OTP Error:', error);
+            Alert.alert('Verification Failed', error.message || 'Incorrect OTP or network error. Please try again.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleOtpChange = (text: string, index: number) => {
+        const newValues = [...otpValues];
+        newValues[index] = text;
+        setOtpValues(newValues);
+        if (text && index < 5) otpRefs.current[index + 1]?.focus();
+    };
+
+    const handleOtpKeyPress = (e: any, index: number) => {
+        if (e.nativeEvent.key === 'Backspace' && !otpValues[index] && index > 0) {
+            otpRefs.current[index - 1]?.focus();
+        }
+    };
 
     // Step 2: Store
     const [store, setStore] = useState({
@@ -153,8 +267,12 @@ export default function SignupScreen() {
 
     const validateStep = () => {
         if (step === 1) {
-            if (!identity.ownerName || !identity.email || !identity.password || !identity.phone) {
+            if (!identity.ownerName || !identity.email || !identity.phone) {
                 Alert.alert('Error', 'Please fill all required fields');
+                return false;
+            }
+            if (!otpVerified) {
+                Alert.alert('Verification Required', 'Please verify your phone number using the OTP before continuing.');
                 return false;
             }
             // Phone Validation: 10 digits, starts with 6-9
@@ -167,11 +285,6 @@ export default function SignupScreen() {
             const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
             if (!emailRegex.test(identity.email)) {
                 Alert.alert('Invalid Email', 'Please enter a valid email address.');
-                return false;
-            }
-            // Password Length
-            if (identity.password.length < 6) {
-                Alert.alert('Error', 'Password must be at least 6 characters');
                 return false;
             }
         }
@@ -224,8 +337,9 @@ export default function SignupScreen() {
 
             // FSSAI Validation
             if (FSSAI_CATEGORIES.includes(store.category)) {
-                if (!kyc.fssaiNumber) {
-                    Alert.alert('Required', 'FSSAI License Number is required for your category.');
+                const fssaiRegex = /^\d{14}$/;
+                if (!kyc.fssaiNumber || !fssaiRegex.test(kyc.fssaiNumber)) {
+                    Alert.alert('Invalid FSSAI', 'FSSAI License Number must be exactly 14 digits.');
                     return false;
                 }
                 if (!docFiles.fssai) {
@@ -234,9 +348,29 @@ export default function SignupScreen() {
                 }
             }
 
+            // MSME Validation (Optional, but validated if entered)
+            if (kyc.msmeNumber) {
+                const msmeRegex = /^UDYAM-[A-Z]{2}-\d{2}-\d{7}$/;
+                if (!msmeRegex.test(kyc.msmeNumber)) {
+                    Alert.alert('Invalid MSME', 'MSME Number must match format UDYAM-XX-00-0000000.');
+                    return false;
+                }
+            }
+
             // Banking Validation
-            if (!kyc.bankAccount || !kyc.ifsc || !kyc.beneficiaryName) {
-                Alert.alert('Required', 'Please enter all bank details (Account No, IFSC, Beneficiary Name).');
+            const bankAccountRegex = /^\d{9,18}$/;
+            const ifscRegex = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+
+            if (!kyc.bankAccount || !bankAccountRegex.test(kyc.bankAccount)) {
+                Alert.alert('Invalid Account', 'Bank Account must be between 9 to 18 digits.');
+                return false;
+            }
+            if (!kyc.ifsc || !ifscRegex.test(kyc.ifsc)) {
+                Alert.alert('Invalid IFSC', 'IFSC Code must be valid (e.g., SBIN0001234).');
+                return false;
+            }
+            if (!kyc.beneficiaryName) {
+                Alert.alert('Required', 'Please enter Beneficiary Name.');
                 return false;
             }
         }
@@ -251,12 +385,44 @@ export default function SignupScreen() {
     };
 
     const handlePayment = async () => {
+        const isPremium = PREMIUM_CATEGORIES.includes(store.category);
+        const subscriptionAmount = isPremium ? 2999 : 999;
+        
+        let orderId = '';
+        try {
+            const apiUrl = getApiUrl();
+            const res = await fetch(`${apiUrl}/payments/create-order`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    amount: subscriptionAmount, 
+                    type: 'merchant', 
+                    userId: identity.phone || 'merchant',
+                    notes: {
+                        plan_type: isPremium ? 'Premium Subscription' : 'Standard Subscription',
+                        store_category: store.category
+                    }
+                })
+            });
+            const data = await res.json();
+            if (data.order_id) {
+                orderId = data.order_id;
+            } else {
+                Alert.alert('Payment Error', 'Failed to initialize secure payment on the server.');
+                return;
+            }
+        } catch (error) {
+            console.error('Create order error:', error);
+            Alert.alert('Error', 'Could not connect to secure payment server.');
+            return;
+        }
+
         const options = {
             description: 'Lifetime Partner Subscription',
             image: 'https://pickatstore.com/logo.png', // Replace with real logo URL
             currency: 'INR',
-            key: 'rzp_test_RnWZnS9NxCVC6V',
-            amount: 99900, // 999 * 100 paise
+            key: process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_RnWZnS9NxCVC6V',
+            order_id: orderId,
             name: 'PickAtStore',
             prefill: {
                 email: identity.email,
@@ -293,7 +459,30 @@ export default function SignupScreen() {
         try {
             const data = await RazorpayCheckout.open(options);
             // On success
-            console.log('Payment Success:', data);
+            console.log('Payment Processed. Verifying...', data);
+            
+            try {
+                const apiUrl = getApiUrl();
+                const verifyRes = await fetch(`${apiUrl}/payments/verify`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        razorpay_order_id: data.razorpay_order_id,
+                        razorpay_payment_id: data.razorpay_payment_id,
+                        razorpay_signature: data.razorpay_signature
+                    })
+                });
+                const verifyData = await verifyRes.json();
+                
+                if (!verifyData.success) {
+                    Alert.alert('Security Error', 'Payment signature could not be verified. Please contact support.');
+                    return;
+                }
+            } catch (err) {
+                 Alert.alert('Error', 'Payment verification failed due to network error.');
+                 return;
+            }
+
             setPaymentStatus('success');
             setPaymentDetails({
                 paymentId: data.razorpay_payment_id,
@@ -340,68 +529,24 @@ export default function SignupScreen() {
             }
 
             setLoading(true);
-            let authUser = null;
-            let finalAuthError = null;
 
-            // 1. Create Auth User
-            const { data: authData, error: authError } = await supabase.auth.signUp({
-                email: identity.email.trim(),
-                password: identity.password,
-                options: {
-                    data: {
-                        name: identity.ownerName,
-                        role: 'MERCHANT'
-                    },
-                    // Ensure auto-sign in if email confirmation is disabled
-                    emailRedirectTo: undefined
-                }
-            });
-
-            if (authError) {
-                // Check if user already exists
-                const isUserExistsError =
-                    authError.message.includes('User already registered') ||
-                    authError.message.includes('User_email_key') ||
-                    authError.message.includes('duplicate key') ||
-                    authError.message.includes('unique constraint') ||
-                    (authError as any).status === 422 ||
-                    (authError as any).status === 409;
-
-                if (isUserExistsError) {
-                    console.log('[Signup] User exists. Attempting Login...');
-                    const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
-                        email: identity.email.trim(),
-                        password: identity.password,
-                    });
-
-                    if (loginError) {
-                        console.error('[Signup] Login Failed after User Exists:', loginError);
-                        if (loginError.message.includes('Invalid login credentials')) {
-                            throw new Error('Account exists but password does not match. Please use a different email or reset password.');
-                        }
-                        throw new Error('User account in inconsistent state. Please use a different email.');
-                    }
-                    authUser = loginData.user;
-                } else {
-                    console.error('[Signup] Auth Error:', authError);
-                    throw authError;
-                }
-            } else {
-                authUser = authData.user;
+            // 1. Get current Authenticated User (verified via OTP in Step 1)
+            const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+            if (sessionError || !sessionData.session?.user) {
+                setLoading(false);
+                throw new Error('Not authenticated. Please verify your phone number on Step 1 again.');
             }
-
-            if (!authUser) throw new Error('Failed to create or retrieve user');
-
-            const userId = authUser.id;
+            
+            const userId = sessionData.session.user.id;
             console.log('[Signup] User verified:', userId);
 
             // 2. Upload Documents
             const uploadFile = async (uri: string, path: string) => {
                 if (!uri) return null;
                 try {
-                    // Use fetch + blob for Expo/React Native
-                    const response = await fetch(uri);
-                    const blob = await response.blob();
+                    // Use standard fetch and blob for cross-platform local file uploads without deprecated Expo FileSystem API
+                    const resp = await fetch(uri);
+                    const blob = await resp.blob();
 
                     const { data, error } = await supabase.storage
                         .from('merchant-docs') // Ensure bucket name is correct
@@ -453,7 +598,7 @@ export default function SignupScreen() {
                 latitude: store.latitude,
                 longitude: store.longitude,
                 has_branches: hasBranches,
-                status: 'active', // 'pending' violates check constraint
+                status: 'inactive', // 'pending' violates check constraint, so we correctly use 'inactive' to block them
                 kyc_status: 'pending',
                 pan_number: kyc.panNumber,
                 aadhar_number: kyc.aadharNumber,
@@ -480,28 +625,36 @@ export default function SignupScreen() {
 
             // 4. Insert Subscription Record
             if (paymentStatus === 'success' && paymentDetails) {
+                const isPremium = PREMIUM_CATEGORIES.includes(store.category);
+                const subscriptionAmount = isPremium ? 2999 : 999;
+                
                 const { error: subError } = await supabase.from('subscriptions').insert({
+                    id: `sub_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
                     merchant_id: userId,
-                    amount: 999.00,
+                    amount: subscriptionAmount,
                     currency: 'INR',
                     status: 'success',
                     provider: 'razorpay',
-                    transaction_id: paymentDetails.paymentId
+                    transaction_id: paymentDetails.paymentId,
+                    updated_at: new Date().toISOString()
                 });
                 if (subError) console.error('[Signup] Subscription Insert Error (Non-blocking):', subError);
             }
 
             if (hasBranches && branches.length > 0) {
                 const branchRecords = branches.map(b => ({
+                    id: `br_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
                     merchant_id: userId,
                     branch_name: b.name,
                     address: b.address,
+                    manager_name: b.manager_name,
+                    phone: b.phone
                 }));
                 // Use upsert or delete-then-insert if branch IDs are not preserved
                 const { error: branchError } = await supabase.from('merchant_branches').insert(branchRecords);
                 if (branchError) {
                     console.error('[Signup] Branch Insert Error:', branchError);
-                    Alert.alert('Warning', 'Merchant created but failed to save branches. Please add them in Settings.');
+                    throw new Error(`Branch Save Error: ${branchError.message}`);
                 }
             }
 
@@ -516,7 +669,7 @@ export default function SignupScreen() {
         }
     };
 
-    const addBranch = () => setBranches([...branches, { name: '', address: '' }]);
+    const addBranch = () => setBranches([...branches, { name: '', address: '', manager_name: '', phone: '' }]);
     const removeBranch = (i: number) => setBranches(branches.filter((_, idx) => idx !== i));
     const updateBranch = (i: number, field: keyof Branch, value: string) => {
         const updated = [...branches];
@@ -548,23 +701,14 @@ export default function SignupScreen() {
                 const isActive = stepNum === step;
                 const isCompleted = stepNum < step;
                 return (
-                    <View key={i} style={styles.stepItem}>
-                        <View
-                            style={[
-                                styles.stepCircle,
-                                isActive && styles.stepCircleActive,
-                                isCompleted && styles.stepCircleCompleted,
-                            ]}
-                        >
-                            {isCompleted ? (
-                                <Ionicons name="checkmark" size={14} color="#FFFFFF" />
-                            ) : (
-                                <Text style={[styles.stepNumber, isActive && styles.stepNumberActive]}>
-                                    {stepNum}
-                                </Text>
-                            )}
-                        </View>
-                        <Text style={[styles.stepLabel, isActive && styles.stepLabelActive]}>{label}</Text>
+                    <View key={i} style={isActive ? styles.stepPill : styles.stepCircle}>
+                        {isCompleted ? (
+                            <Ionicons name="checkmark" size={16} color="#6B7280" />
+                        ) : isActive ? (
+                            <Text style={styles.stepPillText}>{label}</Text>
+                        ) : (
+                            <Text style={styles.stepNumber}>{stepNum}</Text>
+                        )}
                     </View>
                 );
             })}
@@ -581,12 +725,13 @@ export default function SignupScreen() {
                 style={styles.content}
                 contentContainerStyle={styles.contentContainer}
                 enableOnAndroid={true}
-                extraScrollHeight={100}
+                extraScrollHeight={Platform.OS === 'ios' ? 100 : 80}
                 enableAutomaticScroll={true}
                 keyboardShouldPersistTaps="handled"
-                keyboardDismissMode="on-drag"
+                keyboardDismissMode="none"
                 showsVerticalScrollIndicator={false}
             >
+                <View style={{ flex: 1, padding: 16 }}>
                 {step === 1 && (
                     <View style={styles.card}>
                         <View style={styles.cardHeader}>
@@ -606,16 +751,67 @@ export default function SignupScreen() {
                         </View>
 
                         <View style={styles.inputGroup}>
-                            <Text style={styles.label}>Phone <Text style={styles.required}>*</Text></Text>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="+91 98765 43210"
-                                placeholderTextColor="#9CA3AF"
-                                keyboardType="phone-pad"
-                                value={identity.phone}
-                                onChangeText={(t) => setIdentity({ ...identity, phone: t })}
-                            />
+                            <Text style={styles.label}>WhatsApp Number <Text style={styles.required}>*</Text></Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 12, backgroundColor: '#FFFFFF', paddingHorizontal: 16 }}>
+                                <Text style={{ fontSize: 16, color: '#6B7280', fontWeight: '600', marginRight: 8 }}>+91</Text>
+                                <View style={{ width: 1, height: 24, backgroundColor: '#E5E7EB', marginRight: 8 }} />
+                                <TextInput
+                                    style={{ flex: 1, height: 48, fontSize: 16, color: '#111827', fontWeight: 'bold' }}
+                                    placeholder="98765 43210"
+                                    placeholderTextColor="#9CA3AF"
+                                    keyboardType="phone-pad"
+                                    maxLength={10}
+                                    value={identity.phone}
+                                    onChangeText={(t) => setIdentity({ ...identity, phone: t })}
+                                    editable={!otpVerified}
+                                />
+                                {otpVerified ? (
+                                    <Ionicons name="checkmark-circle" size={24} color={Colors.primary} />
+                                ) : (
+                                    <TouchableOpacity 
+                                        onPress={handleSendOtp} 
+                                        disabled={loading || identity.phone.length !== 10}
+                                        style={{ backgroundColor: Colors.primary + '20', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, opacity: (loading || identity.phone.length !== 10) ? 0.5 : 1 }}
+                                    >
+                                        <Text style={{ color: Colors.primary, fontWeight: 'bold' }}>{otpSent ? 'Resend' : 'Verify'}</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
                         </View>
+
+                        {otpSent && !otpVerified && (
+                            <View style={styles.inputGroup}>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                    <Text style={styles.label}>Enter 6-digit OTP</Text>
+                                    {resendTimer > 0 ? (
+                                        <Text style={{ color: '#9CA3AF', fontSize: 12 }}>Resend in {resendTimer}s</Text>
+                                    ) : null}
+                                </View>
+                                
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
+                                    {otpValues.map((val, i) => (
+                                        <TextInput
+                                            key={i}
+                                            ref={ref => { otpRefs.current[i] = ref; }}
+                                            style={{ width: 44, height: 52, borderWidth: 1, borderColor: val ? Colors.primary : '#E5E7EB', borderRadius: 12, textAlign: 'center', fontSize: 20, fontWeight: 'bold', color: '#111827', backgroundColor: val ? '#FFFFFF' : '#F9FAFB' }}
+                                            maxLength={1}
+                                            keyboardType="number-pad"
+                                            value={val}
+                                            onChangeText={(text) => handleOtpChange(text, i)}
+                                            onKeyPress={(e) => handleOtpKeyPress(e, i)}
+                                        />
+                                    ))}
+                                </View>
+
+                                <TouchableOpacity 
+                                    style={[{ height: 52, backgroundColor: Colors.primary, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginTop: 8 }, (loading || otpValues.join('').length !== 6) && { opacity: 0.6 }]}
+                                    onPress={handleVerifyOtp}
+                                    disabled={loading || otpValues.join('').length !== 6}
+                                >
+                                    {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '600' }}>Verify OTP</Text>}
+                                </TouchableOpacity>
+                            </View>
+                        )}
 
                         <View style={styles.inputGroup}>
                             <Text style={styles.label}>Email <Text style={styles.required}>*</Text></Text>
@@ -627,18 +823,6 @@ export default function SignupScreen() {
                                 autoCapitalize="none"
                                 value={identity.email}
                                 onChangeText={(t) => setIdentity({ ...identity, email: t })}
-                            />
-                        </View>
-
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.label}>Password <Text style={styles.required}>*</Text></Text>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="••••••••"
-                                placeholderTextColor="#9CA3AF"
-                                secureTextEntry
-                                value={identity.password}
-                                onChangeText={(t) => setIdentity({ ...identity, password: t })}
                             />
                         </View>
                     </View>
@@ -738,6 +922,7 @@ export default function SignupScreen() {
 
                             <View style={{ height: 200, borderRadius: 12, overflow: 'hidden', marginVertical: 12 }}>
                                 <MapView
+                                    provider={PROVIDER_GOOGLE}
                                     style={{ flex: 1 }}
                                     region={{
                                         latitude: store.latitude,
@@ -852,6 +1037,23 @@ export default function SignupScreen() {
                                                 value={branch.address}
                                                 onChangeText={(t) => updateBranch(i, 'address', t)}
                                             />
+                                            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                                                <TextInput
+                                                    style={[styles.input, { flex: 1 }]}
+                                                    placeholder="Manager Name"
+                                                    placeholderTextColor="#9CA3AF"
+                                                    value={branch.manager_name}
+                                                    onChangeText={(t) => updateBranch(i, 'manager_name', t)}
+                                                />
+                                                <TextInput
+                                                    style={[styles.input, { flex: 1 }]}
+                                                    placeholder="Manager Phone"
+                                                    placeholderTextColor="#9CA3AF"
+                                                    keyboardType="phone-pad"
+                                                    value={branch.phone}
+                                                    onChangeText={(t) => updateBranch(i, 'phone', t)}
+                                                />
+                                            </View>
                                         </View>
                                     ))
                                 )}
@@ -911,6 +1113,7 @@ export default function SignupScreen() {
                                     placeholder="ABCDE1234F"
                                     placeholderTextColor="#9CA3AF"
                                     autoCapitalize="characters"
+                                    maxLength={10}
                                     value={kyc.panNumber}
                                     onChangeText={(t) => setKyc({ ...kyc, panNumber: t.toUpperCase() })}
                                 />
@@ -938,7 +1141,8 @@ export default function SignupScreen() {
                                     style={styles.input}
                                     placeholder="1234 5678 9012"
                                     placeholderTextColor="#9CA3AF"
-                                    keyboardType="numeric"
+                                    keyboardType="number-pad"
+                                    maxLength={12}
                                     value={kyc.aadharNumber}
                                     onChangeText={(t) => setKyc({ ...kyc, aadharNumber: t })}
                                 />
@@ -959,10 +1163,40 @@ export default function SignupScreen() {
                                     placeholder="22AAAAA0000A1Z5"
                                     placeholderTextColor="#9CA3AF"
                                     autoCapitalize="characters"
+                                    maxLength={15}
                                     value={kyc.gstNumber}
                                     onChangeText={(t) => setKyc({ ...kyc, gstNumber: t.toUpperCase() })}
                                 />
                             </View>
+
+                            {FSSAI_CATEGORIES.includes(store.category) && (
+                                <>
+                                    <View style={styles.divider} />
+                                    <Text style={styles.sectionHeader}>Food Safety (FSSAI)</Text>
+
+                                    <View style={styles.inputGroup}>
+                                        <Text style={styles.label}>FSSAI License Number <Text style={styles.required}>*</Text></Text>
+                                        <TextInput
+                                            style={styles.input}
+                                            placeholder="14-digit License Number"
+                                            placeholderTextColor="#9CA3AF"
+                                            keyboardType="number-pad"
+                                            maxLength={14}
+                                            value={kyc.fssaiNumber}
+                                            onChangeText={(t) => setKyc({ ...kyc, fssaiNumber: t })}
+                                        />
+                                    </View>
+
+                                    <View style={styles.inputGroup}>
+                                        <Text style={styles.label}>Upload FSSAI License <Text style={styles.required}>*</Text></Text>
+                                        <TouchableOpacity style={styles.uploadButton} onPress={() => pickDocument('fssai')}>
+                                            <Ionicons name={docFiles.fssai ? "checkmark-circle" : "cloud-upload-outline"} size={22} color={docFiles.fssai ? "#10B981" : "#6366F1"} />
+                                            <Text style={[styles.uploadText, docFiles.fssai && { color: '#10B981' }]}>{docFiles.fssai ? "License Selected" : "Upload License"}</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                    <View style={styles.divider} />
+                                </>
+                            )}
 
                             <View style={styles.inputGroup}>
                                 <Text style={styles.label}>Upload MSME / Udyam Certificate (Optional)</Text>
@@ -979,6 +1213,7 @@ export default function SignupScreen() {
                                     placeholder="UDYAM-XX-00-0000000"
                                     placeholderTextColor="#9CA3AF"
                                     autoCapitalize="characters"
+                                    maxLength={19}
                                     value={kyc.msmeNumber}
                                     onChangeText={(t) => setKyc({ ...kyc, msmeNumber: t.toUpperCase() })}
                                 />
@@ -990,7 +1225,8 @@ export default function SignupScreen() {
                                     style={styles.input}
                                     placeholder="Enter account number"
                                     placeholderTextColor="#9CA3AF"
-                                    keyboardType="numeric"
+                                    keyboardType="number-pad"
+                                    maxLength={18}
                                     value={kyc.bankAccount}
                                     onChangeText={(t) => setKyc({ ...kyc, bankAccount: t })}
                                 />
@@ -1003,6 +1239,7 @@ export default function SignupScreen() {
                                     placeholder="SBIN0001234"
                                     placeholderTextColor="#9CA3AF"
                                     autoCapitalize="characters"
+                                    maxLength={11}
                                     value={kyc.ifsc}
                                     onChangeText={(t) => setKyc({ ...kyc, ifsc: t.toUpperCase() })}
                                 />
@@ -1019,33 +1256,7 @@ export default function SignupScreen() {
                                 />
                             </View>
 
-                            {FSSAI_CATEGORIES.includes(store.category) && (
-                                <>
-                                    <View style={styles.divider} />
-                                    <Text style={styles.sectionHeader}>Food Safety (FSSAI)</Text>
 
-                                    <View style={styles.inputGroup}>
-                                        <Text style={styles.label}>FSSAI License Number <Text style={styles.required}>*</Text></Text>
-                                        <TextInput
-                                            style={styles.input}
-                                            placeholder="14-digit License Number"
-                                            placeholderTextColor="#9CA3AF"
-                                            keyboardType="numeric"
-                                            maxLength={14}
-                                            value={kyc.fssaiNumber}
-                                            onChangeText={(t) => setKyc({ ...kyc, fssaiNumber: t })}
-                                        />
-                                    </View>
-
-                                    <View style={styles.inputGroup}>
-                                        <Text style={styles.label}>Upload FSSAI License <Text style={styles.required}>*</Text></Text>
-                                        <TouchableOpacity style={styles.uploadButton} onPress={() => pickDocument('fssai')}>
-                                            <Ionicons name={docFiles.fssai ? "checkmark-circle" : "cloud-upload-outline"} size={22} color={docFiles.fssai ? "#10B981" : "#6366F1"} />
-                                            <Text style={[styles.uploadText, docFiles.fssai && { color: '#10B981' }]}>{docFiles.fssai ? "License Selected" : "Upload License"}</Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                </>
-                            )}
                         </View>
                     </>
                 )}
@@ -1073,8 +1284,12 @@ export default function SignupScreen() {
                                 <Text style={{ fontSize: 16, fontWeight: '600', color: Colors.primary, marginBottom: 12 }}>LIFETIME ACCESS</Text>
 
                                 <View style={{ flexDirection: 'row', alignItems: 'baseline', marginBottom: 24 }}>
-                                    <Text style={{ fontSize: 20, color: '#9CA3AF', textDecorationLine: 'line-through', marginRight: 12 }}>₹2499</Text>
-                                    <Text style={{ fontSize: 40, fontWeight: '800', color: '#10B981' }}>₹999</Text>
+                                    <Text style={{ fontSize: 20, color: '#9CA3AF', textDecorationLine: 'line-through', marginRight: 12 }}>
+                                        {PREMIUM_CATEGORIES.includes(store.category) ? '₹4999' : '₹2499'}
+                                    </Text>
+                                    <Text style={{ fontSize: 40, fontWeight: '800', color: '#10B981' }}>
+                                        {PREMIUM_CATEGORIES.includes(store.category) ? '₹2999' : '₹999'}
+                                    </Text>
                                 </View>
 
                                 <View style={{ width: '100%', paddingHorizontal: 10 }}>
@@ -1132,93 +1347,94 @@ export default function SignupScreen() {
                         </View>
 
                         <View style={styles.card}>
-                            <Text style={styles.reviewTitle}>Summary</Text>
-                            <View style={styles.reviewRow}>
-                                <Text style={styles.reviewLabel}>Owner</Text>
-                                <Text style={styles.reviewValue}>{identity.ownerName}</Text>
-                            </View>
-                            <View style={styles.reviewRow}>
-                                <Text style={styles.reviewLabel}>Store</Text>
-                                <Text style={styles.reviewValue}>{store.storeName}</Text>
-                            </View>
-                            <View style={styles.reviewRow}>
-                                <Text style={styles.reviewLabel}>Category</Text>
-                                <Text style={styles.reviewValue}>{store.category}</Text>
-                            </View>
-                            <View style={styles.reviewRow}>
-                                <Text style={styles.reviewLabel}>City</Text>
-                                <Text style={styles.reviewValue}>{store.city}</Text>
-                            </View>
-                            <View style={styles.reviewRow}>
-                                <Text style={styles.reviewLabel}>Email</Text>
-                                <Text style={styles.reviewValue}>{identity.email}</Text>
-                            </View>
-                            <View style={styles.reviewRow}>
-                                <Text style={styles.reviewLabel}>PAN</Text>
-                                <Text style={styles.reviewValue}>{kyc.panNumber || '-'}</Text>
-                            </View>
-                            {kyc.gstNumber && (
-                                <View style={styles.reviewRow}>
-                                    <Text style={styles.reviewLabel}>GSTIN</Text>
-                                    <Text style={styles.reviewValue}>{kyc.gstNumber}</Text>
-                                </View>
-                            )}
-                            <View style={styles.reviewRow}>
-                                <Text style={styles.reviewLabel}>Store Photos</Text>
-                                <Text style={styles.reviewValue}>{storePhotos.length} uploaded</Text>
-                            </View>
+                            <Text style={styles.reviewTitle}>Complete Summary</Text>
+
+                            <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#111827', marginTop: 16, marginBottom: 8, borderBottomWidth: 1, borderBottomColor: '#E5E7EB', paddingBottom: 4 }}>Identity & Store</Text>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Owner</Text><Text style={styles.reviewValue}>{identity.ownerName}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Phone</Text><Text style={styles.reviewValue}>{identity.phone || '-'}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Email</Text><Text style={styles.reviewValue}>{identity.email || '-'}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Store Name</Text><Text style={styles.reviewValue}>{store.storeName}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Category</Text><Text style={styles.reviewValue}>{store.category}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>City</Text><Text style={styles.reviewValue}>{store.city}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Address</Text><Text style={[styles.reviewValue, {flex: 2, textAlign: 'right'}]} numberOfLines={2}>{store.address || '-'}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Location Pin</Text><Text style={styles.reviewValue}>{store.latitude && store.longitude ? 'Captured' : 'Missing'}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Has Branches</Text><Text style={styles.reviewValue}>{hasBranches ? 'Yes' : 'No'}</Text></View>
+                            {hasBranches && <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Branches Added</Text><Text style={styles.reviewValue}>{branches.length}</Text></View>}
+                            
+                            <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#111827', marginTop: 16, marginBottom: 8, borderBottomWidth: 1, borderBottomColor: '#E5E7EB', paddingBottom: 4 }}>KYC & Financials</Text>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>PAN Number</Text><Text style={styles.reviewValue}>{kyc.panNumber || '-'}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Aadhar Number</Text><Text style={styles.reviewValue}>{kyc.aadharNumber || '-'}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>GSTIN</Text><Text style={styles.reviewValue}>{kyc.gstNumber || '-'}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>MSME Number</Text><Text style={styles.reviewValue}>{kyc.msmeNumber || '-'}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>FSSAI Number</Text><Text style={styles.reviewValue}>{kyc.fssaiNumber || '-'}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Bank Account</Text><Text style={styles.reviewValue}>{kyc.bankAccount ? `XXXX${kyc.bankAccount.slice(-4)}` : '-'}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>IFSC Code</Text><Text style={styles.reviewValue}>{kyc.ifsc || '-'}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Beneficiary Name</Text><Text style={styles.reviewValue}>{kyc.beneficiaryName || '-'}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Turnover Range</Text><Text style={styles.reviewValue}>{kyc.turnoverRange || '-'}</Text></View>
+
+                            <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#111827', marginTop: 16, marginBottom: 8, borderBottomWidth: 1, borderBottomColor: '#E5E7EB', paddingBottom: 4 }}>Document Verification</Text>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Store Photos</Text><Text style={{...styles.reviewValue, color: storePhotos.length > 0 ? '#10B981' : '#EF4444'}}>{storePhotos.length > 0 ? `${storePhotos.length} Uploaded` : 'Missing'}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>PAN Document</Text><Text style={{...styles.reviewValue, color: docFiles.pan ? '#10B981' : '#EF4444'}}>{docFiles.pan ? 'Uploaded' : 'Missing'}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Aadhar Documents</Text><Text style={{...styles.reviewValue, color: (docFiles.aadharFront && docFiles.aadharBack) ? '#10B981' : '#EF4444'}}>{docFiles.aadharFront && docFiles.aadharBack ? 'Front & Back Uploaded' : 'Missing'}</Text></View>
+                            {kyc.gstNumber && <View style={styles.reviewRow}><Text style={styles.reviewLabel}>GST Certificate</Text><Text style={{...styles.reviewValue, color: docFiles.gst ? '#10B981' : '#EF4444'}}>{docFiles.gst ? 'Uploaded' : 'Missing'}</Text></View>}
+                            {kyc.msmeNumber && <View style={styles.reviewRow}><Text style={styles.reviewLabel}>MSME Certificate</Text><Text style={{...styles.reviewValue, color: docFiles.msme ? '#10B981' : '#EF4444'}}>{docFiles.msme ? 'Uploaded' : 'Missing'}</Text></View>}
+                            {kyc.fssaiNumber && <View style={styles.reviewRow}><Text style={styles.reviewLabel}>FSSAI Certificate</Text><Text style={{...styles.reviewValue, color: docFiles.fssai ? '#10B981' : '#EF4444'}}>{docFiles.fssai ? 'Uploaded' : 'Missing'}</Text></View>}
+
+                            <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#111827', marginTop: 16, marginBottom: 8, borderBottomWidth: 1, borderBottomColor: '#E5E7EB', paddingBottom: 4 }}>Subscription & Payment</Text>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Category Tier</Text><Text style={styles.reviewValue}>{PREMIUM_CATEGORIES.includes(store.category) ? 'Premium' : 'Standard'}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Lifetime Access</Text><Text style={styles.reviewValue}>{PREMIUM_CATEGORIES.includes(store.category) ? '₹2999' : '₹999'}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Payment Status</Text><Text style={{...styles.reviewValue, color: '#10B981'}}>{paymentStatus === 'success' ? 'Successful' : 'Simulated'}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Transaction ID</Text><Text style={styles.reviewValue}>{paymentDetails?.paymentId || 'Verified'}</Text></View>
                         </View>
                     </>
                 )}
+                </View>
+
+                <View style={styles.footer}>
+                    <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+                        <Ionicons name="chevron-back" size={20} color="#6B7280" />
+                        <Text style={styles.backButtonText}>Back</Text>
+                    </TouchableOpacity>
+
+                    <Text style={styles.stepCounter}>Step {step} of 6</Text>
+
+                    <TouchableOpacity
+                        style={[styles.nextButton, loading && styles.buttonDisabled]}
+                        onPress={handleNext}
+                        disabled={loading}
+                    >
+                        {loading ? (
+                            <ActivityIndicator color="#FFFFFF" />
+                        ) : step === 7 ? (
+                            <>
+                                <Text style={styles.nextButtonText}>Submit</Text>
+                                <Ionicons name="checkmark" size={18} color="#FFFFFF" />
+                            </>
+                        ) : (
+                            <>
+                                <Text style={styles.nextButtonText}>Next</Text>
+                                <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
+                            </>
+                        )}
+                    </TouchableOpacity>
+                </View>
+
             </KeyboardAwareScrollView>
 
-            <View style={styles.footer}>
-                <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-                    <Ionicons name="chevron-back" size={20} color="#6B7280" />
-                    <Text style={styles.backButtonText}>Back</Text>
-                </TouchableOpacity>
-
-                <Text style={styles.stepCounter}>Step {step} of 6</Text>
-
-                <TouchableOpacity
-                    style={[styles.nextButton, loading && styles.buttonDisabled]}
-                    onPress={handleNext}
-                    disabled={loading}
-                >
-                    {loading ? (
-                        <ActivityIndicator color="#FFFFFF" />
-                    ) : step === 7 ? (
-                        <>
-                            <Text style={styles.nextButtonText}>Submit</Text>
-                            <Ionicons name="checkmark" size={18} color="#FFFFFF" />
-                        </>
-                    ) : (
-                        <>
-                            <Text style={styles.nextButtonText}>Next</Text>
-                            <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
-                        </>
-                    )}
-                </TouchableOpacity>
-            </View>
-
-        </SafeAreaView >
+        </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#F9FAFB' },
     header: { backgroundColor: '#FFFFFF', padding: 16, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-    stepContainer: { flexDirection: 'row', justifyContent: 'space-between' },
-    stepItem: { alignItems: 'center', flex: 1 },
-    stepCircle: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' },
-    stepCircleActive: { backgroundColor: Colors.primary },
-    stepCircleCompleted: { backgroundColor: '#10B981' },
-    stepNumber: { fontSize: 12, fontWeight: '600', color: '#9CA3AF' },
-    stepNumberActive: { color: '#FFFFFF' },
-    stepLabel: { fontSize: 10, color: '#9CA3AF', marginTop: 4 },
-    stepLabelActive: { color: Colors.primary, fontWeight: '600' },
+    stepContainer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 },
+    stepCircle: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
+    stepPill: { paddingHorizontal: 18, height: 36, borderRadius: 18, backgroundColor: Colors.primary, justifyContent: 'center', alignItems: 'center' },
+    stepPillText: { fontSize: 13, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.5 },
+    stepNumber: { fontSize: 14, fontWeight: '600', color: '#9CA3AF' },
     content: { flex: 1 },
-    contentContainer: { padding: 16, paddingBottom: 32 },
+    contentContainer: { flexGrow: 1, backgroundColor: '#F9FAFB' },
     card: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
     cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
     cardTitle: { fontSize: 16, fontWeight: '600', color: '#111827', marginLeft: 8, flex: 1 },

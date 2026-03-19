@@ -80,10 +80,13 @@ export default function OffersScreen() {
         }
 
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        navigation.navigate('ConfirmPreOrder', {
-            selectedCoupon: {
-                code: coupon.code,
-                discount: disc
+        navigation.navigate('Main' as any, {
+            screen: 'Cart',
+            params: {
+                selectedCoupon: {
+                    code: coupon.code,
+                    discount: disc
+                }
             }
         });
     };

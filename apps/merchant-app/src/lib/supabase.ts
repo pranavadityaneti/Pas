@@ -50,3 +50,14 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
         detectSessionInUrl: false,
     },
 });
+
+export async function setSessionFromTokens(accessToken: string, refreshToken: string) {
+    const { error } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+    });
+    if (error) {
+        console.error('Failed to set session from tokens:', error);
+        throw error;
+    }
+}

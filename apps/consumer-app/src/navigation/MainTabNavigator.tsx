@@ -3,7 +3,8 @@
 import React from 'react';
 import { View, Image } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Home, Store, Utensils, ShoppingBag } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import HomeFeedScreen from '../screens/HomeFeedScreen';
 import DiningScreen from '../screens/DiningScreen';
@@ -14,12 +15,14 @@ export type MainTabParamList = {
     Home: undefined;
     Pickup: undefined;
     Dining: undefined;
-    Cart: undefined;
+    Cart: { selectedCoupon?: { code: string; discount: number } } | undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
 export default function MainTabNavigator() {
+    const insets = useSafeAreaInsets();
+
     return (
         <Tab.Navigator
             screenOptions={({ route }) => ({
@@ -36,9 +39,9 @@ export default function MainTabNavigator() {
                             />
                         );
                     }
-                    if (route.name === 'Pickup') return <Store color={color} size={iconSize} fill={focused ? color : 'transparent'} />;
-                    if (route.name === 'Dining') return <Utensils color={color} size={iconSize} fill={focused ? color : 'transparent'} />;
-                    if (route.name === 'Cart') return <ShoppingBag color={color} size={iconSize} fill={focused ? color : 'transparent'} />;
+                    if (route.name === 'Pickup') return <Ionicons name={focused ? "storefront" : "storefront-outline"} color={color} size={iconSize} />;
+                    if (route.name === 'Dining') return <Ionicons name={focused ? "restaurant" : "restaurant-outline"} color={color} size={iconSize} />;
+                    if (route.name === 'Cart') return <Ionicons name={focused ? "cart" : "cart-outline"} color={color} size={iconSize} />;
                     return null;
                 },
                 tabBarLabel: route.name === 'Home' ? () => null : undefined,
@@ -48,8 +51,8 @@ export default function MainTabNavigator() {
                     backgroundColor: '#FFFFFF',
                     borderTopLeftRadius: 30,
                     borderTopRightRadius: 30,
-                    height: 85,
-                    paddingBottom: 25,
+                    height: 60 + Math.max(insets.bottom, 15),
+                    paddingBottom: Math.max(insets.bottom, 15),
                     paddingTop: 10,
                     shadowColor: '#000',
                     shadowOffset: { width: 0, height: -10 },

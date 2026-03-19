@@ -7,24 +7,51 @@ const SOUND_MAP: Record<string, any> = {
     'Siren': require('../../assets/sounds/siren.mp3'),
 };
 
+// Initialize audio mode for proper playback (even on silent)
+Audio.setAudioModeAsync({
+    allowsRecordingIOS: false,
+    staysActiveInBackground: false,
+    interruptionModeIOS: 1, // InterruptionModeIOS.DoNotMix
+    playsInSilentModeIOS: true,
+    shouldDuckAndroid: true,
+    interruptionModeAndroid: 1, // InterruptionModeAndroid.DoNotMix
+    playThroughEarpieceAndroid: false
+});
+
+let currentSound: Audio.Sound | null = null;
+
 export const playSound = async (soundId: string) => {
     try {
         const soundFile = SOUND_MAP[soundId];
-        if (!soundFile) {
-            console.warn(`Sound ${soundId} not found in map.`);
-            return;
+        if (!soundFile) return;
+
+        // Cleanup before creating new
+        if (currentSound) {
+            try {
+                await currentSound.stopAsync();
+                await currentSound.unloadAsync();
+            } catch (e) {
+                // Ignore cleanup errors
+            }
+            currentSound = null;
         }
 
-        const { sound } = await Audio.Sound.createAsync(soundFile);
-        await sound.playAsync();
+        const { sound } = await Audio.Sound.createAsync(
+            soundFile,
+            { shouldPlay: true }
+        );
+        currentSound = sound;
 
-        // Unload sound from memory when done
-        sound.setOnPlaybackStatusUpdate(async (status) => {
+        // Unload when finished
+        sound.setOnPlaybackStatusUpdate((status) => {
             if (status.isLoaded && status.didJustFinish) {
-                await sound.unloadAsync();
+                sound.unloadAsync().catch(() => {});
+                if (currentSound === sound) {
+                    currentSound = null;
+                }
             }
         });
     } catch (error) {
-        console.error('Error playing sound:', error);
+        console.error('[Audio] Error playing sound:', error);
     }
 };

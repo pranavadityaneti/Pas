@@ -17,6 +17,11 @@ export interface InventoryItem {
         mrp: number;
         category: string;
         brand?: string;
+        description?: string;
+        ean?: string;
+        uom?: string;
+        gstRate?: number;
+        createdByStoreId?: string;
     };
 }
 // ... interface definition ends ...
@@ -50,7 +55,12 @@ export function useInventory() {
                         image,
                         mrp,
                         category,
-                        brand
+                        brand,
+                        description,
+                        ean,
+                        uom,
+                        gstRate,
+                        createdByStoreId
                     )
                 `)
                 // CRITICAL: Ensure 'variant' and 'is_best_seller' are selected above.

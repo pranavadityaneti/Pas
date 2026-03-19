@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
     View, Text, TouchableOpacity, TextInput,
-    ScrollView, Platform
+    ScrollView, Platform, Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -36,6 +36,7 @@ export default function ConfirmPreOrderScreen() {
     const [couponDiscount, setCouponDiscount] = useState(0);
     const [showPayment, setShowPayment] = useState(false);
     const [paymentId, setPaymentId] = useState<string | null>(null);
+    const [razorpayOrderId, setRazorpayOrderId] = useState<string | undefined>();
 
     // Receive selected coupon from Offers screen
     useEffect(() => {
@@ -89,16 +90,57 @@ export default function ConfirmPreOrderScreen() {
     // Generate a random 4-digit OTP
     const [otp] = useState(() => Math.floor(1000 + Math.random() * 9000).toString());
 
-    const handlePayConfirm = () => {
+    const handlePayConfirm = async () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        setShowPayment(true);
+
+        try {
+            const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
+            const res = await fetch(`${apiUrl}/payments/create-order`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ amount: total, type: 'consumer', userId: 'preorder-user' })
+            });
+            const data = await res.json();
+            if (data.order_id) {
+                setRazorpayOrderId(data.order_id);
+                setShowPayment(true);
+            } else {
+                Alert.alert('Payment Error', 'Failed to initialize secure payment.');
+            }
+        } catch (err) {
+            console.error('Create order error:', err);
+            Alert.alert('Error', 'Could not connect to payment server.');
+        }
     };
 
-    const handlePaymentSuccess = (id: string) => {
+    const handlePaymentSuccess = async (id: string, orderId?: string, signature?: string) => {
         setPaymentId(id);
         setShowPayment(false);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setStep('confirmed');
+
+        try {
+            const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
+            const verifyRes = await fetch(`${apiUrl}/payments/verify`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    razorpay_order_id: orderId,
+                    razorpay_payment_id: id,
+                    razorpay_signature: signature
+                })
+            });
+            const verifyData = await verifyRes.json();
+            
+            if (!verifyData.success) {
+                Alert.alert('Security Error', 'Payment signature could not be verified. Please contact support.');
+                return;
+            }
+
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            setStep('confirmed');
+        } catch (error) {
+            console.error('Verify payment error:', error);
+            Alert.alert('Error', 'Could not verify payment.');
+        }
     };
 
     const handlePaymentError = (error: string) => {
@@ -460,6 +502,7 @@ export default function ConfirmPreOrderScreen() {
                 onError={handlePaymentError}
                 amount={total}
                 restaurantName={restaurantInfo.name}
+                orderId={razorpayOrderId}
             />
         </SafeAreaView>
     );

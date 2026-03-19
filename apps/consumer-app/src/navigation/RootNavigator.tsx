@@ -1,4 +1,4 @@
-// @lock — Do NOT overwrite. Approved layout as of Feb 27, 2026.
+// @lock — Do NOT overwrite. Approved layout as of Mar 12, 2026.
 // Root Navigator: Auth-aware stack navigator with session-based routing.
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
@@ -12,9 +12,15 @@ import LocationPickerScreen from '../screens/LocationPickerScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import AuthScreen from '../screens/AuthScreen';
 import ProfileScreen from '../screens/ProfileScreen';
-import CompleteProfileScreen from '../screens/CompleteProfileScreen';
-import ConfirmPreOrderScreen from '../screens/ConfirmPreOrderScreen';
+import ProfileSetupScreen from '../screens/ProfileSetupScreen';
+import CheckoutScreen from '../screens/CheckoutScreen';
+import DiningCheckoutScreen from '../screens/DiningCheckoutScreen';
 import OffersScreen from '../screens/OffersScreen';
+import SpotlightDetailScreen from '../screens/SpotlightDetailScreen';
+import CategoryDetailScreen from '../screens/CategoryDetailScreen';
+import YourOrdersScreen from '../screens/YourOrdersScreen';
+import CartScreen from '../screens/CartScreen';
+import FavoritesScreen from '../screens/FavoritesScreen';
 
 import { RootStackParamList } from './types';
 
@@ -24,78 +30,52 @@ export default function RootNavigator() {
     const [isLoading, setIsLoading] = useState(true);
     const [session, setSession] = useState<any>(null);
     const [hasSeenOnboarding, setHasSeenOnboarding] = useState(false);
-    const [isProfileIncomplete, setIsProfileIncomplete] = useState(false);
-    const [isCheckingProfile, setIsCheckingProfile] = useState(false);
+    const [pendingProfileSetup, setPendingProfileSetup] = useState(false);
 
     useEffect(() => {
-        setupApp();
+        let mounted = true;
 
-        // Listen for auth state changes
+        const loadLocalData = async () => {
+            try {
+                const seen = await SecureStore.getItemAsync('has_seen_onboarding');
+                if (mounted && seen === 'true') {
+                    setHasSeenOnboarding(true);
+                }
+            } catch (err) {
+                console.warn(err);
+            }
+        };
+
+        loadLocalData();
+
+        // Listen for auth state changes (automatically triggers INITIAL_SESSION event)
         const { data: authListener } = supabase.auth.onAuthStateChange(
             async (_event, session) => {
-                setSession(session);
+                if (!mounted) return;
+                
                 if (session) {
-                    await checkProfileStatus(session.user.id);
+                    const pending = await SecureStore.getItemAsync('pending_profile_setup');
+                    if (pending === 'true') {
+                        setPendingProfileSetup(true);
+                        // Removed: await SecureStore.deleteItemAsync('pending_profile_setup');
+                        // ProfileSetupScreen must remove it when completed or skipped to prevent a race condition
+                    } else {
+                        setPendingProfileSetup(false);
+                    }
                 } else {
-                    setIsProfileIncomplete(false);
+                    setPendingProfileSetup(false);
                 }
+                
+                setSession(session);
+                setIsLoading(false);
             }
         );
 
         return () => {
+            mounted = false;
             authListener.subscription.unsubscribe();
         };
     }, []);
-
-    const setupApp = async () => {
-        try {
-            const { data } = await supabase.auth.getSession();
-            setSession(data.session);
-
-            const seen = await SecureStore.getItemAsync('has_seen_onboarding');
-            if (seen === 'true') {
-                setHasSeenOnboarding(true);
-            }
-
-            if (data.session) {
-                await checkProfileStatus(data.session.user.id);
-            }
-        } catch (error) {
-            console.error(error);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const checkProfileStatus = async (userId: string) => {
-        try {
-            setIsCheckingProfile(true);
-            const { data, error } = await supabase
-                .from('profiles')
-                .select('full_name, date_of_birth')
-                .eq('id', userId)
-                .single();
-
-            if (error && error.code !== 'PGRST116') { // PGRST116 is "no rows returned"
-                if (error.code === '42703') {
-                    console.warn('Database schema out of sync: profiles.date_of_birth missing. Please run migrations.');
-                } else {
-                    console.error('Profile check error:', error);
-                }
-                return;
-            }
-
-            if (!data || !data.full_name || !data.date_of_birth) {
-                setIsProfileIncomplete(true);
-            } else {
-                setIsProfileIncomplete(false);
-            }
-        } catch (err) {
-            console.error('Catch error checkProfile:', err);
-        } finally {
-            setIsCheckingProfile(false);
-        }
-    };
 
     if (isLoading) {
         return (
@@ -115,20 +95,39 @@ export default function RootNavigator() {
                     <Stack.Screen name="Auth" component={AuthScreen} />
                     <Stack.Screen name="Main" component={MainTabNavigator} />
                     <Stack.Screen name="Storefront" component={StorefrontScreen} />
-                    <Stack.Screen name="ConfirmPreOrder" component={ConfirmPreOrderScreen} />
+                    <Stack.Screen name="Checkout" component={CheckoutScreen} />
+                    <Stack.Screen name="DiningCheckout" component={DiningCheckoutScreen} />
                     <Stack.Screen name="Offers" component={OffersScreen} />
-                    <Stack.Screen name="LocationPicker" component={LocationPickerScreen} options={{ presentation: 'fullScreenModal' }} />
-                </>
-            ) : isProfileIncomplete ? (
-                <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} />
-            ) : (
-                <>
-                    <Stack.Screen name="Main" component={MainTabNavigator} />
-                    <Stack.Screen name="Storefront" component={StorefrontScreen} />
-                    <Stack.Screen name="ConfirmPreOrder" component={ConfirmPreOrderScreen} />
-                    <Stack.Screen name="Offers" component={OffersScreen} />
+                    <Stack.Screen name="SpotlightDetail" component={SpotlightDetailScreen} />
+                    <Stack.Screen name="CategoryDetail" component={CategoryDetailScreen} />
+                    <Stack.Screen name="YourOrders" component={YourOrdersScreen} />
                     <Stack.Screen name="LocationPicker" component={LocationPickerScreen} options={{ presentation: 'fullScreenModal' }} />
                     <Stack.Screen name="Profile" component={ProfileScreen} />
+                    <Stack.Screen name="Favorites" component={FavoritesScreen} />
+                </>
+            ) : (
+                <>
+                    {pendingProfileSetup ? (
+                        <>
+                            <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
+                            <Stack.Screen name="Main" component={MainTabNavigator} />
+                        </>
+                    ) : (
+                        <>
+                            <Stack.Screen name="Main" component={MainTabNavigator} />
+                            <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
+                        </>
+                    )}
+                    <Stack.Screen name="Storefront" component={StorefrontScreen} />
+                    <Stack.Screen name="Checkout" component={CheckoutScreen} />
+                    <Stack.Screen name="DiningCheckout" component={DiningCheckoutScreen} />
+                    <Stack.Screen name="Offers" component={OffersScreen} />
+                    <Stack.Screen name="SpotlightDetail" component={SpotlightDetailScreen} />
+                    <Stack.Screen name="CategoryDetail" component={CategoryDetailScreen} />
+                    <Stack.Screen name="YourOrders" component={YourOrdersScreen} />
+                    <Stack.Screen name="LocationPicker" component={LocationPickerScreen} options={{ presentation: 'fullScreenModal' }} />
+                    <Stack.Screen name="Profile" component={ProfileScreen} />
+                    <Stack.Screen name="Favorites" component={FavoritesScreen} />
                 </>
             )}
         </Stack.Navigator>

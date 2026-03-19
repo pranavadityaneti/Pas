@@ -8,7 +8,9 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useInventory } from '../../src/hooks/useInventory';
 import InventoryCard from '../../src/components/InventoryCard';
 import FilterModal, { FilterState } from '../../src/components/FilterModal';
+import AddCustomProductModal from '../../src/components/AddCustomProductModal';
 import { Colors } from '../../constants/Colors';
+import { InventoryItem } from '../../src/hooks/useInventory';
 
 const DEFAULT_FILTERS: FilterState = {
     sortBy: 'price_low',
@@ -23,7 +25,10 @@ const DEFAULT_FILTERS: FilterState = {
 
 export default function InventoryScreen() {
     const router = useRouter();
-    const { inventory, loading, refreshing, refetch, updateItem, deleteItem, toggleStatus } = useInventory();
+    const { inventory, loading, refreshing, refetch, updateItem, deleteItem, toggleStatus, storeId } = useInventory();
+
+    const [itemToEdit, setItemToEdit] = useState<InventoryItem | null>(null);
+    const [editModalVisible, setEditModalVisible] = useState(false);
 
     // Refetch on Focus
     useFocusEffect(
@@ -221,7 +226,7 @@ export default function InventoryScreen() {
                         }}
                     >
                         <MaterialCommunityIcons name="star-outline" size={16} color={appliedFilters?.isBestSeller ? "#fff" : "#000"} />
-                        <Text style={[styles.chipText, appliedFilters?.isBestSeller && { color: '#fff' }]}>Best Sellers</Text>
+                        <Text style={[styles.chipText, appliedFilters?.isBestSeller && { color: '#fff' }]}>Hero Picks</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -253,6 +258,10 @@ export default function InventoryScreen() {
                         onUpdate={updateItem}
                         onDelete={deleteItem}
                         onToggleStatus={toggleStatus}
+                        onEdit={(item) => {
+                            setItemToEdit(item);
+                            setEditModalVisible(true);
+                        }}
                     />
                 )}
                 keyExtractor={item => item.id}
@@ -276,6 +285,23 @@ export default function InventoryScreen() {
                 initialFilters={appliedFilters || undefined}
                 initialTab={filterTab}
             />
+
+            {storeId && (
+                <AddCustomProductModal
+                    visible={editModalVisible}
+                    onClose={() => {
+                        setEditModalVisible(false);
+                        setItemToEdit(null);
+                    }}
+                    onSuccess={() => {
+                        setEditModalVisible(false);
+                        setItemToEdit(null);
+                        refetch();
+                    }}
+                    storeId={storeId}
+                    itemToEdit={itemToEdit}
+                />
+            )}
         </SafeAreaView>
     );
 }

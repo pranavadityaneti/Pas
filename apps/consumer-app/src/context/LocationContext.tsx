@@ -50,7 +50,7 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
         setActiveLocation(location);
     };
 
-    const refreshLocation = async () => {
+    const refreshLocation = async (passedUser?: any) => {
         if (isManualSelection) {
             console.log("Skipping auto-refresh due to manual selection");
             return;
@@ -69,7 +69,11 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
             setIsLoadingLocation(true);
 
             // 1. Get User Session
-            const { data: { user } } = await supabase.auth.getUser();
+            let user = passedUser;
+            if (user === undefined) {
+                const { data } = await supabase.auth.getUser();
+                user = data.user;
+            }
 
             // 2. Request GPS Permissions
             const { status } = await Location.requestForegroundPermissionsAsync();
@@ -79,7 +83,19 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
             }
 
             // 3. Ping Live GPS
-            const locationConfig = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            // Try last known first for snappiness
+            const lastKnown = await Location.getLastKnownPositionAsync({});
+            if (lastKnown && !activeLocation) {
+                // If we don't have a location yet, use the last known one temporarily
+                // This prevents the "not found" state while waiting for fresh GPS
+                const lastLat = lastKnown.coords.latitude;
+                const lastLon = lastKnown.coords.longitude;
+                // (Don't return, keep going to get fresh High accuracy)
+            }
+
+            const locationConfig = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.High
+            });
             const currentLat = locationConfig.coords.latitude;
             const currentLon = locationConfig.coords.longitude;
 
@@ -120,29 +136,39 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
             }
 
             // 5. Fallback: Reverse Geocode the Live GPS if no saved addresses are nearby or user is logged out
-            const geocodeCache = await Location.reverseGeocodeAsync({ latitude: currentLat, longitude: currentLon });
-            if (geocodeCache.length > 0) {
-                const place = geocodeCache[0];
-                let fallbackAddress = '';
+            try {
+                const geocodeCache = await Location.reverseGeocodeAsync({ latitude: currentLat, longitude: currentLon });
+                if (geocodeCache.length > 0) {
+                    const place = geocodeCache[0];
+                    let fallbackAddress = '';
 
-                if (place.street) {
-                    fallbackAddress = `${place.street}, ${place.city || place.subregion}`;
-                } else if (place.name) {
-                    fallbackAddress = `${place.name}, ${place.city || place.subregion}`;
-                } else {
-                    fallbackAddress = `${place.city || place.subregion}, ${place.region}`;
+                    if (place.street) {
+                        fallbackAddress = `${place.street}, ${place.city || place.subregion}`;
+                    } else if (place.name) {
+                        fallbackAddress = `${place.name}, ${place.city || place.subregion}`;
+                    } else {
+                        fallbackAddress = `${place.city || place.subregion}, ${place.region}`;
+                    }
+
+                    setActiveLocation({
+                        type: 'Current Location',
+                        address: fallbackAddress,
+                        latitude: currentLat,
+                        longitude: currentLon
+                    });
                 }
-
+            } catch (geoError) {
+                console.warn("Geocoding failed, using generic fallback:", geoError);
                 setActiveLocation({
                     type: 'Current Location',
-                    address: fallbackAddress,
+                    address: 'GPS coordinates',
                     latitude: currentLat,
                     longitude: currentLon
                 });
             }
 
         } catch (error) {
-            console.error("Smart routing error:", error);
+            console.warn("Smart routing error:", error);
         } finally {
             isRefreshing.current = false;
             setIsLoadingLocation(false);
@@ -151,14 +177,12 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
 
     // Auto-run on mount
     useEffect(() => {
-        refreshLocation();
-
         // Listen for Auth changes to reload location logic 
         // (e.g. they log in, now we should check their saved addresses!)
-        const { data: authListener } = supabase.auth.onAuthStateChange(() => {
+        const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
             // Reset manual selection on login/logout to allow smart logic to re-evaluate
             setIsManualSelection(false);
-            refreshLocation();
+            refreshLocation(session?.user || null);
         });
 
         return () => {

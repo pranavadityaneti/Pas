@@ -4,6 +4,7 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, TextInput, S
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import uuid from 'react-native-uuid';
 import { useUser } from '../../../src/context/UserContext'; // Or useStore if linked strictly to store
 import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
 import { supabase } from '../../../src/lib/supabase';
@@ -63,8 +64,8 @@ export default function BranchesScreen() {
 
     const handleSave = async () => {
         if (!user?.id) return;
-        if (!form.name.trim()) {
-            Alert.alert('Error', 'Branch Name is required');
+        if (!form.name.trim() || !form.address.trim() || !form.manager.trim() || !form.phone.trim()) {
+            Alert.alert('Error', 'All fields are mandatory. Please fill in all details.');
             return;
         }
 
@@ -98,7 +99,10 @@ export default function BranchesScreen() {
                 // Insert
                 const { data: newBranch, error: insertError } = await supabase
                     .from('merchant_branches')
-                    .insert(payload)
+                    .insert({
+                        ...payload,
+                        id: uuid.v4() // Explicitly generate ID to avoid null constraint error
+                    })
                     .select()
                     .single();
 
@@ -185,9 +189,28 @@ export default function BranchesScreen() {
                             </View>
                             <View style={styles.cardInfo}>
                                 <Text style={styles.branchName}>{item.branch_name}</Text>
-                                <Text style={styles.branchAddress} numberOfLines={1}>
-                                    {item.address || 'No address provided'}
-                                </Text>
+                                <View style={styles.branchDetailRow}>
+                                    <Ionicons name="location-outline" size={14} color="#6B7280" />
+                                    <Text style={styles.branchAddress} numberOfLines={1}>
+                                        {item.address || 'No address provided'}
+                                    </Text>
+                                </View>
+                                {(item.manager_name || item.phone) && (
+                                    <View style={styles.managerInfoRow}>
+                                        {item.manager_name && (
+                                            <View style={styles.managerDetail}>
+                                                <Ionicons name="person-outline" size={14} color="#6B7280" />
+                                                <Text style={styles.managerText}>{item.manager_name}</Text>
+                                            </View>
+                                        )}
+                                        {item.phone && (
+                                            <View style={styles.managerDetail}>
+                                                <Ionicons name="call-outline" size={14} color="#6B7280" />
+                                                <Text style={styles.managerText}>{item.phone}</Text>
+                                            </View>
+                                        )}
+                                    </View>
+                                )}
                             </View>
                         </View>
 
@@ -221,7 +244,7 @@ export default function BranchesScreen() {
                     </View>
 
                     <View style={styles.inputGroup}>
-                        <Text style={styles.label}>Address</Text>
+                        <Text style={styles.label}>Address <Text style={{ color: '#EF4444' }}>*</Text></Text>
                         <TextInput
                             style={[styles.input, { height: 80 }]}
                             placeholder="Full address"
@@ -233,7 +256,7 @@ export default function BranchesScreen() {
 
                     <View style={styles.row}>
                         <View style={[styles.inputGroup, { flex: 1 }]}>
-                            <Text style={styles.label}>Manager Name</Text>
+                            <Text style={styles.label}>Manager Name <Text style={{ color: '#EF4444' }}>*</Text></Text>
                             <TextInput
                                 style={styles.input}
                                 placeholder="Store Manager"
@@ -243,7 +266,7 @@ export default function BranchesScreen() {
                         </View>
                         <View style={{ width: 12 }} />
                         <View style={[styles.inputGroup, { flex: 1 }]}>
-                            <Text style={styles.label}>Phone</Text>
+                            <Text style={styles.label}>Phone <Text style={{ color: '#EF4444' }}>*</Text></Text>
                             <TextInput
                                 style={styles.input}
                                 placeholder="Contact Number"
@@ -286,7 +309,11 @@ const styles = StyleSheet.create({
     iconBox: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#F0FDF4', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
     cardInfo: { flex: 1 },
     branchName: { fontSize: 16, fontWeight: 'bold', color: '#111827', marginBottom: 4 },
-    branchAddress: { fontSize: 13, color: '#6B7280' },
+    branchDetailRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    branchAddress: { fontSize: 13, color: '#6B7280', flex: 1 },
+    managerInfoRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 12 },
+    managerDetail: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    managerText: { fontSize: 12, color: '#6B7280' },
 
     cardActions: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#F3F4F6', paddingTop: 12 },
     actionBtn: { flex: 1, alignItems: 'center', paddingVertical: 4 },

@@ -1,69 +1,258 @@
-// @lock — Do NOT overwrite. Approved layout as of Feb 27, 2026.
-// Auth Screen: Phone OTP authentication flow.
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ActivityIndicator, Alert, SafeAreaView, ScrollView, Image } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { supabase } from '../lib/supabase';
-import { Mail, Lock, Eye, EyeOff } from 'lucide-react-native';
+// @lock — Do NOT overwrite. Approved layout as of Mar 12, 2026.
+// Auth Screen: Bottom-sheet auth with Phone OTP (Wati) + Email fallback.
+// Replaces previous full-page email/password auth.
 
+import React, { useState, useRef, useEffect } from 'react';
+import {
+    View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView,
+    Platform, ActivityIndicator, Alert, Image, Dimensions, Animated,
+    Modal
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import * as SecureStore from 'expo-secure-store';
+import { supabase, setSessionFromTokens } from '../lib/supabase';
+import { Phone, Mail, Lock, Eye, EyeOff, X, ArrowLeft, MessageCircle } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+// Backend API URL — using environment variables with local fallback
+const getApiUrl = () => {
+    // In development, the API runs locally (can be overridden via EXPO_PUBLIC_API_URL in .env)
+    // In production, it should be the deployed server URL
+    if (process.env.EXPO_PUBLIC_API_URL) {
+        return process.env.EXPO_PUBLIC_API_URL;
+    }
+    return __DEV__
+        ? 'http://192.168.29.171:3000' // Fallback to current local device IP
+        : 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
+};
+
+// Helper to prevent infinite fetch hangs on physical devices
+const fetchWithTimeout = async (resource: RequestInfo | string, options: RequestInit & { timeout?: number } = {}) => {
+    const { timeout = 15000, ...fetchOptions } = options;
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+        const response = await fetch(resource, {
+            ...fetchOptions,
+            signal: controller.signal as any
+        });
+        clearTimeout(id);
+        return response;
+    } catch (error: any) {
+        clearTimeout(id);
+        if (error.name === 'AbortError') {
+            throw new Error('Network request timed out. Please check your connection.');
+        }
+        throw error;
+    }
+};
+
+type AuthMode = 'choose' | 'phone-input' | 'phone-otp' | 'email-login' | 'email-signup';
 
 export default function AuthScreen() {
     const navigation = useNavigation<any>();
 
-    // UI State
-    const [isLogin, setIsLogin] = useState(true);
+    // Auth mode state
+    const [mode, setMode] = useState<AuthMode>('choose');
     const [isLoading, setIsLoading] = useState(false);
-    const [showPassword, setShowPassword] = useState(false);
 
-    // Form State
+    // Phone OTP state
+    const [phoneNumber, setPhoneNumber] = useState('');
+    const [otpValues, setOtpValues] = useState(['', '', '', '', '', '']);
+    const [resendTimer, setResendTimer] = useState(0);
+    const otpRefs = useRef<(TextInput | null)[]>([]);
+
+    // Email state
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
 
-    const triggerHaptic = (style = Haptics.ImpactFeedbackStyle.Medium) => {
+    // Bottom sheet animation
+    const slideAnim = useRef(new Animated.Value(0)).current;
+    const [sheetVisible, setSheetVisible] = useState(true);
+
+    useEffect(() => {
+        if (sheetVisible) {
+            Animated.spring(slideAnim, {
+                toValue: 1,
+                useNativeDriver: true,
+                tension: 65,
+                friction: 11
+            }).start();
+        }
+    }, [sheetVisible]);
+
+    // Resend timer countdown
+    useEffect(() => {
+        if (resendTimer > 0) {
+            const timer = setTimeout(() => setResendTimer(prev => prev - 1), 1000);
+            return () => clearTimeout(timer);
+        }
+    }, [resendTimer]);
+
+    const haptic = (style = Haptics.ImpactFeedbackStyle.Medium) => {
         Haptics.impactAsync(style);
     };
 
-    const handleAuth = async () => {
+    // ==================== PHONE OTP FLOW ====================
+
+    const handleSendOtp = async () => {
+        const cleaned = phoneNumber.replace(/\s/g, '');
+        if (cleaned.length !== 10) {
+            haptic();
+            Alert.alert('Invalid Number', 'Please enter a valid 10-digit phone number.');
+            return;
+        }
+
+        setIsLoading(true);
+        haptic(Haptics.ImpactFeedbackStyle.Light);
+
+        try {
+            const response = await fetchWithTimeout(`${getApiUrl()}/auth/send-otp`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: `91${cleaned}` })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to send OTP');
+            }
+
+            setMode('phone-otp');
+            setResendTimer(60);
+            setOtpValues(['', '', '', '', '', '']);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } catch (error: any) {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            Alert.alert('Error', error.message || 'Failed to send OTP. Please try again.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleVerifyOtp = async () => {
+        const otp = otpValues.join('');
+        if (otp.length !== 6) {
+            haptic();
+            Alert.alert('Invalid OTP', 'Please enter the complete 6-digit OTP.');
+            return;
+        }
+
+        const cleaned = phoneNumber.replace(/\s/g, '');
+        setIsLoading(true);
+        haptic(Haptics.ImpactFeedbackStyle.Light);
+
+        try {
+            console.log(`Sending verify-otp to: ${getApiUrl()}/auth/verify-otp`);
+            const response = await fetchWithTimeout(`${getApiUrl()}/auth/verify-otp`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: `91${cleaned}`, otp })
+            });
+            console.log('Received response from API');
+
+            const data = await response.json();
+            console.log('Parsed JSON data:', typeof data);
+
+            if (!response.ok) {
+                console.log('Response not OK, throwing error');
+                throw new Error(data.error || 'OTP verification failed');
+            }
+
+            console.log(`Setting async storage for new user: ${data.isNewUser}`);
+            // Navigate based on whether user is new
+            // MUST be set BEFORE session is created to prevent RootNavigator race condition
+            if (data.isNewUser) {
+                await SecureStore.setItemAsync('pending_profile_setup', 'true');
+            }
+
+            console.log(`Setting Supabase Session using tokens...`);
+            // Set Supabase session from server-returned tokens
+            await setSessionFromTokens(
+                data.session.access_token,
+                data.session.refresh_token
+            );
+            console.log(`Supabase Session Set successfully`);
+
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            console.log(`Finished handleVerifyOtp`);
+
+            // RootNavigator will handle the routing via the session listener
+            // If existing user, RootNavigator will auto-route to Main via session change
+        } catch (error: any) {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            Alert.alert('Verification Failed', error.message || 'Incorrect OTP. Please try again.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleOtpChange = (text: string, index: number) => {
+        const newValues = [...otpValues];
+        newValues[index] = text;
+        setOtpValues(newValues);
+
+        // Auto-advance to next field
+        if (text && index < 5) {
+            otpRefs.current[index + 1]?.focus();
+        }
+    };
+
+    const handleOtpKeyPress = (e: any, index: number) => {
+        if (e.nativeEvent.key === 'Backspace' && !otpValues[index] && index > 0) {
+            otpRefs.current[index - 1]?.focus();
+        }
+    };
+
+    const handleResendOtp = () => {
+        if (resendTimer > 0) return;
+        handleSendOtp();
+    };
+
+    // ==================== EMAIL AUTH FLOW ====================
+
+    const handleEmailAuth = async () => {
         if (!email || !password) {
-            triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+            haptic();
             Alert.alert('Required', 'Please fill in all fields');
             return;
         }
 
         setIsLoading(true);
-        triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+        haptic(Haptics.ImpactFeedbackStyle.Light);
 
         try {
-            if (isLogin) {
-                // LOGIN FLOW
-                const { error } = await supabase.auth.signInWithPassword({
-                    email,
-                    password,
-                });
-
+            if (mode === 'email-login') {
+                const { error } = await supabase.auth.signInWithPassword({ email, password });
                 if (error) throw error;
-
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             } else {
-                // SIGN UP FLOW
-                const { error, data } = await supabase.auth.signUp({
-                    email,
-                    password,
-                });
-
+                const { error, data } = await supabase.auth.signUp({ email, password });
                 if (error) throw error;
-
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                if (data.session) {
-                    Alert.alert('Success', 'Account created successfully!');
+
+                // Check if user actually requires email confirmation
+                if (data.user?.identities?.length === 0) {
+                    Alert.alert('Exists', 'An account with this email already exists. Please log in.');
+                    setMode('email-login');
+                } else if (!data.session) {
+                    Alert.alert('Success', 'Account created! Please check your email to verify your account.');
+                    // Don't set pending_profile_setup here if they have to verify email first
                 } else {
-                    Alert.alert('Verification Required', 'Please check your email to verify your account.');
+                    // Set flag BEFORE signup completes since session is active
+                    await SecureStore.setItemAsync('pending_profile_setup', 'true');
                 }
+                // If data.session exists, the RootNavigator will naturally route to ProfileSetup 
+                // because the flag was already set in AsyncStorage.
             }
         } catch (error: any) {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            Alert.alert('Authentication Error', error.message || 'Something went wrong');
+            Alert.alert('Error', error.message || 'Authentication failed');
         } finally {
             setIsLoading(false);
         }
@@ -71,15 +260,14 @@ export default function AuthScreen() {
 
     const handleForgotPassword = async () => {
         if (!email) {
-            Alert.alert('Email Required', 'Please enter your email address to reset your password.');
+            Alert.alert('Email Required', 'Please enter your email address.');
             return;
         }
-
         setIsLoading(true);
         try {
             const { error } = await supabase.auth.resetPasswordForEmail(email);
             if (error) throw error;
-            Alert.alert('Reset Email Sent', 'If an account exists for this email, you will receive a password reset link.');
+            Alert.alert('Reset Email Sent', 'Check your email for a password reset link.');
         } catch (error: any) {
             Alert.alert('Error', error.message);
         } finally {
@@ -87,103 +275,320 @@ export default function AuthScreen() {
         }
     };
 
-    return (
-        <SafeAreaView className="flex-1 bg-white">
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                className="flex-1 px-8"
+    const goBack = () => {
+        haptic(Haptics.ImpactFeedbackStyle.Light);
+        if (mode === 'phone-otp') setMode('phone-input');
+        else if (mode === 'phone-input' || mode === 'email-login' || mode === 'email-signup') setMode('choose');
+    };
+
+    // ==================== RENDER HELPERS ====================
+
+    const renderChooseMode = () => (
+        <View>
+            <View className="items-center mb-2">
+                <View className="w-12 h-12 rounded-2xl bg-black items-center justify-center mb-4">
+                    <Text className="text-white text-xl">✦</Text>
+                </View>
+                <Text className="text-2xl font-bold text-[#B52725] mb-1">Get Started</Text>
+                <Text className="text-gray-400 text-center text-sm font-medium leading-relaxed px-4">
+                    Order from your favourite local stores,{'\n'}delivered to your doorstep.
+                </Text>
+            </View>
+
+            {/* Continue with Phone — Primary */}
+            <TouchableOpacity
+                onPress={() => { haptic(); setMode('phone-input'); }}
+                className="bg-[#B52725] h-14 rounded-2xl items-center justify-center flex-row mt-6"
             >
-                <ScrollView
-                    contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}
-                    showsVerticalScrollIndicator={false}
-                    bounces={false}
+                <Phone size={18} color="#FFF" />
+                <Text className="text-white font-bold text-[15px] ml-3">Continue with Phone</Text>
+            </TouchableOpacity>
+
+            {/* Continue with Email — Secondary */}
+            <TouchableOpacity
+                onPress={() => { haptic(); setMode('email-login'); }}
+                className="bg-gray-100 h-14 rounded-2xl items-center justify-center flex-row mt-3"
+            >
+                <Mail size={18} color="#374151" />
+                <Text className="text-gray-700 font-bold text-[15px] ml-3">Continue with Email</Text>
+            </TouchableOpacity>
+
+            {/* Guest Access */}
+            <TouchableOpacity
+                className="items-center mt-6 mb-2"
+                onPress={() => { haptic(Haptics.ImpactFeedbackStyle.Light); navigation.replace('Main' as any); }}
+            >
+                <Text className="text-gray-400 font-bold text-sm">Continue As Guest</Text>
+            </TouchableOpacity>
+        </View>
+    );
+
+    const renderPhoneInput = () => (
+        <View>
+            <TouchableOpacity onPress={goBack} className="mb-4 flex-row items-center">
+                <ArrowLeft size={18} color="#B52725" />
+                <Text className="ml-2 font-bold text-gray-600 text-sm">Back</Text>
+            </TouchableOpacity>
+
+            <Text className="text-xl font-bold text-[#B52725] mb-1">Enter Phone Number</Text>
+            <Text className="text-gray-400 text-sm font-medium mb-6">
+                We'll send a verification code via WhatsApp
+            </Text>
+
+            {/* Phone Input */}
+            <View className="flex-row items-center border border-gray-200 rounded-2xl px-4 h-14 bg-gray-50">
+                <Text className="text-base font-bold text-gray-500 mr-2">+91</Text>
+                <View className="w-px h-6 bg-gray-200 mr-3" />
+                <TextInput
+                    className="flex-1 font-bold text-black text-base"
+                    placeholder="Phone Number"
+                    placeholderTextColor="#9CA3AF"
+                    keyboardType="phone-pad"
+                    maxLength={10}
+                    value={phoneNumber}
+                    onChangeText={setPhoneNumber}
+                    autoFocus
+                    style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
+                />
+            </View>
+
+            {/* WhatsApp indicator */}
+            <View className="flex-row items-center mt-3 ml-1">
+                <MessageCircle size={14} color="#25D366" />
+                <Text className="text-xs text-gray-400 font-medium ml-1.5">OTP will be sent via WhatsApp</Text>
+            </View>
+
+            <TouchableOpacity
+                onPress={handleSendOtp}
+                disabled={isLoading || phoneNumber.replace(/\s/g, '').length !== 10}
+                className={`mt-6 h-14 rounded-2xl items-center justify-center ${
+                    isLoading || phoneNumber.replace(/\s/g, '').length !== 10
+                        ? 'bg-gray-300'
+                        : 'bg-[#B52725]'
+                }`}
+            >
+                {isLoading ? (
+                    <ActivityIndicator color="white" />
+                ) : (
+                    <Text className="text-white font-bold text-[15px]">Send OTP</Text>
+                )}
+            </TouchableOpacity>
+        </View>
+    );
+
+    const renderPhoneOtp = () => (
+        <View>
+            <TouchableOpacity onPress={goBack} className="mb-4 flex-row items-center">
+                <ArrowLeft size={18} color="#B52725" />
+                <Text className="ml-2 font-bold text-gray-600 text-sm">Back</Text>
+            </TouchableOpacity>
+
+            <Text className="text-xl font-bold text-[#B52725] mb-1">Verify OTP</Text>
+            <Text className="text-gray-400 text-sm font-medium mb-6">
+                Enter the 6-digit code sent to{' '}
+                <Text className="text-[#B52725] font-bold">+91 {phoneNumber}</Text>
+            </Text>
+
+            {/* OTP Input Boxes */}
+            <View className="flex-row justify-between mb-6">
+                {otpValues.map((val, i) => (
+                    <TextInput
+                        key={i}
+                        ref={ref => { otpRefs.current[i] = ref; }}
+                        className={`w-12 h-14 rounded-2xl text-center text-xl font-bold border-2 ${
+                            val ? 'border-[#B52725] bg-gray-50' : 'border-gray-200 bg-gray-50'
+                        }`}
+                        maxLength={1}
+                        keyboardType="number-pad"
+                        value={val}
+                        onChangeText={(text) => handleOtpChange(text, i)}
+                        onKeyPress={(e) => handleOtpKeyPress(e, i)}
+                        autoFocus={i === 0}
+                        style={{ color: '#B52725' }}
+                    />
+                ))}
+            </View>
+
+            {/* Resend Timer */}
+            <View className="items-center mb-6">
+                {resendTimer > 0 ? (
+                    <Text className="text-gray-400 font-medium text-sm">
+                        Resend in <Text className="font-bold text-[#B52725]">{resendTimer}s</Text>
+                    </Text>
+                ) : (
+                    <TouchableOpacity onPress={handleResendOtp}>
+                        <Text className="text-[#B52725] font-bold text-sm underline">Resend OTP</Text>
+                    </TouchableOpacity>
+                )}
+            </View>
+
+            <TouchableOpacity
+                onPress={handleVerifyOtp}
+                disabled={isLoading || otpValues.join('').length !== 6}
+                className={`h-14 rounded-2xl items-center justify-center ${
+                    isLoading || otpValues.join('').length !== 6
+                        ? 'bg-gray-300'
+                        : 'bg-[#B52725]'
+                }`}
+            >
+                {isLoading ? (
+                    <ActivityIndicator color="white" />
+                ) : (
+                    <Text className="text-white font-bold text-[15px]">Verify & Continue</Text>
+                )}
+            </TouchableOpacity>
+        </View>
+    );
+
+    const renderEmailAuth = () => (
+        <View>
+            <TouchableOpacity onPress={goBack} className="mb-4 flex-row items-center">
+                <ArrowLeft size={18} color="#B52725" />
+                <Text className="ml-2 font-bold text-gray-600 text-sm">Back</Text>
+            </TouchableOpacity>
+
+            <Text className="text-xl font-bold text-[#B52725] mb-1">
+                {mode === 'email-login' ? 'Welcome Back' : 'Create Account'}
+            </Text>
+            <Text className="text-gray-400 text-sm font-medium mb-6">
+                {mode === 'email-login' ? 'Sign in with your email & password' : 'Sign up with your email'}
+            </Text>
+
+            {/* Email Field */}
+            <View className="flex-row items-center border border-gray-200 rounded-2xl px-4 h-14 bg-gray-50">
+                <Mail color="#9CA3AF" size={18} />
+                <TextInput
+                    className="flex-1 ml-3 font-bold text-black text-base"
+                    placeholder="Email"
+                    placeholderTextColor="#9CA3AF"
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    value={email}
+                    onChangeText={setEmail}
+                    style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
+                />
+            </View>
+
+            {/* Password Field */}
+            <View className="flex-row items-center border border-gray-200 rounded-2xl px-4 h-14 bg-gray-50 mt-3">
+                <Lock color="#9CA3AF" size={18} />
+                <TextInput
+                    className="flex-1 ml-3 font-bold text-black text-base"
+                    placeholder="Password"
+                    placeholderTextColor="#9CA3AF"
+                    secureTextEntry={!showPassword}
+                    value={password}
+                    onChangeText={setPassword}
+                    style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
+                />
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} className="p-2 -mr-2">
+                    {showPassword ? <EyeOff color="#9CA3AF" size={18} /> : <Eye color="#9CA3AF" size={18} />}
+                </TouchableOpacity>
+            </View>
+
+            {/* Forgot Password (Login only) */}
+            {mode === 'email-login' && (
+                <TouchableOpacity className="self-end mt-3" onPress={handleForgotPassword}>
+                    <Text className="font-bold text-gray-500 text-xs underline">Forgot Password?</Text>
+                </TouchableOpacity>
+            )}
+
+            {/* Submit Button */}
+            <TouchableOpacity
+                onPress={handleEmailAuth}
+                disabled={isLoading}
+                className={`mt-6 h-14 rounded-2xl items-center justify-center ${
+                    isLoading ? 'bg-gray-300' : 'bg-[#B52725]'
+                }`}
+            >
+                {isLoading ? (
+                    <ActivityIndicator color="white" />
+                ) : (
+                    <Text className="text-white font-bold text-[15px]">
+                        {mode === 'email-login' ? 'Login' : 'Sign Up'}
+                    </Text>
+                )}
+            </TouchableOpacity>
+
+            {/* Toggle Login/Signup */}
+            <View className="flex-row justify-center mt-5">
+                <Text className="text-gray-400 font-medium text-sm">
+                    {mode === 'email-login' ? 'Need an account? ' : 'Already have an account? '}
+                </Text>
+                <TouchableOpacity onPress={() => setMode(mode === 'email-login' ? 'email-signup' : 'email-login')}>
+                    <Text className="text-[#B52725] font-bold text-sm underline">
+                        {mode === 'email-login' ? 'Sign up' : 'Login'}
+                    </Text>
+                </TouchableOpacity>
+            </View>
+        </View>
+    );
+
+    const getCurrentContent = () => {
+        switch (mode) {
+            case 'choose': return renderChooseMode();
+            case 'phone-input': return renderPhoneInput();
+            case 'phone-otp': return renderPhoneOtp();
+            case 'email-login':
+            case 'email-signup': return renderEmailAuth();
+        }
+    };
+
+    const sheetTranslateY = slideAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [400, 0]
+    });
+
+    return (
+        <View className="flex-1 bg-black">
+            {/* Absolute Background Elements */}
+            <Image
+                source={require('../../assets/images/auth-bg.png')}
+                style={{ position: 'absolute', width: '100%', height: '100%' }}
+                resizeMode="cover"
+            />
+            {/* Dark Overlay for readability */}
+            <View style={{ position: 'absolute', width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.6)' }} />
+
+            {/* Primary Interactive Layer */}
+            <KeyboardAvoidingView
+                behavior="padding"
+                className="flex-1"
+            >
+                {/* Logo Section - Flex-1 pushes the bottom sheet to the very bottom naturally */}
+                <View className="flex-1 items-center justify-center">
+                    <Image
+                        source={require('../../assets/brand/logo_horizontal.png')}
+                        style={{ width: 220, height: 100, tintColor: 'white' }}
+                        resizeMode="contain"
+                    />
+                </View>
+
+                {/* Bottom Sheet Modal - Standard Document Flow */}
+                <Animated.View
+                    style={{
+                        transform: [{ translateY: sheetTranslateY }],
+                    }}
                 >
-                    {/* Brand Logo Header */}
-                    <View className="items-center mb-10">
-                        <Image
-                            source={require('../../assets/brand/logo_horizontal.png')}
-                            style={{ width: 180, height: 80 }}
-                            resizeMode="contain"
-                        />
-                        <Text className="text-gray-500 mt-2 text-center font-medium">
-                            {isLogin ? 'Welcome back! Please enter your details.' : 'Create an account to start ordering.'}
-                        </Text>
-                    </View>
-
-                    {/* Form Fields */}
-                    <View className="space-y-4">
-                        <View className="flex-row items-center border border-gray-200 rounded-full px-4 h-14 bg-gray-50">
-                            <Mail color="#9CA3AF" size={20} />
-                            <TextInput
-                                className="flex-1 ml-3 font-medium text-black text-base"
-                                placeholder="Email"
-                                placeholderTextColor="#9CA3AF"
-                                autoCapitalize="none"
-                                keyboardType="email-address"
-                                value={email}
-                                onChangeText={setEmail}
-                                style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
-                            />
+                    <View
+                        className="bg-white rounded-t-[32px] px-8 pt-8 pb-10"
+                        style={{
+                            shadowColor: '#000',
+                            shadowOffset: { width: 0, height: -4 },
+                            shadowOpacity: 0.08,
+                            shadowRadius: 20,
+                            elevation: 20,
+                        }}
+                    >
+                        {/* Drag Handle */}
+                        <View className="items-center mb-4">
+                            <View className="w-10 h-1 bg-gray-200 rounded-full" />
                         </View>
 
-                        <View className="flex-row items-center border border-gray-200 rounded-full px-4 h-14 bg-gray-50 mt-4">
-                            <Lock color="#9CA3AF" size={20} />
-                            <TextInput
-                                className="flex-1 ml-3 font-medium text-black text-base"
-                                placeholder="Password"
-                                placeholderTextColor="#9CA3AF"
-                                secureTextEntry={!showPassword}
-                                value={password}
-                                onChangeText={setPassword}
-                                style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
-                            />
-                            <TouchableOpacity onPress={() => setShowPassword(!showPassword)} className="p-2 -mr-2">
-                                {showPassword ? <EyeOff color="#9CA3AF" size={20} /> : <Eye color="#9CA3AF" size={20} />}
-                            </TouchableOpacity>
-                        </View>
+                        {getCurrentContent()}
                     </View>
-
-                    {/* Forgot Password Link */}
-                    {isLogin && (
-                        <TouchableOpacity className="items-center mt-6" onPress={handleForgotPassword}>
-                            <Text className="font-bold text-gray-600 underline">Forgot Password?</Text>
-                        </TouchableOpacity>
-                    )}
-
-                    {/* Action Button */}
-                    <TouchableOpacity
-                        onPress={handleAuth}
-                        disabled={isLoading}
-                        className={`mt-8 h-14 rounded-full items-center justify-center shadow-lg ${isLoading ? 'bg-[#982220]' : 'bg-[#B52725]'}`}
-                    >
-                        {isLoading ? (
-                            <ActivityIndicator color="white" />
-                        ) : (
-                            <Text className="text-white font-bold text-lg">{isLogin ? 'Login' : 'Sign Up'}</Text>
-                        )}
-                    </TouchableOpacity>
-
-                    {/* Guest Access */}
-                    <TouchableOpacity
-                        className="flex-row items-center justify-center bg-gray-50 border border-gray-200 h-14 rounded-full mt-6"
-                        onPress={() => navigation.replace('Main' as any)}
-                    >
-                        <Text className="font-bold text-gray-500">Continue As Guest</Text>
-                    </TouchableOpacity>
-
-                    {/* Toggle Mode */}
-                    <View className="flex-row justify-center mt-10 mb-8">
-                        <Text className="text-gray-500 font-medium">
-                            {isLogin ? 'Need an account? ' : 'Already have an account? '}
-                        </Text>
-                        <TouchableOpacity onPress={() => setIsLogin(!isLogin)}>
-                            <Text className="text-black font-bold underline">
-                                {isLogin ? 'Sign up' : 'Login'}
-                            </Text>
-                        </TouchableOpacity>
-                    </View>
-                </ScrollView>
+                </Animated.View>
             </KeyboardAvoidingView>
-        </SafeAreaView>
+        </View>
     );
 }

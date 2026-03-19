@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Image, TextInput, TouchableOpacity, Switch, Alert } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Colors } from '../../constants/Colors';
 
 interface Props {
     item: any; // Type accurately later with DB types
     onUpdate: (id: string, updates: any) => void;
     onDelete: (id: string) => void;
     onToggleStatus: (id: string, currentStatus: boolean) => void;
+    onEdit?: (item: any) => void;
 }
 
-export default function InventoryCard({ item, onUpdate, onDelete, onToggleStatus }: Props) {
+export default function InventoryCard({ item, onUpdate, onDelete, onToggleStatus, onEdit }: Props) {
     // Local state for inputs to allow smooth typing (debounce updates in parent)
     const [sellingPrice, setSellingPrice] = useState(item.sellingPrice?.toString() || item.price?.toString() || '');
     const [stock, setStock] = useState(item.stock?.toString() || '0');
@@ -79,9 +81,16 @@ export default function InventoryCard({ item, onUpdate, onDelete, onToggleStatus
                     )}
                 </View>
 
-                <TouchableOpacity onPress={() => onDelete(item.id)} style={styles.deleteBtn}>
-                    <Ionicons name="trash-outline" size={20} color="#FF3B30" />
-                </TouchableOpacity>
+                <View style={styles.actionButtons}>
+                    {item.product?.createdByStoreId && (
+                        <TouchableOpacity onPress={() => onEdit?.(item)} style={styles.editBtn}>
+                            <MaterialCommunityIcons name="pencil" size={20} color={Colors.primary} />
+                        </TouchableOpacity>
+                    )}
+                    <TouchableOpacity onPress={() => onDelete(item.id)} style={styles.deleteBtn}>
+                        <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+                    </TouchableOpacity>
+                </View>
             </View>
 
             {/* Toggle Row */}
@@ -209,6 +218,14 @@ const styles = StyleSheet.create({
     },
     deleteBtn: {
         padding: 8,
+    },
+    actionButtons: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    editBtn: {
+        padding: 8,
+        marginRight: 4,
     },
     rowBetween: {
         flexDirection: 'row',

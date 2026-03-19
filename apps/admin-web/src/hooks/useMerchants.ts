@@ -30,12 +30,19 @@ export interface Merchant {
     operating_days?: string[];
     // KYC Documents
     pan_doc_url?: string;
+    pan_document_url?: string;
     aadhar_front_url?: string;
     aadhar_back_url?: string;
     gst_certificate_url?: string;
     gst_number?: string;
     store_photos?: string[];
     kyc_rejection_reason?: string;
+    category?: string;
+    msme_number?: string;
+    msme_certificate_url?: string;
+    fssai_number?: string;
+    fssai_certificate_url?: string;
+    bank_beneficiary_name?: string;
     // Computed/joined fields
     orders_30d?: number;
     revenue_30d?: number;
@@ -197,8 +204,12 @@ export function useMerchants() {
                         bank_account_number: merchantData.bank_account_number,
                         ifsc_code: merchantData.ifsc_code,
                         turnover_range: merchantData.turnover_range,
+                        category: merchantData.category,
+                        msme_number: merchantData.msme_number,
+                        fssai_number: merchantData.fssai_number,
+                        bank_beneficiary_name: merchantData.bank_beneficiary_name,
                         // Document URLs
-                        pan_doc_url: panUrl || null,
+                        pan_document_url: panUrl || null,
                         aadhar_front_url: aadharFrontUrl || null,
                         aadhar_back_url: aadharBackUrl || null,
                         gst_certificate_url: gstUrl || null,

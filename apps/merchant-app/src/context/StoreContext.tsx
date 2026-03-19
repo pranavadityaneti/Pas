@@ -18,7 +18,7 @@ interface StoreContextType {
     merchantId: string | null;
     loading: boolean;
     toggleStoreStatus: (newStatus: boolean) => Promise<{ success: boolean; error?: string }>;
-    refreshStore: () => Promise<void>;
+    refreshStore: () => Promise<Store | null>;
     updateStoreDetails: (updates: Partial<Store>) => Promise<{ success: boolean; error?: string }>;
 }
 
@@ -292,13 +292,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
         try {
             // Optimistic update
-            const oldStatus = store.active;
+            const oldStatus = currentStore.active;
             setStore(prev => prev ? { ...prev, active: newStatus } : null);
 
             const { error } = await supabase
                 .from('Store')
                 .update({ active: newStatus })
-                .eq('id', store.id);
+                .eq('id', currentStore.id);
 
             if (error) {
                 console.error('[StoreContext] Toggle error:', error);

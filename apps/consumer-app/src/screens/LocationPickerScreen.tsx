@@ -6,7 +6,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useNavigation } from '@react-navigation/native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
-import { ChevronLeft, MapPin, Target, Plus, Check, Search, X, Trash2, Edit2 } from 'lucide-react-native';
+import { ChevronLeft, MapPin, Target, Plus, Check, Search, X, Trash2, Edit } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 import { useLocation } from '../context/LocationContext';
 import Constants from 'expo-constants';
@@ -51,7 +51,12 @@ export default function LocationPickerScreen() {
         || Constants.expoConfig?.android?.config?.googleMaps?.apiKey;
 
     const debounceTimer = useRef<any>(null);
-    const hasInitiallyCentered = useRef(false);
+
+    useEffect(() => {
+        if (!GOOGLE_API_KEY) {
+            Alert.alert("Config Error", "Google Maps API Key could not be resolved from app.json.");
+        }
+    }, [GOOGLE_API_KEY]);
 
     const searchPlaces = (query: string) => {
         setSearchQuery(query);
@@ -84,9 +89,13 @@ export default function LocationPickerScreen() {
                         setSearchResults(data.predictions);
                     } else {
                         setSearchResults([]);
+                        if (data.status === 'REQUEST_DENIED' || data.status === 'OVER_QUERY_LIMIT') {
+                            Alert.alert("Google Maps Error", `Status: ${data.status}\nMessage: ${data.error_message || 'Check your API key restrictions and billing.'}`);
+                        }
                     }
                 } catch (error) {
-                    console.error("Places Array err: ", error);
+                    console.error("Search err: ", error);
+                    Alert.alert("Connection Error", "Could not reach Google Maps services.");
                 } finally {
                     setIsSearching(false);
                 }
@@ -123,12 +132,12 @@ export default function LocationPickerScreen() {
                 };
 
                 setCurrentPos(coords);
-                setMapRegion({
-                    ...mapRegion,
+                setMapRegion(prev => ({
+                    ...prev,
                     ...coords,
                     latitudeDelta: 0.005,
                     longitudeDelta: 0.005,
-                });
+                }));
 
                 // Clear search and show "Confirm Location"
                 setSearchQuery(description);
@@ -150,13 +159,15 @@ export default function LocationPickerScreen() {
                     if (c.types.includes('postal_code')) zip = c.long_name;
                 });
 
-                setAddressForm({
-                    ...addressForm,
+                setAddressForm(prev => ({
+                    ...prev,
                     city,
                     state,
                     pincode: zip,
                     street: streetInfo,
-                });
+                }));
+            } else {
+                Alert.alert("Google Maps Error", `Details Status: ${data.status}\n${data.error_message || 'Check API restrictions.'}`);
             }
         } catch (error) {
             console.error('Place Details error:', error);
@@ -184,12 +195,12 @@ export default function LocationPickerScreen() {
                 };
 
                 setCurrentPos(coords);
-                setMapRegion({
-                    ...mapRegion,
+                setMapRegion(prev => ({
+                    ...prev,
                     ...coords,
                     latitudeDelta: 0.005,
                     longitudeDelta: 0.005,
-                });
+                }));
 
                 setIsLocationConfirmed(true);
                 setSearchResults([]);
@@ -209,13 +220,13 @@ export default function LocationPickerScreen() {
                     if (c.types.includes('postal_code')) zip = c.long_name;
                 });
 
-                setAddressForm({
-                    ...addressForm,
+                setAddressForm(prev => ({
+                    ...prev,
                     city,
                     state,
                     pincode: zip,
                     street: streetInfo,
-                });
+                }));
             } else {
                 Alert.alert("Location Not Found", "We couldn't find coordinates for that address. Please be more specific or pick a suggestion.");
             }
@@ -245,12 +256,74 @@ export default function LocationPickerScreen() {
         setEditingAddressId(null);
     };
 
+    const requestLocation = async () => {
+        try {
+            const { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== 'granted') {
+                Alert.alert('Permission Denied', 'Location permission is required to detect your address.');
+                return;
+            }
+
+            // Try last known for immediate response
+            const lastKnown = await Location.getLastKnownPositionAsync({});
+            if (lastKnown) {
+                const lastCoords = {
+                    latitude: lastKnown.coords.latitude,
+                    longitude: lastKnown.coords.longitude,
+                };
+                setCurrentPos(lastCoords);
+                setMapRegion(prev => ({
+                    ...prev,
+                    ...lastCoords,
+                    latitudeDelta: 0.01,
+                    longitudeDelta: 0.01
+                }));
+            }
+
+            // Get fresh high accuracy position
+            const location = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.High,
+            });
+            const coords = {
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude,
+            };
+
+            setCurrentPos(coords);
+            setMapRegion(prev => ({
+                ...prev,
+                ...coords,
+                latitudeDelta: 0.005,
+                longitudeDelta: 0.005
+            }));
+
+            // Reverse Geocoding
+            const geocodeCache = await Location.reverseGeocodeAsync(coords);
+            if (geocodeCache.length > 0) {
+                const place = geocodeCache[0];
+                setAddressForm(prev => ({
+                    ...prev,
+                    city: place.city || place.subregion || '',
+                    state: place.region || '',
+                    pincode: place.postalCode || '',
+                    street: place.street || '',
+                }));
+
+                // Populate search bar with current location so user knows it snapped
+                setSearchQuery(`${place.street || place.name || ''}, ${place.city || place.subregion || ''}`);
+                setIsLocationConfirmed(true);
+            }
+
+        } catch (error) {
+            console.log('Location error', error);
+            Alert.alert('Error', 'Could not detect your current location.');
+        }
+    };
+
+
     // Request location once on initial mount
     useEffect(() => {
-        if (!hasInitiallyCentered.current) {
-            requestLocation();
-            hasInitiallyCentered.current = true;
-        }
+        requestLocation();
     }, []);
 
     const fetchAddresses = async () => {
@@ -329,12 +402,12 @@ export default function LocationPickerScreen() {
             longitude: address.longitude,
         };
         setCurrentPos(coords);
-        setMapRegion({
-            ...mapRegion,
+        setMapRegion(prev => ({
+            ...prev,
             ...coords,
             latitudeDelta: 0.005,
             longitudeDelta: 0.005,
-        });
+        }));
 
         setIsLocationConfirmed(true);
         setShowModal(true);
@@ -348,50 +421,6 @@ export default function LocationPickerScreen() {
             longitude: loc.longitude
         });
         navigation.goBack();
-    };
-
-    const requestLocation = async () => {
-        // ... previous code exactly the same below...
-
-        try {
-            const { status } = await Location.requestForegroundPermissionsAsync();
-            if (status !== 'granted') {
-                Alert.alert('Permission Denied', 'Location permission is required to detect your address.');
-                return;
-            }
-
-            Alert.alert('Detecting Location', 'Fetching your exact GPS coordinates...');
-
-            const location = await Location.getCurrentPositionAsync({});
-            const coords = {
-                latitude: location.coords.latitude,
-                longitude: location.coords.longitude,
-            };
-
-            setCurrentPos(coords);
-            setMapRegion({ ...mapRegion, ...coords });
-
-            // Reverse Geocoding
-            const geocodeCache = await Location.reverseGeocodeAsync(coords);
-            if (geocodeCache.length > 0) {
-                const place = geocodeCache[0];
-                setAddressForm({
-                    ...addressForm,
-                    city: place.city || place.subregion || '',
-                    state: place.region || '',
-                    pincode: place.postalCode || '',
-                    street: place.street || '',
-                });
-
-                // Populate search bar with current location so user knows it snapped
-                setSearchQuery(`${place.street || place.name || ''}, ${place.city || place.subregion || ''}`);
-                setIsLocationConfirmed(true);
-            }
-
-        } catch (error) {
-            console.log('Location error', error);
-            Alert.alert('Error', 'Could not detect your current location.');
-        }
     };
 
     const handleSaveAddress = async () => {
@@ -615,7 +644,7 @@ export default function LocationPickerScreen() {
                                         onPress={() => handleEdit(loc)}
                                         className="p-2 bg-gray-50 rounded-full"
                                     >
-                                        <Edit2 size={16} color="#4B5563" />
+                                        <Edit size={16} color="#6B7280" />
                                     </TouchableOpacity>
                                     <TouchableOpacity
                                         onPress={() => handleDelete(loc.id)}

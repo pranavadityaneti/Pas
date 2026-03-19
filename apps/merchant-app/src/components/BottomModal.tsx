@@ -1,5 +1,5 @@
 import React from 'react';
-import { Modal, View, Text, StyleSheet, TouchableOpacity, TouchableWithoutFeedback, Platform, DimensionValue } from 'react-native';
+import { Modal, View, Text, StyleSheet, TouchableOpacity, TouchableWithoutFeedback, Platform, DimensionValue, KeyboardAvoidingView, ScrollView } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -32,31 +32,31 @@ export default function BottomModal({ visible, onClose, title, children, height 
                     <View style={styles.backdrop} />
                 </TouchableWithoutFeedback>
 
-                <View style={[styles.modalContent, {
-                    paddingBottom: Math.max(insets.bottom, 20)
-                }]}>
-                    <View style={styles.handle} />
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    style={{ flex: 1, justifyContent: 'flex-end' }}
+                    keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+                >
+                    <View style={styles.modalContent}>
+                        <View style={styles.handle} />
 
-                    <View style={styles.header}>
-                        <Text style={styles.title}>{title}</Text>
-                        <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-                            <Ionicons name="close" size={20} color="#666" />
-                        </TouchableOpacity>
+                        <View style={styles.header}>
+                            <Text style={styles.title}>{title}</Text>
+                            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                                <Ionicons name="close" size={20} color="#666" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView
+                            style={{ maxHeight: '80%' }}
+                            contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 20) }]}
+                            keyboardShouldPersistTaps="handled"
+                            showsVerticalScrollIndicator={false}
+                        >
+                            {children}
+                        </ScrollView>
                     </View>
-
-                    {/* @ts-ignore: Library type definition missing children prop */}
-                    <KeyboardAwareScrollView
-                        contentContainerStyle={styles.content}
-                        keyboardShouldPersistTaps="handled"
-                        keyboardDismissMode="on-drag"
-                        enableOnAndroid={true}
-                        extraScrollHeight={80}
-                        enableAutomaticScroll={true}
-                        showsVerticalScrollIndicator={false}
-                    >
-                        {children}
-                    </KeyboardAwareScrollView>
-                </View>
+                </KeyboardAvoidingView>
             </View>
         </Modal>
     );

@@ -23,7 +23,7 @@ export function useEarnings() {
             try {
                 // Fetch all orders for this store (except CANCELLED for some stats, but let's get all to be safe)
                 const { data, error } = await supabase
-                    .from('Order')
+                    .from('orders')
                     .select('total_amount, created_at, status')
                     .eq('store_id', storeId);
 
@@ -81,7 +81,7 @@ export function useEarnings() {
             .on('postgres_changes', {
                 event: '*',
                 schema: 'public',
-                table: 'Order',
+                table: 'orders',
                 filter: `store_id=eq.${storeId}`
             }, () => {
                 fetchStats();

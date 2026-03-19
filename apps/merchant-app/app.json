@@ -18,7 +18,7 @@
       "router": {
         "origin": false
       },
-      "apiUrl": "http://localhost:3000",
+      "apiUrl": "http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com",
       "eas": {
         "projectId": "795d700d-a871-4f9e-a6d2-df905ae9f4ff"
       }
@@ -37,6 +37,9 @@
         "NSCameraUsageDescription": "Camera access is required to capture and upload KYC documents for account verification.",
         "NSPhotoLibraryUsageDescription": "Photo library access is needed to select and upload stored KYC documents for merchant verification.",
         "ITSAppUsesNonExemptEncryption": false
+      },
+      "config": {
+        "googleMapsApiKey": "AIzaSyAZPXR9kkXQj_JkrLM2V8L1qvBYwoI5bN4"
       }
     },
     "android": {

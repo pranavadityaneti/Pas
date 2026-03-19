@@ -40,13 +40,27 @@ export default function DashboardScreen() {
     const recentOrders = orders.slice(0, 5);
 
     const [isLunchBreak, setIsLunchBreak] = React.useState(false);
+    const [isClosedToday, setIsClosedToday] = React.useState(false);
 
-    // Check for lunch break status
+    // Check for lunch break and schedule status
     React.useEffect(() => {
-        const checkLunchStatus = () => {
+        const checkStatus = () => {
             if (!store?.operating_hours) return;
             const oh = store.operating_hours;
 
+            // 1. Check if closed today
+            // JS getDay(): 0=Sun, 1=Mon, ..., 6=Sat
+            // Store days: 0=Mon, 1=Tue, ..., 6=Sun
+            const todayJS = new Date().getDay();
+            const todayIndex = (todayJS + 6) % 7;
+            
+            if (oh.days && !oh.days.includes(todayIndex)) {
+                setIsClosedToday(true);
+            } else {
+                setIsClosedToday(false);
+            }
+
+            // 2. Check for lunch break status
             if (!oh.hasLunchBreak || !oh.lunchStart || !oh.lunchEnd) {
                 setIsLunchBreak(false);
                 return;
@@ -68,12 +82,20 @@ export default function DashboardScreen() {
             }
         };
 
-        checkLunchStatus();
-        const interval = setInterval(checkLunchStatus, 60000); // Check every minute
+        checkStatus();
+        const interval = setInterval(checkStatus, 60000); // Check every minute
         return () => clearInterval(interval);
     }, [store?.operating_hours]);
 
     const handleToggleStatus = () => {
+        if (isClosedToday) {
+            Alert.alert(
+                'Store Closed Today',
+                'Your store is scheduled as closed today. To go online, please enable this day in the Store Timings settings.'
+            );
+            return;
+        }
+
         if (isLunchBreak) {
             Alert.alert('Lunch Break', 'Store is currently on lunch break. Please wait until lunch time is over to go online.');
             return;
@@ -103,17 +125,19 @@ export default function DashboardScreen() {
         );
     };
 
-    const isOffline = !store?.active || isLunchBreak;
+    const isOffline = !store?.active || isLunchBreak || isClosedToday;
 
     return (
         <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
             {isOffline && (
-                <View style={[styles.offlineBanner, isLunchBreak && { backgroundColor: '#F59E0B' }]}>
-                    <Ionicons name={isLunchBreak ? "restaurant" : "close-circle"} size={20} color="#FFF" />
+                <View style={[styles.offlineBanner, (isLunchBreak || isClosedToday) && { backgroundColor: '#F59E0B' }]}>
+                    <Ionicons name={isLunchBreak ? "restaurant" : (isClosedToday ? "calendar" : "close-circle")} size={20} color="#FFF" />
                     <Text style={styles.offlineText}>
-                        {isLunchBreak
-                            ? "Lunch Break - Store is temporarily offline"
-                            : "Store Offline - Not accepting new orders"}
+                        {isClosedToday
+                            ? "Store Closed - Today is a non-working day"
+                            : (isLunchBreak
+                                ? "Lunch Break - Store is temporarily offline"
+                                : "Store Offline - Not accepting new orders")}
                     </Text>
                 </View>
             )}
@@ -141,11 +165,11 @@ export default function DashboardScreen() {
                                     <Text style={[
                                         styles.statusLabel,
                                         !store?.active && styles.statusLabelOffline,
-                                        isLunchBreak && { color: '#B45309' }
+                                        (isLunchBreak || isClosedToday) && { color: '#B45309' }
                                     ]}>
-                                        {isLunchBreak ? 'Lunch Break' : (store?.active ? 'Online' : 'Offline')}
+                                        {isClosedToday ? 'Closed Today' : (isLunchBreak ? 'Lunch Break' : (store?.active ? 'Online' : 'Offline'))}
                                     </Text>
-                                    <Ionicons name="chevron-down" size={14} color={store?.active ? '#10B981' : '#6B7280'} />
+                                    <Ionicons name="chevron-down" size={14} color={store?.active && !isClosedToday && !isLunchBreak ? '#10B981' : '#6B7280'} />
                                 </TouchableOpacity>
                             </View>
                         </View>

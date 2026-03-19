@@ -7,7 +7,7 @@ import { WebView } from 'react-native-webview';
 interface RazorpayCheckoutProps {
     visible: boolean;
     onClose: () => void;
-    onSuccess: (paymentId: string) => void;
+    onSuccess: (paymentId: string, orderId?: string, signature?: string) => void;
     onError: (error: string) => void;
     amount: number; // in rupees
     restaurantName: string;
@@ -15,7 +15,7 @@ interface RazorpayCheckoutProps {
     userPhone?: string;
 }
 
-const RAZORPAY_KEY_ID = 'rzp_test_RnWZnS9NxCVC6V';
+const RAZORPAY_KEY_ID = process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_RnWZnS9NxCVC6V';
 
 // Sanitize strings for safe HTML embedding
 const sanitize = (str: string) =>
@@ -31,7 +31,8 @@ export default function RazorpayCheckout({
     restaurantName,
     userEmail = 'customer@pas.app',
     userPhone = '9999999999',
-}: RazorpayCheckoutProps) {
+    orderId,
+}: RazorpayCheckoutProps & { orderId?: string }) {
     const [webviewKey, setWebviewKey] = useState(0);
 
     // Reset WebView on each open to prevent stale state
@@ -62,6 +63,7 @@ export default function RazorpayCheckout({
                 key: '${RAZORPAY_KEY_ID}',
                 amount: ${amountInPaise},
                 currency: 'INR',
+                order_id: '${orderId || ""}',
                 name: 'PAS',
                 description: 'Pre-order at ${safeName}',
                 prefill: {
@@ -74,7 +76,9 @@ export default function RazorpayCheckout({
                 handler: function(response) {
                     window.ReactNativeWebView.postMessage(JSON.stringify({
                         type: 'SUCCESS',
-                        paymentId: response.razorpay_payment_id
+                        paymentId: response.razorpay_payment_id,
+                        orderId: response.razorpay_order_id,
+                        signature: response.razorpay_signature
                     }));
                 },
                 modal: {
@@ -105,7 +109,7 @@ export default function RazorpayCheckout({
         try {
             const data = JSON.parse(event.nativeEvent.data);
             if (data.type === 'SUCCESS') {
-                onSuccess(data.paymentId);
+                onSuccess(data.paymentId, data.orderId, data.signature);
             } else if (data.type === 'ERROR') {
                 onError(data.error);
             } else if (data.type === 'DISMISSED') {

@@ -64,7 +64,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
                 .from('User')
                 .select('*')
                 .eq('id', currentSession.user.id)
-                .single();
+                .maybeSingle();
 
             if (error) {
                 console.error('[UserContext] Error fetching user profile:', error);

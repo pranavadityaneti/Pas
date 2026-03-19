@@ -1,11 +1,24 @@
 export type RootStackParamList = {
     Main: undefined;
     Storefront: { storeId: number };
-    ConfirmPreOrder: { selectedCoupon?: { code: string; discount: number } };
+    Checkout: {
+        selectedCoupon?: { code: string; discount: number },
+        specialInstructions?: string
+    };
+    DiningCheckout: {
+        selectedCoupon?: { code: string; discount: number },
+        specialInstructions?: string
+    };
     LocationPicker: undefined;
     Onboarding: undefined;
     Auth: undefined;
     Profile: undefined;
-    CompleteProfile: undefined;
+    ProfileSetup: undefined;
     Offers: { subtotal: number };
+    SpotlightDetail: { spotlightId: number };
+    CategoryDetail: { categoryId: string; categoryName: string };
+    YourOrders: undefined;
+    Cart: undefined;
+    Favorites: undefined;
 };
+

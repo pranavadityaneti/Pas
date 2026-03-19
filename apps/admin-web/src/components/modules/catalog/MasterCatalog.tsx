@@ -16,7 +16,9 @@ import {
   ChevronDown,
   Percent,
   FolderTree,
+  Zap,
 } from 'lucide-react';
+import { LiveImportModal } from './LiveImportModal';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Checkbox } from '../../ui/checkbox';
@@ -76,17 +78,31 @@ interface Product {
   mrp: number;
   image: string | null;
   ean?: string;
-  ean?: string;
   brand?: string;
   createdByStoreId?: string | null;
   images?: ProductImage[];
   // New Fields
   unitType?: string;
   unitValue?: number;
+  uom?: string;
   hsnCode?: string;
   gstRate?: number;
 }
 
+interface SyncItem {
+  id: string;
+  name: string;
+  brand: string | null;
+  mrp: number;
+  category: string;
+  subcategory: string | null;
+  packsize: string | null;
+  image: string | null;
+  sourceProductId: string;
+  status: string;
+  createdAt: string;
+  metadata?: any;
+}
 // Centralized category list for consistency across all dropdowns
 const CATEGORIES = [
   'Dairy',
@@ -101,7 +117,8 @@ const CATEGORIES = [
   'Home Essentials',
   'Fashion',
   'Pharmacy',
-  'Meat'
+  'Meat',
+  'Fruits & Vegetables'
 ];
 
 export function MasterCatalog() {
@@ -109,7 +126,23 @@ export function MasterCatalog() {
   const [loading, setLoading] = useState(true);
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [catalogType, setCatalogType] = useState<'global' | 'custom'>('global');
+  const [catalogType, setCatalogType] = useState<'global' | 'custom' | 'sync_queue'>('global');
+  
+  // Live Sync States
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [activeSyncRunId, setActiveSyncRunId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('activeSyncRunId');
+    }
+    return null;
+  });
+  const [syncQueue, setSyncQueue] = useState<SyncItem[]>([]);
+  const [isSyncing, setIsSyncing] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return !!localStorage.getItem('activeSyncRunId');
+    }
+    return false;
+  });
 
   // Server-Side Filters
   const [page, setPage] = useState(1);
@@ -139,8 +172,59 @@ export function MasterCatalog() {
   }, [filters, searchQuery]);
 
   useEffect(() => {
-    fetchProducts();
+    if (catalogType === 'sync_queue') {
+      fetchSyncQueue();
+    } else {
+      fetchProducts();
+    }
   }, [page, filters, searchQuery, catalogType]); // Re-fetch when any filter changes
+
+  // Polling for Sync Queue status
+  useEffect(() => {
+    let interval: any;
+    if (isSyncing && activeSyncRunId) {
+      // Poll specific run status
+      interval = setInterval(async () => {
+        try {
+          const res = await api.get(`/catalog/sync/status/${activeSyncRunId}`);
+          if (res.data?.status === 'SUCCEEDED') {
+            toast.success('Products successfully arrived in the Sync Queue!');
+            setIsSyncing(false);
+            setActiveSyncRunId(null);
+            localStorage.removeItem('activeSyncRunId');
+            fetchSyncQueue();
+          } else if (res.data?.status === 'FAILED') {
+            toast.error('Live sync failed.');
+            setIsSyncing(false);
+            setActiveSyncRunId(null);
+            localStorage.removeItem('activeSyncRunId');
+          }
+        } catch (e) {
+          console.error("Status check failed", e);
+        }
+      }, 5000); // 5 seconds
+    } else if (catalogType === 'sync_queue') {
+      interval = setInterval(() => {
+        fetchSyncQueue();
+      }, 10000); // Relaxed polling just to keep UI fresh if on tab
+    }
+    return () => clearInterval(interval);
+  }, [isSyncing, activeSyncRunId, catalogType]);
+
+  const fetchSyncQueue = async () => {
+    try {
+      const response = await api.get('/catalog/sync/queue');
+      setSyncQueue(response.data);
+      
+      // If we were syncing and items appear, we can stop the aggressive isSyncing status
+      // but keep polling if we're on the sync_queue tab
+      if (isSyncing && response.data.length > 0) {
+        // We could check if run is actually finished, but for now this is fine
+      }
+    } catch (error) {
+      console.error('Failed to fetch sync queue:', error);
+    }
+  };
 
   const fetchProducts = async () => {
     setLoading(true);
@@ -177,11 +261,14 @@ export function MasterCatalog() {
     }
   };
 
+  const getActiveListIds = () => catalogType === 'sync_queue' ? syncQueue.map(p => p.id) : products.map(p => p.id);
+
   const toggleSelectAll = () => {
-    if (selectedProducts.length === products.length) {
+    const activeIds = getActiveListIds();
+    if (selectedProducts.length === activeIds.length && activeIds.length > 0) {
       setSelectedProducts([]);
     } else {
-      setSelectedProducts(products.map(p => p.id));
+      setSelectedProducts(activeIds);
     }
   };
 
@@ -190,6 +277,47 @@ export function MasterCatalog() {
       setSelectedProducts(selectedProducts.filter(p => p !== id));
     } else {
       setSelectedProducts([...selectedProducts, id]);
+    }
+  };
+
+  const handleSyncQueueEdit = (id: string, field: keyof SyncItem, value: any) => {
+    setSyncQueue(prev => prev.map(item => item.id === id ? { ...item, [field]: value } : item));
+  };
+
+  const handleApproveSyncItems = async () => {
+    if (selectedProducts.length === 0) return;
+    const toastId = toast.loading(`Approving ${selectedProducts.length} items to Master Catalog...`);
+
+    try {
+      const itemsToApprove = syncQueue.filter(item => selectedProducts.includes(item.id));
+      const response = await api.post('/catalog/sync/approve', { items: itemsToApprove });
+      toast.success(response.data.message || 'Items approved and added to catalog!', { id: toastId });
+      
+      setSyncQueue(prev => prev.filter(item => !selectedProducts.includes(item.id)));
+      setSelectedProducts([]);
+      
+      // Refresh global products so changes reflect instantly
+      fetchProducts();
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to approve items', { id: toastId });
+    }
+  };
+
+  const handleRejectSyncItems = async () => {
+    if (selectedProducts.length === 0) return;
+    const confirm = window.confirm(`Are you sure you want to permanently delete ${selectedProducts.length} scratched item(s) from the queue?`);
+    if (!confirm) return;
+
+    const toastId = toast.loading(`Deleting ${selectedProducts.length} items...`);
+
+    try {
+      await api.post('/catalog/sync/reject', { ids: selectedProducts });
+      toast.success(`Items permanently deleted!`, { id: toastId });
+      
+      setSyncQueue(prev => prev.filter(item => !selectedProducts.includes(item.id)));
+      setSelectedProducts([]);
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to delete items', { id: toastId });
     }
   };
 
@@ -474,6 +602,16 @@ export function MasterCatalog() {
           />
           <Button
             size="sm"
+            variant="outline"
+            className="border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold transition-all"
+            onClick={() => setIsSyncModalOpen(true)}
+          >
+            <Zap className="w-4 h-4 mr-2 fill-amber-500 text-amber-500" />
+            Refresh Import
+          </Button>
+
+          <Button
+            size="sm"
             className="bg-gray-900 hover:bg-gray-800 text-white shadow-md transition-all hover:shadow-lg"
             onClick={() => fileInputRef.current?.click()}
           >
@@ -482,6 +620,22 @@ export function MasterCatalog() {
           </Button>
         </div>
       </div>
+
+      {/* --- Syncing Background Task Banner --- */}
+      {isSyncing && (
+        <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-xl shadow-sm flex items-center justify-between animate-pulse">
+          <div className="flex items-center gap-3">
+            <Loader2 className="w-5 h-5 animate-spin text-amber-600" />
+            <div>
+              <h4 className="text-sm font-bold text-amber-900">Live Sync in Progress...</h4>
+              <p className="text-xs text-amber-700 font-medium">Extracting products directly from our Quick Commerce partner. This can take 1-2 minutes. Please do not refresh the page.</p>
+            </div>
+          </div>
+          <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-200 shadow-none border border-amber-200">
+            Polling Apify Status...
+          </Badge>
+        </div>
+      )}
 
       {/* --- Filter Tabs --- */}
       <div className="flex gap-4 border-b border-gray-200">
@@ -496,6 +650,19 @@ export function MasterCatalog() {
           onClick={() => { setCatalogType('custom'); setPage(1); }}
         >
           Merchant Requests
+        </button>
+        <button
+          className={`pb-2 px-4 font-medium transition-colors ${catalogType === 'sync_queue' ? 'border-b-2 border-[#B52725] text-[#B52725]' : 'text-gray-500 hover:text-gray-700'}`}
+          onClick={() => { setCatalogType('sync_queue'); setPage(1); }}
+        >
+          <div className="flex items-center gap-2">
+            Sync Queue
+            {syncQueue.length > 0 && (
+              <Badge className="bg-[#B52725] text-white hover:bg-[#B52725] text-[10px] h-4 px-1">
+                {syncQueue.length}
+              </Badge>
+            )}
+          </div>
         </button>
       </div>
 
@@ -711,13 +878,100 @@ export function MasterCatalog() {
                     </TableHead>
                     <TableHead className="w-[80px]">Image</TableHead>
                     <TableHead>Product Info</TableHead>
+                    <TableHead className="w-[120px]">Packsize</TableHead>
                     <TableHead className="w-[200px]">Category</TableHead>
                     <TableHead className="w-[150px]">Global MRP (₹)</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {Array.isArray(products) && products.map((product) => (
+                  {catalogType === 'sync_queue' ? (
+                    syncQueue.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="h-64 text-center text-gray-400">
+                          <div className="flex flex-col items-center justify-center gap-2">
+                            <Zap className="w-8 h-8 opacity-20" />
+                            <p>No items in sync queue. Pull some data!</p>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      syncQueue.map((item: SyncItem) => (
+                        <TableRow key={item.id} className="hover:bg-gray-50/50">
+                          <TableCell className="w-[50px]">
+                            <Checkbox
+                              checked={selectedProducts.includes(item.id)}
+                              onCheckedChange={() => toggleSelect(item.id)}
+                            />
+                          </TableCell>
+                          <TableCell className="w-[80px]">
+                            <ImageWithFallback
+                              src={item.image || ''}
+                              alt={item.name}
+                              className="w-12 h-12 rounded-lg object-contain border border-gray-100 bg-white"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col gap-1">
+                              <span className="font-semibold text-gray-900 leading-tight">{item.name}</span>
+                              <div className="flex items-center gap-2 mt-1">
+                                <Label className="text-[10px] text-gray-500 w-8 uppercase tracking-wider font-bold">Brand</Label>
+                                <Input 
+                                  value={item.brand || ''}
+                                  placeholder="Generic"
+                                  className="h-6 text-xs flex-1 max-w-[150px] bg-white border-gray-200"
+                                  onChange={(e) => handleSyncQueueEdit(item.id, 'brand', e.target.value)}
+                                />
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Input 
+                              value={item.packsize || ''}
+                              placeholder="e.g. 250 g"
+                              className="h-8 text-sm bg-white border-gray-200 shadow-sm font-medium"
+                              onChange={(e) => handleSyncQueueEdit(item.id, 'packsize', e.target.value)}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Select
+                              value={item.category || ''}
+                              onValueChange={(value) => handleSyncQueueEdit(item.id, 'category', value)}
+                            >
+                              <SelectTrigger className="w-full h-8 text-xs bg-white border-gray-200 shadow-sm">
+                                <SelectValue placeholder="Select Category" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {CATEGORIES.map(cat => (
+                                  <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm font-medium text-gray-500">₹</span>
+                              <Input
+                                type="number"
+                                value={item.mrp || 0}
+                                className="h-8 w-20 text-right font-bold bg-white border-gray-200 shadow-sm"
+                                onChange={(e) => {
+                                  const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                                  handleSyncQueueEdit(item.id, 'mrp', val);
+                                }}
+                              />
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                             <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50/50 font-bold whitespace-nowrap">
+                               {item.status}
+                             </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )
+                  ) : (
+                    Array.isArray(products) && products.map((product) => (
                     <TableRow key={product.id} className="group hover:bg-gray-50/80 transition-colors">
                       <TableCell>
                         <div className="flex items-center justify-center">
@@ -752,6 +1006,9 @@ export function MasterCatalog() {
                             </Badge>
                           )}
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm text-gray-600 font-medium">{product.uom || 'N/A'}</span>
                       </TableCell>
                       <TableCell>
                         <Select
@@ -800,8 +1057,9 @@ export function MasterCatalog() {
                         </DropdownMenu>
                       </TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
+                  ))
+                )}
+              </TableBody>
               </Table>
 
               {/* Pagination Area */}
@@ -1095,69 +1353,93 @@ export function MasterCatalog() {
 
                 <div className="w-px h-8 bg-gray-600"></div>
 
-                {/* Change Category */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button size="sm" variant="ghost" className="text-white hover:bg-gray-800 gap-2">
-                      <FolderTree className="w-4 h-4" />
-                      Category
-                      <ChevronDown className="w-3 h-3 opacity-50" />
+                {catalogType === 'sync_queue' ? (
+                  <>
+                    <Button
+                      size="sm"
+                      className="bg-[#B52725] hover:bg-[#8e1d1b] text-white shadow-md transition-all gap-2 px-4 whitespace-nowrap"
+                      onClick={handleApproveSyncItems}
+                    >
+                      <Plus className="w-4 h-4" />
+                      Approve Selected
                     </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="center" className="w-48">
-                    <DropdownMenuLabel>Change Category</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    {CATEGORIES.map(cat => (
-                      <DropdownMenuItem key={cat} onClick={() => handleBulkUpdateCategory(cat)}>
-                        {cat}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-
-                {/* Change GST Rate */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button size="sm" variant="ghost" className="text-white hover:bg-gray-800 gap-2">
-                      <Percent className="w-4 h-4" />
-                      GST Rate
-                      <ChevronDown className="w-3 h-3 opacity-50" />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-red-400 hover:text-red-300 hover:bg-red-900/30 gap-2 shrink-0 border border-red-900/50 line-clamp-1"
+                      onClick={handleRejectSyncItems}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Delete
                     </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="center" className="w-40">
-                    <DropdownMenuLabel>Set GST Rate</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    {[0, 5, 12, 18, 28].map(rate => (
-                      <DropdownMenuItem key={rate} onClick={() => handleBulkUpdateGST(rate)}>
-                        {rate}%
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                  </>
+                ) : (
+                  <>
+                    {/* Change Category */}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button size="sm" variant="ghost" className="text-white hover:bg-gray-800 gap-2">
+                          <FolderTree className="w-4 h-4" />
+                          Category
+                          <ChevronDown className="w-3 h-3 opacity-50" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="center" className="w-48">
+                        <DropdownMenuLabel>Change Category</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        {CATEGORIES.map(cat => (
+                          <DropdownMenuItem key={cat} onClick={() => handleBulkUpdateCategory(cat)}>
+                            {cat}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
 
-                {/* Export Selected */}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-white hover:bg-gray-800 gap-2"
-                  onClick={handleBulkExport}
-                >
-                  <Download className="w-4 h-4" />
-                  Export
-                </Button>
+                    {/* Change GST Rate */}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button size="sm" variant="ghost" className="text-white hover:bg-gray-800 gap-2">
+                          <Percent className="w-4 h-4" />
+                          GST Rate
+                          <ChevronDown className="w-3 h-3 opacity-50" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="center" className="w-40">
+                        <DropdownMenuLabel>Set GST Rate</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        {[0, 5, 12, 18, 28].map(rate => (
+                          <DropdownMenuItem key={rate} onClick={() => handleBulkUpdateGST(rate)}>
+                            {rate}%
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
 
-                <div className="w-px h-8 bg-gray-600"></div>
+                    {/* Export Selected */}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-white hover:bg-gray-800 gap-2"
+                      onClick={handleBulkExport}
+                    >
+                      <Download className="w-4 h-4" />
+                      Export
+                    </Button>
 
-                {/* Delete */}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-red-400 hover:text-red-300 hover:bg-red-900/30 gap-2"
-                  onClick={handleBulkDelete}
-                >
-                  <Trash2 className="w-4 h-4" />
-                  Delete
-                </Button>
+                    <div className="w-px h-8 bg-gray-600"></div>
+
+                    {/* Delete */}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-red-400 hover:text-red-300 hover:bg-red-900/30 gap-2"
+                      onClick={handleBulkDelete}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Delete
+                    </Button>
+                  </>
+                )}
 
                 {/* Clear Selection */}
                 <Button
@@ -1173,6 +1455,18 @@ export function MasterCatalog() {
           )
         }
       </div>
+      <LiveImportModal 
+        isOpen={isSyncModalOpen} 
+        onClose={() => setIsSyncModalOpen(false)} 
+        onSyncTriggered={(runId) => {
+          setActiveSyncRunId(runId);
+          setIsSyncing(true);
+          localStorage.setItem('activeSyncRunId', runId);
+          setCatalogType('sync_queue');
+        }} 
+      />
     </div>
   );
 }
+
+export default MasterCatalog;

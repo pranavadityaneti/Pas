@@ -27,9 +27,9 @@
 | Home Screen | `src/screens/HomeScreen.tsx` | 🔒 LOCKED | Feb 27, 2026 | 2-col Pickup/Dining cards + Featured card. Do NOT alter layout. |
 | Pickup Discovery | `src/screens/HomeFeedScreen.tsx` | 🔒 LOCKED | Feb 27, 2026 | Hero slider, category grid, product carousels, cross-promo card. |
 | Dining Discovery | `src/screens/DiningScreen.tsx` | 🔒 LOCKED | Feb 27, 2026 | Redesigned: Spotlights, 4 category carousels, All Restaurants list. |
-| Auth / Login | `src/screens/AuthScreen.tsx` | 🔒 LOCKED | Feb 27, 2026 | Phone OTP authentication flow. |
-| Profile | `src/screens/ProfileScreen.tsx` | 🔒 LOCKED | Feb 27, 2026 | User profile with avatar, details, address management. |
-| Complete Profile | `src/screens/CompleteProfileScreen.tsx` | 🔒 LOCKED | Feb 27, 2026 | Post-signup profile completion (name, DOB, avatar). |
+| Auth / Login | `src/screens/AuthScreen.tsx` | 🔒 LOCKED | Mar 12, 2026 | Phone OTP authentication flow with network timeouts. |
+| Profile | `src/screens/ProfileScreen.tsx` | 🔒 LOCKED | Mar 12, 2026 | User profile with avatar, details, address management. |
+| Complete Profile | `src/screens/ProfileSetupScreen.tsx` | 🔒 LOCKED | Mar 12, 2026 | Post-signup profile completion (name, DOB, avatar). |
 | Onboarding | `src/screens/OnboardingScreen.tsx` | 🔒 LOCKED | Feb 27, 2026 | First-launch onboarding slides. |
 | Location Picker | `src/screens/LocationPickerScreen.tsx` | 🔒 LOCKED | Feb 27, 2026 | Interactive map + Google Places Autocomplete search. |
 | Storefront | `src/screens/StorefrontScreen.tsx` | 🔒 LOCKED | Feb 27, 2026 | Hero carousel, restaurant info, category pills, 2-col product grid, cart integration. |
@@ -39,7 +39,7 @@
 
 | Component | File | Status | Notes |
 |-----------|------|--------|-------|
-| Root Navigator | `src/navigation/RootNavigator.tsx` | 🔒 LOCKED | Auth-aware stack navigator. Session-based routing. |
+| Root Navigator | `src/navigation/RootNavigator.tsx` | 🔒 LOCKED (Mar 12, 2026) | Auth-aware stack navigator. Session-based routing. |
 | Main Tab Navigator | `src/navigation/MainTabNavigator.tsx` | 🔒 LOCKED | Bottom tabs: Home, Pickup, Dining, Cart. Redline effect. |
 
 ### Context & State
@@ -58,7 +58,7 @@
 
 | File | Status | Notes |
 |------|--------|-------|
-| `src/lib/supabase.ts` | 🔒 LOCKED | Supabase client initialization. |
+| `src/lib/supabase.ts` | 🔒 LOCKED (Mar 12, 2026) | Supabase auth initialized via SecureStore instead of AsyncStorage. |
 | `src/lib/data.ts` | 🔒 LOCKED | Mock data constants (stores, products, images). |
 
 ---
@@ -69,7 +69,7 @@
 
 | Component | File | Status | Notes |
 |-----------|------|--------|-------|
-| Add Custom Product Modal | `src/components/AddCustomProductModal.tsx` | 🔒 LOCKED | Custom product creation form. |
+| Add Custom Product Modal | `src/components/AddCustomProductModal.tsx` | 🔒 LOCKED (Mar 16, 2026) | Hardened: Duplicate prevention, multi-image upload, smart edit detection. |
 | Bottom Modal | `src/components/BottomModal.tsx` | 🔒 LOCKED | Reusable bottom sheet modal. |
 | Configure Products Modal | `src/components/ConfigureProductsModal.tsx` | 🔒 LOCKED | Product configuration with variants. |
 | Filter Modal | `src/components/FilterModal.tsx` | 🔒 LOCKED | Order/inventory filter. |

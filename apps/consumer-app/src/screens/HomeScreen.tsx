@@ -11,6 +11,7 @@ import { MainTabParamList } from '../navigation/MainTabNavigator';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocation } from '../context/LocationContext';
 import { supabase } from '../lib/supabase';
+import { useCart } from '../context/CartContext';
 import * as Haptics from 'expo-haptics';
 import CartSummaryBar from '../components/CartSummaryBar';
 import { HERO_IMAGES } from '../lib/data';
@@ -21,28 +22,52 @@ export default function HomeScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const tabNavigation = useNavigation<any>();
     const { activeLocation } = useLocation();
+    const { getItemCount, getTotal } = useCart();
     const [profile, setProfile] = useState<any>(null);
     const [searchText, setSearchText] = useState("");
 
     useEffect(() => {
         fetchProfile();
+
+        // Listen for auth state changes to clear profile on logout
+        const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            if (!session) {
+                setProfile(null);
+            } else {
+                fetchProfile();
+            }
+        });
+
+        return () => {
+            authSubscription.unsubscribe();
+        };
     }, []);
 
     const fetchProfile = async () => {
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            const { data: { session } } = await supabase.auth.getSession();
+            
+            if (!session) {
+                setProfile(null);
+                return;
+            }
 
-            const { data, error } = await supabase
-                .from('profiles')
-                .select('avatar_url')
-                .eq('id', user.id)
-                .single();
+            const timeout = (ms: number) => new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms));
+            
+            const { data, error } = await Promise.race([
+                supabase
+                    .from('profiles')
+                    .select('avatar_url')
+                    .eq('id', session.user.id)
+                    .single(),
+                timeout(15000)
+            ]) as any;
 
             if (error) throw error;
             setProfile(data);
         } catch (error) {
             console.error('Error fetching profile avatar:', error);
+            setProfile(null);
         }
     };
 
@@ -67,14 +92,9 @@ export default function HomeScreen() {
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                        onPress={async () => {
+                        onPress={() => {
                             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                            const { data: { session } } = await supabase.auth.getSession();
-                            if (session) {
-                                navigation.navigate('Profile');
-                            } else {
-                                navigation.navigate('Auth');
-                            }
+                            navigation.navigate('Profile');
                         }}
                         className="w-10 h-10 rounded-xl bg-gray-100 items-center justify-center shadow-sm overflow-hidden border border-gray-100"
                     >
@@ -103,6 +123,7 @@ export default function HomeScreen() {
                 contentContainerStyle={{ paddingBottom: 120, paddingTop: 20 }}
                 showsVerticalScrollIndicator={false}
             >
+
                 {/* 2-Column Grid: Pickup & Dining */}
                 <View className="px-6 mb-8 flex-row gap-4 h-[300px]">
                     {/* Pickup Card */}
@@ -184,7 +205,7 @@ export default function HomeScreen() {
 
             </ScrollView>
 
-            <CartSummaryBar itemCount={2} totalAmount={459} />
+            <CartSummaryBar itemCount={getItemCount()} totalAmount={getTotal()} />
         </SafeAreaView>
     );
 }

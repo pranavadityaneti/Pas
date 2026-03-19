@@ -61,9 +61,11 @@ model User {
   updatedAt    DateTime @updatedAt
 
   // Relations
-  orders        Order[] @relation("CustomerOrders")
-  handledOrders Order[] @relation("StaffHandledOrders")
-  managedStore  Store?  @relation("StoreManager")
+  orders           Order[]           @relation("CustomerOrders")
+  handledOrders    Order[]           @relation("StaffHandledOrders")
+  managedStore     Store?            @relation("StoreManager")
+  favoriteStores   FavoriteStore[]
+  favoriteProducts FavoriteProduct[]
 
   notificationPreferences Json?          @map("notification_preferences")
   notifications           Notification[]
@@ -121,9 +123,10 @@ model Store {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  products StoreProduct[]
-  orders   Order[]
-  coupons  Coupon[]
+  products     StoreProduct[]
+  orders       Order[]
+  favoritedBy  FavoriteStore[]
+  coupons      Coupon[]
 
   @@index([merchantId])
 }
@@ -179,12 +182,32 @@ model Product {
   unitValue Float? // 500
   hsnCode   String? // "0401"
   gstRate   Float? // 5.0
+
+  // Catalog Import Fields
+  sourceProductId  String?  @unique @map("source_product_id") // External ID for dedup
+  source           String?  // "purchased_catalog", "manual", etc.
+  subcategory      String?  // Second level from category_hierarchy
+  unitPrice        Float?   @map("unit_price") // Price per unit (e.g., per kg)
+  uom              String?  // Unit of Measure: "kg", "L", "ml", "g", "pc", "pack"
+  avgRating        Float?   @map("avg_rating")
+  numberOfRatings  Int?     @map("number_of_ratings")
+  isSoldOut        Boolean  @default(false) @map("is_sold_out")
+  productUrl       String?  @map("product_url")
+  countryCode      String?  @map("country_code")
+  catalogName      String?  @map("catalog_name")
+  shippingCharges  Float?   @map("shipping_charges")
+  extraData        Json?    @map("extra_data") // For "others" field and any unmapped fields
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   storeProducts StoreProduct[]
   auditLogs     ProductAuditLog[]
   images        ProductImage[]
+
+  @@index([category])
+  @@index([source])
+  @@index([subcategory])
 }
 
 model ProductImage {
@@ -233,6 +256,7 @@ model StoreProduct {
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
   orderItems     OrderItem[]
+  favoritedBy    FavoriteProduct[]
 
   // CRITICAL: This unique constraint ensures a store can have the same product multiple times 
   // ONLY if they are different variants. Do not revert to [storeId, productId].
@@ -269,6 +293,7 @@ model Order {
   @@index([orderNumber])
   @@index([storeId])
   @@index([userId])
+  @@map("orders")
 }
 
 model Subscription {
@@ -295,6 +320,8 @@ model OrderItem {
 
   quantity Int
   price    Float @map("price")
+
+  @@map("order_items")
 }
 
 // --- Legacy & Merchant Management ---
@@ -325,6 +352,7 @@ model Merchant {
   ifscCode            String? @map("ifsc_code")
   bankName            String? @map("bank_name")
   bankBeneficiaryName String? @map("bank_beneficiary_name")
+  bankAccounts        Json?   @map("bank_accounts")
 
   panDocUrl          String?  @map("pan_doc_url")
   panDocumentUrl     String?  @map("pan_document_url")
@@ -384,4 +412,52 @@ model OtpVerification {
 
   @@index([phone])
   @@map("otp_verifications")
+}
+
+// --- Favorites Feature ---
+
+model FavoriteStore {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeId   String   @map("store_id")
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, storeId])
+  @@map("favorite_stores")
+}
+
+model FavoriteProduct {
+  id               String       @id @default(uuid())
+  userId           String       @map("user_id")
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeProductId   String       @map("store_product_id")
+  storeProduct     StoreProduct @relation(fields: [storeProductId], references: [id], onDelete: Cascade)
+  createdAt        DateTime     @default(now()) @map("created_at")
+
+  @@unique([userId, storeProductId])
+  @@map("favorite_products")
+}
+
+// --- Sync & Integration Models ---
+
+model SyncQueue {
+  id              String   @id @default(uuid())
+  name            String
+  brand           String?
+  mrp             Float
+  category        String
+  subcategory     String?
+  packsize        String?
+  image           String?
+  sourceProductId String   @unique @map("source_product_id") // Partner sku_id
+  status          String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  metadata        Json?    // Stores full scraper JSON for reference
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([sourceProductId])
+  @@map("sync_queue")
 }

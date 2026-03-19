@@ -2,7 +2,7 @@
   "expo": {
     "name": "consumer-app",
     "slug": "consumer-app",
-    "version": "1.0.0",
+    "version": "1.0.5",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "consumerapp",
@@ -10,8 +10,21 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.pas.consumerapp",
       "config": {
         "googleMapsApiKey": "AIzaSyAQAg7zpYvmd2BJGCGmf1opDLDC4KXbKUg"
+      },
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false,
+          "NSExceptionDomains": {
+            "pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com": {
+              "NSExceptionAllowsInsecureHTTPLoads": true,
+              "NSIncludesSubdomains": true
+            }
+          }
+        }
       }
     },
     "android": {
@@ -27,7 +40,10 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.pas.consumerapp",
+      "privacyPolicyUrl": "https://www.pickatstore.io/privacypolicy",
+      "usesCleartextTraffic": true
     },
     "web": {
       "output": "static",
@@ -47,14 +63,40 @@
           }
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "This app uses the camera to let you take a profile photo.",
+          "photosPermission": "This app accesses your photos to let you choose a profile picture."
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "This app accesses your contacts to help you pick someone for order pickup."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
     "extra": {
-      "googleMapsApiKey": "AIzaSyAQAg7zpYvmd2BJGCGmf1opDLDC4KXbKUg"
+      "googleMapsApiKey": "AIzaSyAQAg7zpYvmd2BJGCGmf1opDLDC4KXbKUg",
+      "router": {},
+      "eas": {
+        "projectId": "350a8772-4cd9-439e-9d0e-a99a91c08915"
+      }
     }
   }
 }

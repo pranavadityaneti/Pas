@@ -72,15 +72,38 @@ export default function TimingsScreen() {
         setPickerVisible(false);
     };
 
+    // Format dates to HH:mm string
+    const formatTime = (date: Date) => {
+        return date.getHours().toString().padStart(2, '0') + ':' +
+            date.getMinutes().toString().padStart(2, '0');
+    };
+
+    const isDirty = (() => {
+        if (!store?.operating_hours) return true; // If no hours set, it's dirty
+        const oh = store.operating_hours;
+
+        // Check days
+        const currentDays = [...selectedDays].sort().join(',');
+        const originalDays = [...(oh.days || [])].sort().join(',');
+        if (currentDays !== originalDays) return true;
+
+        // Check times
+        if (formatTime(openTime) !== (oh.open || '')) return true;
+        if (formatTime(closeTime) !== (oh.close || '')) return true;
+
+        // Check lunch break
+        if (hasLunchBreak !== (oh.hasLunchBreak || false)) return true;
+        if (hasLunchBreak) {
+            if (formatTime(lunchStart) !== (oh.lunchStart || '')) return true;
+            if (formatTime(lunchEnd) !== (oh.lunchEnd || '')) return true;
+        }
+
+        return false;
+    })();
+
     const handleSave = async () => {
         if (!store?.id) return;
         setSaving(true);
-
-        // Format dates to HH:mm string
-        const formatTime = (date: Date) => {
-            return date.getHours().toString().padStart(2, '0') + ':' +
-                date.getMinutes().toString().padStart(2, '0');
-        };
 
         const payload = {
             days: selectedDays,
@@ -194,7 +217,11 @@ export default function TimingsScreen() {
             </ScrollView>
 
             <View style={styles.footer}>
-                <TouchableOpacity style={[styles.saveButton, saving && { opacity: 0.7 }]} onPress={handleSave} disabled={saving}>
+                <TouchableOpacity
+                    style={[styles.saveButton, (saving || !isDirty) && { opacity: 0.7 }]}
+                    onPress={handleSave}
+                    disabled={saving || !isDirty}
+                >
                     <Ionicons name="save-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
                     <Text style={styles.saveText}>{saving ? 'Saving...' : 'Save Changes'}</Text>
                 </TouchableOpacity>

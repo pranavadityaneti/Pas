@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useStore } from './useStore';
 import Constants from 'expo-constants';
 
-const API_URL = Constants.expoConfig?.extra?.apiUrl || 'http://localhost:3000';
+const API_URL = Constants.expoConfig?.extra?.apiUrl || 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
 
 export type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED' | 'RETURN_REQUESTED' | 'RETURN_APPROVED' | 'RETURN_REJECTED' | 'REFUNDED';
 
@@ -116,15 +116,14 @@ export function useOrders() {
 
         try {
             const { data, error } = await supabase
-                .from('Order')
+                .from('orders')
                 .select(`
                     *,
-                    user:User!Order_user_id_fkey(name, phone),
-                    items:OrderItem(
+                    items:order_items(
                         id, quantity, price,
-                        storeProduct:StoreProduct(
+                        storeProduct:"StoreProduct"(
                             stock,
-                            product:Product(name, image, gstRate)
+                            product:"Product"(name, image, gstRate)
                         )
                     )
                 `)
@@ -132,6 +131,21 @@ export function useOrders() {
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
+
+            // Application-level JOIN for user profiles to bypass missing physical foreign keys
+            const userIds = [...new Set((data || []).map((o: any) => o.user_id).filter(Boolean))];
+            let profilesMap: Record<string, any> = {};
+            if (userIds.length > 0) {
+                const { data: profiles } = await supabase
+                    .from('profiles')
+                    .select('id, full_name')
+                    .in('id', userIds);
+                if (profiles) {
+                    profiles.forEach((p: any) => {
+                        profilesMap[p.id] = { name: p.full_name || 'Guest', phone: 'N/A' };
+                    });
+                }
+            }
 
             // MERGE: Real Data + Persistent Mock Data
             const realOrders = (data || []).map((o: any) => ({
@@ -141,7 +155,7 @@ export function useOrders() {
                 totalAmount: o.total_amount,
                 isPaid: o.ispaid,
                 createdAt: o.created_at,
-                user: Array.isArray(o.user) ? o.user[0] : o.user,
+                user: profilesMap[o.user_id] || { name: 'Guest', phone: 'N/A' },
                 items: (o.items || []).map((item: any) => ({
                     id: item.id,
                     quantity: item.quantity,
@@ -174,7 +188,7 @@ export function useOrders() {
                 .on('postgres_changes', {
                     event: '*',
                     schema: 'public',
-                    table: 'Order',
+                    table: 'orders',
                     filter: `store_id=eq.${storeId}`
                 }, (payload) => {
                     console.log('Real-time order update:', payload);

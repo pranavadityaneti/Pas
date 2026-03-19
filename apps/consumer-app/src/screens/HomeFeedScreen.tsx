@@ -1,52 +1,55 @@
-// @lock — Do NOT overwrite. Approved layout as of Feb 27, 2026.
-// Pickup Discovery Screen: Hero slider, category grid, product carousels, cross-promo card.
-import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, Image, TouchableOpacity, FlatList, TextInput, ActivityIndicator, Dimensions } from 'react-native';
+// Pickup Discovery Screen (UX Overhauled): Hyper-local venue discovery, distance badges, curated sections.
+import React, { useEffect, useState, useMemo } from 'react';
+import { View, Text, ScrollView, Image, TouchableOpacity, TextInput, Dimensions, FlatList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { MapPin, Search, ChevronDown, User, Mic, ChevronRight, Star, ShoppingBag, ArrowRight, X, Check, UtensilsCrossed } from 'lucide-react-native';
-import { STORE_CATEGORIES, HERO_IMAGES, STORES, ALL_PRODUCTS } from '../lib/data';
+import { Search, User, ChevronRight, Star, Clock, ArrowRight } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { STORES, RESTAURANTS, STORE_CATEGORIES } from '../lib/data';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useLocation } from '../context/LocationContext';
 import { supabase } from '../lib/supabase';
 import * as Haptics from 'expo-haptics';
+import { useCart } from '../context/CartContext';
 import CartSummaryBar from '../components/CartSummaryBar';
-import { Modal } from 'react-native';
-import { useMemo } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const { width } = Dimensions.get('window');
+
+type FilterType = 'nearest' | 'top_rated' | 'food' | 'grocery' | 'bakery';
 
 export default function HomeFeedScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const { activeLocation, isLoadingLocation } = useLocation();
     const [profile, setProfile] = useState<any>(null);
     const [searchText, setSearchText] = useState('');
-    const [vegFilter, setVegFilter] = useState<'all' | 'veg'>('all');
-    const [vegModalVisible, setVegModalVisible] = useState(false);
+    const [activeFilter, setActiveFilter] = useState<FilterType>('nearest');
+
+    const { items, getTotal } = useCart();
+
+    const getTimeBadgeColor = (distanceStr: string) => {
+        const dist = parseFloat(distanceStr) || 0;
+        if (dist < 3) return '#16A34A'; // Green
+        if (dist <= 5) return '#D97706'; // Yellow
+        return '#DC2626'; // Red
+    };
 
     useEffect(() => {
-        fetchProfile();
-
-        // Listen for auth state changes to clear profile on logout
         const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange((_event, session) => {
             if (!session) {
                 setProfile(null);
             } else {
-                fetchProfile();
+                fetchProfile(session.user.id);
             }
         });
 
-        // Listen for profile changes
         const profileSubscription = supabase
             .channel('profile-changes')
-            .on('postgres_changes', {
-                event: '*',
-                schema: 'public',
-                table: 'profiles'
-            }, () => {
-                fetchProfile();
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+                supabase.auth.getSession().then(({ data }) => {
+                    if (data.session) fetchProfile(data.session.user.id);
+                });
             })
             .subscribe();
 
@@ -56,56 +59,154 @@ export default function HomeFeedScreen() {
         };
     }, []);
 
-    const fetchProfile = async () => {
+    const fetchProfile = async (userId: string) => {
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            let profileTimerId: any;
+            const profileTimeout = new Promise((_, reject) => {
+                profileTimerId = setTimeout(() => reject(new Error('timeout')), 5000);
+            });
 
-            const { data, error } = await supabase
-                .from('profiles')
-                .select('avatar_url')
-                .eq('id', user.id)
-                .single();
+            const { data, error } = await Promise.race([
+                supabase.from('profiles').select('avatar_url').eq('id', userId).single(),
+                profileTimeout
+            ]).finally(() => clearTimeout(profileTimerId)) as any;
 
-            if (error) throw error;
+            if (data?.avatar_url) {
+                // Append a timestamp to the URL to bypass React Native's aggressive Image cache
+                data.avatar_url = `${data.avatar_url}?v=${Date.now()}`;
+            }
             setProfile(data);
         } catch (error) {
             console.error('Error fetching profile avatar:', error);
+            setProfile(null);
         }
     };
 
-    // --- Filtered Products Logic ---
-    const filteredProducts = useMemo(() => {
-        let list = [...ALL_PRODUCTS];
-        if (vegFilter === 'veg') {
-            list = list.filter(p => p.isVeg !== false);
+    // --- Venues Data Logic ---
+    const allVenues = useMemo(() => {
+        let list = [
+            ...RESTAURANTS.map(r => ({ ...r, isRestaurant: true, rawDist: parseFloat(r.distance) })),
+            ...STORES.map(s => ({ ...s, isRestaurant: false, rawDist: parseFloat(s.distance) }))
+        ];
+
+        // Apply filters
+        if (activeFilter === 'nearest') {
+            list.sort((a, b) => a.rawDist - b.rawDist);
+        } else if (activeFilter === 'top_rated') {
+            list.sort((a, b) => parseFloat(b.rating) - parseFloat(a.rating));
+        } else if (activeFilter === 'grocery') {
+            list = list.filter(v => (v as any).category === 'grocery');
+        } else if (activeFilter === 'food') {
+            list = list.filter(v => v.isRestaurant);
+        } else if (activeFilter === 'bakery') {
+            list = list.filter(v => (v as any).category === 'bakery');
         }
+
+        // Apply search mapping
         if (searchText) {
             const query = searchText.toLowerCase();
-            list = list.filter(p =>
-                p.name.toLowerCase().includes(query) ||
-                p.category.toLowerCase().includes(query)
+            list = list.filter(v =>
+                v.name.toLowerCase().includes(query) ||
+                ((v as any).cuisine && (v as any).cuisine.toLowerCase().includes(query)) ||
+                ((v as any).category && (v as any).category.toLowerCase().includes(query))
             );
         }
+
+        // Fallback sort by distance if not explicitly sorting by something else
+        if (activeFilter !== 'nearest' && activeFilter !== 'top_rated') {
+            list.sort((a, b) => a.rawDist - b.rawDist);
+        }
+
         return list;
-    }, [vegFilter, searchText]);
+    }, [activeFilter, searchText]);
 
-    const dailyEssentials = useMemo(() =>
-        filteredProducts.filter(p => p.category === 'grocery').slice(0, 10),
-        [filteredProducts]);
+    // (Quick Grab & Go removed — replaced by store-level curated sections)
 
-    const snacksMunchies = useMemo(() =>
-        filteredProducts.filter(p => p.category === 'bakery').slice(0, 10),
-        [filteredProducts]);
+    // Curated store sections
+    const trendingStores = useMemo(() => {
+        return allVenues.filter(v => parseFloat(v.rating) >= 4.0 && v.rawDist <= 5).sort((a, b) => parseFloat(b.rating) - parseFloat(a.rating)).slice(0, 6);
+    }, [allVenues]);
 
-    const topRatedProducts = useMemo(() =>
-        [...filteredProducts].sort((a, b) => parseFloat(b.rating) - parseFloat(a.rating)).slice(0, 10),
-        [filteredProducts]);
+    const readyIn10 = useMemo(() => {
+        return allVenues.filter(v => {
+            const prepMinutes = parseInt((v as any).prepTime || '30');
+            return prepMinutes <= 10;
+        }).sort((a, b) => a.rawDist - b.rawDist).slice(0, 6);
+    }, [allVenues]);
+
+    const dealsStores = useMemo(() => {
+        return allVenues.filter(v => {
+            const products = (v as any).products || [];
+            return products.some((p: any) => p.discount > 0);
+        }).slice(0, 6);
+    }, [allVenues]);
+
+    const filters: { id: FilterType, label: string, ionicon: string }[] = [
+        { id: 'nearest', label: 'Nearest', ionicon: 'location' },
+        { id: 'top_rated', label: 'Top Rated', ionicon: 'star' },
+        { id: 'food', label: 'Restaurants', ionicon: 'storefront' },
+        { id: 'grocery', label: 'Groceries', ionicon: 'cart' },
+        { id: 'bakery', label: 'Coffee & Bites', ionicon: 'cafe' },
+    ];
+
+    const StandardVenueCard = ({ venue, tagType }: { venue: any, tagType?: 'trending' | 'fast' | 'deal' }) => (
+        <TouchableOpacity
+            delayPressIn={0}
+            key={venue.id}
+            onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                navigation.navigate('Storefront', { storeId: venue.id as any });
+            }}
+            style={{ width: width * 0.75 }}
+            className="mr-4 rounded-[28px] bg-white border border-gray-100 overflow-hidden shadow-sm"
+        >
+            <View className="h-[140px] relative">
+                <Image source={{ uri: venue.image }} className="w-full h-full object-cover" />
+                <LinearGradient
+                    colors={['transparent', 'rgba(0,0,0,0.6)']}
+                    style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+                />
+
+                {/* Distance Badge (Top Right) */}
+                <View className="absolute top-3 right-3 bg-white/95 px-2.5 py-1.5 rounded-xl flex-row items-center shadow-sm">
+                    <Ionicons name="location" size={12} color="#B52725" />
+                    <Text className="text-[11px] font-bold text-gray-900 ml-1">{venue.distance}</Text>
+                </View>
+
+                {/* Optional Custom Tags (Top/Bottom Left) */}
+                {tagType === 'deal' && (
+                    <View className="absolute top-3 left-3 bg-red-500 px-2 py-0.5 rounded-md">
+                        <Text className="text-[10px] font-extrabold text-white">OFFER</Text>
+                    </View>
+                )}
+            </View>
+            <View className="p-4">
+                <View className="flex-row justify-between items-start mb-2">
+                    <Text className="text-[16px] font-bold text-gray-900 flex-1 pr-2" numberOfLines={1}>{venue.name}</Text>
+                    <View className="flex-row items-center bg-gray-50 px-1.5 py-0.5 rounded-lg border border-gray-100">
+                        <Star size={12} color="#F59E0B" fill="#F59E0B" />
+                        <Text className="text-[11px] font-bold text-gray-800 ml-1">{venue.rating}</Text>
+                    </View>
+                </View>
+                <View className="flex-row items-center justify-between">
+                    <Text className="text-[13px] font-medium text-gray-500 capitalize" numberOfLines={1}>
+                        {venue.isRestaurant ? (venue as any).cuisine : (venue as any).category}
+                    </Text>
+                    <View className="flex-row items-center px-2.5 py-1 rounded-lg" style={{ backgroundColor: `${getTimeBadgeColor((venue as any).distance)}18` }}>
+                        <Clock size={11} color={getTimeBadgeColor((venue as any).distance)} />
+                        <Text className="text-[11px] font-bold ml-1" style={{ color: getTimeBadgeColor((venue as any).distance) }}>
+                            {(venue as any).prepTime || '10-15 mins'}
+                        </Text>
+                    </View>
+                </View>
+            </View>
+        </TouchableOpacity>
+    );
 
     return (
         <SafeAreaView edges={['top']} className="flex-1 bg-white">
-            {/* Sticky Header — Matching Home Screen */}
-            <View className="px-6 pt-2 pb-4 bg-white z-20 border-b border-gray-100">
+            {/* Sticky Header */}
+            <View className="px-6 pt-2 pb-3 bg-white z-20 overflow-visible">
                 <View className="flex-row items-start justify-between mb-4">
                     <TouchableOpacity
                         className="flex-1 pr-4"
@@ -115,386 +216,244 @@ export default function HomeFeedScreen() {
                         }}
                     >
                         <View className="flex-row items-center">
-                            <Text className="text-lg font-bold text-gray-900">
+                            <Text className="text-xl font-bold text-gray-900 tracking-tight">
                                 {activeLocation?.type || 'Select Location'}
                             </Text>
-                            <ChevronRight size={16} color="#B52725" />
+                            <ChevronRight size={18} color="#B52725" />
                         </View>
-                        <Text className="text-[11px] font-medium text-gray-500 mt-0.5" style={{ flexWrap: 'wrap' }} numberOfLines={1}>
-                            {isLoadingLocation ? "Finding target delivery zone..." : (activeLocation?.address || 'Click to add an address')}
+                        <Text className="text-xs font-medium text-gray-500 mt-0.5" numberOfLines={1}>
+                            {isLoadingLocation ? "Finding target delivery zone..." : (activeLocation?.address || 'Tap to set your current location')}
                         </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                        onPress={async () => {
+                        onPress={() => {
                             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                            const { data: { session } } = await supabase.auth.getSession();
-                            if (session) {
-                                (navigation as any).navigate('Profile');
-                            } else {
-                                (navigation as any).navigate('Auth');
-                            }
+                            (navigation as any).navigate('Profile');
                         }}
-                        className="w-10 h-10 rounded-xl bg-gray-100 items-center justify-center shadow-sm overflow-hidden border border-gray-100"
+                        className="w-11 h-11 rounded-full bg-gray-100 items-center justify-center border border-gray-200 overflow-hidden"
                     >
                         {profile?.avatar_url ? (
                             <Image source={{ uri: profile.avatar_url }} className="w-full h-full" />
                         ) : (
-                            <User size={20} color="#9CA3AF" />
+                            <User size={22} color="#9CA3AF" />
                         )}
                     </TouchableOpacity>
                 </View>
 
-                {/* Search Bar & Veg Filter */}
-                <View className="flex-row items-center">
-                    <View className="flex-1 flex-row items-center px-4 h-12 bg-white rounded-xl border border-gray-200 shadow-sm">
-                        <Search size={18} color="#000" />
+                {/* Search Bar */}
+                <View className="flex-row items-center mb-4">
+                    <View className="flex-1 flex-row items-center px-4 h-12 bg-gray-50 rounded-2xl border border-gray-100">
+                        <Search size={18} color="#9CA3AF" />
                         <TextInput
-                            className="flex-1 ml-3 font-semibold text-sm text-gray-800"
-                            style={{ paddingVertical: 0, height: 20, lineHeight: 20, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
-                            placeholder="Search for 'Atta' or 'Snacks'..."
+                            className="flex-1 ml-3 font-semibold text-[14px] text-gray-800"
+                            style={{ paddingVertical: 0, height: 20, lineHeight: 20 }}
+                            placeholder="Find places to pick up near you..."
                             placeholderTextColor="#9CA3AF"
                             value={searchText}
                             onChangeText={setSearchText}
                         />
                     </View>
-
-                    {/* Veg Toggle Button */}
-                    <TouchableOpacity
-                        onPress={() => {
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                            setVegModalVisible(true);
-                        }}
-                        className={`ml-3 px-3 h-12 rounded-xl border items-center justify-center flex-row ${vegFilter === 'veg' ? 'bg-green-50 border-green-200' : 'bg-white border-gray-200'
-                            }`}
-                    >
-                        <View className="w-3 h-3 border border-green-600 items-center justify-center mr-1.5" style={{ borderWidth: 1 }}>
-                            <View className="w-1.5 h-1.5 rounded-full bg-green-600" />
-                        </View>
-                        <Text className={`text-[10px] font-bold uppercase tracking-tighter ${vegFilter === 'veg' ? 'text-green-700' : 'text-gray-500'}`}>
-                            Veg
-                        </Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
-
-            <ScrollView className="flex-1 bg-[#F8F9FA]" contentContainerStyle={{ paddingBottom: 120, paddingTop: 16 }} showsVerticalScrollIndicator={false}>
-
-                {/* Hero Banner Slider */}
-                <View className="px-5 mb-8">
-                    <FlatList
-                        horizontal
-                        pagingEnabled
-                        showsHorizontalScrollIndicator={false}
-                        data={HERO_IMAGES}
-                        keyExtractor={(_, index) => index.toString()}
-                        renderItem={({ item }) => (
-                            <TouchableOpacity
-                                onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)}
-                                style={{ width: width - 48, height: 210 }}
-                                className="mr-5 relative rounded-[32px] overflow-hidden shadow-sm bg-white border border-gray-100"
-                            >
-                                <Image source={{ uri: item }} className="absolute w-full h-full" />
-                                <View className="absolute inset-0 bg-black/20 p-5">
-                                    <View className="px-3 py-1.5 bg-black/30 rounded-xl border border-white/20 self-start">
-                                        <Text className="text-[10px] font-bold text-white tracking-wider uppercase">Featured</Text>
-                                    </View>
-                                </View>
-                                <View className="w-10 h-10 rounded-full bg-white items-center justify-center shadow-lg absolute bottom-5 right-5">
-                                    <ChevronRight size={20} color="#000" />
-                                </View>
-                            </TouchableOpacity>
-                        )}
-                    />
                 </View>
 
-                {/* Categories Grid */}
-                <View className="px-5 mb-8">
-                    <View className="flex-row flex-wrap justify-between gap-y-6">
-                        {STORE_CATEGORIES.map((cat, i) => (
+                {/* Quick Action Pills */}
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row overflow-visible">
+                    {filters.map(filter => {
+                        const isActive = activeFilter === filter.id;
+                        return (
                             <TouchableOpacity
-                                key={cat.id}
+                                delayPressIn={0}
+                                key={filter.id}
                                 onPress={() => {
-                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                    Haptics.selectionAsync();
+                                    setActiveFilter(filter.id);
                                 }}
-                                className="items-center"
-                                style={{ width: '18%' }}
+                                className={`flex-row items-center px-4 h-9 rounded-full mr-2 border ${isActive
+                                    ? 'bg-[#B52725] border-[#B52725]'
+                                    : 'bg-white border-gray-200 shadow-sm'
+                                    }`}
                             >
-                                <View className="w-14 h-14 rounded-[20px] bg-white border border-gray-100 items-center justify-center shadow-sm">
-                                    <cat.icon size={22} color="#B52725" strokeWidth={1.5} />
-                                </View>
-                                <Text className="text-[10px] font-bold text-gray-800 mt-2 text-center" numberOfLines={1}>
-                                    {cat.name}
+                                <Ionicons name={isActive ? filter.ionicon as any : `${filter.ionicon}-outline` as any} size={14} color={isActive ? '#FFFFFF' : '#4B5563'} />
+                                <Text className={`ml-1.5 font-bold text-[12px] ${isActive ? 'text-white' : 'text-gray-700'}`}>
+                                    {filter.label}
                                 </Text>
                             </TouchableOpacity>
-                        ))}
-                    </View>
-                </View>
+                        );
+                    })}
+                </ScrollView>
+            </View>
 
-                {/* Products Section: Daily Essentials */}
-                <View className="mb-8">
-                    <View className="px-5 mb-4 flex-row justify-between items-end">
-                        <Text className="text-xl font-bold text-black-shadow">Daily Essentials</Text>
-                        <TouchableOpacity>
-                            <Text className="text-xs font-bold text-gray-400">See All</Text>
-                        </TouchableOpacity>
-                    </View>
-                    {dailyEssentials.length > 0 ? (
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="px-5">
-                            {dailyEssentials.map((item) => (
-                                <TouchableOpacity
-                                    key={item.id}
-                                    className="mr-4 w-32"
-                                    onPress={() => {
-                                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                        navigation.navigate('Storefront', { storeId: (item as any).storeId });
-                                    }}
-                                >
-                                    <View className="aspect-[3/4] rounded-[24px] bg-white border border-gray-100 overflow-hidden relative shadow-sm">
-                                        <Image source={{ uri: item.image }} className="w-full h-full object-cover" />
-                                        <View className="absolute top-2 left-2 flex-col gap-1">
-                                            {item.isVeg !== undefined && (
-                                                <View className="bg-white/90 p-1 rounded-md mb-1 self-start">
-                                                    <View className={`w-2.5 h-2.5 border items-center justify-center ${item.isVeg ? 'border-green-600' : 'border-red-600'}`} style={{ borderWidth: 1 }}>
-                                                        {item.isVeg ? (
-                                                            <View className="w-1 h-1 rounded-full bg-green-600" />
-                                                        ) : (
-                                                            <View style={{ width: 0, height: 0, borderLeftWidth: 3, borderRightWidth: 3, borderBottomWidth: 5, borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: '#DC2626' }} />
-                                                        )}
-                                                    </View>
-                                                </View>
-                                            )}
-                                            {item.isBestseller && (
-                                                <View className="px-1.5 py-0.5 bg-orange-100 rounded-md">
-                                                    <Text className="text-[8px] font-bold text-orange-800">Bestseller</Text>
-                                                </View>
-                                            )}
-                                        </View>
-                                    </View>
-                                    <View className="mt-2">
-                                        <Text className="text-[11px] font-bold text-black-shadow" numberOfLines={2}>{item.name}</Text>
-                                        <View className="flex-row items-center mt-1">
-                                            <Text className="text-[10px] font-bold">₹{item.price}</Text>
-                                            {item.discount > 0 && (
-                                                <Text className="text-[9px] font-bold text-green-600 ml-2">{item.discount}% OFF</Text>
-                                            )}
-                                        </View>
-                                    </View>
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
-                    ) : (
-                        <View className="mx-5 py-8 items-center justify-center bg-white rounded-[24px] border border-dashed border-gray-200">
-                            <Search size={24} color="#E5E7EB" strokeWidth={1} />
-                            <Text className="text-gray-400 text-[11px] font-bold mt-2">No matching items found</Text>
-                        </View>
-                    )}
-                </View>
+            <ScrollView className="flex-1 bg-[#F8F9FA]" contentContainerStyle={{ paddingBottom: 120, paddingTop: 10 }} showsVerticalScrollIndicator={false}>
 
-                {/* Products Section: Snacks & Munchies */}
-                <View className="mb-8">
-                    <View className="px-5 mb-4 flex-row justify-between items-end">
-                        <Text className="text-xl font-bold text-black-shadow">Snacks & Munchies</Text>
-                        <TouchableOpacity>
-                            <Text className="text-xs font-bold text-gray-400">See All</Text>
-                        </TouchableOpacity>
+                {/* Categories Section */}
+                <View className="mb-8 mt-2">
+                    <View className="px-6 mb-4">
+                        <Text className="text-[18px] font-extrabold text-gray-900 tracking-tight">Shop by Category</Text>
                     </View>
-                    {snacksMunchies.length > 0 ? (
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="px-5">
-                            {snacksMunchies.map((item) => (
-                                <TouchableOpacity
-                                    key={item.id}
-                                    className="mr-4 w-32"
-                                    onPress={() => {
-                                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                        navigation.navigate('Storefront', { storeId: (item as any).storeId });
-                                    }}
-                                >
-                                    <View className="aspect-[3/4] rounded-[24px] bg-white border border-gray-100 overflow-hidden relative shadow-sm">
-                                        <Image source={{ uri: item.image }} className="w-full h-full object-cover" />
-                                        <View className="absolute top-2 left-2 flex-col gap-1">
-                                            {item.isVeg !== undefined && (
-                                                <View className="bg-white/90 p-1 rounded-md mb-1 self-start">
-                                                    <View className={`w-2.5 h-2.5 border items-center justify-center ${item.isVeg ? 'border-green-600' : 'border-red-600'}`} style={{ borderWidth: 1 }}>
-                                                        {item.isVeg ? (
-                                                            <View className="w-1 h-1 rounded-full bg-green-600" />
-                                                        ) : (
-                                                            <View style={{ width: 0, height: 0, borderLeftWidth: 3, borderRightWidth: 3, borderBottomWidth: 5, borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: '#DC2626' }} />
-                                                        )}
-                                                    </View>
-                                                </View>
-                                            )}
-                                        </View>
-                                    </View>
-                                    <View className="mt-2">
-                                        <Text className="text-[11px] font-bold text-black-shadow" numberOfLines={2}>{item.name}</Text>
-                                        <View className="flex-row items-center mt-1">
-                                            <Text className="text-[10px] font-bold">₹{item.price}</Text>
-                                        </View>
-                                    </View>
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
-                    ) : (
-                        <View className="mx-5 py-8 items-center justify-center bg-white rounded-[24px] border border-dashed border-gray-200">
-                            <Text className="text-gray-400 text-[11px] font-bold">No snacks found</Text>
-                        </View>
-                    )}
-                </View>
-
-                {/* Products Section: Top Rated */}
-                <View className="mb-12">
-                    <View className="px-5 mb-4 flex-row justify-between items-end">
-                        <Text className="text-xl font-bold text-black-shadow">Top Rated Products</Text>
-                    </View>
-                    {topRatedProducts.length > 0 ? (
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="px-5">
-                            {topRatedProducts.map((item) => (
-                                <TouchableOpacity
-                                    key={item.id}
-                                    className="mr-4 w-32"
-                                    onPress={() => {
-                                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                        navigation.navigate('Storefront', { storeId: (item as any).storeId });
-                                    }}
-                                >
-                                    <View className="aspect-[3/4] rounded-[24px] bg-white border border-gray-100 overflow-hidden relative shadow-sm">
-                                        <Image source={{ uri: item.image }} className="w-full h-full object-cover" />
-                                        <View className="absolute top-2 left-2 flex-col gap-1">
-                                            <View className="bg-white/90 p-1 rounded-md mb-1 self-start">
-                                                <View className="flex-row items-center">
-                                                    <Star size={8} color="#FBBF24" fill="#FBBF24" />
-                                                    <Text className="text-[8px] font-bold text-gray-800 ml-0.5">{item.rating}</Text>
-                                                </View>
-                                            </View>
-                                        </View>
-                                    </View>
-                                    <View className="mt-2">
-                                        <Text className="text-[11px] font-bold text-black-shadow" numberOfLines={2}>{item.name}</Text>
-                                        <View className="flex-row items-center mt-1">
-                                            <Text className="text-[10px] font-bold">₹{item.price}</Text>
-                                        </View>
-                                    </View>
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
-                    ) : (
-                        <View className="mx-5 py-8 items-center justify-center bg-white rounded-[24px] border border-dashed border-gray-200">
-                            <Text className="text-gray-400 text-[11px] font-bold">No top picks found</Text>
-                        </View>
-                    )}
-                </View>
-
-                {/* Cross-Promotion: Reserve a Table */}
-                <View className="px-5 mb-10">
-                    <TouchableOpacity
-                        onPress={() => {
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                            (navigation as any).navigate('Dining');
-                        }}
-                        className="w-full h-[180px] rounded-[30px] overflow-hidden relative"
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={{ paddingHorizontal: 24 }}
                     >
-                        <Image
-                            source={{ uri: "https://images.unsplash.com/photo-1559339352-11d035aa65de?auto=format&fit=crop&w=800&q=80" }}
-                            className="absolute w-full h-full"
-                        />
-                        <LinearGradient
-                            colors={['transparent', 'rgba(0,0,0,0.8)']}
-                            style={{ position: 'absolute', inset: 0, padding: 24, justifyContent: 'flex-end' }}
-                        >
-                            <Text className="text-2xl font-bold text-white mb-1">Reserve a Table</Text>
-                            <Text className="text-sm font-medium text-white/90 mb-4">Skip the wait. Explore premium dining.</Text>
-                            <View className="px-4 py-2 bg-white rounded-xl self-start">
-                                <Text className="text-xs font-bold text-black">Explore Dining</Text>
+                        {STORE_CATEGORIES.map((category) => {
+                            const colorClass = category.color.split(' ')[0];
+
+                            return (
+                                <TouchableOpacity
+                                    delayPressIn={0}
+                                    key={category.id}
+                                    onPress={() => {
+                                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                        navigation.navigate('CategoryDetail', {
+                                            categoryId: category.id,
+                                            categoryName: category.name
+                                        });
+                                    }}
+                                    className="items-center mr-5"
+                                >
+                                    <View className={`w-[72px] h-[72px] rounded-full ${colorClass} items-center justify-center mb-2 shadow-sm border border-black/5`}>
+                                        <Ionicons name={category.ionicon as any} size={30} color={category.iconColor} />
+                                    </View>
+                                    <Text className="text-[12px] font-bold text-gray-800 text-center">{category.name}</Text>
+                                    <Text className="text-[10px] font-medium text-gray-400 text-center mt-0.5">{category.sub}</Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
+                </View>
+
+                {/* Nearest Feature: Horizontal Cards */}
+                {activeFilter === 'nearest' && !searchText && (
+                    <View className="mb-8">
+                        <View className="px-6 mb-4 flex-row justify-between items-end">
+                            <Text className="text-[20px] font-extrabold text-gray-900 tracking-tight">Closest to You</Text>
+                            <ArrowRight size={20} color="#B52725" />
+                        </View>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="pl-6" snapToInterval={width * 0.75 + 16} snapToAlignment="start" decelerationRate="fast">
+                            {allVenues.slice(0, 5).map((venue) => (
+                                <StandardVenueCard key={venue.id} venue={venue} />
+                            ))}
+                        </ScrollView>
+                    </View>
+                )}
+
+                {/* ===== CURATED SECTIONS ===== */}
+                {(!searchText && activeFilter === 'nearest') && trendingStores.length > 0 && (
+                    <View className="mb-8">
+                        <View className="px-6 mb-4 flex-row justify-between items-end">
+                            <View>
+                                <Text className="text-[18px] font-extrabold text-gray-900 tracking-tight">🔥 Trending Near You</Text>
+                                <Text className="text-gray-500 text-[12px] font-medium mt-0.5">Highest rated within 5 km</Text>
                             </View>
-                        </LinearGradient>
-                    </TouchableOpacity>
+                        </View>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="pl-6" snapToInterval={width * 0.75 + 16} snapToAlignment="start" decelerationRate="fast">
+                            {trendingStores.map((venue) => (
+                                <StandardVenueCard key={`trending-${venue.id}`} venue={venue} tagType="trending" />
+                            ))}
+                        </ScrollView>
+                    </View>
+                )}
+
+                {(!searchText && activeFilter === 'nearest') && readyIn10.length > 0 && (
+                    <View className="mb-8">
+                        <View className="px-6 mb-4">
+                            <Text className="text-[18px] font-extrabold text-gray-900 tracking-tight">⚡ Ready in 10 Minutes</Text>
+                            <Text className="text-gray-500 text-[12px] font-medium mt-0.5">Grab & go — almost instant</Text>
+                        </View>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="pl-6" snapToInterval={width * 0.75 + 16} snapToAlignment="start" decelerationRate="fast">
+                            {readyIn10.map((venue) => (
+                                <StandardVenueCard key={`fast-${venue.id}`} venue={venue} tagType="fast" />
+                            ))}
+                        </ScrollView>
+                    </View>
+                )}
+
+                {(!searchText && activeFilter === 'nearest') && dealsStores.length > 0 && (
+                    <View className="mb-8">
+                        <View className="px-6 mb-4">
+                            <Text className="text-[18px] font-extrabold text-gray-900 tracking-tight">🏷️ Deals of the Day</Text>
+                            <Text className="text-gray-500 text-[12px] font-medium mt-0.5">Stores with active discounts</Text>
+                        </View>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="pl-6" snapToInterval={width * 0.75 + 16} snapToAlignment="start" decelerationRate="fast">
+                            {dealsStores.map((venue) => (
+                                <StandardVenueCard key={`deal-${venue.id}`} venue={venue} tagType="deal" />
+                            ))}
+                        </ScrollView>
+                    </View>
+                )}
+
+                {/* All Venues Feed */}
+                <View className="px-5">
+                    <Text className="text-[20px] font-extrabold text-gray-900 tracking-tight mb-5 px-1">
+                        {searchText ? 'Search Results' : 'All Nearby Places'}
+                    </Text>
+
+                    {allVenues.length > 0 ? (
+                        allVenues.map((venue, index) => (
+                            <TouchableOpacity
+                                delayPressIn={0}
+                                key={venue.id}
+                                onPress={() => {
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                                    navigation.navigate('Storefront', { storeId: venue.id as any });
+                                }}
+                                className="mb-5 bg-white rounded-[24px] border border-gray-100 shadow-sm overflow-hidden"
+                            >
+                                <View className="h-[160px] w-full relative">
+                                    <Image source={{ uri: venue.image }} className="w-full h-full" />
+                                    <LinearGradient
+                                        colors={['transparent', 'rgba(0,0,0,0.8)']}
+                                        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+                                    />
+
+                                    {/* Top Right Badges */}
+                                    <View className="absolute top-3 right-3 flex-row gap-2">
+                                        <View className="bg-white/95 px-2.5 py-1.5 rounded-xl flex-row items-center shadow-sm">
+                                            <Ionicons name="location" size={12} color="#B52725" />
+                                            <Text className="text-[11px] font-bold text-gray-900 ml-1">{venue.distance}</Text>
+                                        </View>
+                                    </View>
+
+                                    {/* Bottom Info inside image */}
+                                    <View className="absolute bottom-4 left-4 right-4 flex-row justify-between items-end">
+                                        <View className="flex-1 pr-4">
+                                            <Text className="text-white font-extrabold text-[20px] shadow-sm mb-1" numberOfLines={1}>{venue.name}</Text>
+                                            <Text className="text-white/90 font-medium text-[13px] capitalize" numberOfLines={1}>
+                                                {venue.isRestaurant ? (venue as any).cuisine : (venue as any).category} • {venue.address?.split(',')[1]?.trim() || 'Nearby'}
+                                            </Text>
+                                        </View>
+                                        <View className="px-3 py-1.5 rounded-xl flex-row items-center shadow-sm" style={{ backgroundColor: getTimeBadgeColor((venue as any).distance) }}>
+                                            <Clock size={12} color="#FFFFFF" />
+                                            <Text className="text-[12px] font-bold text-white ml-1.5">{(venue as any).prepTime || '15 mins'}</Text>
+                                        </View>
+                                    </View>
+                                </View>
+
+                                {/* Order Again / Highlights Bar */}
+                                <View className="px-4 py-3 flex-row justify-between items-center bg-gray-50/50">
+                                    <View className="flex-row items-center">
+                                        <Star size={14} color="#F59E0B" fill="#F59E0B" />
+                                        <Text className="text-[12px] font-bold text-gray-700 ml-1.5">{venue.rating}</Text>
+                                        <Text className="text-[12px] text-gray-400 mx-2">•</Text>
+                                        <Text className="text-[12px] font-semibold text-gray-500">Pick up here</Text>
+                                    </View>
+                                    <View className="w-8 h-8 rounded-full bg-red-50 items-center justify-center">
+                                        <ArrowRight size={16} color="#B52725" />
+                                    </View>
+                                </View>
+                            </TouchableOpacity>
+                        ))
+                    ) : (
+                        <View className="py-12 items-center justify-center">
+                            <Ionicons name="storefront-outline" size={48} color="#E5E7EB" />
+                            <Text className="text-gray-900 text-[16px] font-bold mt-4">No places found</Text>
+                            <Text className="text-gray-400 text-[13px] font-medium mt-1 text-center px-10">Try adjusting your filters or location to discover more venues.</Text>
+                        </View>
+                    )}
                 </View>
 
             </ScrollView>
 
-            <CartSummaryBar itemCount={2} totalAmount={459} />
-
-            {/* Custom Veg Preference Modal */}
-            <Modal
-                visible={vegModalVisible}
-                animationType="fade"
-                transparent={true}
-                onRequestClose={() => setVegModalVisible(false)}
-            >
-                <View className="flex-1 justify-center items-center px-6" style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}>
-                    <View className="bg-white w-full rounded-[32px] overflow-hidden shadow-2xl">
-                        {/* Modal Header */}
-                        <View className="bg-white p-5 flex-row justify-between items-center border-b border-gray-50">
-                            <View>
-                                <Text className="text-gray-900 text-lg font-bold">Food Preference</Text>
-                                <Text className="text-gray-400 text-[10px] font-semibold uppercase tracking-widest mt-0.5">Clean & Pure Choice</Text>
-                            </View>
-                            <TouchableOpacity
-                                onPress={() => setVegModalVisible(false)}
-                                className="bg-gray-100 p-2 rounded-full"
-                            >
-                                <X size={18} color="#6B7280" />
-                            </TouchableOpacity>
-                        </View>
-
-                        <View className="p-5">
-                            <Text className="text-gray-500 text-[12px] font-medium leading-5 mb-4">
-                                Choose your dining preference across the platform.
-                            </Text>
-
-                            <TouchableOpacity
-                                onPress={() => {
-                                    setVegFilter('all');
-                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                }}
-                                className={`flex-row items-center p-3.5 rounded-2xl mb-3 border-2 ${vegFilter === 'all' ? 'border-amber-400 bg-amber-100' : 'border-gray-100 bg-white'
-                                    }`}
-                                activeOpacity={0.8}
-                            >
-                                <View className={`w-9 h-9 rounded-xl items-center justify-center ${vegFilter === 'all' ? 'bg-amber-400' : 'bg-gray-100'}`}>
-                                    <UtensilsCrossed size={16} color={vegFilter === 'all' ? 'white' : '#9CA3AF'} />
-                                </View>
-                                <View className="ml-3 flex-1">
-                                    <Text className={`text-[14px] font-bold ${vegFilter === 'all' ? 'text-gray-900' : 'text-gray-600'}`}>Show All</Text>
-                                    <Text className="text-[10px] text-gray-400 font-medium">Everything on the menu</Text>
-                                </View>
-                                {vegFilter === 'all' && <Check size={18} color="#F59E0B" />}
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                onPress={() => {
-                                    setVegFilter('veg');
-                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                }}
-                                className={`flex-row items-center p-3.5 rounded-2xl border-2 ${vegFilter === 'veg' ? 'border-green-500 bg-green-50' : 'border-gray-100 bg-white'
-                                    }`}
-                                activeOpacity={0.8}
-                            >
-                                <View className={`w-9 h-9 rounded-xl items-center justify-center ${vegFilter === 'veg' ? 'bg-green-500' : 'bg-gray-100'}`}>
-                                    <View className="w-3.5 h-3.5 border border-white items-center justify-center" style={{ borderWidth: 1 }}>
-                                        <View className="w-1.5 h-1.5 rounded-full bg-white" />
-                                    </View>
-                                </View>
-                                <View className="ml-3 flex-1">
-                                    <Text className={`text-[14px] font-bold ${vegFilter === 'veg' ? 'text-gray-900' : 'text-gray-600'}`}>Pure Veg Only</Text>
-                                    <Text className="text-[10px] text-gray-400 font-medium">Exclusively vegetarian</Text>
-                                </View>
-                                {vegFilter === 'veg' && <Check size={18} color="#10B981" />}
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                onPress={() => {
-                                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                                    setVegModalVisible(false);
-                                }}
-                                className="bg-[#B52725] py-4 rounded-2xl items-center mt-6 shadow-md"
-                            >
-                                <Text className="text-white font-bold uppercase tracking-widest text-[13px]">Update Feed</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
+            <CartSummaryBar itemCount={items.length} totalAmount={getTotal()} />
         </SafeAreaView>
     );
 }

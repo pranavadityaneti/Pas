@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, TextInput, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, TextInput, ActivityIndicator, Alert, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -9,6 +9,34 @@ import { useInventory } from '../../src/hooks/useInventory';
 import ConfigureProductsModal from '../../src/components/ConfigureProductsModal';
 import FilterModal, { FilterState } from '../../src/components/FilterModal';
 import AddCustomProductModal from '../../src/components/AddCustomProductModal';
+
+const CATEGORIES = [
+    'Dairy',
+    'Bakery',
+    'Snacks',
+    'Staples',
+    'Condiments',
+    'Confectionery',
+    'Grocery',
+    'Beverages',
+    'Personal Care',
+    'Home Essentials',
+    'Fashion',
+    'Pharmacy',
+    'Meat',
+    'Fruits & Vegetables'
+];
+
+const DEFAULT_FILTERS: FilterState = {
+    sortBy: 'price_low',
+    categories: [],
+    availability: [],
+    priceRange: [0, 10000],
+    brands: [],
+    onlyDiscounted: false,
+    showInactive: false,
+    isBestSeller: false,
+};
 
 export default function CatalogPicker() {
     const router = useRouter();
@@ -28,7 +56,6 @@ export default function CatalogPicker() {
     // Filter State
     const [filterVisible, setFilterVisible] = useState(false);
     const [appliedFilters, setAppliedFilters] = useState<FilterState | null>(null);
-    const [onlyBestSellers, setOnlyBestSellers] = useState(false);
 
     useEffect(() => {
         fetchGlobalCatalog();
@@ -128,15 +155,16 @@ export default function CatalogPicker() {
 
         let matchesFilter = true;
 
-        if (onlyBestSellers) {
-            // Simulate best sellers by category or rating if not in DB
-            if (p.category !== 'Electronics' && p.category !== 'Dairy') matchesFilter = false;
-        }
-
         if (appliedFilters) {
             if (appliedFilters.categories.length > 0 && !appliedFilters.categories.includes(p.category)) matchesFilter = false;
             if (appliedFilters.brands.length > 0 && !appliedFilters.brands.includes(p.brand)) matchesFilter = false;
             if (p.mrp < appliedFilters.priceRange[0] || p.mrp > appliedFilters.priceRange[1]) matchesFilter = false;
+            
+            // Hero Picks (Simulate premium/fast-moving brands in master catalog)
+            if (appliedFilters.isBestSeller) {
+                const premiumBrands = ['amul', 'haldirams', 'aashirvaad', 'ashirvaad', 'lays', 'britannia', 'nestle', 'cadbury', 'tata', 'parle', 'maggi'];
+                if (!p.brand || !premiumBrands.includes(p.brand.toLowerCase())) matchesFilter = false;
+            }
         }
 
         return matchesSearch && matchesFilter;
@@ -184,12 +212,6 @@ export default function CatalogPicker() {
                         {isCustom && (
                             <View style={styles.customBadge}>
                                 <Text style={styles.customText}>MY PRODUCT</Text>
-                            </View>
-                        )}
-                        {!isCustom && (
-                            <View style={[styles.ratingBadge, isDark && { backgroundColor: '#fff' }]}>
-                                <Ionicons name="star" size={10} color={isDark ? "#000" : "#fff"} />
-                                <Text style={[styles.ratingText, isDark && { color: '#000' }]}>4.5</Text>
                             </View>
                         )}
                     </View>
@@ -243,17 +265,49 @@ export default function CatalogPicker() {
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                    style={[styles.filterChip, onlyBestSellers && { borderColor: Colors.primary, backgroundColor: '#FEF2F2' }]}
-                    onPress={() => setOnlyBestSellers(!onlyBestSellers)}
+                    style={[styles.filterChip, appliedFilters?.isBestSeller && { borderColor: Colors.primary, backgroundColor: '#FEF2F2' }]}
+                    onPress={() => setAppliedFilters(prev => ({ ...(prev || DEFAULT_FILTERS), isBestSeller: !prev?.isBestSeller }))}
                 >
-                    <Ionicons name="star" size={16} color={onlyBestSellers ? Colors.primary : "#000"} />
-                    <Text style={[styles.chipText, onlyBestSellers && { color: Colors.primary }]}>Best Sellers</Text>
+                    <Ionicons name="star" size={16} color={appliedFilters?.isBestSeller ? Colors.primary : "#000"} />
+                    <Text style={[styles.chipText, appliedFilters?.isBestSeller && { color: Colors.primary }]}>Hero Picks</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity style={[styles.filterChip, { borderColor: Colors.primary, backgroundColor: '#fff' }]} onPress={() => setShowCustomModal(true)}>
                     <Ionicons name="add" size={16} color={Colors.primary} />
                     <Text style={[styles.chipText, { color: Colors.primary }]}>Add Custom</Text>
                 </TouchableOpacity>
+            </View>
+
+            {/* Categories Scroll */}
+            <View>
+                <ScrollView 
+                    horizontal 
+                    showsHorizontalScrollIndicator={false} 
+                    contentContainerStyle={styles.categoryScroll}
+                >
+                    {CATEGORIES.map(cat => {
+                        const isSelected = appliedFilters?.categories.includes(cat);
+                        return (
+                            <TouchableOpacity
+                                key={cat}
+                                style={[styles.catChip, isSelected && styles.catChipActive]}
+                                onPress={() => {
+                                    setAppliedFilters(prev => {
+                                        const currentCats = prev?.categories || [];
+                                        const nextCats = currentCats.includes(cat) 
+                                            ? currentCats.filter(c => c !== cat) 
+                                            : [...currentCats, cat];
+                                        return { ...(prev || DEFAULT_FILTERS), categories: nextCats };
+                                    });
+                                }}
+                            >
+                                <Text style={[styles.catChipText, isSelected && styles.catChipTextActive]}>
+                                    {cat}
+                                </Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </ScrollView>
             </View>
 
             <FlatList
@@ -266,7 +320,9 @@ export default function CatalogPicker() {
                         <View style={styles.emptyContainer}>
                             <Text style={styles.emptyText}>No products found.</Text>
                             <TouchableOpacity style={styles.emptyBtn} onPress={() => setShowCustomModal(true)}>
-                                <Text style={styles.emptyBtnText}>+ Add "{search}" as Custom Product</Text>
+                                <Text style={styles.emptyBtnText}>
+                                    {search.trim() ? `+ Add "${search}" as Custom Product` : "+ Add Custom Product"}
+                                </Text>
                             </TouchableOpacity>
                         </View>
                     ) : null
@@ -305,6 +361,8 @@ export default function CatalogPicker() {
                 visible={filterVisible}
                 onClose={() => setFilterVisible(false)}
                 onApply={setAppliedFilters}
+                isGlobalInventory={true}
+                initialFilters={appliedFilters || undefined}
             />
         </SafeAreaView>
     );
@@ -324,6 +382,12 @@ const styles = StyleSheet.create({
     filterRow: { flexDirection: 'row', paddingHorizontal: 20, marginBottom: 15, gap: 10 },
     filterChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#eee', gap: 6 },
     chipText: { fontSize: 13, fontWeight: '600' },
+
+    categoryScroll: { paddingHorizontal: 20, paddingBottom: 15, gap: 8 },
+    catChip: { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#fff', borderRadius: 20, borderWidth: 1, borderColor: '#eee' },
+    catChipActive: { backgroundColor: '#000', borderColor: '#000' },
+    catChipText: { fontSize: 13, fontWeight: '500', color: '#666' },
+    catChipTextActive: { color: '#fff', fontWeight: 'bold' },
 
     list: { paddingHorizontal: 20, paddingBottom: 100 },
 
@@ -345,12 +409,6 @@ const styles = StyleSheet.create({
     details: { fontSize: 12, color: '#666', marginBottom: 6 },
 
     price: { fontSize: 13, color: '#000' },
-
-    ratingBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#000', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, gap: 2 },
-    ratingText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
-
-    bestsellerTag: { backgroundColor: '#FFD700', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
-    bestsellerText: { fontSize: 10, fontWeight: 'bold', color: '#000' },
 
     // Footer
     footer: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 20, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#eee' },

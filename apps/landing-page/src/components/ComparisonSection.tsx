@@ -80,7 +80,7 @@ export function ComparisonSection() {
                         <p className="text-center text-xs font-semibold text-black-shadow/40 uppercase tracking-widest mb-5">
                             Competitor Platforms
                         </p>
-                        <div className="grid grid-cols-3 gap-4 flex-1">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 flex-1">
                             {competitors.map((c, i) => (
                                 <motion.div
                                     key={c.logoAlt}
@@ -88,27 +88,27 @@ export function ComparisonSection() {
                                     whileInView={{ opacity: 1, y: 0 }}
                                     viewport={{ once: true }}
                                     transition={{ duration: 0.4, delay: 0.15 + i * 0.08 }}
-                                    className="bg-white rounded-2xl p-5 flex flex-col gap-4 shadow-sm border border-gray-100 h-full"
+                                    className="bg-white rounded-2xl p-4 md:p-5 flex flex-col gap-4 shadow-sm border border-gray-100 h-full"
                                 >
                                     {/* Logo */}
-                                    <div className={`h-14 rounded-xl flex items-center justify-center p-2 ${c.logoBg} overflow-hidden`}>
+                                    <div className={`h-12 md:h-14 rounded-xl flex items-center justify-center p-2 ${c.logoBg} overflow-hidden`}>
                                         <Image
                                             src={c.logo}
                                             alt={c.logoAlt}
                                             width={120}
                                             height={48}
-                                            className="object-contain max-h-10"
+                                            className="object-contain max-h-8 md:max-h-10"
                                         />
                                     </div>
 
                                     <hr className="border-gray-100" />
 
                                     {/* Fee breakdown */}
-                                    <div className="flex flex-col gap-2">
+                                    <div className="flex flex-col gap-3 md:gap-2">
                                         {c.fees.map(f => (
-                                            <div key={f.label} className="flex items-center justify-between gap-1">
-                                                <span className="text-xs text-black-shadow/50 leading-tight">{f.label}</span>
-                                                <span className="text-xs font-semibold text-black-shadow whitespace-nowrap">{f.value}</span>
+                                            <div key={f.label} className="flex flex-row items-center justify-between sm:flex-col sm:items-start md:flex-row md:items-center gap-1">
+                                                <span className="text-[10px] md:text-xs text-black-shadow/50 leading-tight">{f.label}</span>
+                                                <span className="text-[11px] md:text-xs font-bold text-black-shadow whitespace-nowrap">{f.value}</span>
                                             </div>
                                         ))}
                                     </div>

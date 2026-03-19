@@ -10,93 +10,208 @@ import { useUser } from '../../../src/context/UserContext';
 import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
 import { useEarnings } from '../../../src/hooks/useEarnings';
 
+import { useStoreContext } from '../../../src/context/StoreContext';
+
 function formatCurrency(amount: number) {
     return '₹' + amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+interface BankAccount {
+    id: string;
+    bankName: string;
+    accountNumber: string;
+    displayAccount?: string;
+    ifsc: string;
+    beneficiary: string;
+    isPrimary: boolean;
+}
+
+const NAME_REGEX = /^[a-zA-Z\s]*$/;
+const IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+const ACCOUNT_REGEX = /^[0-9]{9,18}$/;
+
 export default function PayoutsScreen() {
     const { user } = useUser();
+    const { merchantId } = useStoreContext();
     const { stats: earnings, loading: earningsLoading } = useEarnings();
     const [modalVisible, setModalVisible] = useState(false);
+    const [saving, setSaving] = useState(false);
 
     // Realtime Bank Details
-    const { data: merchants, loading: tableLoading } = useRealtimeTable({
+    const { data: merchants, loading: tableLoading, setData } = useRealtimeTable({
         tableName: 'merchants',
-        select: 'bank_account_number, ifsc_code, owner_name, bank_name, bank_beneficiary_name',
-        filter: user?.id ? `id=eq.${user.id}` : undefined,
-        enabled: !!user?.id
+        select: 'bank_account_number, ifsc_code, owner_name, bank_name, bank_beneficiary_name, bank_accounts',
+        filter: merchantId ? `id=eq.${merchantId}` : undefined,
+        enabled: !!merchantId
     });
 
-    const bankDetails = React.useMemo(() => {
+    const bankAccountsList = React.useMemo<BankAccount[]>(() => {
         if (merchants && merchants.length > 0) {
             const data = merchants[0];
-            if (data.bank_account_number && data.bank_account_number.trim().length > 0) {
-                return {
+            // Get accounts from the new JSON column if available
+            const accounts = Array.isArray(data.bank_accounts) ? data.bank_accounts : [];
+            
+            // If no JSON accounts but we have the legacy fields, wrap the legacy fields as the primary account
+            if (accounts.length === 0 && data.bank_account_number) {
+                return [{
+                    id: 'legacy-primary',
                     bankName: data.bank_name || 'Bank',
-                    accountNumber: `**** **** **** ${data.bank_account_number.slice(-4)}`,
+                    accountNumber: data.bank_account_number,
+                    displayAccount: `**** **** **** ${data.bank_account_number.slice(-4)}`,
                     ifsc: data.ifsc_code || '',
                     beneficiary: data.bank_beneficiary_name || data.owner_name || '',
-                    isSet: true,
-                    isVerified: true
-                };
+                    isPrimary: true
+                }];
             }
+            
+            return accounts.map((acc: any, index: number) => ({
+                id: acc.id || `acc-${index}`,
+                bankName: acc.bankName || 'Bank',
+                accountNumber: acc.accountNumber,
+                displayAccount: `**** **** **** ${acc.accountNumber?.slice(-4)}`,
+                ifsc: acc.ifsc || '',
+                beneficiary: acc.beneficiary || '',
+                isPrimary: !!acc.isPrimary
+            }));
         }
-        return {
-            bankName: '',
-            accountNumber: '',
-            ifsc: '',
-            beneficiary: '',
-            isSet: false,
-            isVerified: false
-        };
+        return [];
     }, [merchants]);
 
     const loading = (tableLoading && !merchants.length) || earningsLoading;
 
     const [newBank, setNewBank] = useState({ name: '', account: '', ifsc: '', beneficiary: '' });
+    const [errors, setErrors] = useState({ name: '', account: '', ifsc: '', beneficiary: '' });
 
-    // OTP State
-    const [step, setStep] = useState(1); // 1: Details, 2: OTP
-    const [otp, setOtp] = useState('');
+    const validate = () => {
+        let isValid = true;
+        const newErrors = { name: '', account: '', ifsc: '', beneficiary: '' };
 
-    const handleRequestOtp = () => {
-        if (!newBank.name.trim() || !newBank.account.trim() || !newBank.ifsc.trim() || !newBank.beneficiary.trim()) {
-            Alert.alert('Incomplete', 'Please fill in all bank details.');
-            return;
+        if (!newBank.name.trim()) {
+            newErrors.name = 'Bank name is required';
+            isValid = false;
+        } else if (!NAME_REGEX.test(newBank.name)) {
+            newErrors.name = 'Only letters and spaces allowed';
+            isValid = false;
         }
-        Keyboard.dismiss();
-        setStep(2);
+
+        if (!newBank.account.trim()) {
+            newErrors.account = 'Account number is required';
+            isValid = false;
+        } else if (!ACCOUNT_REGEX.test(newBank.account)) {
+            newErrors.account = 'Enter 9 to 18 digits';
+            isValid = false;
+        }
+
+        if (!newBank.ifsc.trim()) {
+            newErrors.ifsc = 'IFSC code is required';
+            isValid = false;
+        } else if (!IFSC_REGEX.test(newBank.ifsc)) {
+            newErrors.ifsc = 'Invalid format (e.g. HDFC0001234)';
+            isValid = false;
+        }
+
+        if (!newBank.beneficiary.trim()) {
+            newErrors.beneficiary = 'Beneficiary name is required';
+            isValid = false;
+        } else if (!NAME_REGEX.test(newBank.beneficiary)) {
+            newErrors.beneficiary = 'Only letters and spaces allowed';
+            isValid = false;
+        }
+
+        setErrors(newErrors);
+        return isValid;
     };
 
-    const handleVerifyOtp = async () => {
+    const handleSaveBankDetails = async () => {
+        if (!validate()) return;
         Keyboard.dismiss();
-        if (otp === '123456') {
-            try {
-                if (!user?.id) return;
+        
+        try {
+            if (!merchantId) return;
+            setSaving(true);
 
-                // Update DB — save all bank fields
-                const { error } = await supabase
-                    .from('merchants')
-                    .update({
-                        bank_account_number: newBank.account,
-                        ifsc_code: newBank.ifsc,
-                        bank_name: newBank.name,
-                        bank_beneficiary_name: newBank.beneficiary
-                    })
-                    .eq('id', user.id);
+            // 1. Prepare new account object
+            const newAcc = {
+                id: Math.random().toString(36).substring(7),
+                bankName: newBank.name,
+                accountNumber: newBank.account,
+                ifsc: newBank.ifsc,
+                beneficiary: newBank.beneficiary,
+                isPrimary: bankAccountsList.length === 0 // Make primary if first one
+            };
 
-                if (error) throw error;
+            const updatedList = [...bankAccountsList, newAcc];
 
-                setModalVisible(false);
-                setStep(1);
-                setOtp('');
-                setNewBank({ name: '', account: '', ifsc: '', beneficiary: '' });
-                Alert.alert('Success', 'Bank account updated successfully!');
-            } catch (err: any) {
-                Alert.alert('Error', 'Failed to update bank details: ' + err.message);
+            // 2. Map back to compatible state
+            const primary = updatedList.find((a: BankAccount) => a.isPrimary) || newAcc;
+
+            // 3. Update DB
+            const { data: updatedRecord, error } = await supabase
+                .from('merchants')
+                .update({
+                    // Legacy singleton fields (for system compatibility)
+                    bank_account_number: primary.accountNumber,
+                    ifsc_code: primary.ifsc,
+                    bank_name: primary.bankName,
+                    bank_beneficiary_name: primary.beneficiary,
+                    // New multi-account list
+                    bank_accounts: updatedList
+                })
+                .eq('id', merchantId)
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            // 4. Manually update state to ensure UI reflects changes immediately
+            if (updatedRecord) {
+                setData([updatedRecord as any]);
             }
-        } else {
-            Alert.alert('Error', 'Invalid OTP. Use 123456 for testing.');
+
+            setModalVisible(false);
+            setNewBank({ name: '', account: '', ifsc: '', beneficiary: '' });
+            Alert.alert('Success', 'Bank account added successfully!');
+        } catch (err: any) {
+            Alert.alert('Error', 'Failed to add bank account: ' + err.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleSetPrimaryBank = async (accId: string) => {
+        try {
+            if (!merchantId) return;
+            setSaving(true);
+
+            const updatedList = bankAccountsList.map((acc: BankAccount) => ({
+                ...acc,
+                isPrimary: acc.id === accId
+            }));
+
+            const primary = updatedList.find((a: BankAccount) => a.isPrimary)!;
+
+            const { data: updatedRecord, error } = await supabase
+                .from('merchants')
+                .update({
+                    bank_account_number: primary.accountNumber,
+                    ifsc_code: primary.ifsc,
+                    bank_name: primary.bankName,
+                    bank_beneficiary_name: primary.beneficiary,
+                    bank_accounts: updatedList
+                })
+                .eq('id', merchantId)
+                .select()
+                .single();
+
+            if (error) throw error;
+            if (updatedRecord) {
+                setData([updatedRecord as any]);
+            }
+            Alert.alert('Updated', 'Primary bank account changed successfully.');
+        } catch (err: any) {
+            Alert.alert('Error', 'Failed to change primary bank: ' + err.message);
+        } finally {
+            setSaving(false);
         }
     };
 
@@ -159,38 +274,50 @@ export default function PayoutsScreen() {
                     </Text>
                 </View>
 
-                <Text style={styles.sectionTitle}>Linked Bank Account</Text>
+                <Text style={styles.sectionTitle}>Linked Bank Accounts</Text>
 
-                {bankDetails.isSet ? (
-                    <View style={[styles.bankCard, bankDetails.isVerified && { borderColor: '#10B981' }]}>
-                        <View style={styles.bankHeader}>
-                            <View style={styles.bankIcon}>
-                                <MaterialCommunityIcons name="bank-outline" size={24} color="#4B5563" />
-                            </View>
-                            <View style={{ flex: 1 }}>
-                                <Text style={styles.bankName}>{bankDetails.bankName}</Text>
-                                <Text style={styles.accountNumber}>{bankDetails.accountNumber}</Text>
-                            </View>
-                            {bankDetails.isVerified && (
-                                <View style={styles.verifiedBadge}>
-                                    <Text style={styles.verifiedText}>PRIMARY</Text>
+                {bankAccountsList.length > 0 ? (
+                    bankAccountsList.map((acc: BankAccount) => (
+                        <View key={acc.id} style={[styles.bankCard, acc.isPrimary && { borderColor: '#10B981' }]}>
+                            <View style={styles.bankHeader}>
+                                <View style={styles.bankIcon}>
+                                    <MaterialCommunityIcons name="bank-outline" size={24} color="#4B5563" />
                                 </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.bankName}>{acc.bankName}</Text>
+                                    <Text style={styles.accountNumber}>{acc.displayAccount}</Text>
+                                </View>
+                                {acc.isPrimary && (
+                                    <View style={styles.verifiedBadge}>
+                                        <Text style={styles.verifiedText}>PRIMARY</Text>
+                                    </View>
+                                )}
+                            </View>
+
+                            <View style={styles.divider} />
+
+                            <View style={styles.bankDetailsRow}>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.detailLabel}>IFSC Code</Text>
+                                    <Text style={styles.detailValue}>{acc.ifsc}</Text>
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.detailLabel}>Beneficiary</Text>
+                                    <Text style={styles.detailValue}>{acc.beneficiary}</Text>
+                                </View>
+                            </View>
+                            
+                            {!acc.isPrimary && (
+                                <TouchableOpacity 
+                                    style={styles.setPrimaryBtn} 
+                                    onPress={() => handleSetPrimaryBank(acc.id)}
+                                    disabled={saving}
+                                >
+                                    <Text style={styles.setPrimaryText}>Set as Primary</Text>
+                                </TouchableOpacity>
                             )}
                         </View>
-
-                        <View style={styles.divider} />
-
-                        <View style={styles.bankDetailsRow}>
-                            <View style={{ flex: 1 }}>
-                                <Text style={styles.detailLabel}>IFSC Code</Text>
-                                <Text style={styles.detailValue}>{bankDetails.ifsc}</Text>
-                            </View>
-                            <View style={{ flex: 1 }}>
-                                <Text style={styles.detailLabel}>Beneficiary</Text>
-                                <Text style={styles.detailValue}>{bankDetails.beneficiary}</Text>
-                            </View>
-                        </View>
-                    </View>
+                    ))
                 ) : (
                     <View style={styles.emptyBankCard}>
                         <View style={styles.emptyBankIconCircle}>
@@ -202,102 +329,96 @@ export default function PayoutsScreen() {
                 )}
 
                 <TouchableOpacity style={styles.changeButton} onPress={() => setModalVisible(true)}>
-                    <Ionicons name={bankDetails.isSet ? "card-outline" : "add-circle-outline"} size={20} color="#374151" style={{ marginRight: 8 }} />
-                    <Text style={styles.changeButtonText}>{bankDetails.isSet ? "Change Bank Account" : "Add Bank Account"}</Text>
+                    <Ionicons name="add-circle-outline" size={20} color="#374151" style={{ marginRight: 8 }} />
+                    <Text style={styles.changeButtonText}>Add Bank Account</Text>
                 </TouchableOpacity>
 
-                <View style={styles.infoNote}>
-                    <Ionicons name="information-circle-outline" size={20} color="#9CA3AF" />
-                    <Text style={styles.infoNoteText}>
-                        For security, we will send an OTP to your registered mobile number to verify your identity before adding or changing bank details.
-                    </Text>
-                </View>
+                {/* Debug info - only if developer check needed */}
+
+
 
             </ScrollView>
 
             <BottomModal
                 visible={modalVisible}
-                onClose={() => { setModalVisible(false); setStep(1); }}
-                title={step === 1 ? (bankDetails.isSet ? "Change Bank Account" : "Add Bank Account") : "Verify OTP"}
+                onClose={() => { setModalVisible(false); }}
+                title="Add Bank Account"
             >
-                {step === 1 ? (
-                    <View style={styles.form}>
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.inputLabel}>Bank Name</Text>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="e.g. HDFC Bank"
-                                value={newBank.name}
-                                onChangeText={t => setNewBank({ ...newBank, name: t })}
-                            />
-                        </View>
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.inputLabel}>Account Number</Text>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="Enter account number"
-                                keyboardType="numeric"
-                                value={newBank.account}
-                                onChangeText={t => setNewBank({ ...newBank, account: t })}
-                            />
-                        </View>
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.inputLabel}>IFSC Code</Text>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="E.G. HDFC0001234"
-                                autoCapitalize="characters"
-                                value={newBank.ifsc}
-                                onChangeText={t => setNewBank({ ...newBank, ifsc: t })}
-                            />
-                        </View>
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.inputLabel}>Beneficiary Name</Text>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="As per bank records"
-                                value={newBank.beneficiary}
-                                onChangeText={t => setNewBank({ ...newBank, beneficiary: t })}
-                            />
-                        </View>
-
-                        <View style={styles.modalActions}>
-                            <TouchableOpacity style={styles.modalCancel} onPress={() => setModalVisible(false)}>
-                                <Text style={styles.modalCancelText}>Cancel</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.modalSave} onPress={handleRequestOtp}>
-                                <Text style={styles.modalSaveText}>Continue</Text>
-                            </TouchableOpacity>
-                        </View>
+                <View style={styles.form}>
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Bank Name</Text>
+                        <TextInput
+                            style={[styles.input, errors.name && styles.inputError]}
+                            placeholder="e.g. HDFC Bank"
+                            value={newBank.name}
+                            onChangeText={t => {
+                                if (NAME_REGEX.test(t)) {
+                                    setNewBank({ ...newBank, name: t });
+                                    setErrors({ ...errors, name: '' });
+                                }
+                            }}
+                        />
+                        {errors.name ? <Text style={styles.errorText}>{errors.name}</Text> : null}
                     </View>
-                ) : (
-                    <View style={styles.form}>
-                        <Text style={styles.otpDesc}>
-                            Enter the 6-digit verification code sent to your registered mobile number by PickAtStore.
-                        </Text>
-
-                        <View style={styles.inputGroup}>
-                            <TextInput
-                                style={[styles.input, { textAlign: 'center', letterSpacing: 8, fontSize: 24 }]}
-                                placeholder="000000"
-                                keyboardType="number-pad"
-                                maxLength={6}
-                                value={otp}
-                                onChangeText={setOtp}
-                                autoFocus
-                            />
-                        </View>
-
-                        <View style={styles.modalActions}>
-                            <TouchableOpacity style={styles.modalCancel} onPress={() => setStep(1)}>
-                                <Text style={styles.modalCancelText}>Back</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.modalSave} onPress={handleVerifyOtp}>
-                                <Text style={styles.modalSaveText}>Verify & Save</Text>
-                            </TouchableOpacity>
-                        </View>
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Account Number</Text>
+                        <TextInput
+                            style={[styles.input, errors.account && styles.inputError]}
+                            placeholder="Enter account number"
+                            keyboardType="numeric"
+                            maxLength={18}
+                            value={newBank.account}
+                            onChangeText={t => {
+                                setNewBank({ ...newBank, account: t.replace(/[^0-9]/g, '') });
+                                setErrors({ ...errors, account: '' });
+                            }}
+                        />
+                        {errors.account ? <Text style={styles.errorText}>{errors.account}</Text> : null}
                     </View>
-                )}
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>IFSC Code</Text>
+                        <TextInput
+                            style={[styles.input, errors.ifsc && styles.inputError]}
+                            placeholder="E.G. HDFC0001234"
+                            autoCapitalize="characters"
+                            maxLength={11}
+                            value={newBank.ifsc}
+                            onChangeText={t => {
+                                setNewBank({ ...newBank, ifsc: t.toUpperCase() });
+                                setErrors({ ...errors, ifsc: '' });
+                            }}
+                        />
+                        {errors.ifsc ? <Text style={styles.errorText}>{errors.ifsc}</Text> : null}
+                    </View>
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Beneficiary Name</Text>
+                        <TextInput
+                            style={[styles.input, errors.beneficiary && styles.inputError]}
+                            placeholder="As per bank records"
+                            value={newBank.beneficiary}
+                            onChangeText={t => {
+                                if (NAME_REGEX.test(t)) {
+                                    setNewBank({ ...newBank, beneficiary: t });
+                                    setErrors({ ...errors, beneficiary: '' });
+                                }
+                            }}
+                        />
+                        {errors.beneficiary ? <Text style={styles.errorText}>{errors.beneficiary}</Text> : null}
+                    </View>
+
+                    <View style={styles.modalActions}>
+                        <TouchableOpacity style={styles.modalCancel} onPress={() => setModalVisible(false)}>
+                            <Text style={styles.modalCancelText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                            style={[styles.modalSave, saving && { opacity: 0.7 }]} 
+                            onPress={handleSaveBankDetails}
+                            disabled={saving}
+                        >
+                            <Text style={styles.modalSaveText}>{saving ? 'Saving...' : 'Save Bank Details'}</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
             </BottomModal>
         </SafeAreaView>
     );
@@ -368,4 +489,8 @@ const styles = StyleSheet.create({
     modalCancelText: { fontWeight: '700', color: '#374151', fontSize: 16 },
     modalSave: { flex: 1, padding: 16, backgroundColor: Colors.text, borderRadius: 12, alignItems: 'center' },
     modalSaveText: { fontWeight: '700', color: Colors.white, fontSize: 16 },
+    setPrimaryBtn: { marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: Colors.border, alignItems: 'center' },
+    setPrimaryText: { color: Colors.text, fontWeight: '700', fontSize: 13 },
+    inputError: { borderColor: '#EF4444' },
+    errorText: { color: '#EF4444', fontSize: 12, marginTop: 4, marginLeft: 4 },
 });

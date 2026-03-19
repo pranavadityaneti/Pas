@@ -1,4 +1,4 @@
-// @lock — Do NOT overwrite. Approved layout as of Feb 27, 2026.
+// @lock — Do NOT overwrite. Approved layout as of Mar 12, 2026.
 // Profile Screen: User profile with avatar, details, address management, logout.
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Image, Alert, ActivityIndicator, RefreshControl, Modal, TextInput, KeyboardAvoidingView, Platform, Switch } from 'react-native';
@@ -38,7 +38,9 @@ import {
     CreditCard,
     Store,
     MessageCircle,
-    Pencil
+    Pencil,
+    Phone,
+    Heart
 } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 import { useNavigation } from '@react-navigation/native';
@@ -57,6 +59,7 @@ export default function ProfileScreen() {
     // Edit Profile Modal State
     const [isEditModalVisible, setIsEditModalVisible] = useState(false);
     const [newName, setNewName] = useState('');
+    const [newEmail, setNewEmail] = useState('');
     const [newDob, setNewDob] = useState('');
 
     // Security & Notification Modal State
@@ -100,19 +103,47 @@ export default function ProfileScreen() {
     const fetchUserProfile = async (isRetry = false) => {
         try {
             if (!isRetry && !refreshing) setLoading(true);
-            const { data: { user } } = await supabase.auth.getUser();
+            
+            // Use getSession instead of getUser to avoid blocking network requests that can hang
+            // Wrap in a Promise.race to prevent infinite spinning if the network completely drops
+            const sessionResponse = await Promise.race([
+                supabase.auth.getSession(),
+                new Promise<any>((_, reject) => 
+                    setTimeout(() => reject(new Error('Network timeout fetching session')), 8000)
+                )
+            ]);
+            
+            const { data: { session }, error: authError } = sessionResponse;
+            const user = session?.user;
+            
+            if (authError || !user) {
+                console.error('Session validation failed:', authError);
+                await supabase.auth.signOut();
+                navigation.replace('Auth');
+                return;
+            }
+
             setUser(user);
 
             if (user) {
-                const { data: profileData, error } = await supabase
-                    .from('profiles')
-                    .select('*')
-                    .eq('id', user.id)
-                    .single();
+                // Wrap the profile fetch in a timeout too to prevent hanging
+                const profileResponse = await Promise.race([
+                    supabase.from('profiles').select('*').eq('id', user.id).single(),
+                    new Promise<any>((_, reject) => 
+                        setTimeout(() => reject(new Error('Network timeout fetching profile')), 8000)
+                    )
+                ]);
+                
+                const { data: profileData, error } = profileResponse;
 
                 if (!error) {
+                    if (profileData.avatar_url) {
+                        profileData.avatar_url = `${profileData.avatar_url}?v=${Date.now()}`;
+                    }
+
                     setProfile(profileData);
                     setNewName(profileData.full_name || '');
+                    setNewEmail(profileData.email || '');
 
                     if (profileData.notification_preferences) {
                         // Merge with default structure to avoid crashes on missing keys
@@ -223,6 +254,25 @@ export default function ProfileScreen() {
             return;
         }
 
+        if (newDob && !/^\d{2}-\d{2}-\d{4}$/.test(newDob)) {
+            Alert.alert('Invalid Date', 'Please use DD-MM-YYYY format.');
+            return;
+        }
+
+        if (newEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+            Alert.alert('Invalid Email', 'Please enter a valid email address.');
+            return;
+        }
+
+        if (newDob) {
+            const [checkD, checkM, checkY] = newDob.split('-');
+            const parsedDate = new Date(`${checkY}-${checkM}-${checkD}`);
+            if (parsedDate.getDate() !== parseInt(checkD, 10) || parsedDate.getMonth() + 1 !== parseInt(checkM, 10)) {
+                Alert.alert('Invalid Date', 'Please enter a valid calendar date.');
+                return;
+            }
+        }
+
         setIsSaving(true);
         triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
 
@@ -238,6 +288,7 @@ export default function ProfileScreen() {
                 .from('profiles')
                 .update({
                     full_name: newName,
+                    email: newEmail.trim() || null,
                     date_of_birth: formattedDob,
                     updated_at: new Date()
                 })
@@ -417,8 +468,15 @@ export default function ProfileScreen() {
                     text: "Logout",
                     style: "destructive",
                     onPress: async () => {
-                        const { error } = await supabase.auth.signOut();
-                        if (error) Alert.alert("Error", error.message);
+                        // Force local token wipe instantly regardless of network/server state
+                        const { error } = await supabase.auth.signOut({ scope: 'local' });
+                        if (error) {
+                            console.error("Logout error:", error);
+                            Alert.alert("Notice", "You have been logged out locally, but the server couldn't be reached.");
+                        }
+                        
+                        // Force navigation back to Auth immediately
+                        navigation.replace('Auth');
                     }
                 }
             ]
@@ -519,9 +577,16 @@ export default function ProfileScreen() {
                         <Text className="text-2xl font-bold text-[#111827]">
                             {profile?.full_name || user?.email?.split('@')[0] || 'Member'}
                         </Text>
-                        <Text className="text-gray-400 font-medium text-sm mt-1">
-                            {user?.email}
-                        </Text>
+                        {(profile?.email || user?.email) && (
+                            <Text className="text-gray-400 font-medium text-sm mt-1">
+                                {profile?.email || user?.email}
+                            </Text>
+                        )}
+                        {user?.phone && (
+                            <Text className="text-gray-400 font-medium text-sm mt-1">
+                                +{user.phone.replace(/^\+/, '')}
+                            </Text>
+                        )}
                     </View>
                 </View>
 
@@ -531,7 +596,7 @@ export default function ProfileScreen() {
                     <MenuItem
                         icon={ShoppingBag}
                         label="Your Orders"
-                        onPress={() => Alert.alert("Orders", "Order history coming soon.")}
+                        onPress={() => navigation.navigate('YourOrders')}
                     />
                     <MenuItem
                         icon={MapPin}
@@ -544,10 +609,10 @@ export default function ProfileScreen() {
                         onPress={() => Alert.alert("Payments", "Payment methods coming soon.")}
                     />
                     <MenuItem
-                        icon={Store}
-                        label="My Stores"
+                        icon={Heart}
+                        label="Favorites"
                         isLast={true}
-                        onPress={() => Alert.alert("My Stores", "Favorite stores coming soon.")}
+                        onPress={() => navigation.navigate('Favorites' as any)}
                     />
                 </SectionCard>
 
@@ -667,15 +732,34 @@ export default function ProfileScreen() {
 
                             {/* Email Address */}
                             <Text className="text-gray-400 font-bold mb-2 ml-2 uppercase text-[10px] tracking-widest">Email Address</Text>
-                            <View className="flex-row items-center border border-gray-100 rounded-3xl px-4 h-14 bg-gray-100 opacity-60 mb-6">
+                            <View className="flex-row items-center border border-gray-100 rounded-3xl px-4 h-14 bg-gray-50 mb-6">
                                 <Mail size={18} color="#9CA3AF" />
                                 <TextInput
-                                    className="flex-1 font-bold text-gray-500 text-base ml-3"
-                                    value={user?.email}
-                                    editable={false}
+                                    className="flex-1 font-bold text-black text-base ml-3"
+                                    placeholder="your.email@example.com"
+                                    keyboardType="email-address"
+                                    autoCapitalize="none"
+                                    value={newEmail}
+                                    onChangeText={setNewEmail}
                                     style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
                                 />
                             </View>
+
+                            {/* Phone Number (Read-only) */}
+                            {user?.phone && (
+                                <>
+                                    <Text className="text-gray-400 font-bold mb-2 ml-2 uppercase text-[10px] tracking-widest">Phone Number</Text>
+                                    <View className="flex-row items-center border border-gray-100 rounded-3xl px-4 h-14 bg-gray-100 opacity-60 mb-6">
+                                        <Phone size={18} color="#9CA3AF" />
+                                        <TextInput
+                                            className="flex-1 font-bold text-gray-500 text-base ml-3"
+                                            value={`+${user.phone.replace(/^\+/, '')}`}
+                                            editable={false}
+                                            style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
+                                        />
+                                    </View>
+                                </>
+                            )}
 
                             {/* DOB */}
                             <Text className="text-gray-400 font-bold mb-2 ml-2 uppercase text-[10px] tracking-widest">Date of Birth</Text>

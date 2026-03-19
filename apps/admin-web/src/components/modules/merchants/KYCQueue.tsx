@@ -24,7 +24,7 @@ export function KYCQueue() {
   const { merchants, updateMerchant, deleteMerchant, loading } = useMerchants();
   const [selectedApp, setSelectedApp] = useState<Merchant | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
-  const [activeDoc, setActiveDoc] = useState<'pan' | 'aadhar_front' | 'aadhar_back' | 'gst' | 'store_1' | 'store_2'>('pan');
+  const [activeDoc, setActiveDoc] = useState<string>('pan');
   const [rejectionReason, setRejectionReason] = useState('');
 
   const [checklist, setChecklist] = useState({
@@ -77,13 +77,17 @@ export function KYCQueue() {
 
   const getActiveDocUrl = () => {
     if (!selectedApp) return null;
+    if (activeDoc.startsWith('store_')) {
+      const idx = parseInt(activeDoc.split('_')[1], 10);
+      return selectedApp.store_photos?.[idx] ?? null;
+    }
     switch (activeDoc) {
-      case 'pan': return selectedApp.pan_doc_url;
+      case 'pan': return selectedApp.pan_document_url || selectedApp.pan_doc_url;
       case 'aadhar_front': return selectedApp.aadhar_front_url;
       case 'aadhar_back': return selectedApp.aadhar_back_url;
       case 'gst': return selectedApp.gst_certificate_url;
-      case 'store_1': return selectedApp.store_photos?.[0];
-      case 'store_2': return selectedApp.store_photos?.[1];
+      case 'msme': return selectedApp.msme_certificate_url;
+      case 'fssai': return selectedApp.fssai_certificate_url;
       default: return null;
     }
   };
@@ -176,24 +180,34 @@ export function KYCQueue() {
                   GST Cert
                 </button>
               )}
-              {selectedApp.store_photos?.[0] && (
+              {selectedApp.msme_certificate_url && (
                 <button
-                  onClick={() => setActiveDoc('store_1')}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-sm transition-all border ${activeDoc === 'store_1' ? 'bg-black/80 text-white border-black' : 'bg-white/80 text-gray-700 border-gray-200 hover:bg-white'
+                  onClick={() => setActiveDoc('msme')}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-sm transition-all border ${activeDoc === 'msme' ? 'bg-black/80 text-white border-black' : 'bg-white/80 text-gray-700 border-gray-200 hover:bg-white'
                     }`}
                 >
-                  Store 1
+                  MSME Cert
                 </button>
               )}
-              {selectedApp.store_photos?.[1] && (
+              {selectedApp.fssai_certificate_url && (
                 <button
-                  onClick={() => setActiveDoc('store_2')}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-sm transition-all border ${activeDoc === 'store_2' ? 'bg-black/80 text-white border-black' : 'bg-white/80 text-gray-700 border-gray-200 hover:bg-white'
+                  onClick={() => setActiveDoc('fssai')}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-sm transition-all border ${activeDoc === 'fssai' ? 'bg-black/80 text-white border-black' : 'bg-white/80 text-gray-700 border-gray-200 hover:bg-white'
                     }`}
                 >
-                  Store 2
+                  FSSAI Cert
                 </button>
               )}
+              {selectedApp.store_photos?.map((_, i) => (
+                <button
+                  key={`store_${i}`}
+                  onClick={() => setActiveDoc(`store_${i}`)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-sm transition-all border ${activeDoc === `store_${i}` ? 'bg-black/80 text-white border-black' : 'bg-white/80 text-gray-700 border-gray-200 hover:bg-white'
+                    }`}
+                >
+                  Store {i + 1}
+                </button>
+              ))}
             </div>
 
             <div className="flex-1 flex items-center justify-center p-8 overflow-auto">
@@ -242,10 +256,17 @@ export function KYCQueue() {
               <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm mb-3">
                 <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-2 text-xs items-center">
                   <User className="w-3 h-3 text-gray-400" />
-                  <div className="font-medium text-gray-900">{selectedApp.owner_name}</div>
+                  <div className="font-medium text-gray-900 border-b border-gray-50 pb-1">
+                    {selectedApp.owner_name}
+                    <div className="text-[10px] text-gray-500 font-normal mt-0.5">{selectedApp.email} • {selectedApp.phone}</div>
+                  </div>
 
                   <MapPin className="w-3 h-3 text-gray-400" />
-                  <div className="text-gray-600 truncate" title={selectedApp.address}>{selectedApp.city}</div>
+                  <div className="text-gray-600 truncate border-b border-gray-50 pb-1" title={selectedApp.address}>
+                    {selectedApp.city}
+                    <div className="text-[10px] text-gray-500 font-normal mt-0.5 truncate">{selectedApp.address}</div>
+                    <div className="text-[10px] text-blue-500 font-medium mt-0.5">{selectedApp.category}</div>
+                  </div>
 
                   <FileText className="w-3 h-3 text-gray-400" />
                   <div className="flex gap-2 flex-wrap">
@@ -273,6 +294,18 @@ export function KYCQueue() {
                       <span className="text-[11px] text-gray-500">GSTIN</span>
                       <span className="text-[11px] font-semibold text-gray-900">{selectedApp.gst_number || 'N/A'}</span>
                     </div>
+                    {selectedApp.msme_number && (
+                      <div className="flex justify-between items-center bg-gray-50/50 p-1.5 rounded">
+                        <span className="text-[11px] text-gray-500">MSME</span>
+                        <span className="text-[11px] font-semibold text-gray-900">{selectedApp.msme_number}</span>
+                      </div>
+                    )}
+                    {selectedApp.fssai_number && (
+                      <div className="flex justify-between items-center bg-gray-50/50 p-1.5 rounded">
+                        <span className="text-[11px] text-gray-500">FSSAI</span>
+                        <span className="text-[11px] font-semibold text-gray-900">{selectedApp.fssai_number}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between items-center bg-gray-50/50 p-1.5 rounded">
                       <span className="text-[11px] text-gray-500">Turnover</span>
                       <span className="text-[11px] font-semibold text-gray-900">{selectedApp.turnover_range || 'N/A'}</span>
@@ -283,6 +316,10 @@ export function KYCQueue() {
                 <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
                   <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Payout & Bank</h4>
                   <div className="space-y-2">
+                    <div className="flex justify-between items-center bg-gray-50/50 p-1.5 rounded">
+                      <span className="text-[11px] text-gray-500">Beneficiary</span>
+                      <span className="text-[11px] font-semibold text-gray-900">{selectedApp.bank_beneficiary_name || 'N/A'}</span>
+                    </div>
                     <div className="flex justify-between items-center bg-gray-50/50 p-1.5 rounded">
                       <span className="text-[11px] text-gray-500">Account</span>
                       <span className="text-[11px] font-mono font-semibold text-gray-900">{selectedApp.bank_account_number || 'N/A'}</span>
@@ -362,7 +399,7 @@ export function KYCQueue() {
                   variant="outline"
                   size="sm"
                   className="flex-1 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 h-9 text-xs"
-                  disabled={!rejectionReason && checklist.nameMatch} // Require reason if rejecting
+                  disabled={!rejectionReason} // Always require a rejection reason
                   onClick={() => handleDecision('reject')}
                 >
                   <X className="w-3.5 h-3.5 mr-2" />

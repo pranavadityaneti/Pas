@@ -38,7 +38,7 @@ export default function Index() {
                 .from('merchants')
                 .select('status')
                 .eq('id', userId)
-                .single();
+                .maybeSingle();
 
             if (error) throw error;
             setMerchantStatus(data?.status || null);

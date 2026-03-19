@@ -13,7 +13,14 @@ interface FilterModalProps {
     onApply: (filters: FilterState) => void;
     initialFilters?: FilterState;
     initialTab?: string;
+    isGlobalInventory?: boolean;
 }
+
+const CATEGORIES = [
+    'Dairy', 'Bakery', 'Snacks', 'Staples', 'Condiments', 
+    'Confectionery', 'Grocery', 'Beverages', 'Personal Care', 
+    'Home Essentials', 'Fashion', 'Pharmacy', 'Meat', 'Fruits & Vegetables'
+];
 
 export interface FilterState {
     sortBy: string;
@@ -35,7 +42,7 @@ const SIDEBAR_ITEMS = [
     { id: 'discount', label: 'Discounts' }
 ];
 
-export default function FilterModal({ visible, onClose, onApply, initialFilters, initialTab = 'sort' }: FilterModalProps) {
+export default function FilterModal({ visible, onClose, onApply, initialFilters, initialTab = 'sort', isGlobalInventory = false }: FilterModalProps) {
     const [selectedTab, setSelectedTab] = useState(initialTab);
 
     useEffect(() => {
@@ -55,7 +62,6 @@ export default function FilterModal({ visible, onClose, onApply, initialFilters,
     });
 
     // Dynamic Options State
-    const [availableCategories, setAvailableCategories] = useState<string[]>([]);
     const [availableBrands, setAvailableBrands] = useState<string[]>([]);
 
     useEffect(() => {
@@ -65,15 +71,12 @@ export default function FilterModal({ visible, onClose, onApply, initialFilters,
     // Fetch Dynamic Options on Mount
     useEffect(() => {
         const fetchOptions = async () => {
-            // Fetch all products to extract unique categories and brands
+            // Fetch all products to extract unique brands
             // Ideally use an RPC call for DISTINCT, but client-side set is fine for <2000 items
-            const { data } = await supabase.from('Product').select('category, brand');
+            const { data } = await supabase.from('Product').select('brand');
 
             if (data) {
-                const uniqueCategories = Array.from(new Set(data.map((p: any) => p.category).filter(Boolean)));
                 const uniqueBrands = Array.from(new Set(data.map((p: any) => p.brand).filter(Boolean)));
-
-                setAvailableCategories(uniqueCategories.sort());
                 setAvailableBrands(uniqueBrands.sort());
             }
         };
@@ -136,7 +139,7 @@ export default function FilterModal({ visible, onClose, onApply, initialFilters,
             case 'category':
                 return (
                     <ScrollView contentContainerStyle={styles.optionList}>
-                        {availableCategories.map(cat => (
+                        {CATEGORIES.map(cat => (
                             <TouchableOpacity key={cat} style={styles.checkRow} onPress={() => toggleArrayItem('categories', cat)}>
                                 <Text style={styles.checkLabel}>{cat}</Text>
                                 <View style={[styles.checkBox, filters.categories.includes(cat) && styles.checkActive]}>
@@ -251,7 +254,10 @@ export default function FilterModal({ visible, onClose, onApply, initialFilters,
                     <View style={styles.content}>
                         {/* Sidebar */}
                         <View style={styles.sidebar}>
-                            {SIDEBAR_ITEMS.map(item => (
+                            {SIDEBAR_ITEMS.filter(item => {
+                                if (isGlobalInventory && (item.id === 'availability' || item.id === 'discount')) return false;
+                                return true;
+                            }).map(item => (
                                 <TouchableOpacity
                                     key={item.id}
                                     style={[styles.sidebarItem, selectedTab === item.id && styles.sidebarItemActive]}
