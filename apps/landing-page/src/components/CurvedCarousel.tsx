@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion, useMotionValue, useAnimationFrame } from "framer-motion";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
@@ -23,8 +23,15 @@ export function CurvedCarousel() {
     const containerRef = useRef<HTMLDivElement>(null);
     const scrollX = useMotionValue(0);
 
+    const [isMounted, setIsMounted] = useState(false);
+
+    useEffect(() => {
+        setIsMounted(true);
+    }, []);
+
     // Auto-scroll logic
     useAnimationFrame((time, delta) => {
+        if (!isMounted) return;
         // Move faster: 1.0px per frame (was 0.5)
         const moveBy = 1.2 * (delta / 16);
         // Reset when we've scrolled past the first set width (approx)
@@ -36,6 +43,10 @@ export function CurvedCarousel() {
         }
         scrollX.set(newX);
     });
+
+    if (!isMounted) {
+        return <div className="h-[420px]" />; // Placeholder with same height to avoid layout shift
+    }
 
     return (
         <div
