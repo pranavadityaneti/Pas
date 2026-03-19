@@ -47,7 +47,7 @@ export function Hero() {
                         transition={{ delay: 0.2 }}
                         className="text-base md:text-lg text-black-shadow/70 leading-relaxed"
                     >
-                        The ultimate convenience for your daily needs. Order from your favorite neighborhood stores and pick up curbside in minutes.
+                        The ultimate convenience for your daily needs. Order from your favorite neighborhood stores and Pickup at Store in minutes.
                     </motion.p>
 
 

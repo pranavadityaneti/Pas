@@ -13,11 +13,11 @@ export function Footer() {
             <div className="w-full bg-[#FAF9F6] border-t border-black/[0.03] py-8 px-6 md:px-10 flex flex-col md:flex-row justify-between items-center gap-6 relative z-30">
                 <div className="flex items-center gap-6">
                     <Image
-                        src="/PAS_AppLauncherIcon-Mono_Red.png"
+                        src="/PAS_Logo-Horizontal.png"
                         alt="Logo"
-                        width={32}
-                        height={32}
-                        className="grayscale opacity-50"
+                        width={120}
+                        height={40}
+                        className="grayscale opacity-50 object-contain"
                     />
                     <p className="text-sm text-black-shadow/40 font-medium">© 2026 PAS Retail Networks PVT LTD</p>
                 </div>
@@ -26,14 +26,14 @@ export function Footer() {
                 <div className="flex items-center gap-4">
                     <a href="#" className="hover:opacity-80 transition-opacity">
                         <img
-                            src="/google-play-badge.png"
+                            src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg"
                             alt="Get it on Google Play"
                             className="h-8 w-auto"
                         />
                     </a>
                     <a href="#" className="hover:opacity-80 transition-opacity">
                         <img
-                            src="/app-store-badge.png"
+                            src="https://upload.wikimedia.org/wikipedia/commons/3/3c/Download_on_the_App_Store_Badge.svg"
                             alt="Download on the App Store"
                             className="h-8 w-auto"
                         />
@@ -41,17 +41,19 @@ export function Footer() {
                 </div>
 
                 <div className="flex items-center gap-6">
-                    <a href="/privacypolicy" className="text-sm font-bold text-black-shadow/60 hover:text-store-red transition-colors mr-4">Privacy Policy</a>
+                    <a href="/privacypolicy" className="text-sm font-bold text-black-shadow/60 hover:text-store-red transition-colors whitespace-nowrap">Privacy Policy</a>
+                    <a href="/terms" className="text-sm font-bold text-black-shadow/60 hover:text-store-red transition-colors whitespace-nowrap">Terms & Conditions</a>
                     <a href="https://www.youtube.com/@pickatstore" target="_blank" rel="noopener noreferrer" className="text-black-shadow/60 hover:text-store-red transition-colors">
                         <Youtube size={20} />
                     </a>
                     <a href="https://www.instagram.com/pickatstore.in/" target="_blank" rel="noopener noreferrer" className="text-black-shadow/60 hover:text-store-red transition-colors">
                         <Instagram size={20} />
                     </a>
-                    <a href="tel:+918888888888" className="text-black-shadow/60 hover:text-store-red transition-colors">
-                        <Phone size={20} />
+                    <a href="tel:+917842287373" className="flex items-center gap-2 text-black-shadow/60 hover:text-store-red transition-colors font-medium">
+                        <Phone size={18} />
+                        <span className="text-sm">+91 78422 87373</span>
                     </a>
-                    <a href="mailto:contact@pickatstore.in,Krishnaonguru@gmail.com" className="text-black-shadow/60 hover:text-store-red transition-colors">
+                    <a href="mailto:support@pickatstore.io" className="text-black-shadow/60 hover:text-store-red transition-colors">
                         <Mail size={20} />
                     </a>
                 </div>

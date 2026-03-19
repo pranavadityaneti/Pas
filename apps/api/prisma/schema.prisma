@@ -370,3 +370,18 @@ model MerchantBranch {
   @@unique([merchantId, branchName])
   @@map("merchant_branches")
 }
+
+// --- OTP Verification for WhatsApp Login ---
+
+model OtpVerification {
+  id        String   @id @default(uuid())
+  phone     String
+  otp       String
+  expiresAt DateTime @map("expires_at")
+  verified  Boolean  @default(false)
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([phone])
+  @@map("otp_verifications")
+}

@@ -1,0 +1,24 @@
+# .ebignore - tells EB what NOT to include in the deployment bundle
+node_modules/
+.env
+uploads/
+*.log
+*.sql
+test_*
+simulate_*
+diagnostic.*
+inspect_*
+verify_*
+apply_*
+check_*
+fix_*
+debug_*
+reload_*
+run_*
+seed_*
+.git/
+Dockerfile
+.dockerignore
+api_dev.log
+root_dev.log
+test.*

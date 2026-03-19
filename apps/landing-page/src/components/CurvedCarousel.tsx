@@ -1,7 +1,7 @@
 "use client";
 
-import { motion, useScroll, useTransform, useMotionValue, useAnimationFrame } from "framer-motion";
-import { useRef } from "react";
+import { useState, useRef } from "react";
+import { motion, useMotionValue, useAnimationFrame } from "framer-motion";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
 
@@ -77,29 +77,42 @@ function CarouselItem({ src, label, index, containerRef }: { src: string, label:
         zDepth.set(Math.abs(clampedRotation) * -2);
     });
 
+    const [isHovered, setIsHovered] = useState(false);
+
     return (
-        // whileHover uses Framer Motion's own pointer listeners — not React synthetic events
-        // so it fires reliably on all continuously-animated cards
         <motion.div
             ref={cardRef}
             style={{ rotateY, z: zDepth }}
             className="relative shrink-0 w-[280px] h-[360px] md:w-[320px] md:h-[420px] rounded-3xl overflow-hidden bg-white cursor-pointer"
-            whileHover="hovered"
-            initial="normal"
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => setIsHovered(false)}
         >
             <motion.div
                 className="absolute inset-0"
+                animate={isHovered ? "hovered" : "normal"}
                 variants={{
-                    normal: { filter: "grayscale(1) contrast(1.25)", scale: 1 },
-                    hovered: { filter: "grayscale(0) contrast(1)", scale: 1.05 },
+                    normal: { 
+                        filter: "grayscale(0) contrast(1)", 
+                        scale: 1,
+                        zIndex: 1
+                    },
+                    hovered: { 
+                        filter: "grayscale(0) contrast(1)", 
+                        scale: 1.15,
+                        zIndex: 10
+                    },
                 }}
-                transition={{ duration: 0.4, ease: "easeOut" }}
+                transition={{ 
+                    duration: 0.3, 
+                    ease: [0.23, 1, 0.32, 1] 
+                }}
             >
                 <Image
                     src={src}
                     alt={label}
                     fill
                     className="object-cover"
+                    priority={index < 4}
                 />
             </motion.div>
         </motion.div>

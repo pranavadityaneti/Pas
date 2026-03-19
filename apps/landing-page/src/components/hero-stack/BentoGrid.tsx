@@ -73,7 +73,7 @@ export function BentoGrid() {
 
                 {/* Row 3 */}
                 <BentoCard item={content[4]} className="col-span-1 md:col-span-2 md:row-span-1 h-[300px] md:h-auto">
-                    {appMode === "customer" ? <MockupCurbside appMode={appMode} /> : <MockupFastPayouts />}
+                    {appMode === "customer" ? <MockupPickupAtStore appMode={appMode} /> : <MockupFastPayouts />}
                 </BentoCard>
                 <BentoCard item={content[5]} className="col-span-1 md:col-span-2 md:row-span-1 h-[300px] md:h-auto">
                     <MockupRetailStores appMode={appMode} />
@@ -652,7 +652,7 @@ function MockupStaff({ appMode }: { appMode: string }) {
     );
 }
 
-function MockupCurbside({ appMode }: { appMode: string }) {
+function MockupPickupAtStore({ appMode }: { appMode: string }) {
     const isCustomer = appMode === "customer";
 
     return (

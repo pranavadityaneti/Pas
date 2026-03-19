@@ -12,6 +12,7 @@ import * as xlsx from 'xlsx';
 import fs from 'fs';
 import { createClient } from '@supabase/supabase-js';
 import { smsService } from './services/sms.service';
+import { watiService } from './services/wati.service';
 
 // --- Configuration ---
 const app = express();
@@ -30,6 +31,12 @@ const prisma = new PrismaClient();
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Supabase Admin Client (for server-side user creation via service_role key)
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false }
+});
 
 // --- Middleware ---
 app.use(helmet());
@@ -1667,6 +1674,200 @@ app.get('/debug/list-users', async (req, res) => {
         res.json(users);
     } catch (e: any) {
         res.status(500).json({ error: e.message });
+    }
+});
+
+// ==========================================
+// --- WhatsApp OTP Authentication Routes ---
+// ==========================================
+
+/**
+ * POST /auth/send-otp
+ * Generate a 6-digit OTP and send via WhatsApp (Wati)
+ * Body: { phone: "91XXXXXXXXXX" }
+ */
+app.post('/auth/send-otp', async (req, res) => {
+    try {
+        const { phone } = req.body;
+
+        if (!phone || !/^91\d{10}$/.test(phone)) {
+            return res.status(400).json({ error: 'Valid Indian phone number required (format: 91XXXXXXXXXX)' });
+        }
+
+        // Rate limit: max 3 OTPs per phone in 10 minutes
+        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+        const recentCount = await prisma.otpVerification.count({
+            where: {
+                phone,
+                createdAt: { gte: tenMinutesAgo }
+            }
+        });
+
+        if (recentCount >= 3) {
+            return res.status(429).json({ error: 'Too many OTP requests. Please wait 10 minutes.' });
+        }
+
+        // Generate 6-digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min expiry
+
+        // Store OTP in database
+        await prisma.otpVerification.create({
+            data: { phone, otp, expiresAt }
+        });
+
+        // Send via Wati WhatsApp
+        const sent = await watiService.sendOtp(phone, otp);
+
+        if (!sent) {
+            console.error(`[Auth] Failed to send OTP to ${phone} via Wati`);
+            return res.status(500).json({ error: 'Failed to send OTP via WhatsApp. Please try again.' });
+        }
+
+        console.log(`[Auth] OTP sent to ${phone}`);
+        res.json({ success: true, message: 'OTP sent via WhatsApp' });
+    } catch (error: any) {
+        console.error('[Auth] Send OTP Error:', error);
+        res.status(500).json({ error: 'Failed to send OTP' });
+    }
+});
+
+/**
+ * POST /auth/verify-otp
+ * Validate OTP → create or find Supabase user → return session
+ * Body: { phone: "91XXXXXXXXXX", otp: "123456" }
+ */
+app.post('/auth/verify-otp', async (req, res) => {
+    try {
+        const { phone, otp } = req.body;
+
+        if (!phone || !otp) {
+            return res.status(400).json({ error: 'Phone and OTP are required' });
+        }
+
+        // Find the latest unverified OTP for this phone
+        const record = await prisma.otpVerification.findFirst({
+            where: {
+                phone,
+                verified: false,
+                expiresAt: { gte: new Date() }
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        if (!record) {
+            return res.status(410).json({ error: 'OTP expired or not found. Please request a new one.' });
+        }
+
+        // Check max attempts
+        if (record.attempts >= 5) {
+            return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new OTP.' });
+        }
+
+        // Increment attempts
+        await prisma.otpVerification.update({
+            where: { id: record.id },
+            data: { attempts: { increment: 1 } }
+        });
+
+        // Validate OTP
+        if (record.otp !== otp) {
+            return res.status(401).json({ error: 'Incorrect OTP', attemptsRemaining: 5 - (record.attempts + 1) });
+        }
+
+        // Mark OTP as verified
+        await prisma.otpVerification.update({
+            where: { id: record.id },
+            data: { verified: true }
+        });
+
+        // Format phone for Supabase (needs +91 prefix)
+        const formattedPhone = `+${phone}`;
+        let isNewUser = false;
+
+        // Check if user already exists in Supabase Auth via direct SQL (bypasses listUsers pagination)
+        const authUsers: any[] = await prisma.$queryRaw`SELECT id, email, phone FROM auth.users WHERE phone = ${formattedPhone} OR phone = ${phone}`;
+        let existingUser = authUsers.length > 0 ? authUsers[0] : null;
+        let tempPassword = '';
+        let signInEmail = '';
+
+        if (!existingUser) {
+            // Create new user with email and password to bypass disabled Phone provider
+            signInEmail = `${phone}@phone.pickatstore.app`;
+            tempPassword = `PAS_OTP_${phone}_${Date.now()}_${Math.random().toString(36)}`;
+            
+            const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
+                phone: formattedPhone,
+                phone_confirm: true,
+                email: signInEmail,
+                email_confirm: true,
+                password: tempPassword,
+                user_metadata: { phone: formattedPhone }
+            });
+
+            if (createError) {
+                console.error('[Auth] Create user error:', createError);
+                return res.status(500).json({ error: 'Failed to create user account' });
+            }
+            existingUser = newUser.user;
+            isNewUser = true;
+
+            // Create empty profile row
+            await supabase.from('profiles').upsert({
+                id: existingUser.id,
+                updated_at: new Date().toISOString()
+            }).select();
+
+            console.log(`[Auth] New user created: ${existingUser.id}`);
+        } else {
+            // For existing users, update with a temporary password to mint session
+            tempPassword = `PAS_OTP_${phone}_${Date.now()}_${Math.random().toString(36)}`;
+            signInEmail = existingUser.email || `${phone}@phone.pickatstore.app`;
+
+            const updatePayload: any = { password: tempPassword };
+            if (!existingUser.email) {
+                updatePayload.email = signInEmail;
+                updatePayload.email_confirm = true;
+            }
+
+            const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(existingUser.id, updatePayload);
+
+            if (updateError) {
+                console.error('[Auth] User password update failed:', updateError);
+            }
+        }
+
+        // Sign in with temporary password to get session tokens
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+            email: signInEmail,
+            password: tempPassword
+        });
+
+        if (signInError || !signInData.session) {
+            console.error('[Auth] Sign-in error:', signInError);
+            return res.status(500).json({ error: 'Failed to create session' });
+        }
+
+        console.log(`[Auth] User ${existingUser.id} authenticated (isNew: ${isNewUser})`);
+
+        res.json({
+            success: true,
+            session: {
+                access_token: signInData.session.access_token,
+                refresh_token: signInData.session.refresh_token,
+                expires_in: signInData.session.expires_in,
+                expires_at: signInData.session.expires_at
+            },
+            user: {
+                id: existingUser.id,
+                phone: formattedPhone,
+                email: existingUser.email
+            },
+            isNewUser
+        });
+    } catch (error: any) {
+        console.error('[Auth] Verify OTP Error:', error);
+        res.status(500).json({ error: 'OTP verification failed' });
     }
 });
 

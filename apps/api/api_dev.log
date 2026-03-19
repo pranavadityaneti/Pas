@@ -1,0 +1,1097 @@
+
+> pas-api@1.0.0 dev
+> ts-node-dev --respawn --transpile-only src/index.ts
+
+[INFO] 14:22:40 ts-node-dev ver. 2.0.0 (using ts-node ver. 10.9.2, typescript ver. 5.9.3)
+[API] Server running on http://localhost:3000
+[API] Socket.io ready
+[API Request] POST /auth/send-otp
+[Wati] OTP sent to 919999999999
+[Auth] OTP sent to 919999999999
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+[API Request] POST /auth/send-otp
+[Wati] OTP sent to 919999999999
+[Auth] OTP sent to 919999999999
+[API Request] POST /auth/verify-otp
+[Auth] New user created: 71c2f6c1-dc3e-4d2e-99bd-d4efed896766
+[Auth] Verify OTP Error: TypeError: supabaseAdmin.auth.admin.updateUser is not a function
+    at /Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1616:40
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+[INFO] 14:23:48 Restarting: /Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts has been modified
+[API] Server running on http://localhost:3000
+[API] Socket.io ready
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+[API Request] POST /auth/send-otp
+[Wati] OTP sent to 919999999999
+[Auth] OTP sent to 919999999999
+[API Request] POST /auth/verify-otp
+[Auth] Create user error: AuthApiError: Phone number already registered by another user
+    at handleError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:102:9)
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at _handleRequest (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:195:5)
+    at _request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:157:16)
+    at GoTrueAdminApi.createUser (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/GoTrueAdminApi.ts:210:14)
+    at /Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1580:59 {
+  __isAuthError: true,
+  status: 422,
+  code: 'phone_exists'
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+[INFO] 14:25:25 Restarting: /Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts has been modified
+[API] Server running on http://localhost:3000
+[API] Socket.io ready
+[API Request] POST /auth/send-otp
+[API Request] POST /auth/verify-otp
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+[API Request] POST /auth/send-otp
+[Wati] OTP sent to 918888888888
+[Auth] OTP sent to 918888888888
+[API Request] POST /auth/verify-otp
+[Auth] New user created: e8d32655-df67-40e9-aea4-6848b845dd8c
+[Auth] Sign-in error: AuthApiError: Invalid login credentials
+    at handleError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:102:9)
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at _handleRequest (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:195:5)
+    at _request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:157:16)
+    at SupabaseAuthClient.signInWithPassword (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/GoTrueClient.ts:861:15)
+    at /Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1632:58 {
+  __isAuthError: true,
+  status: 400,
+  code: 'invalid_credentials'
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+[INFO] 14:26:43 Restarting: /Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts has been modified
+[API] Server running on http://localhost:3000
+[API] Socket.io ready
+[API Request] POST /auth/send-otp
+[Wati] OTP sent to 918888888888
+[Auth] OTP sent to 918888888888
+[API Request] POST /auth/verify-otp
+[Auth] Create user error: AuthApiError: Phone number already registered by another user
+    at handleError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:102:9)
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at _handleRequest (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:195:5)
+    at _request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:157:16)
+    at GoTrueAdminApi.createUser (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/GoTrueAdminApi.ts:210:14)
+    at /Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1580:59 {
+  __isAuthError: true,
+  status: 422,
+  code: 'phone_exists'
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+[INFO] 14:27:42 Restarting: /Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts has been modified
+[API] Server running on http://localhost:3000
+[API] Socket.io ready
+[API Request] POST /auth/send-otp
+[Wati] OTP sent to 918888888888
+[Auth] OTP sent to 918888888888
+[API Request] POST /auth/verify-otp
+[Auth] User update prior to sign-in failed: AuthApiError: Error updating user
+    at handleError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:102:9)
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at _handleRequest (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:195:5)
+    at _request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:157:16)
+    at GoTrueAdminApi.updateUserById (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/GoTrueAdminApi.ts:330:14)
+    at /Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1625:40 {
+  __isAuthError: true,
+  status: 500,
+  code: 'unexpected_failure'
+}
+[Auth] Sign-in error: AuthApiError: Invalid login credentials
+    at handleError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:102:9)
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at _handleRequest (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:195:5)
+    at _request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:157:16)
+    at SupabaseAuthClient.signInWithPassword (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/GoTrueClient.ts:861:15)
+    at /Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1631:58 {
+  __isAuthError: true,
+  status: 400,
+  code: 'invalid_credentials'
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+[INFO] 14:28:30 Restarting: /Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts has been modified
+[API] Server running on http://localhost:3000
+[API] Socket.io ready
+[API Request] POST /auth/send-otp
+[API Request] POST /auth/verify-otp
+[API Request] POST /auth/send-otp
+[Wati] OTP sent to 917777777777
+[Auth] OTP sent to 917777777777
+[API Request] POST /auth/verify-otp
+[Auth] New user created: 2e4ae2a9-7eda-4977-9875-88ad6071bca1
+[Auth] Sign-in error: AuthApiError: Phone logins are disabled
+    at handleError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:102:9)
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at _handleRequest (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:195:5)
+    at _request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:157:16)
+    at SupabaseAuthClient.signInWithPassword (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/GoTrueClient.ts:872:15)
+    at /Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1622:58 {
+  __isAuthError: true,
+  status: 422,
+  code: 'phone_provider_disabled'
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+[INFO] 14:30:01 Restarting: /Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts has been modified
+[API] Server running on http://localhost:3000
+[API] Socket.io ready
+[API Request] POST /auth/send-otp
+[Wati] OTP sent to 917777777777
+[Auth] OTP sent to 917777777777
+[API Request] POST /auth/verify-otp
+[Auth] New user created: dc665c26-dd7c-42dd-939e-1e7b351f2a22
+[Auth] User password update failed: AuthApiError: Error updating user
+    at handleError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:102:9)
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at _handleRequest (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:195:5)
+    at _request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:157:16)
+    at GoTrueAdminApi.updateUserById (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/GoTrueAdminApi.ts:330:14)
+    at /Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1613:40 {
+  __isAuthError: true,
+  status: 500,
+  code: 'unexpected_failure'
+}
+[Auth] Sign-in error: AuthApiError: Invalid login credentials
+    at handleError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:102:9)
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at _handleRequest (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:195:5)
+    at _request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:157:16)
+    at SupabaseAuthClient.signInWithPassword (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/GoTrueClient.ts:861:15)
+    at /Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1620:58 {
+  __isAuthError: true,
+  status: 400,
+  code: 'invalid_credentials'
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+[INFO] 14:31:18 Restarting: /Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts has been modified
+[API] Server running on http://localhost:3000
+[API] Socket.io ready
+[API Request] POST /auth/send-otp
+[Wati] OTP sent to 917777777777
+[Auth] OTP sent to 917777777777
+[API Request] POST /auth/verify-otp
+[Auth] Create user error: AuthApiError: A user with this email address has already been registered
+    at handleError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:102:9)
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at _handleRequest (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:195:5)
+    at _request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/lib/fetch.ts:157:16)
+    at GoTrueAdminApi.createUser (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@supabase/auth-js/src/GoTrueAdminApi.ts:210:14)
+    at /Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1585:59 {
+  __isAuthError: true,
+  status: 422,
+  code: 'email_exists'
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+[API Request] POST /auth/send-otp
+[Wati] OTP sent to 915555555555
+[Auth] OTP sent to 915555555555
+[API Request] POST /auth/verify-otp
+[Auth] New user created: ab17fa84-b765-4181-bd0f-f59515a225e1
+[Auth] User ab17fa84-b765-4181-bd0f-f59515a225e1 authenticated (isNew: true)
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}
+Auto-reject check failed PrismaClientKnownRequestError: 
+Invalid `prisma.order.findMany()` invocation in
+/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:54
+
+  1134 setInterval(async () => {
+  1135     try {
+  1136         const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
+→ 1137         const expiredOrders = await prisma.order.findMany(
+The table `public.Order` does not exist in the current database.
+    at $n.handleRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:7315)
+    at $n.handleAndLogRequestError (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6623)
+    at $n.request (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:121:6307)
+    at l (/Users/pranavaditya/projects/pas-admin/apps/api/node_modules/@prisma/client/runtime/library.js:130:9633)
+    at Timeout._onTimeout (/Users/pranavaditya/projects/pas-admin/apps/api/src/index.ts:1137:35) {
+  code: 'P2021',
+  clientVersion: '5.22.0',
+  meta: { modelName: 'Order', table: 'public.Order' }
+}

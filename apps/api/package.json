@@ -1,6 +1,9 @@
 {
     "name": "pas-api",
     "version": "1.0.0",
+    "engines": {
+        "node": "20.x"
+    },
     "scripts": {
         "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
         "build": "tsc",
@@ -11,7 +14,6 @@
         "seed": "ts-node-dev prisma/seed.ts"
     },
     "dependencies": {
-        "@pas/shared": "*",
         "@prisma/client": "^5.11.0",
         "@supabase/supabase-js": "^2.91.0",
         "axios": "^1.13.4",
@@ -23,6 +25,7 @@
         "helmet": "^7.1.0",
         "multer": "^2.0.2",
         "nodemailer": "^8.0.1",
+        "pg": "^8.20.0",
         "razorpay": "^2.9.6",
         "socket.io": "^4.7.5",
         "xlsx": "^0.18.5",

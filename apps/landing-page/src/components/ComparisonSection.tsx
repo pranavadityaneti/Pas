@@ -29,7 +29,7 @@ const competitors = [
     },
     {
         logo: "/logos/zepto.png",
-        logoAlt: "Zepto",
+        logoAlt: "10 Min Delivery",
         logoBg: "bg-white",
         fees: [
             { label: "Delivery fee", value: "₹30" },

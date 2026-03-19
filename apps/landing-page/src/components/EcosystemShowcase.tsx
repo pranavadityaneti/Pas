@@ -10,7 +10,7 @@ const features = [
         id: "consumer",
         title: "Consumer App",
         tagline: "Shop while you drive",
-        description: "The ultimate convenience. Browse nearby inventory, order ahead, and pick up curbside without ever leaving your car.",
+        description: "The ultimate convenience. Browse nearby inventory, order ahead, and Pickup at Store without ever leaving your car.",
         icon: <Smartphone className="w-12 h-12 text-white" />,
         color: "bg-blue-500",
         gradient: "from-blue-500 to-indigo-600",
