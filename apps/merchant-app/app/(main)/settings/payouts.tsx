@@ -33,7 +33,9 @@ const ACCOUNT_REGEX = /^[0-9]{9,18}$/;
 
 export default function PayoutsScreen() {
     const { user } = useUser();
-    const { merchantId } = useStoreContext();
+    const { store } = useStoreContext();
+    const targetId = store?.id;
+    
     const { stats: earnings, loading: earningsLoading } = useEarnings();
     const [modalVisible, setModalVisible] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -42,13 +44,13 @@ export default function PayoutsScreen() {
     const { data: merchants, loading: tableLoading, setData } = useRealtimeTable({
         tableName: 'merchants',
         select: 'bank_account_number, ifsc_code, owner_name, bank_name, bank_beneficiary_name, bank_accounts',
-        filter: merchantId ? `id.eq.${merchantId}` : undefined,
-        enabled: !!merchantId
+        filter: targetId ? `id.eq.${targetId}` : undefined,
+        enabled: !!targetId
     });
 
     const bankAccountsList = useMemo<BankAccount[]>(() => {
         // Step 1: Mandatory Debug Logs
-        console.log("DEBUG_PAYOUT_ID:", merchantId);
+        console.log("DEBUG_PAYOUT_ID:", targetId);
         console.log("RAW_BANK_DATA:", merchants);
 
         if (merchants && merchants.length > 0) {
@@ -88,7 +90,7 @@ export default function PayoutsScreen() {
             return list;
         }
         return [];
-    }, [merchants, merchantId]);
+    }, [merchants, targetId]);
 
     const loading = (tableLoading && !merchants.length) || earningsLoading;
 
@@ -140,7 +142,7 @@ export default function PayoutsScreen() {
         Keyboard.dismiss();
         
         try {
-            if (!merchantId) return;
+            if (!targetId) return;
             setSaving(true);
 
             // 1. Prepare new account object
@@ -170,7 +172,7 @@ export default function PayoutsScreen() {
                     // New multi-account list
                     bank_accounts: updatedList
                 })
-                .eq('id', merchantId)
+                .eq('id', targetId)
                 .select()
                 .single();
 
@@ -193,7 +195,7 @@ export default function PayoutsScreen() {
 
     const handleSetPrimaryBank = async (accId: string) => {
         try {
-            if (!merchantId) return;
+            if (!targetId) return;
             setSaving(true);
 
             const updatedList = bankAccountsList.map((acc: BankAccount) => ({
@@ -212,7 +214,7 @@ export default function PayoutsScreen() {
                     bank_beneficiary_name: primary.beneficiary,
                     bank_accounts: updatedList
                 })
-                .eq('id', merchantId)
+                .eq('id', targetId)
                 .select()
                 .single();
 
