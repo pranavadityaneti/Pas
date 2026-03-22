@@ -65,9 +65,12 @@ export default function StoreDetailsScreen() {
             }
 
             // Prepend Storage URL
-            const fullPhotoUrls = photosArray.map(p => 
-                (p.startsWith('http') || p.startsWith('data:')) ? p : `${STORAGE_BASE_URL}${p}`
-            );
+            const fullPhotoUrls = photosArray.map(p => {
+                const cleanPath = p.startsWith('/') ? p.substring(1) : p;
+                const fullUri = (p.startsWith('http') || p.startsWith('data:')) ? p : `${STORAGE_BASE_URL}${cleanPath}`;
+                console.log("DEBUG PHOTO URI:", fullUri);
+                return fullUri;
+            });
 
             const newDetails = {
                 name: mData.store_name || '',
@@ -197,7 +200,11 @@ export default function StoreDetailsScreen() {
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photosScroll}>
                         {details.photos.map((photo, index) => (
                             <View key={index} style={styles.photoWrapper}>
-                                <Image source={{ uri: photo }} style={styles.photo} />
+                                <Image 
+                                    source={{ uri: photo }} 
+                                    style={styles.photo} 
+                                    defaultSource={require('../../../assets/images/icon.png')} // Fallback if local
+                                />
                             </View>
                         ))}
                         {details.photos.length === 0 && (
