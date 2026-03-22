@@ -117,7 +117,6 @@ export default function StaffScreen() {
                 name,
                 role,
                 phone,
-                branch,
                 activities: activities
             };
 
@@ -133,7 +132,6 @@ export default function StaffScreen() {
                         name,
                         role,
                         phone,
-                        branch,
                         activities
                     })
                     .eq('id', editingId);
