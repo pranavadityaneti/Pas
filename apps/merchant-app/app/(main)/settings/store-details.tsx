@@ -13,11 +13,11 @@ import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
 import Constants from 'expo-constants';
 
 const SUPABASE_PROJECT_ID = 'llhxkonraqaxtradyycj';
-const STORAGE_BASE_URL = `https://${SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/merchant-docs/`;
+const STORAGE_BASE_URL = `https://${SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/merchant-assets/`;
 
 const VERTICAL_MAP: { [key: string]: string } = {
     'c307b78e-b924-47a1-a5a7-4405777fa50c': 'Kirana Store',
-    'default': 'Not Specified'
+    'default': 'General Store'
 };
 
 export default function StoreDetailsScreen() {
@@ -49,17 +49,30 @@ export default function StoreDetailsScreen() {
         if (merchantDataList && merchantDataList.length > 0) {
             const mData = merchantDataList[0];
             
-            // Handle Photos (JSON string or array)
+            // Handle Photos (Priority: Store.image, Fallback: merchants.store_photos)
             let photosArray: string[] = [];
+            
+            // Step 1: Add main image from Store table
+            if (store?.image) {
+                photosArray.push(store.image);
+            }
+
+            // Step 2: Add additional photos from merchants table (parsing JSON if needed)
             try {
                 const rawPhotos = mData.store_photos;
+                let additionalPhotos: string[] = [];
                 if (Array.isArray(rawPhotos)) {
-                    photosArray = rawPhotos;
+                    additionalPhotos = rawPhotos;
                 } else if (typeof rawPhotos === 'string' && rawPhotos.startsWith('[')) {
-                    photosArray = JSON.parse(rawPhotos);
+                    additionalPhotos = JSON.parse(rawPhotos);
                 } else if (rawPhotos) {
-                    photosArray = [rawPhotos];
+                    additionalPhotos = [rawPhotos];
                 }
+                
+                // Avoid duplicating the main image if it's already in the list
+                additionalPhotos.forEach(p => {
+                    if (!photosArray.includes(p)) photosArray.push(p);
+                });
             } catch (e) {
                 console.warn('[StoreDetails] Photo parsing error:', e);
             }
@@ -72,10 +85,12 @@ export default function StoreDetailsScreen() {
                 return fullUri;
             });
 
+            const label = mData.vertical_id === 'c307b78e-b924-47a1-a5a7-4405777fa50c' ? 'Kirana Store' : 'General Store';
+
             const newDetails = {
                 name: mData.store_name || '',
                 address: mData.address || '',
-                category: VERTICAL_MAP[mData.vertical_id] || VERTICAL_MAP['default'],
+                category: label,
                 photos: fullPhotoUrls,
                 cityId: mData.city || ''
             };
@@ -83,7 +98,7 @@ export default function StoreDetailsScreen() {
             setInitialDetails(newDetails);
         }
         setLoading(false);
-    }, [merchantDataList, merchantLoading]);
+    }, [merchantDataList, merchantLoading, store?.image]);
 
     // Removed redundant store sync to prioritize single source of truth from signup metadata
 
