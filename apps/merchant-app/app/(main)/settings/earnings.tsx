@@ -71,30 +71,6 @@ export default function EarningsScreen() {
                     </TouchableOpacity>
                 </View>
 
-                <Text style={styles.sectionTitle}>Reports & Insights</Text>
-
-                <TouchableOpacity style={styles.reportItem}>
-                    <View style={[styles.reportIcon, { backgroundColor: '#DBEAFE' }]}>
-                        <Ionicons name="calendar-outline" size={24} color="#3B82F6" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                        <Text style={styles.reportTitle}>Daily Breakdown</Text>
-                        <Text style={styles.reportDesc}>Detailed sales log for the last 30 days</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.reportItem}>
-                    <View style={[styles.reportIcon, { backgroundColor: '#D1FAE5' }]}>
-                        <Ionicons name="cube-outline" size={24} color="#10B981" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                        <Text style={styles.reportTitle}>Product Sales</Text>
-                        <Text style={styles.reportDesc}>See which items are selling the most</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
-                </TouchableOpacity>
-
             </ScrollView>
         </SafeAreaView>
     );
@@ -125,10 +101,4 @@ const styles = StyleSheet.create({
     pendingTitle: { fontSize: 15, fontWeight: 'bold', color: '#92400E' },
     pendingDesc: { fontSize: 12, color: '#B45309', marginTop: 2, lineHeight: 16 },
     viewLink: { color: '#D97706', fontWeight: 'bold', fontSize: 14, marginLeft: 8 },
-
-    sectionTitle: { fontSize: 18, fontWeight: 'bold', color: Colors.text, marginBottom: 16, marginLeft: 4 },
-    reportItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.white, padding: 16, borderRadius: 20, marginBottom: 12, borderWidth: 1, borderColor: Colors.border },
-    reportIcon: { width: 48, height: 48, borderRadius: 14, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
-    reportTitle: { fontSize: 16, fontWeight: 'bold', color: Colors.text },
-    reportDesc: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
 });
