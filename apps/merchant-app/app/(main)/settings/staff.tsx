@@ -324,9 +324,9 @@ export default function StaffScreen() {
                                             alignItems: 'center',
                                             padding: 12,
                                             borderRadius: 12,
-                                            backgroundColor: isSelected ? Colors.text + '10' : Colors.white,
+                                            backgroundColor: isSelected ? Colors.primary + '10' : Colors.white,
                                             borderWidth: 1,
-                                            borderColor: isSelected ? Colors.text : Colors.border
+                                            borderColor: isSelected ? Colors.primary : Colors.border
                                         }}
                                         onPress={() => toggleActivity(activity)}
                                     >
@@ -335,8 +335,8 @@ export default function StaffScreen() {
                                             height: 20,
                                             borderRadius: 6,
                                             borderWidth: 1.5,
-                                            borderColor: isSelected ? Colors.text : Colors.textSecondary,
-                                            backgroundColor: isSelected ? Colors.text : 'transparent',
+                                            borderColor: isSelected ? Colors.primary : Colors.textSecondary,
+                                            backgroundColor: isSelected ? Colors.primary : 'transparent',
                                             justifyContent: 'center',
                                             alignItems: 'center',
                                             marginRight: 12
@@ -400,7 +400,7 @@ const styles = StyleSheet.create({
     actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     iconButton: { padding: 8 },
 
-    addButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.text, padding: 16, borderRadius: 16, marginTop: 24 },
+    addButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.primary, padding: 16, borderRadius: 16, marginTop: 24 },
     addButtonText: { color: Colors.white, fontSize: 16, fontWeight: 'bold' },
 
     loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 40 },
@@ -408,7 +408,7 @@ const styles = StyleSheet.create({
     emptyIconContainer: { width: 120, height: 120, borderRadius: 60, backgroundColor: Colors.border + '33', justifyContent: 'center', alignItems: 'center', marginBottom: 24 },
     emptyTitle: { fontSize: 20, fontWeight: 'bold', color: Colors.text, marginBottom: 8, textAlign: 'center' },
     emptySubtitle: { fontSize: 14, color: Colors.textSecondary, textAlign: 'center', marginBottom: 32, lineHeight: 20 },
-    emptyAddButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.text, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 12 },
+    emptyAddButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.primary, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 12 },
     emptyAddButtonText: { color: Colors.white, fontWeight: 'bold', fontSize: 16 },
 
     form: { gap: 16, paddingBottom: 20 },
@@ -418,13 +418,13 @@ const styles = StyleSheet.create({
 
     branchScroll: { flexDirection: 'row', gap: 8 },
     branchPill: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: Colors.border, marginRight: 8 },
-    branchPillActive: { backgroundColor: Colors.text },
+    branchPillActive: { backgroundColor: Colors.primary },
     branchText: { color: Colors.textSecondary, fontWeight: '600' },
     branchTextActive: { color: Colors.white },
 
     modalActions: { flexDirection: 'row', gap: 12, marginTop: 10 },
     modalCancel: { flex: 1, padding: 16, backgroundColor: Colors.border, borderRadius: 12, alignItems: 'center' },
     modalCancelText: { fontWeight: '700', color: Colors.text, fontSize: 16 },
-    modalSave: { flex: 1, padding: 16, backgroundColor: Colors.text, borderRadius: 12, alignItems: 'center' },
+    modalSave: { flex: 1, padding: 16, backgroundColor: Colors.primary, borderRadius: 12, alignItems: 'center' },
     modalSaveText: { fontWeight: '700', color: Colors.white, fontSize: 16 },
 });
