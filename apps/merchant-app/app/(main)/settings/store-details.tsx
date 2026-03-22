@@ -13,9 +13,9 @@ import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
 import Constants from 'expo-constants';
 
 const SUPABASE_PROJECT_ID = 'llhxkonraqaxtradyycj';
-const STORAGE_BASE_URL = `https://${SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/merchant-docs/`;
+const STORAGE_BASE_URL = `https://${SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/merchant-assets/`;
 
-const VERTICAL_MAPPING: { [key: string]: string } = {
+const VERTICAL_MAP: { [key: string]: string } = {
     'c307b78e-b924-47a1-a5a7-4405777fa50c': 'Kirana Store',
     'default': 'Not Specified'
 };
@@ -72,7 +72,7 @@ export default function StoreDetailsScreen() {
             const newDetails = {
                 name: mData.store_name || '',
                 address: mData.address || '',
-                category: VERTICAL_MAPPING[mData.vertical_id] || mData.vertical_id || VERTICAL_MAPPING['default'],
+                category: VERTICAL_MAP[mData.vertical_id] || VERTICAL_MAP['default'],
                 photos: fullPhotoUrls,
                 cityId: mData.city || ''
             };
@@ -210,11 +210,11 @@ export default function StoreDetailsScreen() {
                 </View>
 
                 <View style={styles.formGroup}>
-                    <Text style={[styles.label, { color: '#999' }]}>City (Read Only)</Text>
+                    <Text style={styles.label}>City</Text>
                     <TextInput
-                        style={[styles.input, { backgroundColor: '#F3F4F6', color: '#666' }]}
+                        style={styles.input}
                         value={details.cityId}
-                        editable={false}
+                        onChangeText={(t) => setDetails({ ...details, cityId: t })}
                     />
                 </View>
 
