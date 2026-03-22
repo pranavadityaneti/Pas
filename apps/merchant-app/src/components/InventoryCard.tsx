@@ -11,6 +11,15 @@ interface Props {
     onEdit?: (item: any) => void;
 }
 
+const CATEGORY_MAP: Record<string, string> = {
+    '1c4ebf02-778e-44be-a50a-3442233202ba': 'Grocery & Staples',
+    'f3ca935e-85b4-4b55-aed0-8a1ef96b4ad9': 'Dairy & Bakery',
+    'b48873ad-bb3e-4c7a-9fb7-c88f1883395d': 'Personal Care',
+    'd8315228-4e8c-40ad-bc42-5f6af1587af0': 'Snacks & Beverages',
+    'c2caba79-0520-4b2a-aec5-b2864205511e': 'Household Items'
+};
+
+
 export default function InventoryCard({ item, onUpdate, onDelete, onToggleStatus, onEdit }: Props) {
     // Local state for inputs to allow smooth typing (debounce updates in parent)
     const [sellingPrice, setSellingPrice] = useState(item.sellingPrice?.toString() || item.price?.toString() || '');
@@ -71,7 +80,9 @@ export default function InventoryCard({ item, onUpdate, onDelete, onToggleStatus
 
                 <View style={styles.info}>
                     <Text style={styles.name} numberOfLines={2}>{item.product?.name || item.name}</Text>
-                    <Text style={styles.category}>{item.product?.category || item.category || 'General'}</Text>
+                    <Text style={styles.category}>
+                        {item.product?.subcategory || CATEGORY_MAP[item.product?.category_id || ''] || 'Others'}
+                    </Text>
                     {/* Low Stock Indicator */}
                     {parseInt(stock) < 5 && item.active && (
                         <View style={styles.lowStockBadge}>

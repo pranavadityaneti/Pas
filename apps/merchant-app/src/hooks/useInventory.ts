@@ -15,7 +15,8 @@ export interface InventoryItem {
         name: string;
         image: string;
         mrp: number;
-        category: string;
+        category_id?: string;
+        subcategory?: string;
         brand?: string;
         description?: string;
         ean?: string;
@@ -54,7 +55,8 @@ export function useInventory() {
                         name,
                         image,
                         mrp,
-                        category,
+                        category_id,
+                        subcategory,
                         brand,
                         description,
                         ean,

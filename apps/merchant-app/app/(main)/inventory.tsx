@@ -12,6 +12,14 @@ import AddCustomProductModal from '../../src/components/AddCustomProductModal';
 import { Colors } from '../../constants/Colors';
 import { InventoryItem } from '../../src/hooks/useInventory';
 
+export const CATEGORY_MAP: Record<string, string> = {
+    '1c4ebf02-778e-44be-a50a-3442233202ba': 'Grocery & Staples',
+    'f3ca935e-85b4-4b55-aed0-8a1ef96b4ad9': 'Dairy & Bakery',
+    'b48873ad-bb3e-4c7a-9fb7-c88f1883395d': 'Personal Care',
+    'd8315228-4e8c-40ad-bc42-5f6af1587af0': 'Snacks & Beverages',
+    'c2caba79-0520-4b2a-aec5-b2864205511e': 'Household Items'
+};
+
 const DEFAULT_FILTERS: FilterState = {
     sortBy: 'price_low',
     categories: [],
@@ -59,7 +67,10 @@ export default function InventoryScreen() {
         // Apply Advanced Filters
         let matchesFilter = true;
         if (appliedFilters) {
-            if (appliedFilters.categories.length > 0 && !appliedFilters.categories.includes(item.product.category)) matchesFilter = false;
+            const mappedCategory = CATEGORY_MAP[item.product?.category_id || ''] || 'Others';
+            const displayCategory = item.product?.subcategory || mappedCategory;
+            
+            if (appliedFilters.categories.length > 0 && !appliedFilters.categories.includes(displayCategory)) matchesFilter = false;
 
             // Availability
             if (appliedFilters.availability.includes('Low Stock') && item.stock >= 5) matchesFilter = false;
