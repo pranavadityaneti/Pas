@@ -34,21 +34,18 @@ export function useRealtimeTable<T extends Record<string, any> = any>({
                 let query = supabase.from(tableName).select(select);
 
                 if (filter) {
-                    // Primitive splitting to handle simple eq filters for initial fetch
-                    // This is a bit fragile if filter is complex, but for "storeId=eq.xyz" it works
-                    // Ideally, pass filter parts separately or use a builder pattern
-                    // For now, we assume calling code might handle fetching if filter is complex, 
-                    // OR we just use this for simple lists.
-
-                    // Actually, let's just interpret filter string for basic equality if possible
-                    // or rely on the caller to provide a more structured filter if we expand this hook.
-                    // For now: specific implementation for our common case: "column=operator.value"
-                    const parts = filter.split('=');
-                    if (parts.length === 2) {
-                        const [col, rest] = parts;
-                        const [op, val] = rest.split('.');
-                        if (op === 'eq') query = query.eq(col, val);
-                    }
+                    const filterParts = filter.split(',');
+                    filterParts.forEach(p => {
+                        const parts = p.split('=');
+                        if (parts.length === 2) {
+                            const [col, rest] = parts;
+                            const [op, val] = rest.split('.');
+                            if (op === 'eq') query = query.eq(col, val);
+                            if (op === 'neq') query = query.neq(col, val);
+                            if (op === 'gt') query = query.gt(col, val);
+                            if (op === 'lt') query = query.lt(col, val);
+                        }
+                    });
                 }
 
                 if (orderBy) {
@@ -69,15 +66,17 @@ export function useRealtimeTable<T extends Record<string, any> = any>({
 
         fetchData();
 
-        // Subscription
-        const channel = supabase.channel(`realtime_${tableName}_${filter || 'all'}`)
+        // Subscription - Use the first filter part only as Supabase Realtime doesn't support multiple
+        const subscriptionFilter = filter?.split(',')[0];
+
+        const channel = supabase.channel(`realtime_${tableName}_${subscriptionFilter || 'all'}`)
             .on(
                 'postgres_changes' as any, // Cast to any to avoid strict literal type mismatch if SDK types are older/newer
                 {
                     event: '*',
                     schema: 'public',
                     table: tableName,
-                    filter: filter
+                    filter: subscriptionFilter
                 },
                 (payload: RealtimePostgresChangesPayload<T>) => {
                     console.log(`[useRealtimeTable] Update in ${tableName}:`, payload.eventType);

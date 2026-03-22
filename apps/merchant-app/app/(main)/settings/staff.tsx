@@ -28,22 +28,24 @@ export default function StaffScreen() {
 
     // Realtime Data Hook
     const { data: rawStaff, loading: tableLoading, setData } = useRealtimeTable({
-        tableName: 'StoreStaff',
-        filter: storeId ? `store_id=eq.${storeId}` : undefined,
+        tableName: 'store_staff',
+        filter: storeId ? `store_id=eq.${storeId},is_active=eq.true` : undefined,
         orderBy: { column: 'created_at', ascending: false },
         enabled: !!storeId
     });
 
     const staff = useMemo(() => {
-        return rawStaff.map(item => ({
-            id: item.id,
-            name: item.name,
-            role: item.role,
-            phone: item.phone,
-            branch: item.branch,
-            initials: item.name ? item.name.charAt(0).toUpperCase() : '?',
-            activities: Array.isArray(item.activities) ? item.activities : []
-        })) as StaffMember[];
+        return rawStaff
+            .filter(item => item.is_active !== false) // Client-side safety for realtime
+            .map(item => ({
+                id: item.id,
+                name: item.name,
+                role: item.role,
+                phone: item.phone,
+                branch: item.branch,
+                initials: item.name ? item.name.charAt(0).toUpperCase() : '?',
+                activities: Array.isArray(item.activities) ? item.activities : []
+            })) as StaffMember[];
     }, [rawStaff]);
 
     const loading = tableLoading && staff.length === 0;
@@ -123,7 +125,7 @@ export default function StaffScreen() {
 
                 // Update Existing
                 const { error } = await supabase
-                    .from('StoreStaff')
+                    .from('store_staff')
                     .update({
                         name,
                         role,
@@ -137,13 +139,13 @@ export default function StaffScreen() {
             } else {
                 // Optimistic Add
                 const tempId = `temp-${Date.now()}`;
-                const tempMember = { ...payload, id: tempId };
+                const tempMember = { ...payload, id: tempId, is_active: true };
                 // @ts-ignore
                 setData(prev => [tempMember, ...prev]);
 
                 // Add New
                 const { data: newStaff, error } = await supabase
-                    .from('StoreStaff')
+                    .from('store_staff')
                     .insert([payload])
                     .select()
                     .single();
