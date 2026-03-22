@@ -1,17 +1,41 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
 }
 
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
+  schemas   = ["public", "auth"]
+}
+
+model Profile {
+  id             String   @id @db.Uuid
+  user           User     @relation(fields: [id], references: [id])
+  updatedAt      DateTime @default(now()) @map("updated_at")
+  fullName       String?  @map("full_name")
+  avatarUrl      String?  @map("avatar_url")
+  tier           String?
+  credits        Decimal? @db.Decimal
+  couponsCount   Int?     @map("coupons_count")
+  dateOfBirth    DateTime? @db.Date @map("date_of_birth")
+  notificationPreferences Json? @map("notification_preferences")
+  securityPreferences     Json? @map("security_preferences")
+  profileCompleted       Boolean? @map("profile_completed")
+  email                  String?
+  razorpayCustomerId     String? @map("razorpay_customer_id")
+
+  @@map("profiles")
+  @@schema("public")
 }
 
 enum Role {
   SUPER_ADMIN
   MERCHANT
   CONSUMER
+
+  @@schema("public")
 }
 
 enum OrderStatus {
@@ -25,33 +49,39 @@ enum OrderStatus {
   RETURN_APPROVED
   RETURN_REJECTED
   REFUNDED
+
+  @@schema("public")
 }
 
 // --- Geographic Models ---
 
 model City {
-  id           String        @id @default(uuid())
+  id           String        @id @default(uuid()) @db.Uuid
   name         String        @unique
   active       Boolean       @default(true)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   stores       Store[]
   serviceAreas ServiceArea[]
+
+  @@schema("public")
 }
 
 model ServiceArea {
-  id        String   @id @default(uuid())
-  cityId    String
+  id        String   @id @default(uuid()) @db.Uuid
+  cityId    String   @db.Uuid
   city      City     @relation(fields: [cityId], references: [id])
   pincode   String
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
+
+  @@schema("public")
 }
 
 // --- User & Store Models ---
 
 model User {
-  id           String   @id @default(uuid())
+  id           String   @id @default(uuid()) @db.Uuid
   email        String   @unique
   passwordHash String?
   role         Role     @default(CONSUMER)
@@ -63,17 +93,20 @@ model User {
   // Relations
   orders           Order[]           @relation("CustomerOrders")
   handledOrders    Order[]           @relation("StaffHandledOrders")
+  profile          Profile?
   managedStore     Store?            @relation("StoreManager")
   favoriteStores   FavoriteStore[]
   favoriteProducts FavoriteProduct[]
 
   notificationPreferences Json?          @map("notification_preferences")
   notifications           Notification[]
+
+  @@schema("public")
 }
 
 model Notification {
-  id     String @id @default(uuid())
-  userId String @map("user_id")
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
   user   User   @relation(fields: [userId], references: [id])
 
   type     String // "ORDER", "SYSTEM", "INVENTORY"
@@ -87,6 +120,7 @@ model Notification {
 
   @@index([userId])
   @@map("notifications")
+  @@schema("public")
 }
 
 // --- Coupon Enums ---
@@ -94,29 +128,35 @@ model Notification {
 enum DiscountType {
   PERCENTAGE
   FLAT
+
+  @@schema("public")
 }
 
 enum FundingSource {
   PLATFORM
   MERCHANT
+
+  @@schema("public")
 }
 
 enum TargetAudience {
   ALL
   NEW_USERS
   INACTIVE_USERS
+
+  @@schema("public")
 }
 
 model Store {
-  id             String   @id @default(uuid())
+  id             String   @id @default(uuid()) @db.Uuid
   name           String
-  cityId         String
+  cityId         String   @db.Uuid
   city           City     @relation(fields: [cityId], references: [id])
   address        String?
   image          String?
-  managerId      String?  @unique
+  managerId      String?  @unique @db.Uuid
   manager        User?    @relation("StoreManager", fields: [managerId], references: [id])
-  merchantId     String?  @map("merchant_id")
+  merchantId     String?  @map("merchant_id") @db.Uuid
   active         Boolean  @default(true)
   operatingHours Json?    @map("operating_hours")
   operatingDays  String[] @map("operating_days")
@@ -129,6 +169,7 @@ model Store {
   coupons      Coupon[]
 
   @@index([merchantId])
+  @@schema("public")
 }
 
 // --- Coupon Model ---
@@ -160,13 +201,14 @@ model Coupon {
   @@index([code])
   @@index([storeId])
   @@map("coupons")
+  @@schema("public")
 }
 
 // --- Catalog Models ---
 
 // Global Master Catalog
 model Product {
-  id          String  @id @default(uuid())
+  id          String  @id @default(uuid()) @db.Uuid
   name        String
   description String?
   image       String?
@@ -175,7 +217,7 @@ model Product {
   brand       String?
 
   ean              String?
-  createdByStoreId String? // Null = Global, Value = Private to Store
+  createdByStoreId String? @db.Uuid // Null = Global, Value = Private to Store
 
   // Specs for Commerce
   unitType  String? // "ml", "L", "kg", "g", "pc"
@@ -208,21 +250,24 @@ model Product {
   @@index([category])
   @@index([source])
   @@index([subcategory])
+  @@schema("public")
 }
 
 model ProductImage {
-  id        String   @id @default(uuid())
-  productId String
+  id        String   @id @default(uuid()) @db.Uuid
+  productId String   @db.Uuid
   product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   url       String
   name      String? // e.g. "Front View", "Back View"
   isPrimary Boolean  @default(false)
   createdAt DateTime @default(now())
+
+  @@schema("public")
 }
 
 model ProductAuditLog {
-  id        String   @id @default(uuid())
-  productId String
+  id        String   @id @default(uuid()) @db.Uuid
+  productId String   @db.Uuid
   product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   action    String // "UPDATE", "CREATE", "DELETE"
   field     String? // "mrp", "name", etc.
@@ -230,14 +275,16 @@ model ProductAuditLog {
   newValue  String?
   changedAt DateTime @default(now())
   changedBy String? // User ID or Email
+
+  @@schema("public")
 }
 
 // Store Specific Inventory (Price & Stock)
 model StoreProduct {
-  id        String  @id @default(uuid())
-  storeId   String
+  id        String  @id @default(uuid()) @db.Uuid
+  storeId   String  @db.Uuid
   store     Store   @relation(fields: [storeId], references: [id])
-  productId String
+  productId String  @db.Uuid
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   // CRITICAL: Do not remove 'price'. It is the store-specific selling price.
@@ -261,18 +308,19 @@ model StoreProduct {
   // CRITICAL: This unique constraint ensures a store can have the same product multiple times 
   // ONLY if they are different variants. Do not revert to [storeId, productId].
   @@unique([storeId, productId, variant])
+  @@schema("public")
 }
 
 // --- Transaction Models ---
 
 model Order {
-  id          String  @id @default(uuid())
+  id          String  @id @default(uuid()) @db.Uuid
   orderNumber String  @unique @map("order_number") // PAS-YYYYMMDD-XXXX
-  userId      String  @map("user_id")
+  userId      String  @map("user_id") @db.Uuid
   user        User    @relation("CustomerOrders", fields: [userId], references: [id])
-  storeId     String  @map("store_id")
+  storeId     String  @map("store_id") @db.Uuid
   store       Store   @relation(fields: [storeId], references: [id])
-  staffId     String? @map("staff_id")
+  staffId     String? @map("staff_id") @db.Uuid
   staff       User?   @relation("StaffHandledOrders", fields: [staffId], references: [id])
 
   status          OrderStatus @default(PENDING)
@@ -294,11 +342,12 @@ model Order {
   @@index([storeId])
   @@index([userId])
   @@map("orders")
+  @@schema("public")
 }
 
 model Subscription {
-  id            String   @id @default(uuid())
-  merchantId    String   @map("merchant_id")
+  id            String   @id @default(uuid()) @db.Uuid
+  merchantId    String   @map("merchant_id") @db.Uuid
   merchant      Merchant @relation(fields: [merchantId], references: [id])
   amount        Float
   currency      String   @default("INR")
@@ -309,6 +358,7 @@ model Subscription {
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   @@map("subscriptions")
+  @@schema("public")
 }
 
 model OrderItem {
@@ -322,6 +372,7 @@ model OrderItem {
   price    Float @map("price")
 
   @@map("order_items")
+  @@schema("public")
 }
 
 // --- Legacy & Merchant Management ---
@@ -366,9 +417,9 @@ model Merchant {
   fssaiCertificateUrl String?  @map("fssai_certificate_url")
   storePhotos        String[] @map("store_photos")
 
-  category           String?
   kycRejectionReason String? @map("kyc_rejection_reason")
   turnoverRange      String? @map("turnover_range")
+  verticalId         String? @map("vertical_id") @db.Uuid
 
   createdAt DateTime? @default(now()) @map("created_at")
   updatedAt DateTime? @updatedAt @map("updated_at")
@@ -377,11 +428,12 @@ model Merchant {
   subscriptions Subscription[]
 
   @@map("merchants")
+  @@schema("public")
 }
 
 model MerchantBranch {
-  id          String    @id @default(uuid())
-  merchantId  String?   @map("merchant_id")
+  id          String    @id @default(uuid()) @db.Uuid
+  merchantId  String?   @map("merchant_id") @db.Uuid
   merchant    Merchant? @relation(fields: [merchantId], references: [id])
   branchName  String    @map("branch_name")
   managerName String?   @map("manager_name")
@@ -397,12 +449,13 @@ model MerchantBranch {
 
   @@unique([merchantId, branchName])
   @@map("merchant_branches")
+  @@schema("public")
 }
 
 // --- OTP Verification for WhatsApp Login ---
 
 model OtpVerification {
-  id        String   @id @default(uuid())
+  id        String   @id @default(uuid()) @db.Uuid
   phone     String
   otp       String
   expiresAt DateTime @map("expires_at")
@@ -412,38 +465,41 @@ model OtpVerification {
 
   @@index([phone])
   @@map("otp_verifications")
+  @@schema("public")
 }
 
 // --- Favorites Feature ---
 
 model FavoriteStore {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  storeId   String   @map("store_id")
+  storeId   String   @map("store_id") @db.Uuid
   store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now()) @map("created_at")
 
   @@unique([userId, storeId])
   @@map("favorite_stores")
+  @@schema("public")
 }
 
 model FavoriteProduct {
-  id               String       @id @default(uuid())
-  userId           String       @map("user_id")
+  id               String       @id @default(uuid()) @db.Uuid
+  userId           String       @map("user_id") @db.Uuid
   user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  storeProductId   String       @map("store_product_id")
+  storeProductId   String       @map("store_product_id") @db.Uuid
   storeProduct     StoreProduct @relation(fields: [storeProductId], references: [id], onDelete: Cascade)
   createdAt        DateTime     @default(now()) @map("created_at")
 
   @@unique([userId, storeProductId])
   @@map("favorite_products")
+  @@schema("public")
 }
 
 // --- Sync & Integration Models ---
 
 model SyncQueue {
-  id              String   @id @default(uuid())
+  id              String   @id @default(uuid()) @db.Uuid
   name            String
   brand           String?
   mrp             Float
@@ -460,4 +516,5 @@ model SyncQueue {
   @@index([status])
   @@index([sourceProductId])
   @@map("sync_queue")
+  @@schema("public")
 }

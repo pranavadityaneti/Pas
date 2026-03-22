@@ -14,6 +14,7 @@ import axios from 'axios';
 import { supabase, setSessionFromTokens } from '../../src/lib/supabase';
 import { Colors } from '../../constants/Colors';
 import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 let RazorpayCheckout: any = null;
 if (Constants.appOwnership !== 'expo') {
@@ -28,34 +29,19 @@ if (Constants.appOwnership !== 'expo') {
 const STEPS = ['Identity', 'Store', 'Photos', 'Branches', 'KYC', 'Subscription', 'Review'];
 
 const STORE_CATEGORIES = [
-    'Restaurants & Cafes',
-    'Bakeries & Desserts',
-    'Fast Food & Quick Bites',
-    'Sweet Shops & Namkeen',
-    'Fresh Groceries & Supermarkets',
-    'Fresh Meat & Seafood',
-    'Pharmacy & Wellness',
-    'Electronics & Accessories',
-    'Books & Stationery',
-    'Pet Care & Supplies',
-    'Beauty & Personal Care',
-    'Fashion & Apparel',
-    'Home & Lifestyle'
+    'Grocery & Kirana', 'Fruits & Vegetables', 'Restaurants & Cafes', 
+    'Bakeries & Desserts', 'Meat & Seafood', 'Pharmacy & Wellness', 
+    'Electronics & Accessories', 'Fashion & Apparel', 'Home & Lifestyle', 
+    'Beauty & Personal Care', 'Pet Care & Supplies'
 ];
 
 const FSSAI_CATEGORIES = [
-    'Restaurants & Cafes',
-    'Bakeries & Desserts',
-    'Fast Food & Quick Bites',
-    'Sweet Shops & Namkeen',
-    'Fresh Groceries & Supermarkets',
-    'Fresh Meat & Seafood'
+    'Grocery & Kirana', 'Fruits & Vegetables', 'Restaurants & Cafes', 
+    'Bakeries & Desserts', 'Meat & Seafood'
 ];
 
 const PREMIUM_CATEGORIES = [
-    'Restaurants & Cafes',
-    'Bakeries & Desserts',
-    'Fast Food & Quick Bites'
+    'Restaurants & Cafes', 'Bakeries & Desserts'
 ];
 
 interface Branch {
@@ -68,6 +54,7 @@ interface Branch {
 export default function SignupScreen() {
     const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
+    const [isRestoring, setIsRestoring] = useState(true);
 
     // Step 1: Identity
     const [identity, setIdentity] = useState({
@@ -85,7 +72,7 @@ export default function SignupScreen() {
 
     const getApiUrl = () => {
         if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
-        return __DEV__ ? 'http://192.168.29.171:3000' : 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
+        return __DEV__ ? 'http://192.168.29.184:3000' : 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
     };
 
     const fetchWithTimeout = async (resource: string, options: any = {}) => {
@@ -233,6 +220,44 @@ export default function SignupScreen() {
     // Step 6: Payment
     const [paymentStatus, setPaymentStatus] = useState<'pending' | 'success'>('pending');
     const [paymentDetails, setPaymentDetails] = useState<any>(null);
+
+    // Initial Draft Restoration
+    useEffect(() => {
+        const loadDraft = async () => {
+            try {
+                const draft = await AsyncStorage.getItem('@merchant_signup_draft');
+                if (draft) {
+                    const parsed = JSON.parse(draft);
+                    if (parsed.step) setStep(parsed.step);
+                    if (parsed.identity) setIdentity(parsed.identity);
+                    if (parsed.store) setStore(parsed.store);
+                    if (parsed.hasBranches !== undefined) setHasBranches(parsed.hasBranches);
+                    if (parsed.branches) setBranches(parsed.branches);
+                    if (parsed.kyc) setKyc(parsed.kyc);
+                    if (parsed.docFiles) setDocFiles(parsed.docFiles);
+                    if (parsed.storePhotos) setStorePhotos(parsed.storePhotos);
+                    console.log('[Signup] Draft restored securely. Resuming from step:', parsed.step);
+                }
+            } catch (e) {
+                console.error('[Signup] Failed to restore draft state', e);
+            } finally {
+                setIsRestoring(false);
+            }
+        };
+        loadDraft();
+    }, []);
+
+    // Debounced Draft Persistence (Saves state robustly against App Background Kills)
+    useEffect(() => {
+        if (isRestoring) return; // Do not overwrite draft with empty initial states during mount
+        const timer = setTimeout(() => {
+            const snapshot = { step, identity, store, hasBranches, branches, kyc, docFiles, storePhotos };
+            AsyncStorage.setItem('@merchant_signup_draft', JSON.stringify(snapshot)).catch(e => {
+                console.error('[Signup] Failed to synchronize draft with disk:', e);
+            });
+        }, 1000); // 1-second debounce per QA instructions
+        return () => clearTimeout(timer);
+    }, [step, identity, store, hasBranches, branches, kyc, docFiles, storePhotos, isRestoring]);
 
     const pickDocument = async (type: string) => {
         const result = await ImagePicker.launchImageLibraryAsync({
@@ -540,36 +565,36 @@ export default function SignupScreen() {
             const userId = sessionData.session.user.id;
             console.log('[Signup] User verified:', userId);
 
-            // 2. Upload Documents
-            const uploadFile = async (uri: string, path: string) => {
+            // 2. Upload Documents with Retry Mechanism (For Tier 3/4 Network Resilience)
+            const uploadFile = async (uri: string, path: string, maxRetries = 3) => {
                 if (!uri) return null;
-                try {
-                    // Use standard fetch and blob for cross-platform local file uploads without deprecated Expo FileSystem API
-                    const resp = await fetch(uri);
-                    const blob = await resp.blob();
+                
+                for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                    try {
+                        const resp = await fetch(uri);
+                        const blob = await resp.blob();
 
-                    const { data, error } = await supabase.storage
-                        .from('merchant-docs') // Ensure bucket name is correct
-                        .upload(path, blob, {
-                            contentType: 'image/jpeg',
-                            upsert: true
-                        });
+                        const { error } = await supabase.storage
+                            .from('merchant-docs')
+                            .upload(path, blob, {
+                                contentType: 'image/jpeg',
+                                upsert: true
+                            });
 
-                    if (error) {
-                        console.error('Upload Error:', error);
-                        throw error;
+                        if (error) throw error;
+
+                        return path; // Return raw storage path for private buckets
+                    } catch (error) {
+                        console.error(`Upload Error (Attempt ${attempt}/${maxRetries}):`, error);
+                        if (attempt === maxRetries) {
+                            Alert.alert('Upload Failed', 'Network connection dropped or upload failed. Please check your internet and try again.');
+                            throw new Error('Upload failed'); // Returns execution to outer catch, stopping submission
+                        }
+                        // Exponential backoff
+                        await new Promise(resolve => setTimeout(resolve, attempt * 1500));
                     }
-
-                    // Get Public URL
-                    const { data: { publicUrl } } = supabase.storage
-                        .from('merchant-docs')
-                        .getPublicUrl(path);
-
-                    return publicUrl;
-                } catch (error) {
-                    console.error('File upload failed:', error);
-                    return null;
                 }
+                throw new Error('Upload failed');
             };
 
             const docUrls = {
@@ -581,85 +606,69 @@ export default function SignupScreen() {
                 fssai: docFiles.fssai ? await uploadFile(docFiles.fssai, `${userId}/fssai.jpg`) : null,
             };
 
+
+
             const storePhotoUrls = await Promise.all(
                 storePhotos.map((uri, idx) => uploadFile(uri, `${userId}/store_photo_${idx}.jpg`))
             );
 
-            // 3. Insert Merchant Record
-            const { error: dbError } = await supabase.from('merchants').upsert({
-                id: userId,
-                owner_name: identity.ownerName,
+            // 3. Insert Merchant Record via Secure Backend Endpoint
+            const payload = {
+                ownerName: identity.ownerName,
                 email: identity.email.trim(),
                 phone: identity.phone,
-                store_name: store.storeName,
+                storeName: store.storeName,
                 category: store.category,
                 city: store.city,
                 address: store.address,
                 latitude: store.latitude,
                 longitude: store.longitude,
-                has_branches: hasBranches,
-                status: 'inactive', // 'pending' violates check constraint, so we correctly use 'inactive' to block them
-                kyc_status: 'pending',
-                pan_number: kyc.panNumber,
-                aadhar_number: kyc.aadharNumber,
-                msme_number: kyc.msmeNumber,
-                bank_account_number: kyc.bankAccount,
-                ifsc_code: kyc.ifsc,
-                bank_beneficiary_name: kyc.beneficiaryName,
-                turnover_range: kyc.turnoverRange,
-                pan_document_url: docUrls.pan,
-                aadhar_front_url: docUrls.aadharFront,
-                aadhar_back_url: docUrls.aadharBack,
-                msme_certificate_url: docUrls.msme,
-                gst_certificate_url: docUrls.gst,
-                gst_number: kyc.gstNumber,
-                fssai_number: kyc.fssaiNumber,
-                fssai_certificate_url: docUrls.fssai,
-                store_photos: storePhotoUrls.filter(url => url !== null),
+                hasBranches: hasBranches,
+                status: 'inactive',
+                kycStatus: 'pending',
+                panNumber: kyc.panNumber,
+                aadharNumber: kyc.aadharNumber,
+                msmeNumber: kyc.msmeNumber,
+                bankAccount: kyc.bankAccount,
+                ifsc: kyc.ifsc,
+                beneficiaryName: kyc.beneficiaryName,
+                turnoverRange: kyc.turnoverRange,
+                gstNumber: kyc.gstNumber,
+                fssaiNumber: kyc.fssaiNumber,
+                docUrls: docUrls,
+                storePhotos: storePhotoUrls.filter(url => url !== null),
+                branches: hasBranches ? branches : [],
+                subscription: paymentStatus === 'success' && paymentDetails ? {
+                    amount: PREMIUM_CATEGORIES.includes(store.category) ? 2999 : 999,
+                    paymentId: paymentDetails.paymentId,
+                    orderId: paymentDetails.orderId,
+                    signature: paymentDetails.signature
+                } : undefined
+            };
+
+            const apiUrl = getApiUrl();
+            const response = await fetch(`${apiUrl}/auth/merchant/signup`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${sessionData.session.access_token}`
+                },
+                body: JSON.stringify(payload)
             });
 
-            if (dbError) {
-                console.error('[Signup] DB Insert Error:', dbError);
-                throw dbError;
-            }
-
-            // 4. Insert Subscription Record
-            if (paymentStatus === 'success' && paymentDetails) {
-                const isPremium = PREMIUM_CATEGORIES.includes(store.category);
-                const subscriptionAmount = isPremium ? 2999 : 999;
-                
-                const { error: subError } = await supabase.from('subscriptions').insert({
-                    id: `sub_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-                    merchant_id: userId,
-                    amount: subscriptionAmount,
-                    currency: 'INR',
-                    status: 'success',
-                    provider: 'razorpay',
-                    transaction_id: paymentDetails.paymentId,
-                    updated_at: new Date().toISOString()
-                });
-                if (subError) console.error('[Signup] Subscription Insert Error (Non-blocking):', subError);
-            }
-
-            if (hasBranches && branches.length > 0) {
-                const branchRecords = branches.map(b => ({
-                    id: `br_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-                    merchant_id: userId,
-                    branch_name: b.name,
-                    address: b.address,
-                    manager_name: b.manager_name,
-                    phone: b.phone
-                }));
-                // Use upsert or delete-then-insert if branch IDs are not preserved
-                const { error: branchError } = await supabase.from('merchant_branches').insert(branchRecords);
-                if (branchError) {
-                    console.error('[Signup] Branch Insert Error:', branchError);
-                    throw new Error(`Branch Save Error: ${branchError.message}`);
+            const data = await response.json();
+            if (!response.ok) {
+                console.error('[Signup] Server API Error:', data);
+                if (data.details) {
+                    // Combine Zod validation messages
+                    const detailsStr = data.details.map((d: any) => d.message).join(', ');
+                    throw new Error(`Validation Error: ${detailsStr}`);
                 }
+                throw new Error(data.error || 'Server rejected registration');
             }
-
 
             Alert.alert('Success!', 'Your application has been submitted.');
+            await AsyncStorage.removeItem('@merchant_signup_draft'); // Clear cache correctly
             router.replace('/(auth)/pending');
         } catch (error: any) {
             console.error('[Signup] Submit Error:', error);
@@ -714,6 +723,15 @@ export default function SignupScreen() {
             })}
         </View>
     );
+
+    if (isRestoring) {
+        return (
+            <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+                <ActivityIndicator size="large" color={Colors.primary} />
+                <Text style={{ marginTop: 12, color: '#6B7280' }}>Resuming your application...</Text>
+            </SafeAreaView>
+        );
+    }
 
     return (
         <SafeAreaView style={styles.container}>

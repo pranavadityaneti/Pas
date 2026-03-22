@@ -11,6 +11,7 @@ import multer from 'multer';
 import * as xlsx from 'xlsx';
 import fs from 'fs';
 import { createClient } from '@supabase/supabase-js';
+import { z } from 'zod';
 import { smsService } from './services/sms.service';
 import { watiService } from './services/wati.service';
 import { apifyService } from './services/apify.service';
@@ -45,6 +46,19 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '50mb' }));
 
 // --- Helper Functions ---
+async function getAuthUser(req: express.Request) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        throw new Error('Missing or invalid token');
+    }
+    const token = authHeader.split(' ')[1];
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+    if (authError || !user) {
+        throw new Error('Unauthorized');
+    }
+    return user;
+}
+
 async function logAudit(productId: string, action: string, field: string | null, oldValue: any, newValue: any, changedBy: string = 'System') {
     try {
         await prisma.productAuditLog.create({
@@ -96,7 +110,8 @@ let MOCK_PRODUCTS: any[] = [
         name: 'Amul Gold Milk',
         description: 'Full cream milk',
         mrp: 68,
-        category: 'Dairy',
+        category: 'Dairy & Milk',
+        vertical: 'Grocery & Kirana',
         brand: 'Amul',
         ean: '8901262010043',
         image: 'https://m.media-amazon.com/images/I/61lzZAgv5GL.jpg',
@@ -229,6 +244,77 @@ app.post('/payments/verify', (req, res) => {
     }
 });
 
+/**
+ * GET /payments/methods
+ * List saved payment tokens for the authenticated user.
+ * Mandate 2: Lazy Customer Creation (Return [] if no ID exists)
+ */
+app.get('/payments/methods', async (req, res) => {
+    try {
+        const user = await getAuthUser(req);
+        const profile = await prisma.profiles.findUnique({
+            where: { id: user.id },
+            select: { razorpay_customer_id: true }
+        });
+
+        if (!profile?.razorpay_customer_id) {
+            return res.json([]);
+        }
+
+        if (!razorpayInstance) return res.status(500).json({ error: 'Razorpay not configured' });
+
+        const tokens = await razorpayInstance.customers.fetchTokens(profile.razorpay_customer_id);
+        res.json(tokens.items || []);
+    } catch (error: any) {
+        const status = (error.message === 'Unauthorized' || error.message === 'Missing or invalid token') ? 401 : 500;
+        // Smarter Error Handling
+        if (error.code === 'BAD_REQUEST_ERROR') return res.status(400).json({ error: error.description });
+        res.status(status).json({ error: error.message });
+    }
+});
+
+/**
+ * DELETE /payments/methods/:tokenId
+ * Mandate 1: Prevent IDOR (Strict ownership verification)
+ */
+app.delete('/payments/methods/:tokenId', async (req, res) => {
+    try {
+        const { tokenId } = req.params;
+        const user = await getAuthUser(req);
+        const profile = await prisma.profiles.findUnique({
+            where: { id: user.id },
+            select: { razorpay_customer_id: true }
+        });
+
+        if (!profile?.razorpay_customer_id) {
+            return res.status(403).json({ error: 'Forbidden: No associated payment account' });
+        }
+
+        if (!razorpayInstance) return res.status(500).json({ error: 'Razorpay not configured' });
+
+        // Mandate 1: Fetch first to verify customer_id ownership
+        let rzpToken;
+        try {
+            rzpToken = await razorpayInstance.tokens.fetch(tokenId);
+        } catch (err: any) {
+            if (err.code === 'BAD_REQUEST_ERROR') return res.status(404).json({ error: 'Payment method not found' });
+            throw err;
+        }
+
+        if (rzpToken.customer_id !== profile.razorpay_customer_id) {
+            console.error(`[SECURITY] IDOR attempt detected! User ${user.id} tried to delete token ${tokenId}`);
+            return res.status(403).json({ error: 'Forbidden: You do not own this payment method' });
+        }
+
+        await razorpayInstance.tokens.delete(tokenId);
+        res.json({ success: true, message: 'Payment method deleted' });
+    } catch (error: any) {
+        const status = (error.message === 'Unauthorized' || error.message === 'Missing or invalid token') ? 401 : 500;
+        if (error.code === 'BAD_REQUEST_ERROR') return res.status(400).json({ error: error.description });
+        res.status(status).json({ error: error.message });
+    }
+});
+
 app.get('/', (req, res) => {
     res.send('PickAtStore API is running 🚀');
 });
@@ -247,6 +333,7 @@ app.get('/products', async (req, res) => {
             limit = 50,
             search,
             category,
+            vertical,
             brand,
             minPrice,
             maxPrice,
@@ -278,6 +365,10 @@ app.get('/products', async (req, res) => {
 
         if (category) {
             where.category = { in: String(category).split(',') };
+        }
+
+        if (vertical) {
+            where.vertical = { in: String(vertical).split(',') };
         }
 
         if (brand) {
@@ -340,6 +431,7 @@ app.get('/products/template', async (req, res) => {
         worksheet.columns = [
             { header: 'name', key: 'name', width: 30 },
             { header: 'mrp', key: 'mrp', width: 15 },
+            { header: 'vertical', key: 'vertical', width: 20 },
             { header: 'category', key: 'category', width: 20 },
             { header: 'brand', key: 'brand', width: 20 },
             { header: 'ean', key: 'ean', width: 20 },
@@ -354,22 +446,30 @@ app.get('/products/template', async (req, res) => {
         const refSheet = workbook.addWorksheet('RefData');
         refSheet.state = 'hidden';
 
-        const categories = ['Dairy', 'Bakery', 'Snacks', 'Staples', 'Condiments', 'Confectionery', 'Grocery'];
+        const verticals = ['Grocery & Kirana', 'Restaurants & Cafes', 'Bakeries & Desserts', 'Meat & Seafood', 'Pharmacy & Wellness', 'Electronics & Accessories', 'Fashion & Apparel', 'Home & Lifestyle', 'Beauty & Personal Care', 'Pet Care & Supplies'];
+        const categories = ['Dairy & Milk', 'Staples & Pulse', 'Snacks & Munchies', 'Beverages', 'Personal Care', 'Home Essentials', 'Fruits & Vegetables', 'Ready-to-Eat'];
         const unitTypes = ['ml', 'L', 'kg', 'g', 'pc'];
         const gstRates = [0, 5, 12, 18, 28];
 
-        // Populate RefData: Column A = Categories, B = Unit Types, C = GST Rates
-        categories.forEach((c, i) => refSheet.getCell(`A${i + 1}`).value = c);
-        unitTypes.forEach((u, i) => refSheet.getCell(`B${i + 1}`).value = u);
-        gstRates.forEach((g, i) => refSheet.getCell(`C${i + 1}`).value = g);
+        // Populate RefData: Column A = Verticals, B = Categories, C = Unit Types, D = GST Rates
+        verticals.forEach((v, i) => refSheet.getCell(`A${i + 1}`).value = v);
+        categories.forEach((c, i) => refSheet.getCell(`B${i + 1}`).value = c);
+        unitTypes.forEach((u, i) => refSheet.getCell(`C${i + 1}`).value = u);
+        gstRates.forEach((g, i) => refSheet.getCell(`D${i + 1}`).value = g);
 
         // 3. Apply Data Validations (Rows 2-1000)
         for (let i = 2; i <= 1000; i++) {
-            // Category (Column C)
+            // Vertical (Column C)
             worksheet.getCell(`C${i}`).dataValidation = {
                 type: 'list',
                 allowBlank: true,
-                formulae: [`'RefData'!$A$1:$A$${categories.length}`]
+                formulae: [`'RefData'!$A$1:$A$${verticals.length}`]
+            };
+            // Category (Column D)
+            worksheet.getCell(`D${i}`).dataValidation = {
+                type: 'list',
+                allowBlank: true,
+                formulae: [`'RefData'!$B$1:$B$${categories.length}`]
             };
             // Unit Type (Column F)
             worksheet.getCell(`F${i}`).dataValidation = {
@@ -392,7 +492,8 @@ app.get('/products/template', async (req, res) => {
         worksheet.addRow({
             name: 'Amul Gold Milk',
             mrp: 34,
-            category: 'Dairy',
+            vertical: 'Grocery & Kirana',
+            category: 'Dairy & Milk',
             brand: 'Amul',
             ean: '8901262010043',
             unitType: 'ml',
@@ -422,6 +523,7 @@ app.get('/products/export', async (req, res) => {
         const data = products.map(p => ({
             name: p.name,
             mrp: p.mrp,
+            vertical: p.vertical,
             category: p.category,
             brand: p.brand,
             ean: p.ean,
@@ -463,6 +565,7 @@ app.post('/products/export-selected', async (req, res) => {
         worksheet.columns = [
             { header: 'name', key: 'name', width: 30 },
             { header: 'mrp', key: 'mrp', width: 15 },
+            { header: 'vertical', key: 'vertical', width: 20 },
             { header: 'category', key: 'category', width: 20 },
             { header: 'brand', key: 'brand', width: 20 },
             { header: 'ean', key: 'ean', width: 20 },
@@ -478,6 +581,7 @@ app.post('/products/export-selected', async (req, res) => {
             worksheet.addRow({
                 name: p.name,
                 mrp: p.mrp,
+                vertical: p.vertical,
                 category: p.category,
                 brand: p.brand,
                 ean: p.ean,
@@ -584,33 +688,38 @@ async function processScraperDataset(datasetId: string) {
         'Confectionery', 'Grocery', 'Beverages', 'Personal Care', 
         'Home Essentials', 'Fashion', 'Pharmacy', 'Meat', 'Fruits & Vegetables'
     ];
-
-    const mapCategory = (rawCategory: string | null): string => {
-        if (!rawCategory) return 'Uncategorized';
+    
+    const mapCategory = (rawCategory: string | null): { vertical: string, category: string } => {
+        if (!rawCategory) return { vertical: 'Grocery & Kirana', category: 'General' };
         const lowerCat = rawCategory.toLowerCase();
         
-        // High specific priority (prevents adjective bleeding like "Fruit Juice" -> Fruits)
-        if (lowerCat.includes('staple') || lowerCat.includes('rice') || lowerCat.includes('dal') || lowerCat.includes('flour') || lowerCat.includes('atta') || lowerCat.includes('masala') || lowerCat.includes('spice')) return 'Staples';
-        if (lowerCat.includes('biscuit') || lowerCat.includes('snack') || lowerCat.includes('chip') || lowerCat.includes('namkeen') || lowerCat.includes('munchies') || lowerCat.includes('dry fruit')) return 'Snacks';
-        if (lowerCat.includes('beverage') || lowerCat.includes('drink') || lowerCat.includes('soda') || lowerCat.includes('juice') || lowerCat.includes('coffee') || lowerCat.includes('tea')) return 'Beverages';
-        if (lowerCat.includes('bake') || lowerCat.includes('bread') || lowerCat.includes('cake') || lowerCat.includes('pizza')) return 'Bakery';
-        if (lowerCat.includes('condiment') || lowerCat.includes('sauce') || lowerCat.includes('spread') || lowerCat.includes('jam')) return 'Condiments';
-        if (lowerCat.includes('dairy') || lowerCat.includes('milk') || lowerCat.includes('paneer') || lowerCat.includes('cheese') || lowerCat.includes('egg')) return 'Dairy';
-        if (lowerCat.includes('meat') || lowerCat.includes('chicken') || lowerCat.includes('fish') || lowerCat.includes('seafood')) return 'Meat';
-        if (lowerCat.includes('confectionery') || lowerCat.includes('chocolate') || lowerCat.includes('candy') || lowerCat.includes('sweet')) return 'Confectionery';
-        if (lowerCat.includes('care') || lowerCat.includes('bath') || lowerCat.includes('hair') || lowerCat.includes('skin') || lowerCat.includes('beauty')) return 'Personal Care';
-        if (lowerCat.includes('home') || lowerCat.includes('clean') || lowerCat.includes('detergent')) return 'Home Essentials';
-        if (lowerCat.includes('pharma') || lowerCat.includes('medicine') || lowerCat.includes('health') || lowerCat.includes('wellness') || lowerCat.includes('sexual')) return 'Pharmacy';
-        
-        // Lower priority fallbacks
-        if (lowerCat.includes('fruit') || lowerCat.includes('veg') || lowerCat.includes('produce')) return 'Fruits & Vegetables';
-        
-        // Fallback attempt
-        for (const valid of validCategories) {
-            if (lowerCat.includes(valid.toLowerCase())) return valid;
-        }
-        
-        return 'Grocery'; // Default catch-all instead of 'Uncategorized' for a better UX
+        // 1. Fruits & Vegetables (Standalone Vertical)
+        if (lowerCat.includes('fruit') || lowerCat.includes('veg') || lowerCat.includes('produce')) 
+            return { vertical: 'Fruits & Vegetables', category: 'Fresh Produce' };
+
+        // 2. Pharmacy & Wellness (Includes Personal Care/Hygiene)
+        if (lowerCat.includes('pharmacy') || lowerCat.includes('wellness') || lowerCat.includes('med') || 
+            lowerCat.includes('personal care') || lowerCat.includes('hygiene') || lowerCat.includes('skin') ||
+            lowerCat.includes('hair') || lowerCat.includes('dent') || lowerCat.includes('soap') || lowerCat.includes('shampoo'))
+            return { vertical: 'Pharmacy & Wellness', category: 'Personal Care' };
+
+        // 3. Home & Lifestyle (Includes Home Essentials/Cleaning)
+        if (lowerCat.includes('home') || lowerCat.includes('lifestyle') || lowerCat.includes('cleaning') || 
+            lowerCat.includes('detergent') || lowerCat.includes('household') || lowerCat.includes('kitchen') || 
+            lowerCat.includes('essential'))
+            return { vertical: 'Home & Lifestyle', category: 'Home Essentials' };
+
+        // 4. Grocery & Kirana (Staples, Dairy, Snacks, Beverages)
+        if (lowerCat.includes('dairy') || lowerCat.includes('milk') || lowerCat.includes('paneer') || lowerCat.includes('cheese') || lowerCat.includes('egg')) 
+            return { vertical: 'Grocery & Kirana', category: 'Dairy & Milk' };
+        if (lowerCat.includes('staple') || lowerCat.includes('rice') || lowerCat.includes('dal') || lowerCat.includes('flour') || lowerCat.includes('atta') || lowerCat.includes('masala')) 
+            return { vertical: 'Grocery & Kirana', category: 'Staples & Pulse' };
+        if (lowerCat.includes('biscuit') || lowerCat.includes('snack') || lowerCat.includes('chip') || lowerCat.includes('namkeen')) 
+            return { vertical: 'Grocery & Kirana', category: 'Snacks & Munchies' };
+        if (lowerCat.includes('beverage') || lowerCat.includes('drink') || lowerCat.includes('soda') || lowerCat.includes('juice')) 
+            return { vertical: 'Grocery & Kirana', category: 'Beverages' };
+            
+        return { vertical: 'Grocery & Kirana', category: 'General' };
     };
 
     const sanitizeScraperData = (obj: any): any => {
@@ -658,7 +767,7 @@ async function processScraperDataset(datasetId: string) {
             const sellingPrice = rawSp > 1000 ? rawSp / 100 : rawSp;
 
             const rawCategory = sanitizeNullBytes(entry?.primaryCategoryName) || sanitizeNullBytes(productData?.category);
-            const category = mapCategory(rawCategory);
+            const { vertical, category } = mapCategory(rawCategory);
             const subcategory = sanitizeNullBytes(entry?.primarySubcategoryName) || sanitizeNullBytes(productData?.subcategory) || null;
             const sourceProductId = String(productData?.id || itemData?.sku_id || itemData?.id);
             
@@ -680,13 +789,14 @@ async function processScraperDataset(datasetId: string) {
 
             // Raw data insertion for Phase 2
             await prisma.syncQueue.upsert({
-                where: { sourceProductId },
+                where: { sourceProductId: sourceProductId },
                 update: { 
                     status: 'PENDING',
                     name,
                     brand,
                     mrp: mrp > 0 ? mrp : sellingPrice,
                     category,
+                    vertical,
                     subcategory,
                     packsize,
                     image,
@@ -697,6 +807,7 @@ async function processScraperDataset(datasetId: string) {
                     brand,
                     mrp: mrp > 0 ? mrp : sellingPrice,
                     category,
+                    vertical,
                     subcategory,
                     packsize,
                     image,
@@ -844,71 +955,168 @@ app.get('/catalog/sync/queue', async (req, res) => {
     }
 });
 
-// Approve items from sync queue to master catalog
-app.post('/catalog/sync/approve', async (req, res) => {
+// --- AUDIT LOGGING HELPERS ---
+async function logBulkAudit(items: any[], action: string, changedBy: string = 'system', tx?: any) {
+    if (items.length === 0) return;
+    const client = tx || prisma;
+    const logs = items.map(p => ({
+        id: crypto.randomUUID(),
+        productId: p.id,
+        action,
+        field: p.changedFields || 'bulk_operation',
+        newValue: JSON.stringify(p.updateData || p.item || {}),
+        changedAt: new Date(),
+        changedBy
+    }));
+    return (client as any).productAuditLog.createMany({ data: logs });
+}
+
+// --- TAXONOMY VALIDATION HELPER ---
+async function validateTaxonomy(verticalId: string, category_id: string): Promise<boolean> {
+    const category = await (prisma as any).tier2Category.findUnique({
+        where: { id: category_id }
+    });
+    return category && category.vertical_id === vertical_id;
+}
+
+// Get All Verticals and Categories (API-driven taxonomy)
+app.get('/verticals', async (req, res) => {
     try {
-        const { items } = req.body;
-        
-        if (!items || !Array.isArray(items) || items.length === 0) {
-            return res.status(400).json({ error: 'No items provided for approval' });
-        }
+        const verticals = await (prisma as any).vertical.findMany({
+            include: { categories: true },
+        });
+        res.json(verticals);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch taxonomy' });
+    }
+});
 
-        let approvedCount = 0;
+// Delete Vertical (Atomic with Product Audit)
+app.delete('/verticals/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        await prisma.$transaction(async (tx) => {
+            const affectedProducts = await (tx as any).product.findMany({
+                where: { verticalId: id },
+                select: { id: true }
+            });
 
+            if (affectedProducts.length > 0) {
+                await logBulkAudit(affectedProducts.map((p: any) => ({ 
+                    id: p.id, 
+                    item: { note: 'Uncategorized due to Vertical deletion' } 
+                })), 'VERTICAL_DELETED_UNCATEGORIZED', 'admin', tx);
+            }
+
+            await (tx as any).vertical.delete({ where: { id } });
+        });
+        res.json({ success: true, message: 'Vertical deleted and products gracefully uncategorized' });
+    } catch (error) {
+        console.error('Vertical deletion error:', error);
+        res.status(500).json({ error: 'Failed to delete vertical' });
+    }
+});
+
+// Delete Category (Atomic with Product Audit)
+app.delete('/categories/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        await prisma.$transaction(async (tx) => {
+            const affectedProducts = await (tx as any).product.findMany({
+                where: { category_id: id },
+                select: { id: true }
+            });
+
+            if (affectedProducts.length > 0) {
+                await logBulkAudit(affectedProducts.map((p: any) => ({ 
+                    id: p.id, 
+                    item: { note: 'Uncategorized due to Category deletion' } 
+                })), 'CATEGORY_DELETED_UNCATEGORIZED', 'admin', tx);
+            }
+
+            await (tx as any).tier2Category.delete({ where: { id } });
+        });
+        res.json({ success: true, message: 'Category deleted and products gracefully uncategorized' });
+    } catch (error) {
+        console.error('Category deletion error:', error);
+        res.status(500).json({ error: 'Failed to delete category' });
+    }
+});
+
+// Approve items from sync queue to master catalog (O(1) Raw SQL Batch)
+app.post('/catalog/sync/approve', async (req, res) => {
+    const { items } = req.body;
+    if (!items || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: 'Valid items array required' });
+    }
+
+    try {
+        // 1. Pre-validation: Taxonomy Integrity Check
         for (const item of items) {
-            try {
-                const ean = item.metadata?.ean || item.metadata?.barcode || null;
-                const sourceProductId = item.sourceProductId;
-                
-                // Upsert to Global Catalog (prevent duplicates if same ID is approved again)
-                await prisma.product.upsert({
-                    where: { sourceProductId },
-                    update: {
-                        name: item.name,
-                        brand: item.brand,
-                        category: item.category,
-                        mrp: Number(item.mrp),
-                        image: item.image,
-                        ean,
-                        subcategory: item.subcategory,
-                        uom: item.packsize,
-                    },
-                    create: {
-                        name: item.name,
-                        brand: item.brand,
-                        category: item.category,
-                        mrp: Number(item.mrp),
-                        image: item.image,
-                        sourceProductId,
-                        source: 'live_sync',
-                        ean,
-                        subcategory: item.subcategory,
-                        uom: item.packsize,
-                        unitType: 'pc',
-                        unitValue: 1,
-                        gstRate: 0,
-                    }
-                });
-
-                // Delete from SyncQueue
-                await prisma.syncQueue.delete({
-                    where: { id: item.id }
-                });
-
-                approvedCount++;
-            } catch (itemError) {
-                console.error(`Failed to approve item ${item.id}:`, itemError);
+            if (item.vertical_id && item.category_id) {
+                const isValid = await validateTaxonomy(item.vertical_id, item.category_id);
+                if (!isValid) {
+                    return res.status(400).json({ 
+                        error: `Invalid Category/Vertical pairing for item: ${item.name}`,
+                        itemId: item.id 
+                    });
+                }
             }
         }
 
-        res.json({ 
-            success: true, 
-            message: `Successfully approved and imported ${approvedCount} products!`,
-            approvedCount
+        await prisma.$transaction(async (tx) => {
+            // 2. High-Performance Bulk Upsert via Raw SQL
+            // Using PostgreSQL "INSERT ... ON CONFLICT" for O(1) performance
+            for (const item of items) {
+                const sourceId = item.source_product_id || item.sourceProductId;
+                await tx.$executeRaw`
+                    INSERT INTO "Product" (
+                        id, name, brand, mrp, image, uom, source, source_product_id, 
+                        vertical_id, category_id, "updatedAt", "createdAt"
+                    ) VALUES (
+                        ${crypto.randomUUID()}, ${item.name}, ${item.brand}, ${Number(item.mrp)}, 
+                        ${item.image}, ${item.packsize || item.uom}, 'purchased_catalog', 
+                        ${sourceId}, ${item.vertical_id}::uuid, ${item.category_id}::uuid, 
+                        NOW(), NOW()
+                    )
+                    ON CONFLICT (source_product_id) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        brand = EXCLUDED.brand,
+                        mrp = EXCLUDED.mrp,
+                        image = EXCLUDED.image,
+                        uom = EXCLUDED.uom,
+                        vertical_id = EXCLUDED.vertical_id,
+                        category_id = EXCLUDED.category_id,
+                        "updatedAt" = NOW()
+                `;
+            }
+
+            // 3. Batched Audit (Inside Transaction for Atomicity)
+            // Fetch resolved IDs for auditing (since Raw SQL doesn't return them easily in bulk)
+            const resolvedProducts = await (tx as any).product.findMany({
+                where: { sourceProductId: { in: items.map(i => i.source_product_id || i.sourceProductId) } },
+                select: { id: true }
+            });
+            
+            await logBulkAudit(resolvedProducts.map((p: any, idx: number) => ({ 
+                id: p.id, 
+                item: items[idx] 
+            })), 'CATALOG_SYNC_APPROVE', 'system', tx);
+
+            // 4. Batch Cleanup
+            const idsToDelete = items.map(i => i.id);
+            await (tx as any).syncQueue.deleteMany({
+                where: { id: { in: idsToDelete } }
+            });
+        }, {
+            timeout: 60000,
+            maxWait: 15000
         });
-    } catch (error: any) {
-        console.error('Approve Sync Error:', error);
-        res.status(500).json({ error: 'Failed to approve sync items', details: error.message });
+
+        res.json({ success: true, message: `Successfully approved ${items.length} items with O(1) performance` });
+    } catch (error) {
+        console.error('High-performance sync approval error:', error);
+        res.status(500).json({ error: 'Failed to approve items due to database pressure or constraint violation' });
     }
 });
 
@@ -956,11 +1164,11 @@ app.post('/products/bulk', upload.single('file'), async (req, res) => {
             rowNumber++;
 
             // 1. Validate Mandatory Fields
-            if (!row.name || !row.mrp || !row.category) {
+            if (!row.name || !row.mrp || !row.category || !row.vertical) {
                 skipped.push({
                     row: rowNumber,
                     name: row.name || 'Unknown',
-                    reason: `Missing mandatory fields: ${!row.name ? 'Name ' : ''}${!row.mrp ? 'MRP ' : ''}${!row.category ? 'Category' : ''}`
+                    reason: `Missing mandatory fields: ${!row.name ? 'Name ' : ''}${!row.mrp ? 'MRP ' : ''}${!row.vertical ? 'Vertical ' : ''}${!row.category ? 'Category' : ''}`
                 });
                 continue;
             }
@@ -998,11 +1206,15 @@ app.post('/products/bulk', upload.single('file'), async (req, res) => {
                 const product = await prisma.product.create({
                     data: {
                         name: row.name,
-                        mrp: mrp,
-                        category: row.category,
+                        description: row.description || null,
+                        mrp: Number(row.mrp),
+                        image: row.image || null,
                         brand: row.brand || null,
                         ean: row.ean ? String(row.ean) : null,
-                        image: row.image || null,
+                        sourceProductId: row.source_product_id ? String(row.source_product_id) : null,
+                        updatedAt: new Date(),
+                        category_id: row.category_id,
+                        verticalId: row.vertical_id,
                         // New Fields
                         unitType: row.unitType || null,
                         unitValue: unitValue,
@@ -1092,7 +1304,10 @@ app.post('/products/bulk-update', async (req, res) => {
 
         // Build safe update data
         const updateData: any = {};
+        if (updates.vertical !== undefined) updateData.vertical = updates.vertical;
         if (updates.category !== undefined) updateData.category = updates.category;
+        if (updates.vertical_id !== undefined) updateData.vertical_id = updates.vertical_id;
+        if (updates.category_id !== undefined) updateData.category_id = updates.category_id;
         if (updates.gstRate !== undefined) updateData.gstRate = parseFloat(updates.gstRate);
         if (updates.unitType !== undefined) updateData.unitType = updates.unitType;
         if (updates.brand !== undefined) updateData.brand = updates.brand;
@@ -1101,16 +1316,28 @@ app.post('/products/bulk-update', async (req, res) => {
             return res.status(400).json({ error: 'No valid updates provided' });
         }
 
-        // Log audit for each product (fire-and-forget)
         const changedFields = Object.keys(updateData).join(', ');
-        for (const id of ids) {
-            logAudit(id, 'BULK_UPDATE', changedFields, null, JSON.stringify(updateData)).catch(() => { });
+
+        // Taxonomy Integrity Check (Strict)
+        if (updateData.vertical_id || updateData.category_id) {
+            if (updateData.vertical_id && updateData.category_id) {
+                const isValid = await validateTaxonomy(updateData.vertical_id, updateData.category_id);
+                if (!isValid) return res.status(400).json({ error: 'Invalid Category/Vertical pairing' });
+            }
         }
 
-        // Update all products in a single transaction
-        const result = await prisma.product.updateMany({
-            where: { id: { in: ids } },
-            data: updateData
+        // Update with Atomic Auditing
+        const result = await prisma.$transaction(async (tx) => {
+            const updateResult = await (tx as any).product.updateMany({
+                where: { id: { in: ids } },
+                data: updateData
+            });
+
+            // Batched Audit (Inside Transaction prevents "Lying Logs")
+            const auditPayload = ids.map(id => ({ id, updateData, changedFields }));
+            await logBulkAudit(auditPayload, 'BULK_UPDATE', 'system', tx);
+
+            return updateResult;
         });
 
         res.json({
@@ -1134,6 +1361,15 @@ app.patch('/products/:id', async (req, res) => {
     if (updates.category !== undefined) updateData.category = updates.category;
     if (updates.name !== undefined) updateData.name = updates.name;
     if (updates.brand !== undefined) updateData.brand = updates.brand;
+    if (updates.vertical !== undefined) updateData.vertical = updates.vertical;
+    if (updates.vertical_id !== undefined) updateData.vertical_id = updates.vertical_id;
+    if (updates.category_id !== undefined) updateData.category_id = updates.category_id;
+
+    // Taxonomy Integrity Check
+    if (updateData.vertical_id && updateData.category_id) {
+        const isValid = await validateTaxonomy(updateData.vertical_id, updateData.category_id);
+        if (!isValid) return res.status(400).json({ error: 'Invalid Category for the selected Vertical' });
+    }
     if (updates.ean !== undefined) updateData.ean = updates.ean;
     if (updates.image !== undefined) updateData.image = updates.image;
     if (updates.unitType !== undefined) updateData.unitType = updates.unitType;
@@ -1275,6 +1511,7 @@ app.post('/products/bulk-import-json', express.json({ limit: '100mb' }), async (
             product_name: 'name',
             image_url: 'image',
             product_price: 'mrp',
+            vertical: 'vertical',
             category_hierarchy: 'category', // Will be parsed for category + subcategory
             avg_rating: 'avgRating',
             number_of_ratings: 'numberOfRatings',
@@ -1477,7 +1714,7 @@ app.get('/consumer/stores', async (req, res) => {
                 take,
                 include: {
                     city: { select: { name: true } },
-                    _count: { select: { products: { where: { active: true } } } }
+                    _count: { select: { storeProduct: { where: { active: true } } } }
                 },
                 orderBy: { name: 'asc' }
             }),
@@ -1492,9 +1729,9 @@ app.get('/consumer/stores', async (req, res) => {
             image: store.image,
             city: store.city?.name || null,
             active: store.active,
-            operatingHours: store.operatingHours,
-            operatingDays: store.operatingDays,
-            productCount: store._count.products,
+            operating_hours: store.operating_hours,
+            operating_days: store.operating_days,
+            product_count: (store as any)._count?.storeProduct || 0,
         }));
 
         res.json({
@@ -1584,8 +1821,8 @@ app.get('/consumer/stores/:id', async (req, res) => {
                 address: store.address,
                 image: store.image,
                 city: store.city?.name || null,
-                operatingHours: store.operatingHours,
-                operatingDays: store.operatingDays,
+                operating_hours: store.operating_hours,
+                operating_days: store.operating_days,
             },
             sections,
             totalProducts: storeProducts.length,
@@ -1622,15 +1859,15 @@ app.get('/consumer/products/search', async (req, res) => {
             orderBy: { product: { name: 'asc' } }
         });
 
-        const results = storeProducts.map(sp => ({
+        const results = storeProducts.map((sp: any) => ({
             storeProductId: sp.id,
             product: {
-                id: sp.product.id,
-                name: sp.product.name,
-                image: sp.product.image,
-                mrp: sp.product.mrp,
-                category: sp.product.category,
-                brand: sp.product.brand,
+                id: sp.product?.id,
+                name: sp.product?.name,
+                image: sp.product?.image,
+                mrp: sp.product?.mrp,
+                category: sp.product?.category,
+                brand: sp.product?.brand,
             },
             price: sp.price,
             stock: sp.stock,
@@ -1660,7 +1897,7 @@ app.post('/orders', async (req, res) => {
                 totalAmount,
                 status: 'PENDING',
                 isPaid: false,
-                items: {
+                orderItems: {
                     create: items.map((item: any) => ({
                         storeProductId: item.storeProductId,
                         quantity: item.quantity,
@@ -1669,7 +1906,7 @@ app.post('/orders', async (req, res) => {
                 }
             },
             include: {
-                items: { include: { storeProduct: { include: { product: true } } } },
+                orderItems: { include: { storeProduct: { include: { product: true } } } },
                 store: true
             }
         });
@@ -1733,9 +1970,9 @@ app.patch('/orders/:id/status', async (req, res) => {
         const { status, reason } = req.body; // Accept reason
 
         // 1. Fetch current order to validate transition
-        const currentOrder = await prisma.order.findUnique({
+        const currentOrder = await (prisma as any).order.findUnique({
             where: { id },
-            include: { user: true, items: { include: { storeProduct: { include: { product: true } } } }, store: { include: { manager: true } } }
+            include: { user: true, orderItems: { include: { storeProduct: { include: { product: true } } } }, store: { include: { manager: true } } }
         });
 
         if (!currentOrder) {
@@ -1776,7 +2013,7 @@ app.patch('/orders/:id/status', async (req, res) => {
         const order = await prisma.order.update({
             where: { id },
             data,
-            include: { user: true, items: { include: { storeProduct: { include: { product: true } } } }, store: { include: { manager: true } } }
+            include: { user: true, orderItems: { include: { storeProduct: { include: { product: true } } } }, store: { include: { manager: true } } }
         });
 
         if (status === 'READY' && order.user?.phone && order.otp) {
@@ -1786,11 +2023,11 @@ app.patch('/orders/:id/status', async (req, res) => {
         // --- Notification & Stock Restoration on Cancellation ---
         if (status === 'CANCELLED') {
             // Restore Stock
-            for (const item of order.items) {
+            for (const item of order.orderItems) {
                 await prisma.storeProduct.update({
                     where: { id: item.storeProductId },
                     data: { stock: { increment: item.quantity } }
-                }).catch(e => console.error('Failed to restore stock', e));
+                }).catch((e: any) => console.error('Failed to restore stock', e));
             }
         }
 
@@ -1919,7 +2156,7 @@ app.post('/webhooks/payment', async (req, res) => {
             const order = await prisma.order.update({
                 where: { id: orderId },
                 data: { isPaid: true },
-                include: { user: true, items: { include: { storeProduct: { include: { product: true } } } } }
+                include: { user: true, orderItems: { include: { storeProduct: { include: { product: true } } } } }
             });
             io.emit('order_updated', order);
             return res.json({ message: 'Payment captured' });
@@ -1945,7 +2182,7 @@ app.post('/orders/:id/verify-otp', async (req, res) => {
         const updatedOrder = await prisma.order.update({
             where: { id },
             data: { status: 'COMPLETED' },
-            include: { user: true, items: { include: { storeProduct: { include: { product: true } } } } }
+            include: { user: true, orderItems: { include: { storeProduct: { include: { product: true } } } } }
         });
 
         io.emit('order_updated', updatedOrder);
@@ -1961,54 +2198,25 @@ const startAutoRejectTimer = () => {
     setInterval(async () => {
         try {
             const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000);
-            const expiredOrders = await prisma.order.findMany({
+            
+            // Fix: Bulk update PENDING orders that have timed out
+            // Executes in a single network trip and connection
+            const result = await prisma.order.updateMany({
                 where: {
                     status: 'PENDING',
                     createdAt: { lt: twoMinsAgo }
-                }
+                },
+                data: { status: 'CANCELLED' }
             });
 
-            for (const order of expiredOrders) {
-                const cancelled = await prisma.order.update({
-                    where: { id: order.id },
-                    data: { status: 'CANCELLED' },
-                    include: {
-                        user: true,
-                        items: { include: { storeProduct: { include: { product: true } } } },
-                        store: { include: { manager: true } }
-                    }
-                });
-
-                // Notify Manager
-                if (cancelled.store?.managerId) {
-                    await createNotification(
-                        cancelled.store.managerId,
-                        'ORDER',
-                        'Order Auto-Cancelled',
-                        `Order #${cancelled.orderNumber} was cancelled due to timeout.`,
-                        `/orders/${cancelled.id}`
-                    );
-                }
-
-                // Restore Stock
-                for (const item of cancelled.items) {
-                    if (item.storeProductId) {
-                        await prisma.storeProduct.update({
-                            where: { id: item.storeProductId },
-                            data: { stock: { increment: item.quantity } }
-                        }).catch(e => console.error('Failed to restore stock', e));
-                    }
-                }
-
-                io.emit('order_updated', cancelled);
-                console.log(`[Auto-Reject] Order ${order.id} cancelled`);
+            if (result.count > 0) {
+                console.log(`[Auto-Reject] Cancelled ${result.count} expired orders.`);
             }
         } catch (error) {
             console.error('Auto-reject check failed', error);
         }
-    }, 30000);
+    }, 2 * 60 * 1000); // 2 minutes
 };
-
 startAutoRejectTimer();
 
 // --- Merchant Routes ---
@@ -2127,7 +2335,7 @@ app.post('/merchants/export-selected', async (req, res) => {
                 branch_name: m.branch_name || 'Main',
                 status: m.status,
                 rating: m.rating,
-                created_at: m.created_at
+                createdAt: m.created_at
             });
         });
 
@@ -2187,7 +2395,7 @@ app.patch('/stores/:id', async (req, res) => {
                 address: fullStore.address,
                 has_branches: false, // Default
                 status: fullStore.active ? 'active' : 'inactive',
-                updated_at: new Date().toISOString()
+                updatedAt: new Date().toISOString()
             };
 
             const { error: syncError } = await supabase
@@ -2221,28 +2429,28 @@ app.get('/coupons', async (req, res) => {
         const { storeId, isActive, fundingSource, search } = req.query;
 
         const where: any = {};
-        if (storeId) where.storeId = String(storeId);
-        if (isActive !== undefined) where.isActive = isActive === 'true';
-        if (fundingSource) where.fundingSource = String(fundingSource).toUpperCase();
+        if (storeId) where.store_id = String(storeId);
+        if (isActive !== undefined) where.is_active = isActive === 'true';
+        if (fundingSource) where.funding_source = String(fundingSource).toUpperCase();
         if (search) {
             where.code = { contains: String(search).toUpperCase(), mode: 'insensitive' };
         }
 
-        const coupons = await prisma.coupon.findMany({
+        const coupon = await prisma.coupon.findMany({
             where,
             include: { store: { select: { id: true, name: true } } },
             orderBy: { createdAt: 'desc' }
         });
 
-        res.json({ data: coupons });
+        res.json({ data: coupon });
     } catch (error) {
         console.error('List Coupons Error:', error);
-        res.status(500).json({ error: 'Failed to fetch coupons' });
+        res.status(500).json({ error: 'Failed to fetch coupon' });
     }
 });
 
 // Create Coupon
-app.post('/coupons', async (req, res) => {
+app.post('/coupon', async (req, res) => {
     try {
         const {
             code,
@@ -2285,9 +2493,10 @@ app.post('/coupons', async (req, res) => {
                 fundingSource: fundingSource.toUpperCase(),
                 targetAudience: targetAudience.toUpperCase(),
                 storeId: storeId || null,
-                usageLimit: usageLimit ? Number(usageLimit) : null,
+                usageLimit: usageLimit ? parseInt(usageLimit) : null,
                 startDate: startDate ? new Date(startDate) : new Date(),
                 endDate: endDate ? new Date(endDate) : null,
+                updatedAt: new Date(),
             },
             include: { store: { select: { id: true, name: true } } }
         });
@@ -2300,7 +2509,7 @@ app.post('/coupons', async (req, res) => {
 });
 
 // Update Coupon
-app.patch('/coupons/:id', async (req, res) => {
+app.patch('/coupon/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const updateData: any = {};
@@ -2311,17 +2520,22 @@ app.patch('/coupons/:id', async (req, res) => {
         for (const field of allowedFields) {
             if (req.body[field] !== undefined) {
                 let value = req.body[field];
+                let prismaField = field; // Use camelCase directly for Prisma
+
                 if (['discountType', 'fundingSource', 'targetAudience'].includes(field)) {
                     value = String(value).toUpperCase();
                 }
                 if (field === 'code') value = String(value).toUpperCase();
-                if (['discountValue', 'maxDiscountCap', 'usageLimit'].includes(field)) {
-                    value = value === null ? null : Number(value);
+                if (['discountValue', 'maxDiscountCap'].includes(field)) {
+                    value = value === null ? null : parseFloat(value);
+                }
+                if (field === 'usageLimit') {
+                    value = value === null ? null : parseInt(value);
                 }
                 if (['startDate', 'endDate'].includes(field)) {
                     value = value === null ? null : new Date(value);
                 }
-                updateData[field] = value;
+                updateData[prismaField] = value;
             }
         }
 
@@ -2339,7 +2553,7 @@ app.patch('/coupons/:id', async (req, res) => {
 });
 
 // Delete Coupon
-app.delete('/coupons/:id', async (req, res) => {
+app.delete('/coupon/:id', async (req, res) => {
     try {
         const { id } = req.params;
         await prisma.coupon.delete({ where: { id } });
@@ -2392,7 +2606,7 @@ app.post('/checkout/validate-coupon', async (req, res) => {
 
         // Check audience (requires userId for NEW_USERS check)
         if (coupon.targetAudience === 'NEW_USERS' && userId) {
-            const orderCount = await prisma.order.count({ where: { userId } });
+            const orderCount = await prisma.order.count({ where: { userId: userId } });
             if (orderCount > 0) {
                 return res.status(400).json({ valid: false, error: 'This coupon is only for new users' });
             }
@@ -2419,7 +2633,7 @@ app.post('/checkout/validate-coupon', async (req, res) => {
             discount: Math.round(discount * 100) / 100,
             discountType: coupon.discountType,
             discountValue: coupon.discountValue,
-            maxDiscountCap: coupon.maxDiscountCap
+            maxDiscountCap: coupon.maxDiscountCap,
         });
     } catch (error) {
         console.error('Validate Coupon Error:', error);
@@ -2563,22 +2777,32 @@ app.post('/auth/send-otp', async (req, res) => {
 
         // Store OTP in database
         await prisma.otpVerification.create({
-            data: { phone, otp, expiresAt }
+            data: { phone, otp, expiresAt: expiresAt }
         });
 
         // Send via Wati WhatsApp
-        const sent = await watiService.sendOtp(phone, otp);
+        let sent = false;
+        try {
+            sent = await watiService.sendOtp(phone, otp);
+        } catch (watiErr: any) {
+            console.error(`[Auth] Wati Service Exception:`, watiErr.message);
+        }
 
         if (!sent) {
-            console.error(`[Auth] Failed to send OTP to ${phone} via Wati`);
-            return res.status(500).json({ error: 'Failed to send OTP via WhatsApp. Please try again.' });
+            console.error(`[Auth] Failed to send OTP to ${phone} via Wati. Invalidating record.`);
+            // Mandate 2: Invalidate the record immediately for audit purposes
+            await prisma.otpVerification.updateMany({
+                where: { phone, otp, verified: false },
+                data: { expiresAt: new Date(0) }
+            });
+            return res.status(502).json({ error: 'WhatsApp delivery failed. Please try again.' });
         }
 
         console.log(`[Auth] OTP sent to ${phone}`);
         res.json({ success: true, message: 'OTP sent via WhatsApp' });
     } catch (error: any) {
         console.error('[Auth] Send OTP Error:', error);
-        res.status(500).json({ error: 'Failed to send OTP' });
+        res.status(500).json({ error: 'Internal Server Error' });
     }
 });
 
@@ -2612,7 +2836,7 @@ app.post('/auth/verify-otp', async (req, res) => {
         }
 
         // Check max attempts
-        if (record.attempts >= 5) {
+        if ((record.attempts ?? 0) >= 5) {
             return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new OTP.' });
         }
 
@@ -2624,7 +2848,7 @@ app.post('/auth/verify-otp', async (req, res) => {
 
         // Validate OTP
         if (record.otp !== otp) {
-            return res.status(401).json({ error: 'Incorrect OTP', attemptsRemaining: 5 - (record.attempts + 1) });
+            return res.status(401).json({ error: 'Incorrect OTP', attemptsRemaining: 5 - ((record.attempts ?? 0) + 1) });
         }
 
         // Mark OTP as verified
@@ -2670,7 +2894,7 @@ app.post('/auth/verify-otp', async (req, res) => {
             // Create empty profile row
             await supabase.from('profiles').upsert({
                 id: existingUser.id,
-                updated_at: new Date().toISOString()
+                updatedAt: new Date().toISOString()
             }).select();
 
             console.log(`[Auth] New user created: ${existingUser.id}`);
@@ -2712,7 +2936,7 @@ app.post('/auth/verify-otp', async (req, res) => {
                 access_token: signInData.session.access_token,
                 refresh_token: signInData.session.refresh_token,
                 expires_in: signInData.session.expires_in,
-                expires_at: signInData.session.expires_at
+                expiresAt: signInData.session.expires_at
             },
             user: {
                 id: existingUser.id,
@@ -2725,6 +2949,260 @@ app.post('/auth/verify-otp', async (req, res) => {
     } catch (error: any) {
         console.error('[Auth] Verify OTP Error:', error);
         res.status(500).json({ error: 'OTP verification failed' });
+    }
+});
+
+/**
+ * POST /auth/merchant/signup
+ * Securely creates a User, Store, and merchant lookup record via a single Prisma transaction.
+ * Header: Authorization: Bearer <token>
+ */
+const merchantSignupSchema = z.object({
+    ownerName: z.string().min(2, "Owner name is required"),
+    email: z.string().email("Valid email is required"),
+    phone: z.string().min(10, "Valid phone is required"),
+    storeName: z.string().min(2, "Store name is required"),
+    category: z.string().min(2, "Category is required"), // Maps roughly to our vertical logic
+    city: z.string().min(2, "City is required"),
+    address: z.string().min(5, "Address is required"),
+    latitude: z.number(),
+    longitude: z.number(),
+    hasBranches: z.boolean().default(false),
+    status: z.string().default('inactive'),
+    kycStatus: z.string().default('pending'),
+    panNumber: z.string().min(10, "Valid PAN is required"),
+    aadharNumber: z.string().min(12, "Valid Aadhaar is required"),
+    msmeNumber: z.string().optional().nullable(),
+    bankAccount: z.string().min(9, "Valid bank account is required"),
+    ifsc: z.string().min(4, "Valid IFSC is required"),
+    beneficiaryName: z.string().min(2, "Beneficiary name is required"),
+    turnoverRange: z.string(),
+    gstNumber: z.string().min(15, "Valid GST is required"),
+    fssaiNumber: z.string().optional().nullable(),
+    docUrls: z.object({
+        pan: z.string().min(1, "Valid PAN doc required"),
+        aadharFront: z.string().min(1, "Valid Aadhaar front required"),
+        aadharBack: z.string().min(1, "Valid Aadhaar back required"),
+        msme: z.string().nullable().optional(),
+        gst: z.string().min(1, "Valid GST doc required"),
+        fssai: z.string().nullable().optional(),
+    }),
+    storePhotos: z.array(z.string()),
+    branches: z.array(z.object({
+        name: z.string().optional(),
+        address: z.string().optional(),
+        manager_name: z.string().optional(),
+        phone: z.string().optional()
+    })).optional(),
+    subscription: z.object({
+        amount: z.number(),
+        paymentId: z.string(),
+        orderId: z.string(),
+        signature: z.string()
+    }).optional()
+});
+
+app.post('/auth/merchant/signup', async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ error: 'Missing or invalid token' });
+        }
+        const token = authHeader.split(' ')[1];
+
+        // 1. Authenticate user from Supabase token
+        const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+        if (authError || !user) {
+            return res.status(401).json({ error: 'Invalid or expired token' });
+        }
+        
+        // 2. Validate payload
+        const parsed = merchantSignupSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'Validation failed', details: parsed.error.issues });
+        }
+        const payload = parsed.data;
+
+        const userId = user.id;
+
+        // 3. Prevent duplicate creation
+        const existingMerchant = await prisma.user.findUnique({ where: { id: userId } });
+        if (existingMerchant && existingMerchant.role === 'MERCHANT') {
+            return res.status(409).json({ error: 'Merchant already registered' });
+        }
+
+        // 4. Resolve City (Atomic resolution to prevent race condition)
+        const cityRecord = await prisma.city.upsert({
+            where: { name: payload.city },
+            update: {}, // No updates needed if it exists
+            create: {
+                id: crypto.randomUUID(),
+                name: payload.city,
+                active: true,
+                updatedAt: new Date()
+            }
+        });
+        const cityId = cityRecord.id;
+
+        // Assigning a generic UUID for the vertical_id fallback (since schema depends on it)
+        const verticalId = 'c307b78e-b924-47a1-a5a7-4405777fa50c';
+
+        // 5. ACID Transaction
+        try {
+            await prisma.$transaction(async (tx) => {
+                // 5a. Create/Update Prisma User (Role: MERCHANT) - user might exist as consumer
+                await tx.user.upsert({
+                    where: { email: payload.email },
+                    update: {
+                        id: userId,
+                        role: 'MERCHANT',
+                        name: payload.ownerName,
+                        phone: payload.phone
+                    },
+                    create: {
+                        id: userId,
+                        email: payload.email,
+                        name: payload.ownerName,
+                        role: 'MERCHANT',
+                        passwordHash: 'sso_auth_active',
+                        phone: payload.phone,
+                        updatedAt: new Date()
+                    }
+                });
+
+                // 5b. Create Prisma Store
+                await tx.store.create({
+                    data: {
+                        id: userId,
+                        name: payload.storeName,
+                        cityId: cityId,
+                        managerId: userId,
+                        address: payload.address,
+                        active: false,
+                        image: payload.storePhotos.length > 0 ? payload.storePhotos[0] : null,
+                        updatedAt: new Date()
+                    }
+                });
+
+                // 5c. Create merchant record for Admin Dashboard (formal model managed by Prisma)
+                await tx.merchant.create({
+                    data: {
+                        id: userId,
+                        storeName: payload.storeName,
+                        ownerName: payload.ownerName,
+                        email: payload.email,
+                        phone: payload.phone,
+                        city: payload.city,
+                        address: payload.address,
+                        latitude: payload.latitude,
+                        longitude: payload.longitude,
+                        hasBranches: payload.hasBranches,
+                        status: payload.status,
+                        kycStatus: payload.kycStatus,
+                        panNumber: payload.panNumber,
+                        aadharNumber: payload.aadharNumber,
+                        msmeNumber: payload.msmeNumber || '',
+                        bankAccountNumber: payload.bankAccount,
+                        ifscCode: payload.ifsc,
+                        bankBeneficiaryName: payload.beneficiaryName,
+                        turnoverRange: payload.turnoverRange,
+                        panDocUrl: payload.docUrls.pan || null,
+                        aadharFrontUrl: payload.docUrls.aadharFront || null,
+                        aadharBackUrl: payload.docUrls.aadharBack || null,
+                        msmeCertificateUrl: payload.docUrls.msme || null,
+                        gstNumber: payload.gstNumber,
+                        gstCertificateUrl: payload.docUrls.gst || null,
+                        fssaiNumber: payload.fssaiNumber || '',
+                        fssaiCertificateUrl: payload.docUrls.fssai || null,
+                        storePhotos: payload.storePhotos,
+                        verticalId: verticalId
+                    }
+                });
+
+                // 5d. Insert Branches (Atomic, relying on Prisma to generate UUID keys)
+                if (payload.hasBranches && payload.branches && payload.branches.length > 0) {
+                    await tx.merchantBranch.createMany({
+                        data: payload.branches.map((b: any) => ({
+                            merchantId: userId,
+                            branchName: b.name || 'Main Branch',
+                            managerName: b.manager_name,
+                            phone: b.phone,
+                            address: b.address,
+                            isActive: true
+                        }))
+                    });
+                }
+
+                // 5e. Insert Secure Subscription Record
+                if (payload.subscription) {
+                    await tx.subscription.create({
+                        data: {
+                            merchantId: userId,
+                            amount: payload.subscription.amount,
+                            currency: 'INR',
+                            status: 'success',
+                            provider: 'razorpay',
+                            transactionId: payload.subscription.paymentId
+                        }
+                    });
+                }
+            });
+        } catch (txnError: any) {
+            console.error('[Signup Transaction Error]', txnError);
+            if (txnError.code === 'P2002') {
+                const target = txnError.meta?.target || 'field';
+                return res.status(400).json({ error: `Registration failed: The ${target} is already in use by another merchant.` });
+            }
+            throw txnError; // let the outer catch block handle it
+        }
+
+        res.json({ success: true, message: 'Merchant successfully registered' });
+
+    } catch (error: any) {
+        console.error('[Auth] Merchant Signup Error:', error);
+        res.status(500).json({ error: 'Internal Server Error during registration', details: error?.message || String(error) });
+    }
+});
+
+/**
+ * GET /auth/me
+ * Fetch the authenticated user's profile using their Supabase JWT.
+ * Header: Authorization: Bearer <token>
+ */
+app.get('/auth/me', async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ error: 'Missing or invalid token' });
+        }
+
+        const token = authHeader.split(' ')[1];
+
+        // Verify token with Supabase
+        const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+
+        if (authError || !user) {
+            console.error('[Auth] Token verification failed:', authError);
+            return res.status(401).json({ error: 'Unauthorized', details: authError?.message });
+        }
+
+        // Fetch profile from Prisma (Primary source of truth for user data)
+        const profile = await prisma.profile.findUnique({
+            where: { id: user.id }
+        });
+
+        // Return unified user/profile object
+        res.json({
+            user: {
+                id: user.id,
+                email: user.email,
+                phone: user.phone || (user.user_metadata?.phone)
+            },
+            profile: profile || { tier: 'Member', credits: 0 } // Fallback if profile row is missing
+        });
+    } catch (error: any) {
+        console.error('[Auth] /auth/me Error:', error);
+        res.status(500).json({ error: 'Failed to fetch user context' });
     }
 });
 
