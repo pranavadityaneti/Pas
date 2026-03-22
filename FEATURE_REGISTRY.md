@@ -65,6 +65,12 @@
 
 ## 🏪 Merchant App (`apps/merchant-app`)
 
+### Screens
+
+| Screen | File | Status | Locked Date | Notes |
+|--------|------|--------|-------------|-------|
+| Signup | `app/(auth)/signup.tsx` | 🔒 LOCKED | Mar 22, 2026 | Full 7-step signup flow with ACID backend transaction. |
+
 ### Components
 
 | Component | File | Status | Notes |

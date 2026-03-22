@@ -1,3 +1,4 @@
+// @lock — Do NOT overwrite. Approved layout as of March 22, 2026.
 import React, { useState, useRef, useEffect } from 'react';
 import {
     View, Text, TextInput, TouchableOpacity, StyleSheet,
