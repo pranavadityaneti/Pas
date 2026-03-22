@@ -70,6 +70,7 @@
 | Screen | File | Status | Locked Date | Notes |
 |--------|------|--------|-------------|-------|
 | Signup | `app/(auth)/signup.tsx` | 🔒 LOCKED | Mar 22, 2026 | Full 7-step signup flow with ACID backend transaction. |
+| Staff Management | `app/(main)/settings/staff.tsx` | 🔒 LOCKED | Mar 22, 2026 | Comprehensive staff CRUD with 10-digit validation and brand red UI. |
 
 ### Components
 
