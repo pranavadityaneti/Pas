@@ -3241,6 +3241,131 @@ io.on('connection', (socket) => {
     });
 });
 
+/**
+ * GET /auth/merchant/profile
+ * Securely fetches the complete merchant profile with signed URLs for private documents.
+ * Header: Authorization: Bearer <token>
+ */
+app.get('/auth/merchant/profile', async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ error: 'Missing or invalid token' });
+        }
+        const token = authHeader.split(' ')[1];
+
+        // 1. Authenticate user from Supabase token (Zero-Trust)
+        const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+        if (authError || !user) {
+            return res.status(401).json({ error: 'Invalid or expired token' });
+        }
+        const userId = user.id;
+
+        // 2. Fetch comprehensive merchant data via Prisma
+        const merchantData = await prisma.merchant.findUnique({
+            where: { id: userId },
+            include: {
+                branches: true,
+                subscriptions: {
+                    orderBy: { createdAt: 'desc' },
+                    take: 1
+                }
+            }
+        });
+
+        if (!merchantData) {
+            return res.status(404).json({ error: 'Merchant profile not found' });
+        }
+
+        // Fetch associated store (aligned with signup ID mapping)
+        const storeData = await prisma.store.findUnique({
+            where: { id: userId },
+            include: {
+                city: true
+            }
+        });
+
+        // 3. Generate Signed URLs for private document storage (1-hour expiry)
+        const signUrl = async (path: string | null) => {
+            if (!path) return null;
+            // Use supabaseAdmin to bypass public access requirements
+            const { data, error } = await supabaseAdmin.storage
+                .from('merchant-docs')
+                .createSignedUrl(path, 3600);
+            return error ? null : data?.signedUrl;
+        };
+
+        const [
+            panUrl, 
+            aadharFrontUrl, 
+            aadharBackUrl, 
+            msmeUrl, 
+            gstUrl, 
+            fssaiUrl
+        ] = await Promise.all([
+            signUrl(merchantData.panDocUrl),
+            signUrl(merchantData.aadharFrontUrl),
+            signUrl(merchantData.aadharBackUrl),
+            signUrl(merchantData.msmeCertificateUrl),
+            signUrl(merchantData.gstCertificateUrl),
+            signUrl(merchantData.fssaiCertificateUrl)
+        ]);
+
+        // 4. Clean, Flattened Response (Data Sanitization)
+        const profileResponse = {
+            id: merchantData.id,
+            ownerName: merchantData.ownerName,
+            email: merchantData.email,
+            phone: merchantData.phone,
+            status: merchantData.status,
+            kycStatus: merchantData.kycStatus,
+            store: storeData ? {
+                name: storeData.name,
+                address: storeData.address,
+                city: storeData.city?.name,
+                image: storeData.image,
+                active: storeData.active
+            } : null,
+            kyc: {
+                panNumber: merchantData.panNumber,
+                aadharNumber: merchantData.aadharNumber,
+                msmeNumber: merchantData.msmeNumber,
+                gstNumber: merchantData.gstNumber,
+                fssaiNumber: merchantData.fssaiNumber,
+                bankAccount: merchantData.bankAccountNumber,
+                ifsc: merchantData.ifscCode,
+                beneficiaryName: merchantData.bankBeneficiaryName,
+                docUrls: {
+                    pan: panUrl,
+                    aadharFront: aadharFrontUrl,
+                    aadharBack: aadharBackUrl,
+                    msme: msmeUrl,
+                    gst: gstUrl,
+                    fssai: fssaiUrl
+                }
+            },
+            branches: merchantData.branches.map(b => ({
+                id: b.id,
+                name: b.branchName,
+                manager: b.managerName,
+                phone: b.phone,
+                isActive: b.isActive
+            })),
+            subscription: merchantData.subscriptions[0] ? {
+                status: merchantData.subscriptions[0].status,
+                amount: merchantData.subscriptions[0].amount,
+                createdAt: merchantData.subscriptions[0].createdAt
+            } : null
+        };
+
+        res.json(profileResponse);
+
+    } catch (error: any) {
+        console.error('[Auth] Merchant Profile Fetch Error:', error);
+        res.status(500).json({ error: 'Internal Server Error while fetching profile' });
+    }
+});
+
 // --- Server Start ---
 server.listen(port, () => {
     console.log(`[API] Server running on http://localhost:${port}`);
