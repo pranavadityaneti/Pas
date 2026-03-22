@@ -200,5 +200,13 @@
 
 ---
 
+## ⚖️ Project Core
+| Component | File | Status | Notes |
+|-----------|------|--------|-------|
+| Project Guidelines | `PROJECT_GUIDELINES.md` | 🔒 LOCKED (Mar 22, 2026) | The 10 rules. Sacred schema, zero-trust dependencies, strict secrets. |
+| Feature Registry | `FEATURE_REGISTRY.md` | 🔒 LOCKED (Mar 22, 2026) | Full system manifest. |
+
+---
+
 > **To unlock a file**: User must explicitly say "unlock [filename]" or approve a structural change.  
 > **To lock a new file**: Add `// @lock` comment + update this registry.

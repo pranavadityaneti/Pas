@@ -3,7 +3,7 @@
 > **Purpose**: This document defines the rules that ALL development agents (AI or human) must follow  
 > to prevent accidental overwrites, regressions, and loss of implemented work.  
 > **Created**: February 27, 2026  
-> **Last Updated**: February 27, 2026
+> **Last Updated**: March 22, 2026
 
 ---
 
@@ -57,6 +57,25 @@ Before modifying any file:
 1. Note the current working state of the app.
 2. After changes, verify the app still renders correctly.
 3. If an existing screen breaks, **revert immediately**.
+
+### Rule 8: The Database Schema is Sacred
+The database is the backbone of the application. AI agents often attempt to add or delete columns in `schema.prisma` to simplify frontend features, which can lead to catastrophic data loss in production.
+- **Never modify** `apps/api/prisma/schema.prisma` without explicit permission.
+- If a feature requires new database fields, **propose the schema change first** and wait for approval.
+- **Never execute** `prisma db push` or `prisma migrate` without direct user confirmation.
+- Assume all existing tables contain **live production data**.
+
+### Rule 9: Zero-Trust Dependency Management
+To protect the bundle size and prevent build failures in Expo or Vercel, we maintain a strict dependency diet.
+- **Do NOT install new packages** (via `npm`, `yarn`, or `pnpm`) without explicit approval.
+- **Always check `package.json`** to use existing libraries first (e.g., use an existing date library instead of installing a new one).
+- In React Native/Expo, **prioritize built-in standard APIs** before suggesting external community packages.
+
+### Rule 10: Strict Secret Management
+Security is non-negotiable. We must prevent accidental leaks of API keys or credentials.
+- **Never read, write, or modify `.env` files** unless explicitly instructed by the user.
+- **Never print API keys, JWTs, or database URLs** in code comments, console logs, or PR descriptions.
+- Before executing any `git commit`, **verify that `.gitignore` is actively protecting** `node_modules` and `.env` files.
 
 ---
 
