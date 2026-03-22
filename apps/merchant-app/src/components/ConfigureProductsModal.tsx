@@ -25,7 +25,8 @@ interface ConfigureProductsModalProps {
 
 // Mock Variant Logic with Smart Ratios
 // ratio: 1.0 = 100% of Base MRP
-const getVariantsForCategory = (category: string) => {
+const getVariantsForCategory = (category?: string) => {
+    if (!category) return [{ label: 'Standard', ratio: 1.0 }];
     const cat = category.toLowerCase();
     if (cat.includes('dairy') || cat.includes('beverage')) {
         return [

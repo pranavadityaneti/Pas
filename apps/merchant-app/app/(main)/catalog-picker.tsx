@@ -10,22 +10,27 @@ import ConfigureProductsModal from '../../src/components/ConfigureProductsModal'
 import FilterModal, { FilterState } from '../../src/components/FilterModal';
 import AddCustomProductModal from '../../src/components/AddCustomProductModal';
 
-const CATEGORIES = [
-    'Dairy',
-    'Bakery',
-    'Snacks',
-    'Staples',
-    'Condiments',
-    'Confectionery',
-    'Grocery',
-    'Beverages',
-    'Personal Care',
-    'Home Essentials',
-    'Fashion',
-    'Pharmacy',
-    'Meat',
-    'Fruits & Vegetables'
+const VERTICALS = [
+    'Grocery & Kirana', 'Fruits & Vegetables', 'Restaurants & Cafes', 
+    'Bakeries & Desserts', 'Meat & Seafood', 'Pharmacy & Wellness', 
+    'Electronics & Accessories', 'Fashion & Apparel', 'Home & Lifestyle', 
+    'Beauty & Personal Care', 'Pet Care & Supplies'
 ];
+
+const PRODUCT_CATEGORIES = [
+    'Dairy & Milk', 'Staples & Pulse', 'Snacks & Munchies', 'Beverages', 
+    'Personal Care', 'Home Essentials', 'Ready-to-Eat', 'Household Supply'
+];
+
+const CATEGORY_MAP: Record<string, string> = {
+    '1c4ebf02-778e-44be-a50a-3442233202ba': 'Grocery & Staples',
+    'f3ca935e-85b4-4b55-aed0-8a1ef96b4ad9': 'Dairy & Bakery',
+    'b48873ad-bb3e-4c7a-9fb7-c88f1883395d': 'Personal Care',
+    'd8315228-4e8c-40ad-bc42-5f6af1587af0': 'Snacks & Beverages',
+    'c2caba79-0520-4b2a-aec5-b2864205511e': 'Household Items'
+};
+
+const ALL_CATEGORIES = [...VERTICALS, ...PRODUCT_CATEGORIES, ...Object.values(CATEGORY_MAP)];
 
 const DEFAULT_FILTERS: FilterState = {
     sortBy: 'price_low',
@@ -88,7 +93,9 @@ export default function CatalogPicker() {
                 data.forEach(p => {
                     const cleanName = p.name.replace(/\s*\([^)]+\)/g, '').trim();
                     if (!uniqueMap.has(cleanName)) {
-                        uniqueMap.set(cleanName, { ...p, name: cleanName });
+                        const mappedCat = CATEGORY_MAP[p.category_id || ''] || 'Others';
+                        const displayCat = p.subcategory || mappedCat;
+                        uniqueMap.set(cleanName, { ...p, name: cleanName, category: displayCat });
                     }
                 });
                 setProducts(Array.from(uniqueMap.values()));
@@ -103,7 +110,9 @@ export default function CatalogPicker() {
                 data.forEach(p => {
                     const cleanName = p.name.replace(/\s*\([^)]+\)/g, '').trim();
                     if (!uniqueMap.has(cleanName)) {
-                        uniqueMap.set(cleanName, { ...p, name: cleanName });
+                        const mappedCat = CATEGORY_MAP[p.category_id || ''] || 'Others';
+                        const displayCat = p.subcategory || mappedCat;
+                        uniqueMap.set(cleanName, { ...p, name: cleanName, category: displayCat });
                     }
                 });
                 setProducts(Array.from(uniqueMap.values()));
@@ -156,7 +165,11 @@ export default function CatalogPicker() {
         let matchesFilter = true;
 
         if (appliedFilters) {
-            if (appliedFilters.categories.length > 0 && !appliedFilters.categories.includes(p.category)) matchesFilter = false;
+            if (appliedFilters.categories.length > 0) {
+                const isMatch = appliedFilters.categories.includes(p.category) || 
+                               appliedFilters.categories.includes(p.vertical);
+                if (!isMatch) matchesFilter = false;
+            }
             if (appliedFilters.brands.length > 0 && !appliedFilters.brands.includes(p.brand)) matchesFilter = false;
             if (p.mrp < appliedFilters.priceRange[0] || p.mrp > appliedFilters.priceRange[1]) matchesFilter = false;
             
@@ -285,7 +298,7 @@ export default function CatalogPicker() {
                     showsHorizontalScrollIndicator={false} 
                     contentContainerStyle={styles.categoryScroll}
                 >
-                    {CATEGORIES.map(cat => {
+                    {ALL_CATEGORIES.map(cat => {
                         const isSelected = appliedFilters?.categories.includes(cat);
                         return (
                             <TouchableOpacity
