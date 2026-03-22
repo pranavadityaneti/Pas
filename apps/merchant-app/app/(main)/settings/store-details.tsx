@@ -13,7 +13,7 @@ import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
 import Constants from 'expo-constants';
 
 const SUPABASE_PROJECT_ID = 'llhxkonraqaxtradyycj';
-const STORAGE_BASE_URL = `https://${SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/merchant-assets/`;
+const STORAGE_BASE_URL = `https://${SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/merchant-docs/`;
 
 const VERTICAL_MAP: { [key: string]: string } = {
     'c307b78e-b924-47a1-a5a7-4405777fa50c': 'Kirana Store',
@@ -210,11 +210,11 @@ export default function StoreDetailsScreen() {
                 </View>
 
                 <View style={styles.formGroup}>
-                    <Text style={styles.label}>City</Text>
+                    <Text style={[styles.label, { color: '#999' }]}>City (Read Only)</Text>
                     <TextInput
-                        style={styles.input}
+                        style={[styles.input, { backgroundColor: '#F3F4F6', color: '#666' }]}
                         value={details.cityId}
-                        onChangeText={(t) => setDetails({ ...details, cityId: t })}
+                        editable={false}
                     />
                 </View>
 
