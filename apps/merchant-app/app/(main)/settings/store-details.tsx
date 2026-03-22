@@ -35,70 +35,63 @@ export default function StoreDetailsScreen() {
     });
     const [initialDetails, setInitialDetails] = useState<typeof details | null>(null);
 
+    // Step 1: Fix Fetch Logic
+    const targetId = store?.id;
+
+    // Realtime Store Data (Main image, name, address)
+    const { data: storeDataList, loading: storeLoading } = useRealtimeTable({
+        tableName: 'Store',
+        select: 'name, address, image',
+        filter: targetId ? `id.eq.${targetId}` : undefined,
+        enabled: !!targetId
+    });
+
     // Realtime Merchant Extras (Signup Data)
     const { data: merchantDataList, loading: merchantLoading } = useRealtimeTable({
         tableName: 'merchants',
-        select: 'store_name, address, city, vertical_id, store_photos',
-        filter: store?.id ? `id=eq.${store.id}` : undefined,
-        enabled: !!store?.id
+        select: 'city, vertical_id',
+        filter: targetId ? `id.eq.${targetId}` : undefined,
+        enabled: !!targetId
     });
 
     useEffect(() => {
-        if (merchantLoading) return;
+        if (storeLoading || merchantLoading) return;
 
-        if (merchantDataList && merchantDataList.length > 0) {
-            const mData = merchantDataList[0];
-            
-            // Handle Photos (Priority: Store.image, Fallback: merchants.store_photos)
-            let photosArray: string[] = [];
-            
-            // Step 1: Add main image from Store table
-            if (store?.image) {
-                photosArray.push(store.image);
-            }
+        // Step 2: Add Array Validation
+        console.log("RAW_STORE_DATA:", storeDataList);
 
-            // Step 2: Add additional photos from merchants table (parsing JSON if needed)
-            try {
-                const rawPhotos = mData.store_photos;
-                let additionalPhotos: string[] = [];
-                if (Array.isArray(rawPhotos)) {
-                    additionalPhotos = rawPhotos;
-                } else if (typeof rawPhotos === 'string' && rawPhotos.startsWith('[')) {
-                    additionalPhotos = JSON.parse(rawPhotos);
-                } else if (rawPhotos) {
-                    additionalPhotos = [rawPhotos];
-                }
+        const sData = storeDataList && storeDataList.length > 0 ? storeDataList[0] : null;
+        const mData = merchantDataList && merchantDataList.length > 0 ? merchantDataList[0] : null;
+
+        if (sData || mData) {
+            // Step 1 & 2: Constuct URI from Store.image and merchant-assets bucket
+            const photosArray: string[] = [];
+            if (sData?.image) {
+                const cleanPath = sData.image.startsWith('/') ? sData.image.substring(1) : sData.image;
+                // Step 3: Correct the URI Formatting
+                const photoUri = `${STORAGE_BASE_URL}${cleanPath}`;
                 
-                // Avoid duplicating the main image if it's already in the list
-                additionalPhotos.forEach(p => {
-                    if (!photosArray.includes(p)) photosArray.push(p);
-                });
-            } catch (e) {
-                console.warn('[StoreDetails] Photo parsing error:', e);
+                // Mandatory Debug Log
+                console.log("FINAL_IMAGE_URL_CHECK:", photoUri);
+                photosArray.push(photoUri);
             }
 
-            // Prepend Storage URL
-            const fullPhotoUrls = photosArray.map(p => {
-                const cleanPath = p.startsWith('/') ? p.substring(1) : p;
-                const fullUri = (p.startsWith('http') || p.startsWith('data:')) ? p : `${STORAGE_BASE_URL}${cleanPath}`;
-                console.log("DEBUG PHOTO URI:", fullUri);
-                return fullUri;
-            });
-
-            const label = mData.vertical_id === 'c307b78e-b924-47a1-a5a7-4405777fa50c' ? 'Kirana Store' : 'General Store';
+            // Step 4: Mandatory Category Label Mapping
+            const vertical_id = mData?.vertical_id;
+            const label = vertical_id === 'c307b78e-b924-47a1-a5a7-4405777fa50c' ? 'Kirana Store' : 'General Store';
 
             const newDetails = {
-                name: mData.store_name || '',
-                address: mData.address || '',
+                name: sData?.name || '',
+                address: sData?.address || '',
                 category: label,
-                photos: fullPhotoUrls,
-                cityId: mData.city || ''
+                photos: photosArray,
+                cityId: mData?.city || ''
             };
             setDetails(newDetails);
             setInitialDetails(newDetails);
         }
         setLoading(false);
-    }, [merchantDataList, merchantLoading, store?.image]);
+    }, [storeDataList, merchantDataList, storeLoading, merchantLoading]);
 
     // Removed redundant store sync to prioritize single source of truth from signup metadata
 

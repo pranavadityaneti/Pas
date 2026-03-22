@@ -36,14 +36,23 @@ export function useRealtimeTable<T extends Record<string, any> = any>({
                 if (filter) {
                     const filterParts = filter.split(',');
                     filterParts.forEach(p => {
-                        const parts = p.split('=');
-                        if (parts.length === 2) {
-                            const [col, rest] = parts;
-                            const [op, val] = rest.split('.');
-                            if (op === 'eq') query = query.eq(col, val);
-                            if (op === 'neq') query = query.neq(col, val);
-                            if (op === 'gt') query = query.gt(col, val);
-                            if (op === 'lt') query = query.lt(col, val);
+                        // Support both 'col=op.val' and 'col.op.val'
+                        const parts = p.includes('=') ? p.split('=') : p.split('.');
+                        if (parts.length >= 2) {
+                            let col, op, val;
+                            if (p.includes('=')) {
+                                [col, op] = [parts[0], parts[1].split('.')[0]];
+                                val = parts[1].split('.')[1];
+                            } else {
+                                [col, op, val] = [parts[0], parts[1], parts[2]];
+                            }
+                            
+                            if (col && op && val) {
+                                if (op === 'eq') query = query.eq(col, val);
+                                if (op === 'neq') query = query.neq(col, val);
+                                if (op === 'gt') query = query.gt(col, val);
+                                if (op === 'lt') query = query.lt(col, val);
+                            }
                         }
                     });
                 }
