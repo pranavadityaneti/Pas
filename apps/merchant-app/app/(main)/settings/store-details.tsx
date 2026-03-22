@@ -26,12 +26,12 @@ export default function StoreDetailsScreen() {
     });
     const [initialDetails, setInitialDetails] = useState<typeof details | null>(null);
 
-    // Realtime Merchant Extras (Photos, Category)
+    // Realtime Merchant Extras (Signup Data)
     const { data: merchantDataList, loading: merchantLoading } = useRealtimeTable({
         tableName: 'merchants',
-        select: 'vertical_id, store_photos, city',
-        filter: merchantId ? `id=eq.${merchantId}` : (user?.email ? `email=eq.${user.email}` : undefined),
-        enabled: !!(merchantId || user?.email)
+        select: 'store_name, address, city, vertical_id, store_photos',
+        filter: store?.id ? `id=eq.${store.id}` : undefined,
+        enabled: !!store?.id
     });
 
     useEffect(() => {
@@ -39,45 +39,20 @@ export default function StoreDetailsScreen() {
 
         if (merchantDataList && merchantDataList.length > 0) {
             const mData = merchantDataList[0];
-            setDetails(prev => ({
-                ...prev,
+            const newDetails = {
+                name: mData.store_name || '',
+                address: mData.address || '',
                 category: mData.vertical_id || '',
-                photos: mData.store_photos || [],
+                photos: Array.isArray(mData.store_photos) ? mData.store_photos : (mData.store_photos ? [mData.store_photos] : []),
                 cityId: mData.city || ''
-            }));
+            };
+            setDetails(newDetails);
+            setInitialDetails(newDetails);
         }
         setLoading(false);
     }, [merchantDataList, merchantLoading]);
 
-    // Sync with Store Context (Realtime)
-    useEffect(() => {
-        if (store) {
-            setDetails(prev => {
-                // Only update if changed to avoid cursor jumps if we were typing? 
-                // Actually, if we are typing, we don't want external updates to overwrite us immediately
-                // But for "Realtime", we generally expect latest server state.
-                // To keep it simple: We update local state if it differs from Store Context, 
-                // but we might want to check if the user is currently editing?
-                // For now, we will just sync. If user is typing and another device updates, it might jump.
-                // A better UX is to show a "New data available" toast, but requirements said "Realtime Sync".
-                // So we will overwrite.
-
-                const newDetails = {
-                    ...prev,
-                    name: store.name || prev.name,
-                    address: store.address || prev.address
-                };
-
-                // Update initial details to the new baseline so 'isDirty' works correctly
-                setInitialDetails(current => ({
-                    ...current,
-                    ...newDetails
-                } as typeof details));
-
-                return newDetails;
-            });
-        }
-    }, [store]);
+    // Removed redundant store sync to prioritize single source of truth from signup metadata
 
     const isDirty = initialDetails && JSON.stringify(details) !== JSON.stringify(initialDetails);
 
