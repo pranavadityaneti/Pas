@@ -12,7 +12,7 @@ import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
 import Constants from 'expo-constants';
 
 export default function StoreDetailsScreen() {
-    const { store } = useStoreContext();
+    const { store, merchantId } = useStoreContext();
     const { user } = useUser();
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -29,9 +29,9 @@ export default function StoreDetailsScreen() {
     // Realtime Merchant Extras (Photos, Category)
     const { data: merchantDataList, loading: merchantLoading } = useRealtimeTable({
         tableName: 'merchants',
-        select: 'category, store_photos, city',
-        filter: user?.email ? `email=eq.${user.email}` : undefined,
-        enabled: !!user?.email
+        select: 'vertical_id, store_photos, city',
+        filter: merchantId ? `id=eq.${merchantId}` : (user?.email ? `email=eq.${user.email}` : undefined),
+        enabled: !!(merchantId || user?.email)
     });
 
     useEffect(() => {
@@ -41,7 +41,7 @@ export default function StoreDetailsScreen() {
             const mData = merchantDataList[0];
             setDetails(prev => ({
                 ...prev,
-                category: mData.category || '',
+                category: mData.vertical_id || '',
                 photos: mData.store_photos || [],
                 cityId: mData.city || ''
             }));
