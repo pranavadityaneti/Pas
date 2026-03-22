@@ -39,14 +39,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const { data, error } = await supabase
                 .from('User')
                 .select('id, email, name, role')
-                .eq('email', supabaseUser.email)
+                .eq('id', supabaseUser.id)
                 .single()
                 .abortSignal(controller.signal);
 
             clearTimeout(timeoutId);
 
             if (error) {
-                console.error('Error fetching user profile:', error);
+                console.error('Error fetching user profile for ID:', supabaseUser.id, error);
                 return null;
             }
 
