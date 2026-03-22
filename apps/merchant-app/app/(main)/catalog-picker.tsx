@@ -30,7 +30,7 @@ const CATEGORY_MAP: Record<string, string> = {
     'c2caba79-0520-4b2a-aec5-b2864205511e': 'Household Items'
 };
 
-const ALL_CATEGORIES = [...VERTICALS, ...PRODUCT_CATEGORIES, ...Object.values(CATEGORY_MAP)];
+const ALL_CATEGORIES = Array.from(new Set([...VERTICALS, ...PRODUCT_CATEGORIES, ...Object.values(CATEGORY_MAP)]));
 
 const DEFAULT_FILTERS: FilterState = {
     sortBy: 'price_low',
