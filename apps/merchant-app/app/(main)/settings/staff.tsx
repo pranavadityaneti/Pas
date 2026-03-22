@@ -104,7 +104,10 @@ export default function StaffScreen() {
             return;
         }
 
-        if (!storeId) return;
+        if (!storeId) {
+            Alert.alert('Error', 'Store ID not found. Refreshing your profile...');
+            return;
+        }
 
         setActionLoading(true);
 
@@ -136,6 +139,7 @@ export default function StaffScreen() {
                     .eq('id', editingId);
 
                 if (error) throw error;
+                Alert.alert('Success', 'Staff member updated successfully');
             } else {
                 // Optimistic Add
                 const tempId = `temp-${Date.now()}`;
@@ -157,18 +161,20 @@ export default function StaffScreen() {
                     throw error;
                 }
 
-                // Replace temp ID with real ID (if Realtime doesn't beat us to it)
+                // Replace temp ID with real ID
                 // @ts-ignore
                 setData(prev => prev.map(p => p.id === tempId ? newStaff : p));
+                Alert.alert('Success', 'Staff member added successfully');
             }
 
-            // Refresh list
-            // await fetchStaff(); // Auto-updated via realtime
             setModalVisible(false);
 
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error saving staff:', error);
-            Alert.alert('Error', 'Failed to save staff member');
+            const message = error.code === '23505' 
+                ? 'A staff member with this phone number already exists.' 
+                : 'Failed to save staff member. Please try again.';
+            Alert.alert('Error', message);
         } finally {
             setActionLoading(false);
         }
