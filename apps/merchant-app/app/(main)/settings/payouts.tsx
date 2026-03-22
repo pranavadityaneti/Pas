@@ -343,13 +343,10 @@ export default function PayoutsScreen() {
                     </View>
                 )}
 
-                {/* Step 3: Restore Add Button conditionally */}
-                {bankAccountsList.length === 0 && (
-                    <TouchableOpacity style={styles.changeButton} onPress={() => setModalVisible(true)}>
-                        <Ionicons name="add-circle-outline" size={20} color="#374151" style={{ marginRight: 8 }} />
-                        <Text style={styles.changeButtonText}>Add Bank Account</Text>
-                    </TouchableOpacity>
-                )}
+                <TouchableOpacity style={styles.changeButton} onPress={() => setModalVisible(true)}>
+                    <Ionicons name="add-circle-outline" size={20} color="#374151" style={{ marginRight: 8 }} />
+                    <Text style={styles.changeButtonText}>Add Bank Account</Text>
+                </TouchableOpacity>
 
                 {/* Debug info - only if developer check needed */}
 
