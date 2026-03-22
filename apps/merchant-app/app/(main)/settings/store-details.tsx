@@ -218,7 +218,7 @@ export default function StoreDetailsScreen() {
                                 <Image 
                                     source={{ uri: photo }} 
                                     style={styles.photo} 
-                                    defaultSource={require('../../../assets/images/icon.png')} // Fallback if local
+                                    defaultSource={require('../../../../assets/icon.png')} // Fallback if local
                                 />
                             </View>
                         ))}
