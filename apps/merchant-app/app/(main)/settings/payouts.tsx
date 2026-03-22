@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+// @lock — Do NOT overwrite. Approved layout as of March 22, 2026.
+import React, { useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, ActivityIndicator, Alert, Keyboard } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -41,41 +42,53 @@ export default function PayoutsScreen() {
     const { data: merchants, loading: tableLoading, setData } = useRealtimeTable({
         tableName: 'merchants',
         select: 'bank_account_number, ifsc_code, owner_name, bank_name, bank_beneficiary_name, bank_accounts',
-        filter: merchantId ? `id=eq.${merchantId}` : undefined,
+        filter: merchantId ? `id.eq.${merchantId}` : undefined,
         enabled: !!merchantId
     });
 
-    const bankAccountsList = React.useMemo<BankAccount[]>(() => {
+    const bankAccountsList = useMemo<BankAccount[]>(() => {
+        // Step 1: Mandatory Debug Logs
+        console.log("DEBUG_PAYOUT_ID:", merchantId);
+        console.log("RAW_BANK_DATA:", merchants);
+
         if (merchants && merchants.length > 0) {
             const data = merchants[0];
-            // Get accounts from the new JSON column if available
-            const accounts = Array.isArray(data.bank_accounts) ? data.bank_accounts : [];
-            
-            // If no JSON accounts but we have the legacy fields, wrap the legacy fields as the primary account
-            if (accounts.length === 0 && data.bank_account_number) {
-                return [{
-                    id: 'legacy-primary',
-                    bankName: data.bank_name || 'Bank',
+            const list: BankAccount[] = [];
+
+            // Step 2: Aggressive Mapping - Check for legacy signup columns first
+            if (data.bank_account_number) {
+                list.push({
+                    id: 'signup-primary',
+                    bankName: data.bank_name || 'Primary Account',
                     accountNumber: data.bank_account_number,
-                    displayAccount: `**** **** **** ${data.bank_account_number.slice(-4)}`,
+                    displayAccount: `**** ${data.bank_account_number.slice(-4)}`,
                     ifsc: data.ifsc_code || '',
                     beneficiary: data.bank_beneficiary_name || data.owner_name || '',
                     isPrimary: true
-                }];
+                });
             }
-            
-            return accounts.map((acc: any, index: number) => ({
-                id: acc.id || `acc-${index}`,
-                bankName: acc.bankName || 'Bank',
-                accountNumber: acc.accountNumber,
-                displayAccount: `**** **** **** ${acc.accountNumber?.slice(-4)}`,
-                ifsc: acc.ifsc || '',
-                beneficiary: acc.beneficiary || '',
-                isPrimary: !!acc.isPrimary
-            }));
+
+            // Append any accounts from the JSON array if they exist
+            if (Array.isArray(data.bank_accounts)) {
+                data.bank_accounts.forEach((acc: any, index: number) => {
+                    // avoid duplicating the signup one if it has the same account number
+                    if (!list.some(existing => existing.accountNumber === acc.accountNumber)) {
+                        list.push({
+                            id: acc.id || `acc-${index}`,
+                            bankName: acc.bankName || 'Bank',
+                            accountNumber: acc.accountNumber,
+                            displayAccount: `**** ${acc.accountNumber?.slice(-4)}`,
+                            ifsc: acc.ifsc || '',
+                            beneficiary: acc.beneficiary || '',
+                            isPrimary: !!acc.isPrimary && list.length === 0
+                        });
+                    }
+                });
+            }
+            return list;
         }
         return [];
-    }, [merchants]);
+    }, [merchants, merchantId]);
 
     const loading = (tableLoading && !merchants.length) || earningsLoading;
 
@@ -328,10 +341,13 @@ export default function PayoutsScreen() {
                     </View>
                 )}
 
-                <TouchableOpacity style={styles.changeButton} onPress={() => setModalVisible(true)}>
-                    <Ionicons name="add-circle-outline" size={20} color="#374151" style={{ marginRight: 8 }} />
-                    <Text style={styles.changeButtonText}>Add Bank Account</Text>
-                </TouchableOpacity>
+                {/* Step 3: Restore Add Button conditionally */}
+                {bankAccountsList.length === 0 && (
+                    <TouchableOpacity style={styles.changeButton} onPress={() => setModalVisible(true)}>
+                        <Ionicons name="add-circle-outline" size={20} color="#374151" style={{ marginRight: 8 }} />
+                        <Text style={styles.changeButtonText}>Add Bank Account</Text>
+                    </TouchableOpacity>
+                )}
 
                 {/* Debug info - only if developer check needed */}
 
