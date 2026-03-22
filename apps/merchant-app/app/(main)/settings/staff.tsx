@@ -104,6 +104,11 @@ export default function StaffScreen() {
             return;
         }
 
+        if (phone.length !== 10) {
+            Alert.alert('Error', 'Phone number must be exactly 10 digits');
+            return;
+        }
+
         if (!storeId) {
             Alert.alert('Error', 'Store ID not found. Refreshing your profile...');
             return;
@@ -276,9 +281,10 @@ export default function StaffScreen() {
                         <Text style={styles.inputLabel}>Phone Number <Text style={{ color: '#EF4444' }}>*</Text></Text>
                         <TextInput
                             style={styles.input}
-                            placeholder="+91 XXXXX XXXXX"
+                            placeholder="10-digit mobile number"
                             placeholderTextColor={Colors.textSecondary}
                             keyboardType="phone-pad"
+                            maxLength={10}
                             value={phone || ''} // Safety guard
                             onChangeText={setPhone}
                         />
