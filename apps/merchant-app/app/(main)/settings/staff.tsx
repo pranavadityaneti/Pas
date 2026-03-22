@@ -104,7 +104,9 @@ export default function StaffScreen() {
             return;
         }
 
-        if (phone.length !== 10) {
+        const sanitizedPhone = phone.replace(/\D/g, '');
+
+        if (sanitizedPhone.length !== 10) {
             Alert.alert('Error', 'Phone number must be exactly 10 digits');
             return;
         }
@@ -121,7 +123,7 @@ export default function StaffScreen() {
                 store_id: storeId,
                 name,
                 role,
-                phone,
+                phone: sanitizedPhone,
                 activities: activities
             };
 
