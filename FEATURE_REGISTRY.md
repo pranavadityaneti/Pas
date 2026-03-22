@@ -71,6 +71,7 @@
 |--------|------|--------|-------------|-------|
 | Signup | `app/(auth)/signup.tsx` | 🔒 LOCKED | Mar 22, 2026 | Full 7-step signup flow with ACID backend transaction. |
 | Staff Management | `app/(main)/settings/staff.tsx` | 🔒 LOCKED | Mar 22, 2026 | Comprehensive staff CRUD with 10-digit validation and brand red UI. |
+| Store Details | `app/(main)/settings/store-details.tsx` | 🔒 LOCKED | Mar 22, 2026 | Read-only signup metadata review with human-readable categories. |
 
 ### Components
 

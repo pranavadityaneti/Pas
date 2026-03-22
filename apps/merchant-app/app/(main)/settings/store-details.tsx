@@ -1,3 +1,4 @@
+// @lock — Do NOT overwrite. Approved layout as of March 22, 2026.
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator, ScrollView, Image } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
@@ -10,6 +11,14 @@ import { useStoreContext } from '../../../src/context/StoreContext';
 import { useUser } from '../../../src/context/UserContext';
 import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
 import Constants from 'expo-constants';
+
+const SUPABASE_PROJECT_ID = 'llhxkonraqaxtradyycj';
+const STORAGE_BASE_URL = `https://${SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/merchant-docs/`;
+
+const VERTICAL_MAPPING: { [key: string]: string } = {
+    'c307b78e-b924-47a1-a5a7-4405777fa50c': 'Kirana Store',
+    'default': 'Not Specified'
+};
 
 export default function StoreDetailsScreen() {
     const { store, merchantId } = useStoreContext();
@@ -39,11 +48,32 @@ export default function StoreDetailsScreen() {
 
         if (merchantDataList && merchantDataList.length > 0) {
             const mData = merchantDataList[0];
+            
+            // Handle Photos (JSON string or array)
+            let photosArray: string[] = [];
+            try {
+                const rawPhotos = mData.store_photos;
+                if (Array.isArray(rawPhotos)) {
+                    photosArray = rawPhotos;
+                } else if (typeof rawPhotos === 'string' && rawPhotos.startsWith('[')) {
+                    photosArray = JSON.parse(rawPhotos);
+                } else if (rawPhotos) {
+                    photosArray = [rawPhotos];
+                }
+            } catch (e) {
+                console.warn('[StoreDetails] Photo parsing error:', e);
+            }
+
+            // Prepend Storage URL
+            const fullPhotoUrls = photosArray.map(p => 
+                (p.startsWith('http') || p.startsWith('data:')) ? p : `${STORAGE_BASE_URL}${p}`
+            );
+
             const newDetails = {
                 name: mData.store_name || '',
                 address: mData.address || '',
-                category: mData.vertical_id || '',
-                photos: Array.isArray(mData.store_photos) ? mData.store_photos : (mData.store_photos ? [mData.store_photos] : []),
+                category: VERTICAL_MAPPING[mData.vertical_id] || mData.vertical_id || VERTICAL_MAPPING['default'],
+                photos: fullPhotoUrls,
                 cityId: mData.city || ''
             };
             setDetails(newDetails);
@@ -131,9 +161,9 @@ export default function StoreDetailsScreen() {
                 <View style={styles.formGroup}>
                     <Text style={styles.label}>Store Name</Text>
                     <TextInput
-                        style={styles.input}
+                        style={[styles.input, { backgroundColor: '#F3F4F6', color: '#666' }]}
                         value={details.name}
-                        onChangeText={(t) => setDetails({ ...details, name: t })}
+                        editable={false}
                         placeholder="Enter store name"
                     />
                 </View>
@@ -141,9 +171,9 @@ export default function StoreDetailsScreen() {
                 <View style={styles.formGroup}>
                     <Text style={styles.label}>Address</Text>
                     <TextInput
-                        style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
+                        style={[styles.input, { height: 80, textAlignVertical: 'top', backgroundColor: '#F3F4F6', color: '#666' }]}
                         value={details.address}
-                        onChangeText={(t) => setDetails({ ...details, address: t })}
+                        editable={false}
                         placeholder="Enter full address"
                         multiline
                         numberOfLines={3}
