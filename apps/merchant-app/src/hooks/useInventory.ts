@@ -33,6 +33,7 @@ export function useInventory() {
     const [inventory, setInventory] = useState<InventoryItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
     // Use the dedicated useStore hook
     const { storeId, loading: storeLoading } = useStore();
@@ -44,8 +45,9 @@ export function useInventory() {
             return;
         }
         setLoading(true);
+        setError(null);
         try {
-            const { data, error } = await supabase
+            const { data, error: fetchError } = await supabase
                 .from('StoreProduct')
                 .select(`
                     *,
@@ -65,21 +67,22 @@ export function useInventory() {
                         createdByStoreId
                     )
                 `)
-                // CRITICAL: Ensure 'variant' and 'is_best_seller' are selected above.
-                // Missing these will cause silent failures in the UI.
                 .eq('storeId', storeId)
-                .order('updatedAt', { ascending: false });
+                .order('updatedAt', { ascending: false })
+                .limit(50);
 
-            if (error) {
-                console.error('[useInventory] Supabase Error:', JSON.stringify(error, null, 2));
-                throw error;
+            if (fetchError) {
+                console.error('[useInventory] Supabase Error:', JSON.stringify(fetchError, null, 2));
+                throw fetchError;
             }
 
             if (data) {
                 setInventory(data as unknown as InventoryItem[]);
             }
-        } catch (e) {
-            console.error(e);
+        } catch (e: any) {
+            console.error('[useInventory] Fetch failed:', e);
+            setError(e?.message || 'Failed to load inventory. Check your connection.');
+            // DO NOT clear inventory here — preserve last known good data if available
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -113,7 +116,7 @@ export function useInventory() {
         }
 
         return () => {
-            if (subscription) subscription.unsubscribe();
+            if (subscription) supabase.removeChannel(subscription);
         };
     }, [storeId, storeLoading, fetchInventory]);
 
@@ -163,6 +166,7 @@ export function useInventory() {
         inventory,
         loading,
         refreshing,
+        error,
         refetch,
         updateItem,
         deleteItem,

@@ -33,7 +33,7 @@ const DEFAULT_FILTERS: FilterState = {
 
 export default function InventoryScreen() {
     const router = useRouter();
-    const { inventory, loading, refreshing, refetch, updateItem, deleteItem, toggleStatus, storeId } = useInventory();
+    const { inventory, loading, refreshing, error, refetch, updateItem, deleteItem, toggleStatus, storeId } = useInventory();
 
     const [itemToEdit, setItemToEdit] = useState<InventoryItem | null>(null);
     const [editModalVisible, setEditModalVisible] = useState(false);
@@ -111,10 +111,29 @@ export default function InventoryScreen() {
         }
     });
 
-    // Empty State (If NO items at all in the DB, not just search results)
+    // Error / Offline State — MUST be checked BEFORE the empty inventory Lottie
+    if (!loading && error && inventory.length === 0) {
+        return (
+            <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+                <View style={[styles.header, { borderBottomWidth: 0 }]}>
+                    <Text style={styles.title}>Inventory</Text>
+                </View>
+                <View style={styles.emptyContainer}>
+                    <Ionicons name="cloud-offline-outline" size={64} color="#ccc" />
+                    <Text style={styles.emptyTitle}>Unable to Load Inventory</Text>
+                    <Text style={styles.emptyDesc}>{error}</Text>
+                    <TouchableOpacity style={styles.bigAddBtn} onPress={refetch}>
+                        <Text style={styles.bigAddText}>Retry</Text>
+                    </TouchableOpacity>
+                </View>
+            </SafeAreaView>
+        );
+    }
+
+    // Empty State — ONLY if fetch succeeded and genuinely returned 0 items
     const isInventoryEmpty = inventory.length === 0;
 
-    if (!loading && isInventoryEmpty) {
+    if (!loading && !error && isInventoryEmpty) {
         return (
             <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
                 <View style={[styles.header, { borderBottomWidth: 0 }]}>

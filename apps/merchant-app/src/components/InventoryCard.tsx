@@ -3,6 +3,15 @@ import { View, Text, StyleSheet, Image, TextInput, TouchableOpacity, Switch, Ale
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
 
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+
+/** Resolve image URI: prepend Supabase storage base for non-http paths */
+const resolveImageUri = (raw?: string | null): string => {
+    if (!raw) return 'https://placehold.co/100x100';
+    if (raw.startsWith('http')) return raw;
+    return `${SUPABASE_URL}/storage/v1/object/public/merchant-assets/${raw}`;
+};
+
 interface Props {
     item: any; // Type accurately later with DB types
     onUpdate: (id: string, updates: any) => void;
@@ -72,7 +81,7 @@ export default function InventoryCard({ item, onUpdate, onDelete, onToggleStatus
             <View style={styles.headerRow}>
                 <View style={styles.imageContainer}>
                     <Image
-                        source={{ uri: item.product?.image || item.image || 'https://placehold.co/100x100' }}
+                        source={{ uri: resolveImageUri(item.product?.image || item.image) }}
                         style={styles.image}
                     />
                     {discount > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{discount}% OFF</Text></View>}
@@ -83,8 +92,14 @@ export default function InventoryCard({ item, onUpdate, onDelete, onToggleStatus
                     <Text style={styles.category}>
                         {item.product?.subcategory || CATEGORY_MAP[item.product?.category_id || ''] || 'Others'}
                     </Text>
-                    {/* Low Stock Indicator */}
-                    {parseInt(stock) < 5 && item.active && (
+                    {/* Stock Status Indicators */}
+                    {parseInt(stock) === 0 && item.active && (
+                        <View style={styles.outOfStockBadge}>
+                            <MaterialCommunityIcons name="package-variant-remove" size={12} color="#6B7280" />
+                            <Text style={styles.outOfStockText}>Out of Stock</Text>
+                        </View>
+                    )}
+                    {parseInt(stock) > 0 && parseInt(stock) < 5 && item.active && (
                         <View style={styles.lowStockBadge}>
                             <Ionicons name="alert-circle" size={12} color="#EF4444" />
                             <Text style={styles.lowStockText}>Low Stock</Text>
@@ -313,6 +328,21 @@ const styles = StyleSheet.create({
     },
     lowStockText: {
         color: '#EF4444',
+        fontSize: 10,
+        fontWeight: 'bold'
+    },
+    outOfStockBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 4,
+        backgroundColor: '#F3F4F6',
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 4,
+        gap: 3
+    },
+    outOfStockText: {
+        color: '#6B7280',
         fontSize: 10,
         fontWeight: 'bold'
     }
