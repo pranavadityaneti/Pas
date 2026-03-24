@@ -31,7 +31,7 @@ export default function LegalScreen() {
                         resizeMode="contain"
                     />
                     <Text style={styles.appName}>Pick At Store</Text>
-                    <Text style={styles.version}>Merchant App v1.2.0</Text>
+                    <Text style={styles.version}>Partner App v1.2.0</Text>
                 </View>
 
                 <View style={styles.linksContainer}>
