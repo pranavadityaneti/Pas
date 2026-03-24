@@ -72,8 +72,7 @@ const styles = StyleSheet.create({
     content: { padding: 20 },
 
     logoContainer: { alignItems: 'center', marginVertical: 40 },
-    logoBox: { width: 80, height: 80, backgroundColor: '#000', borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
-    logoImage: { width: 120, height: 120, marginBottom: 16 },
+    logoImage: { width: 140, height: 140, marginBottom: 16 },
     appName: { fontSize: 24, fontWeight: 'bold', color: '#000' },
     version: { fontSize: 14, color: '#6B7280', marginTop: 4 },
 

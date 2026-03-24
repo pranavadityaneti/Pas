@@ -753,6 +753,14 @@ export default function SignupScreen() {
             >
                 <View style={{ flex: 1, padding: 16 }}>
                 {step === 1 && (
+                    <View style={styles.authLogoContainer}>
+                        <Image source={require('../../assets/logo.png')} style={styles.authLogo} resizeMode="contain" />
+                        <Text style={styles.authTitle}>Join Pick At Store</Text>
+                        <Text style={styles.authSubtitle}>Grow your business with our partner network</Text>
+                    </View>
+                )}
+
+                {step === 1 && (
                     <View style={styles.card}>
                         <View style={styles.cardHeader}>
                             <Ionicons name="person-outline" size={20} color={Colors.primary} />
@@ -1524,4 +1532,25 @@ const styles = StyleSheet.create({
     turnoverButtonActive: { borderColor: Colors.primary, backgroundColor: Colors.primary + '08' },
     turnoverTextOption: { fontSize: 14, color: '#374151', fontWeight: '500' },
     turnoverTextActive: { color: Colors.primary, fontWeight: '700' },
+    authLogoContainer: {
+        alignItems: 'center',
+        marginBottom: 24,
+        marginTop: 8,
+    },
+    authLogo: {
+        width: 140,
+        height: 140,
+        marginBottom: 12,
+    },
+    authTitle: {
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: '#111827',
+        marginBottom: 4,
+    },
+    authSubtitle: {
+        fontSize: 14,
+        color: '#6B7280',
+        textAlign: 'center',
+    },
 });
