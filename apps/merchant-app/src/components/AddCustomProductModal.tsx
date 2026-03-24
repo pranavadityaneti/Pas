@@ -70,7 +70,7 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
             setStock(itemToEdit.stock.toString());
             setUom(itemToEdit.product.uom || '');
             setGst(itemToEdit.product.gstRate?.toString() || '0');
-            setCategory(itemToEdit.product.category);
+            setCategory(itemToEdit.product.subcategory || '');
             setDescription(itemToEdit.product.description || '');
 
             // Set change detection baseline
@@ -83,7 +83,7 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
                 stock: itemToEdit.stock.toString(),
                 uom: itemToEdit.product.uom || '',
                 gst: itemToEdit.product.gstRate?.toString() || '0',
-                category: itemToEdit.product.category,
+                category: itemToEdit.product.subcategory || '',
                 description: itemToEdit.product.description || '',
                 images: [itemToEdit.product.image].filter(Boolean) as string[]
             };
@@ -430,7 +430,7 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
             const productPayload = {
                 name: name.trim(),
                 mrp: parsedMrp,
-                category: category.trim(),
+                subcategory: category.trim(),
                 brand: brand.trim() || null,
                 ean: sku.trim() || null,
                 uom: uom.trim() || null,
@@ -551,7 +551,7 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
                     </View>
 
                     <KeyboardAvoidingView
-                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                         style={{ flex: 1 }}
                         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
                     >
@@ -771,7 +771,8 @@ const styles = StyleSheet.create({
         backgroundColor: '#fff',
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
-        height: SCREEN_HEIGHT * 0.9,
+        maxHeight: SCREEN_HEIGHT * 0.9,
+        flex: 1,
     },
     header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#eee' },
     title: { fontSize: 20, fontWeight: 'bold' },
