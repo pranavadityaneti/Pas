@@ -1538,8 +1538,8 @@ const styles = StyleSheet.create({
         marginTop: 8,
     },
     authLogo: {
-        width: 140,
-        height: 140,
+        width: 100,
+        height: 100,
         marginBottom: 12,
     },
     authTitle: {
