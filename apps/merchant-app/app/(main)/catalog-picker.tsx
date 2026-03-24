@@ -370,6 +370,8 @@ export default function CatalogPicker() {
                 onApply={setAppliedFilters}
                 isGlobalInventory={true}
                 initialFilters={appliedFilters || undefined}
+                verticalPills={verticalPills}
+                products={products}
             />
         </SafeAreaView>
     );

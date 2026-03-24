@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Animated, Dimensions, Pressable, TextInput, Keyboard, TouchableWithoutFeedback } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { supabase } from '../lib/supabase';
+
 
 const { height } = Dimensions.get('window');
 
@@ -14,13 +14,11 @@ interface FilterModalProps {
     initialFilters?: FilterState;
     initialTab?: string;
     isGlobalInventory?: boolean;
+    verticalPills?: { id: string; name: string }[];
+    products?: any[];
 }
 
-const CATEGORIES = [
-    'Dairy', 'Bakery', 'Snacks', 'Staples', 'Condiments', 
-    'Confectionery', 'Grocery', 'Beverages', 'Personal Care', 
-    'Home Essentials', 'Fashion', 'Pharmacy', 'Meat', 'Fruits & Vegetables'
-];
+
 
 export interface FilterState {
     sortBy: string;
@@ -42,7 +40,7 @@ const SIDEBAR_ITEMS = [
     { id: 'discount', label: 'Discounts' }
 ];
 
-export default function FilterModal({ visible, onClose, onApply, initialFilters, initialTab = 'sort', isGlobalInventory = false }: FilterModalProps) {
+export default function FilterModal({ visible, onClose, onApply, initialFilters, initialTab = 'sort', isGlobalInventory = false, verticalPills = [], products = [] }: FilterModalProps) {
     const [selectedTab, setSelectedTab] = useState(initialTab);
 
     useEffect(() => {
@@ -61,28 +59,18 @@ export default function FilterModal({ visible, onClose, onApply, initialFilters,
         isBestSeller: false,
     });
 
-    // Dynamic Options State
-    const [availableBrands, setAvailableBrands] = useState<string[]>([]);
-
     useEffect(() => {
         if (initialFilters) setFilters(initialFilters);
     }, [initialFilters, visible]);
 
-    // Fetch Dynamic Options on Mount
-    useEffect(() => {
-        const fetchOptions = async () => {
-            // Fetch all products to extract unique brands
-            // Ideally use an RPC call for DISTINCT, but client-side set is fine for <2000 items
-            const { data } = await supabase.from('Product').select('brand');
-
-            if (data) {
-                const uniqueBrands = Array.from(new Set(data.map((p: any) => p.brand).filter(Boolean)));
-                setAvailableBrands(uniqueBrands.sort());
-            }
-        };
-
-        fetchOptions();
-    }, []);
+    // Cascading brands: derive from products filtered by selected categories
+    const cascadedBrands = useMemo(() => {
+        if (!products || products.length === 0) return [];
+        const pool = filters.categories.length > 0
+            ? products.filter(p => filters.categories.includes(p.vertical_id))
+            : products;
+        return [...new Set(pool.map((p: any) => p.brand).filter(Boolean))].sort() as string[];
+    }, [products, filters.categories]);
 
     const handleApply = () => {
         onApply(filters);
@@ -139,11 +127,11 @@ export default function FilterModal({ visible, onClose, onApply, initialFilters,
             case 'category':
                 return (
                     <ScrollView contentContainerStyle={styles.optionList}>
-                        {CATEGORIES.map(cat => (
-                            <TouchableOpacity key={cat} style={styles.checkRow} onPress={() => toggleArrayItem('categories', cat)}>
-                                <Text style={styles.checkLabel}>{cat}</Text>
-                                <View style={[styles.checkBox, filters.categories.includes(cat) && styles.checkActive]}>
-                                    {filters.categories.includes(cat) && <Ionicons name="checkmark" size={14} color="#fff" />}
+                        {verticalPills.map(v => (
+                            <TouchableOpacity key={v.id} style={styles.checkRow} onPress={() => toggleArrayItem('categories', v.id)}>
+                                <Text style={styles.checkLabel}>{v.name}</Text>
+                                <View style={[styles.checkBox, filters.categories.includes(v.id) && styles.checkActive]}>
+                                    {filters.categories.includes(v.id) && <Ionicons name="checkmark" size={14} color="#fff" />}
                                 </View>
                             </TouchableOpacity>
                         ))}
@@ -153,7 +141,7 @@ export default function FilterModal({ visible, onClose, onApply, initialFilters,
             case 'brand':
                 return (
                     <ScrollView contentContainerStyle={styles.optionList}>
-                        {availableBrands.map(brand => (
+                        {cascadedBrands.map(brand => (
                             <TouchableOpacity key={brand} style={styles.checkRow} onPress={() => toggleArrayItem('brands', brand)}>
                                 <Text style={styles.checkLabel}>{brand}</Text>
                                 <View style={[styles.checkBox, filters.brands.includes(brand) && styles.checkActive]}>
