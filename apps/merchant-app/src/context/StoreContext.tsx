@@ -11,6 +11,7 @@ export interface Store {
     image: string | null;
     active: boolean;
     operating_hours?: any;
+    vertical_id?: string | null;
 }
 
 interface StoreContextType {
@@ -107,7 +108,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
             let { data: storeData, error: storeError } = await supabase
                 .from('Store')
-                .select('id, name, address, image, active, operating_hours, managerId')
+                .select('id, name, address, image, active, operating_hours, managerId, vertical_id')
                 .eq('managerId', user.id)
                 .maybeSingle();
 

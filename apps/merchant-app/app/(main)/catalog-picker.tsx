@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import { Colors } from '../../constants/Colors';
 import { supabase } from '../../src/lib/supabase';
 import { useInventory } from '../../src/hooks/useInventory';
+import { useStore } from '../../src/hooks/useStore';
 import ConfigureProductsModal from '../../src/components/ConfigureProductsModal';
 import FilterModal, { FilterState } from '../../src/components/FilterModal';
 import AddCustomProductModal from '../../src/components/AddCustomProductModal';
@@ -26,6 +27,7 @@ const DEFAULT_FILTERS: FilterState = {
 export default function CatalogPicker() {
     const router = useRouter();
     const { storeId, refetch: refetchInventory, loading: inventoryLoading } = useInventory();
+    const { store } = useStore();
 
     const [products, setProducts] = useState<any[]>([]);
     const [search, setSearch] = useState('');
@@ -42,23 +44,48 @@ export default function CatalogPicker() {
     const [filterVisible, setFilterVisible] = useState(false);
     const [appliedFilters, setAppliedFilters] = useState<FilterState | null>(null);
 
-    // Dynamically derive category pills from actual product data
-    const dynamicCategories = useMemo(
-        () => [...new Set(products.map(p => p.category).filter(Boolean))].sort(),
-        [products]
-    );
+    const [tier2Categories, setTier2Categories] = useState<any[]>([]);
+
+    useEffect(() => {
+        if (store?.vertical_id) {
+            fetchCategories();
+        }
+    }, [store?.vertical_id]);
+
+    const fetchCategories = async () => {
+        if (!store?.vertical_id) return;
+        try {
+            const { data, error } = await supabase
+                .from('Tier2Category')
+                .select('id, name')
+                .eq('vertical_id', store.vertical_id)
+                .order('name');
+            if (error) throw error;
+            if (data) setTier2Categories(data);
+        } catch (error) {
+            console.error('Failed to fetch categories:', error);
+        }
+    };
 
     useEffect(() => {
         fetchGlobalCatalog();
-    }, [storeId]);
+    }, [storeId, store?.vertical_id]);
 
     const fetchGlobalCatalog = async () => {
+        if (!store?.vertical_id) {
+            console.warn("Store vertical_id is missing. Returning empty catalog.");
+            setProducts([]);
+            setLoading(false);
+            return;
+        }
+
         setLoading(true);
         try {
             // Attempt to fetch Global (null) OR Store Specific (storeId)
             let query = supabase
                 .from('Product')
-                .select('*');
+                .select('*')
+                .eq('vertical_id', store.vertical_id);
 
             if (storeId) {
                 query = query.or(`createdByStoreId.is.null,createdByStoreId.eq.${storeId}`);
@@ -148,7 +175,7 @@ export default function CatalogPicker() {
 
         if (appliedFilters) {
             if (appliedFilters.categories.length > 0) {
-                if (!appliedFilters.categories.includes(p.category)) matchesFilter = false;
+                if (!appliedFilters.categories.includes(p.category_id)) matchesFilter = false;
             }
             if (appliedFilters.brands.length > 0 && !appliedFilters.brands.includes(p.brand)) matchesFilter = false;
             if (p.mrp < appliedFilters.priceRange[0] || p.mrp > appliedFilters.priceRange[1]) matchesFilter = false;
@@ -290,24 +317,24 @@ export default function CatalogPicker() {
                         </Text>
                     </TouchableOpacity>
 
-                    {dynamicCategories.map(cat => {
-                        const isSelected = appliedFilters?.categories.includes(cat) ?? false;
+                    {tier2Categories.map(cat => {
+                        const isSelected = appliedFilters?.categories.includes(cat.id) ?? false;
                         return (
                             <TouchableOpacity
-                                key={cat}
+                                key={cat.id}
                                 style={[styles.catChip, isSelected && styles.catChipActive]}
                                 onPress={() => {
                                     setAppliedFilters(prev => {
                                         const currentCats = prev?.categories || [];
-                                        const nextCats = currentCats.includes(cat) 
-                                            ? currentCats.filter(c => c !== cat) 
-                                            : [...currentCats, cat];
+                                        const nextCats = currentCats.includes(cat.id) 
+                                            ? currentCats.filter(c => c !== cat.id) 
+                                            : [...currentCats, cat.id];
                                         return { ...(prev || DEFAULT_FILTERS), categories: nextCats };
                                     });
                                 }}
                             >
                                 <Text style={[styles.catChipText, isSelected && styles.catChipTextActive]}>
-                                    {cat}
+                                    {cat.name}
                                 </Text>
                             </TouchableOpacity>
                         );
