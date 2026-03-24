@@ -6,6 +6,7 @@ import { router } from 'expo-router';
 import { Colors } from '../../../constants/Colors';
 import { useUser } from '../../../src/context/UserContext';
 import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
+import { supabase } from '../../../src/lib/supabase';
 
 export default function ComplianceScreen() {
     const { user } = useUser();
@@ -50,6 +51,61 @@ export default function ComplianceScreen() {
 
     const loading = tableLoading && !merchants.length;
 
+    const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+    const [isLoadingDocs, setIsLoadingDocs] = useState(true);
+
+    React.useEffect(() => {
+        const fetchSignedUrls = async () => {
+            if (!merchants || merchants.length === 0) {
+                setIsLoadingDocs(false);
+                return;
+            }
+
+            const data = merchants[0];
+            const rawPaths = [
+                data.pan_document_url,
+                data.aadhar_front_url,
+                data.aadhar_back_url,
+                data.gst_certificate_url,
+                data.fssai_certificate_url
+            ].filter(Boolean); // Only keep non-null, non-empty paths
+
+            if (rawPaths.length === 0) {
+                setIsLoadingDocs(false);
+                return;
+            }
+
+            setIsLoadingDocs(true);
+            try {
+                // Concurrently fetch all signed URLs
+                const results = await Promise.all(
+                    rawPaths.map(async (path) => {
+                        const { data: signedData, error } = await supabase
+                            .storage
+                            .from('merchant-docs')
+                            .createSignedUrl(path, 3600);
+                        
+                        // Return tuple of [original_path, signed_url]
+                        return { path, url: signedData?.signedUrl || null, error };
+                    })
+                );
+
+                const urlMap: Record<string, string> = {};
+                results.forEach(({ path, url }) => {
+                    if (url) urlMap[path] = url;
+                });
+
+                setSignedUrls(urlMap);
+            } catch (error) {
+                console.error('[Compliance] Error fetching signed URLs:', error);
+            } finally {
+                setIsLoadingDocs(false);
+            }
+        };
+
+        fetchSignedUrls();
+    }, [merchants]);
+
     const InfoRow = ({ label, value, icon }: { label: string, value: string, icon: string }) => (
         <View style={styles.infoRow}>
             <View style={styles.iconBox}>
@@ -64,28 +120,37 @@ export default function ComplianceScreen() {
 
     const [selectedDoc, setSelectedDoc] = useState<{ url: string, label: string } | null>(null);
 
-    const DocCard = ({ label, url }: { label: string, url: string | null }) => (
-        <TouchableOpacity
-            style={styles.docCard}
-            onPress={() => url ? setSelectedDoc({ url, label }) : null}
-            activeOpacity={url ? 0.7 : 1}
-        >
-            <Text style={styles.docLabel}>{label}</Text>
-            {url ? (
-                <View style={styles.docImageContainer}>
-                    <Image source={{ uri: url }} style={styles.docImage} resizeMode="cover" />
-                    <View style={styles.zoomOverlay}>
-                        <Ionicons name="scan-outline" size={20} color="#FFFFFF" />
+    const DocCard = ({ label, rawUrl }: { label: string, rawUrl: string | null }) => {
+        const signedUrl = rawUrl ? signedUrls[rawUrl] : null;
+
+        return (
+            <TouchableOpacity
+                style={styles.docCard}
+                onPress={() => signedUrl ? setSelectedDoc({ url: signedUrl, label }) : null}
+                activeOpacity={signedUrl ? 0.7 : 1}
+            >
+                <Text style={styles.docLabel}>{label}</Text>
+                {rawUrl && isLoadingDocs ? (
+                    <View style={styles.noDocBox}>
+                        <ActivityIndicator size="small" color={Colors.primary} />
+                        <Text style={styles.noDocText}>Loading...</Text>
                     </View>
-                </View>
-            ) : (
-                <View style={styles.noDocBox}>
-                    <Ionicons name="document-outline" size={32} color="#D1D5DB" />
-                    <Text style={styles.noDocText}>Document not uploaded</Text>
-                </View>
-            )}
-        </TouchableOpacity>
-    );
+                ) : signedUrl ? (
+                    <View style={styles.docImageContainer}>
+                        <Image source={{ uri: signedUrl }} style={styles.docImage} resizeMode="cover" />
+                        <View style={styles.zoomOverlay}>
+                            <Ionicons name="scan-outline" size={20} color="#FFFFFF" />
+                        </View>
+                    </View>
+                ) : (
+                    <View style={styles.noDocBox}>
+                        <Ionicons name="document-outline" size={32} color="#D1D5DB" />
+                        <Text style={styles.noDocText}>Document not uploaded</Text>
+                    </View>
+                )}
+            </TouchableOpacity>
+        );
+    };
 
     if (loading) {
         return (
@@ -136,11 +201,11 @@ export default function ComplianceScreen() {
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Uploaded Documents</Text>
                     <View style={styles.docsGrid}>
-                        <DocCard label="PAN Card" url={kyc.panDocUrl} />
-                        <DocCard label="GST Certificate" url={kyc.gstCertificateUrl} />
-                        <DocCard label="FSSAI License" url={kyc.fssaiCertificateUrl} />
-                        <DocCard label="Aadhaar Front" url={kyc.aadharFrontUrl} />
-                        <DocCard label="Aadhaar Back" url={kyc.aadharBackUrl} />
+                        <DocCard label="PAN Card" rawUrl={kyc.panDocUrl} />
+                        <DocCard label="GST Certificate" rawUrl={kyc.gstCertificateUrl} />
+                        <DocCard label="FSSAI License" rawUrl={kyc.fssaiCertificateUrl} />
+                        <DocCard label="Aadhaar Front" rawUrl={kyc.aadharFrontUrl} />
+                        <DocCard label="Aadhaar Back" rawUrl={kyc.aadharBackUrl} />
                     </View>
                 </View>
 
