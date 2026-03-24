@@ -2,15 +2,15 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, Stack } from 'expo-router';
+import { Colors } from '../../../constants/Colors';
+import { Image } from 'react-native';
 
 export default function LegalScreen() {
 
     const LEGAL_LINKS = [
-        { label: 'Terms of Service', bg: '#F9FAFB', icon: 'file-document-outline' },
-        { label: 'Privacy Policy', bg: '#F9FAFB', icon: 'shield-check-outline' },
-        { label: 'Merchant Agreement', bg: '#F9FAFB', icon: 'handshake-outline' },
-        { label: 'Open Source Licenses', bg: '#F9FAFB', icon: 'code-tags' },
+        { label: 'Terms of Service', bg: '#F9FAFB', icon: 'file-document-outline', url: 'https://www.pickatstore.io/terms/merchant-app' },
+        { label: 'Privacy Policy', bg: '#F9FAFB', icon: 'shield-check-outline', url: 'https://www.pickatstore.io/privacypolicy/merchant-app' },
     ];
 
     return (
@@ -25,9 +25,11 @@ export default function LegalScreen() {
             <ScrollView contentContainerStyle={styles.content}>
 
                 <View style={styles.logoContainer}>
-                    <View style={styles.logoBox}>
-                        <Text style={styles.logoText}>PAS</Text>
-                    </View>
+                    <Image 
+                        source={require('../../../assets/logo.png')} 
+                        style={styles.logoImage}
+                        resizeMode="contain"
+                    />
                     <Text style={styles.appName}>Pick At Store</Text>
                     <Text style={styles.version}>Merchant App v1.2.0</Text>
                 </View>
@@ -38,8 +40,8 @@ export default function LegalScreen() {
                             key={index}
                             style={[styles.linkItem, { marginTop: index === 0 ? 0 : 12 }]}
                             onPress={() => {
-                                if (item.label === 'Privacy Policy') {
-                                    Linking.openURL('https://www.pickatstore.io/privacypolicy/merchant-app');
+                                if (item.url) {
+                                    Linking.openURL(item.url);
                                 }
                             }}
                         >
@@ -53,8 +55,8 @@ export default function LegalScreen() {
                 </View>
 
                 <View style={styles.footer}>
-                    <Text style={styles.footerText}>© 2026 Pick At Store Inc.</Text>
-                    <Text style={styles.footerText}>Made with ❤️ in Hyderabad</Text>
+                    <Text style={styles.footerText}>© 2026 PAS Retail Networks PVT LTD</Text>
+                    <Text style={styles.footerText}>Made with ❤️ in Hyderabad, India.</Text>
                 </View>
 
             </ScrollView>
@@ -71,14 +73,14 @@ const styles = StyleSheet.create({
 
     logoContainer: { alignItems: 'center', marginVertical: 40 },
     logoBox: { width: 80, height: 80, backgroundColor: '#000', borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
-    logoText: { color: '#fff', fontSize: 24, fontWeight: 'bold' },
+    logoImage: { width: 120, height: 120, marginBottom: 16 },
     appName: { fontSize: 24, fontWeight: 'bold', color: '#000' },
     version: { fontSize: 14, color: '#6B7280', marginTop: 4 },
 
     linksContainer: { marginBottom: 60 },
     linkItem: { flexDirection: 'row', alignItems: 'center', padding: 16, backgroundColor: '#F9FAFB', borderRadius: 12, borderWidth: 1, borderColor: '#F3F4F6' },
     iconBox: { marginRight: 12 },
-    linkLabel: { flex: 1, fontSize: 16, fontWeight: '600', color: '#374151' },
+    linkLabel: { flex: 1, fontSize: 16, fontWeight: '600', color: Colors.primary },
 
     footer: { alignItems: 'center' },
     footerText: { fontSize: 13, color: '#9CA3AF', lineHeight: 20 },
