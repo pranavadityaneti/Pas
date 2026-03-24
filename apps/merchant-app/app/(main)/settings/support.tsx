@@ -9,8 +9,6 @@ export default function SupportScreen() {
     // Actions - These would open actual links/dials/emails
     const handleCall = () => Linking.openURL('tel:+917842287373');
     const handleEmail = () => Linking.openURL('mailto:support@pickatstore.io');
-    const handleWhatsApp = () => Linking.openURL('https://wa.me/917842287373?text=Hi%20PickAtStore%20Support,%20I%20need%20help%20with...');
-    const handleChat = () => alert('Live Chat feature coming soon!');
 
 
     return (
@@ -24,30 +22,9 @@ export default function SupportScreen() {
 
             <ScrollView contentContainerStyle={styles.content}>
 
-                {/* Hero Card */}
-                <View style={styles.heroCard}>
-                    <Text style={styles.heroTitle}>How can we help?</Text>
-                    <Text style={styles.heroText}>Our support team is available 24/7 to assist you with any issues.</Text>
-                    <TouchableOpacity style={styles.chatButton} onPress={handleChat}>
-                        <Ionicons name="chatbubble-ellipses-outline" size={20} color="#000" style={{ marginRight: 8 }} />
-                        <Text style={styles.chatButtonText}>Start Live Chat</Text>
-                    </TouchableOpacity>
-                </View>
-
                 <Text style={styles.sectionTitle}>Direct Assistance</Text>
 
-                <TouchableOpacity style={styles.contactItem} onPress={handleWhatsApp}>
-                    <View style={[styles.iconCircle, { backgroundColor: '#E8F5E9' }]}>
-                        <Ionicons name="logo-whatsapp" size={24} color="#25D366" />
-                    </View>
-                    <View style={styles.contactInfo}>
-                        <Text style={styles.contactLabel}>WhatsApp Support</Text>
-                        <Text style={styles.contactValue}>Instant resolution via chat</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={20} color="#ccc" />
-                </TouchableOpacity>
-
-                <TouchableOpacity style={[styles.contactItem, { marginTop: 12 }]} onPress={handleCall}>
+                <TouchableOpacity style={[styles.contactItem]} onPress={handleCall}>
                     <View style={[styles.iconCircle, { backgroundColor: '#E3F2FD' }]}>
                         <Ionicons name="call-outline" size={24} color="#2196F3" />
                     </View>
@@ -82,12 +59,6 @@ const styles = StyleSheet.create({
     backButton: { marginRight: 16 },
     headerTitle: { fontSize: 20, fontWeight: 'bold' },
     content: { padding: 20 },
-
-    heroCard: { backgroundColor: '#000', borderRadius: 20, padding: 24, paddingVertical: 32, alignItems: 'center', marginBottom: 32, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 10, elevation: 5 },
-    heroTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold', marginBottom: 8 },
-    heroText: { color: '#9CA3AF', fontSize: 14, textAlign: 'center', marginBottom: 24, lineHeight: 20 },
-    chatButton: { backgroundColor: '#fff', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 30, flexDirection: 'row', alignItems: 'center' },
-    chatButtonText: { color: '#000', fontWeight: 'bold', fontSize: 14 },
 
     sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#000', marginBottom: 16 },
 
