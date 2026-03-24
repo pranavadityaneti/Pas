@@ -10,6 +10,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
+import { decode } from 'base64-arraybuffer';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import axios from 'axios';
 import { supabase, setSessionFromTokens } from '../../src/lib/supabase';
@@ -572,12 +574,11 @@ export default function SignupScreen() {
                 
                 for (let attempt = 1; attempt <= maxRetries; attempt++) {
                     try {
-                        const resp = await fetch(uri);
-                        const blob = await resp.blob();
+                        const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
 
                         const { error } = await supabase.storage
                             .from('merchant-docs')
-                            .upload(path, blob, {
+                            .upload(path, decode(base64), {
                                 contentType: 'image/jpeg',
                                 upsert: true
                             });
