@@ -19,6 +19,14 @@ export default function ComplianceScreen() {
         enabled: !!user?.id
     });
 
+    const loading = tableLoading && !merchants.length;
+
+    const getPublicUrl = (path: string | null) => {
+        if (!path) return null;
+        const { data } = supabase.storage.from('merchant-docs').getPublicUrl(path);
+        return data.publicUrl;
+    };
+
     const kyc = React.useMemo(() => {
         if (merchants && merchants.length > 0) {
             const data = merchants[0];
@@ -28,11 +36,11 @@ export default function ComplianceScreen() {
                 gstNumber: data.gst_number || 'Not Provided',
                 fssaiNumber: data.fssai_number || 'Not Provided',
                 turnoverRange: data.turnover_range || 'Not Specified',
-                panDocUrl: data.pan_doc_url,
-                aadharFrontUrl: data.aadhar_front_url,
-                aadharBackUrl: data.aadhar_back_url,
-                gstCertificateUrl: data.gst_certificate_url,
-                fssaiCertificateUrl: data.fssai_certificate_url
+                panDocUrl: getPublicUrl(data.pan_doc_url || data.pan_document_url),
+                aadharFrontUrl: getPublicUrl(data.aadhar_front_url),
+                aadharBackUrl: getPublicUrl(data.aadhar_back_url),
+                gstCertificateUrl: getPublicUrl(data.gst_certificate_url),
+                fssaiCertificateUrl: getPublicUrl(data.fssai_certificate_url)
             };
         }
         return {
@@ -41,69 +49,12 @@ export default function ComplianceScreen() {
             gstNumber: '',
             fssaiNumber: '',
             turnoverRange: '',
-            panDocUrl: '',
-            aadharFrontUrl: '',
-            aadharBackUrl: '',
-            gstCertificateUrl: '',
-            fssaiCertificateUrl: ''
+            panDocUrl: null,
+            aadharFrontUrl: null,
+            aadharBackUrl: null,
+            gstCertificateUrl: null,
+            fssaiCertificateUrl: null
         };
-    }, [merchants]);
-
-    const loading = tableLoading && !merchants.length;
-
-    const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
-    const [isLoadingDocs, setIsLoadingDocs] = useState(true);
-
-    React.useEffect(() => {
-        const fetchSignedUrls = async () => {
-            if (!merchants || merchants.length === 0) {
-                setIsLoadingDocs(false);
-                return;
-            }
-
-            const data = merchants[0];
-            const rawPaths = [
-                data.pan_doc_url,
-                data.aadhar_front_url,
-                data.aadhar_back_url,
-                data.gst_certificate_url,
-                data.fssai_certificate_url
-            ].filter(Boolean); // Only keep non-null, non-empty paths
-
-            if (rawPaths.length === 0) {
-                setIsLoadingDocs(false);
-                return;
-            }
-
-            setIsLoadingDocs(true);
-            try {
-                // Concurrently fetch all signed URLs
-                const results = await Promise.all(
-                    rawPaths.map(async (path) => {
-                        const { data: signedData, error } = await supabase
-                            .storage
-                            .from('merchant-docs')
-                            .createSignedUrl(path, 3600);
-                        
-                        // Return tuple of [original_path, signed_url]
-                        return { path, url: signedData?.signedUrl || null, error };
-                    })
-                );
-
-                const urlMap: Record<string, string> = {};
-                results.forEach(({ path, url }) => {
-                    if (url) urlMap[path] = url;
-                });
-
-                setSignedUrls(urlMap);
-            } catch (error) {
-                console.error('[Compliance] Error fetching signed URLs:', error);
-            } finally {
-                setIsLoadingDocs(false);
-            }
-        };
-
-        fetchSignedUrls();
     }, [merchants]);
 
     const InfoRow = ({ label, value, icon }: { label: string, value: string, icon: string }) => (
@@ -120,24 +71,26 @@ export default function ComplianceScreen() {
 
     const [selectedDoc, setSelectedDoc] = useState<{ url: string, label: string } | null>(null);
 
-    const DocCard = ({ label, rawUrl }: { label: string, rawUrl: string | null }) => {
-        const signedUrl = rawUrl ? signedUrls[rawUrl] : null;
-
+    const DocCard = ({ label, url }: { label: string, url: string | null }) => {
         return (
             <TouchableOpacity
                 style={styles.docCard}
-                onPress={() => signedUrl ? setSelectedDoc({ url: signedUrl, label }) : null}
-                activeOpacity={signedUrl ? 0.7 : 1}
+                onPress={() => url ? setSelectedDoc({ url, label }) : null}
+                activeOpacity={url ? 0.7 : 1}
             >
                 <Text style={styles.docLabel}>{label}</Text>
-                {rawUrl && isLoadingDocs ? (
-                    <View style={styles.noDocBox}>
-                        <ActivityIndicator size="small" color={Colors.primary} />
-                        <Text style={styles.noDocText}>Loading...</Text>
-                    </View>
-                ) : signedUrl ? (
+                {url ? (
                     <View style={styles.docImageContainer}>
-                        <Image source={{ uri: signedUrl }} style={{ width: '100%', height: '100%', resizeMode: 'cover', borderRadius: 8 }} />
+                        <Image 
+                            source={{ uri: url }} 
+                            style={{ 
+                                width: '100%', 
+                                height: 100, 
+                                borderRadius: 8,
+                                backgroundColor: '#F3F4F6'
+                            }} 
+                            resizeMode="cover" 
+                        />
                         <View style={styles.zoomOverlay}>
                             <Ionicons name="scan-outline" size={20} color="#FFFFFF" />
                         </View>
@@ -201,11 +154,11 @@ export default function ComplianceScreen() {
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Uploaded Documents</Text>
                     <View style={styles.docsGrid}>
-                        <DocCard label="PAN Card" rawUrl={kyc.panDocUrl} />
-                        <DocCard label="GST Certificate" rawUrl={kyc.gstCertificateUrl} />
-                        <DocCard label="FSSAI License" rawUrl={kyc.fssaiCertificateUrl} />
-                        <DocCard label="Aadhaar Front" rawUrl={kyc.aadharFrontUrl} />
-                        <DocCard label="Aadhaar Back" rawUrl={kyc.aadharBackUrl} />
+                        <DocCard label="PAN Card" url={kyc.panDocUrl} />
+                        <DocCard label="GST Certificate" url={kyc.gstCertificateUrl} />
+                        <DocCard label="FSSAI License" url={kyc.fssaiCertificateUrl} />
+                        <DocCard label="Aadhaar Front" url={kyc.aadharFrontUrl} />
+                        <DocCard label="Aadhaar Back" url={kyc.aadharBackUrl} />
                     </View>
                 </View>
 
@@ -273,6 +226,6 @@ const styles = StyleSheet.create({
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
     closeButton: { padding: 8, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20 },
     modalTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: '600' },
-    modalContent: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    fullImage: { width: '100%', height: '100%' }
+    modalContent: { flex: 1 },
+    fullImage: { flex: 1, width: '100%', alignSelf: 'stretch' }
 });
