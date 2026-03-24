@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, TextInput, ActivityIndicator, Alert, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -6,12 +6,31 @@ import { useRouter } from 'expo-router';
 import { Colors } from '../../constants/Colors';
 import { supabase } from '../../src/lib/supabase';
 import { useInventory } from '../../src/hooks/useInventory';
-import { useStore } from '../../src/hooks/useStore';
 import ConfigureProductsModal from '../../src/components/ConfigureProductsModal';
 import FilterModal, { FilterState } from '../../src/components/FilterModal';
 import AddCustomProductModal from '../../src/components/AddCustomProductModal';
 
+const VERTICALS = [
+    'Grocery & Kirana', 'Fruits & Vegetables', 'Restaurants & Cafes', 
+    'Bakeries & Desserts', 'Meat & Seafood', 'Pharmacy & Wellness', 
+    'Electronics & Accessories', 'Fashion & Apparel', 'Home & Lifestyle', 
+    'Beauty & Personal Care', 'Pet Care & Supplies'
+];
 
+const PRODUCT_CATEGORIES = [
+    'Dairy & Milk', 'Staples & Pulse', 'Snacks & Munchies', 'Beverages', 
+    'Personal Care', 'Home Essentials', 'Ready-to-Eat', 'Household Supply'
+];
+
+const CATEGORY_MAP: Record<string, string> = {
+    '1c4ebf02-778e-44be-a50a-3442233202ba': 'Grocery & Staples',
+    'f3ca935e-85b4-4b55-aed0-8a1ef96b4ad9': 'Dairy & Bakery',
+    'b48873ad-bb3e-4c7a-9fb7-c88f1883395d': 'Personal Care',
+    'd8315228-4e8c-40ad-bc42-5f6af1587af0': 'Snacks & Beverages',
+    'c2caba79-0520-4b2a-aec5-b2864205511e': 'Household Items'
+};
+
+const ALL_CATEGORIES = Array.from(new Set([...VERTICALS, ...PRODUCT_CATEGORIES, ...Object.values(CATEGORY_MAP)]));
 
 const DEFAULT_FILTERS: FilterState = {
     sortBy: 'price_low',
@@ -27,7 +46,6 @@ const DEFAULT_FILTERS: FilterState = {
 export default function CatalogPicker() {
     const router = useRouter();
     const { storeId, refetch: refetchInventory, loading: inventoryLoading } = useInventory();
-    const { store } = useStore();
 
     const [products, setProducts] = useState<any[]>([]);
     const [search, setSearch] = useState('');
@@ -44,48 +62,17 @@ export default function CatalogPicker() {
     const [filterVisible, setFilterVisible] = useState(false);
     const [appliedFilters, setAppliedFilters] = useState<FilterState | null>(null);
 
-    const [tier2Categories, setTier2Categories] = useState<any[]>([]);
-
-    useEffect(() => {
-        if (store?.vertical_id) {
-            fetchCategories();
-        }
-    }, [store?.vertical_id]);
-
-    const fetchCategories = async () => {
-        if (!store?.vertical_id) return;
-        try {
-            const { data, error } = await supabase
-                .from('Tier2Category')
-                .select('id, name')
-                .eq('vertical_id', store.vertical_id)
-                .order('name');
-            if (error) throw error;
-            if (data) setTier2Categories(data);
-        } catch (error) {
-            console.error('Failed to fetch categories:', error);
-        }
-    };
-
     useEffect(() => {
         fetchGlobalCatalog();
-    }, [storeId, store?.vertical_id]);
+    }, [storeId]);
 
     const fetchGlobalCatalog = async () => {
-        if (!store?.vertical_id) {
-            console.warn("Store vertical_id is missing. Returning empty catalog.");
-            setProducts([]);
-            setLoading(false);
-            return;
-        }
-
         setLoading(true);
         try {
             // Attempt to fetch Global (null) OR Store Specific (storeId)
             let query = supabase
                 .from('Product')
-                .select('*')
-                .eq('vertical_id', store.vertical_id);
+                .select('*');
 
             if (storeId) {
                 query = query.or(`createdByStoreId.is.null,createdByStoreId.eq.${storeId}`);
@@ -106,7 +93,9 @@ export default function CatalogPicker() {
                 data.forEach(p => {
                     const cleanName = p.name.replace(/\s*\([^)]+\)/g, '').trim();
                     if (!uniqueMap.has(cleanName)) {
-                        uniqueMap.set(cleanName, { ...p, name: cleanName });
+                        const mappedCat = CATEGORY_MAP[p.category_id || ''] || 'Others';
+                        const displayCat = p.subcategory || mappedCat;
+                        uniqueMap.set(cleanName, { ...p, name: cleanName, category: displayCat });
                     }
                 });
                 setProducts(Array.from(uniqueMap.values()));
@@ -121,7 +110,9 @@ export default function CatalogPicker() {
                 data.forEach(p => {
                     const cleanName = p.name.replace(/\s*\([^)]+\)/g, '').trim();
                     if (!uniqueMap.has(cleanName)) {
-                        uniqueMap.set(cleanName, { ...p, name: cleanName });
+                        const mappedCat = CATEGORY_MAP[p.category_id || ''] || 'Others';
+                        const displayCat = p.subcategory || mappedCat;
+                        uniqueMap.set(cleanName, { ...p, name: cleanName, category: displayCat });
                     }
                 });
                 setProducts(Array.from(uniqueMap.values()));
@@ -175,7 +166,9 @@ export default function CatalogPicker() {
 
         if (appliedFilters) {
             if (appliedFilters.categories.length > 0) {
-                if (!appliedFilters.categories.includes(p.category_id)) matchesFilter = false;
+                const isMatch = appliedFilters.categories.includes(p.category) || 
+                               appliedFilters.categories.includes(p.vertical);
+                if (!isMatch) matchesFilter = false;
             }
             if (appliedFilters.brands.length > 0 && !appliedFilters.brands.includes(p.brand)) matchesFilter = false;
             if (p.mrp < appliedFilters.priceRange[0] || p.mrp > appliedFilters.priceRange[1]) matchesFilter = false;
@@ -305,36 +298,24 @@ export default function CatalogPicker() {
                     showsHorizontalScrollIndicator={false} 
                     contentContainerStyle={styles.categoryScroll}
                 >
-                    {/* "All" pill */}
-                    <TouchableOpacity
-                        style={[styles.catChip, (!appliedFilters || appliedFilters.categories.length === 0) && styles.catChipActive]}
-                        onPress={() => {
-                            setAppliedFilters(prev => prev ? { ...prev, categories: [] } : null);
-                        }}
-                    >
-                        <Text style={[styles.catChipText, (!appliedFilters || appliedFilters.categories.length === 0) && styles.catChipTextActive]}>
-                            All
-                        </Text>
-                    </TouchableOpacity>
-
-                    {tier2Categories.map(cat => {
-                        const isSelected = appliedFilters?.categories.includes(cat.id) ?? false;
+                    {ALL_CATEGORIES.map(cat => {
+                        const isSelected = appliedFilters?.categories.includes(cat);
                         return (
                             <TouchableOpacity
-                                key={cat.id}
+                                key={cat}
                                 style={[styles.catChip, isSelected && styles.catChipActive]}
                                 onPress={() => {
                                     setAppliedFilters(prev => {
                                         const currentCats = prev?.categories || [];
-                                        const nextCats = currentCats.includes(cat.id) 
-                                            ? currentCats.filter(c => c !== cat.id) 
-                                            : [...currentCats, cat.id];
+                                        const nextCats = currentCats.includes(cat) 
+                                            ? currentCats.filter(c => c !== cat) 
+                                            : [...currentCats, cat];
                                         return { ...(prev || DEFAULT_FILTERS), categories: nextCats };
                                     });
                                 }}
                             >
                                 <Text style={[styles.catChipText, isSelected && styles.catChipTextActive]}>
-                                    {cat.name}
+                                    {cat}
                                 </Text>
                             </TouchableOpacity>
                         );
