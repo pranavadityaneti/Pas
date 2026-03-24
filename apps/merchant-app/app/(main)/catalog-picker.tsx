@@ -361,6 +361,7 @@ export default function CatalogPicker() {
                 onSuccess={handleCustomSuccess}
                 storeId={storeId!}
                 initialName={search}
+                verticalPills={verticalPills}
             />
 
             {/* Filter Modal */}

@@ -20,9 +20,10 @@ interface AddCustomProductModalProps {
     storeId: string;
     initialName?: string;
     itemToEdit?: InventoryItem | null;
+    verticalPills?: { id: string; name: string }[];
 }
 
-export default function AddCustomProductModal({ visible, onClose, onSuccess, storeId, initialName, itemToEdit }: AddCustomProductModalProps) {
+export default function AddCustomProductModal({ visible, onClose, onSuccess, storeId, initialName, itemToEdit, verticalPills = [] }: AddCustomProductModalProps) {
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const [loading, setLoading] = useState(false);
@@ -187,8 +188,7 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
         }
     };
 
-    // Predefined simple categories for MVP
-    const SUGGESTED_CATEGORIES = ["Dairy", "Snacks", "Beverages", "Spices", "Grains", "Household", "Personal Care"];
+
 
     const pickImage = async () => {
         if (images.length >= 4) {
@@ -641,17 +641,17 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
                                 {/* Dropdown List */}
                                 {showCategoryDropdown && (
                                     <View style={styles.dropdownList}>
-                                        {SUGGESTED_CATEGORIES.map(cat => (
+                                        {verticalPills.map(v => (
                                             <TouchableOpacity
-                                                key={cat}
+                                                key={v.id}
                                                 style={styles.dropdownItem}
                                                 onPress={() => {
-                                                    setCategory(cat);
+                                                    setCategory(v.name);
                                                     setShowCategoryDropdown(false);
                                                 }}
                                             >
-                                                <Text>{cat}</Text>
-                                                {category === cat && <Ionicons name="checkmark" size={16} color={Colors.primary} />}
+                                                <Text>{v.name}</Text>
+                                                {category === v.name && <Ionicons name="checkmark" size={16} color={Colors.primary} />}
                                             </TouchableOpacity>
                                         ))}
                                     </View>
