@@ -178,7 +178,7 @@ export default function TimingsScreen() {
                         <Switch
                             value={hasLunchBreak}
                             onValueChange={setHasLunchBreak}
-                            trackColor={{ false: Colors.border, true: Colors.text }}
+                            trackColor={{ false: Colors.border, true: Colors.primary }}
                             thumbColor={Colors.white}
                         />
                     </View>
@@ -252,7 +252,7 @@ const styles = StyleSheet.create({
 
     card: { backgroundColor: Colors.white, borderRadius: 20, padding: 24, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
     cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 24 },
-    iconCircle: { width: 48, height: 48, borderRadius: 24, backgroundColor: Colors.text, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+    iconCircle: { width: 48, height: 48, borderRadius: 24, backgroundColor: Colors.primary, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
     cardTitle: { fontSize: 18, fontWeight: 'bold', color: Colors.text },
     cardSubtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
 
@@ -267,11 +267,11 @@ const styles = StyleSheet.create({
 
     daysContainer: { flexDirection: 'row', justifyContent: 'space-between' },
     dayPill: { width: 40, height: 40, borderRadius: 12, backgroundColor: Colors.border, justifyContent: 'center', alignItems: 'center' },
-    dayPillActive: { backgroundColor: Colors.text },
+    dayPillActive: { backgroundColor: Colors.primary },
     dayText: { color: Colors.textSecondary, fontWeight: 'bold', fontSize: 14 },
     dayTextActive: { color: Colors.white },
 
     footer: { padding: 20, backgroundColor: Colors.white, borderTopWidth: 1, borderTopColor: Colors.border },
-    saveButton: { backgroundColor: Colors.text, paddingVertical: 16, borderRadius: 12, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
+    saveButton: { backgroundColor: Colors.primary, paddingVertical: 16, borderRadius: 12, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
     saveText: { color: Colors.white, fontWeight: 'bold', fontSize: 16 },
 });

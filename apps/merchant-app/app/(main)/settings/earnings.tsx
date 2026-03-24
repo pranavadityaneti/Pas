@@ -84,7 +84,7 @@ const styles = StyleSheet.create({
     headerTitle: { fontSize: 20, fontWeight: 'bold', color: Colors.text },
     content: { padding: 16 },
 
-    totalCard: { backgroundColor: Colors.text, borderRadius: 24, padding: 32, marginBottom: 20, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, elevation: 5 },
+    totalCard: { backgroundColor: Colors.primary, borderRadius: 24, padding: 32, marginBottom: 20, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, elevation: 5 },
     totalLabel: { color: '#9CA3AF', fontSize: 12, fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
     totalAmount: { color: Colors.white, fontSize: 40, fontWeight: 'bold' },
     totalMeta: { flexDirection: 'row', marginTop: 24, gap: 16 },

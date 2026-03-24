@@ -447,7 +447,7 @@ const styles = StyleSheet.create({
     content: { padding: 16 },
 
     // Earnings Card
-    earningsCard: { backgroundColor: Colors.text, borderRadius: 20, padding: 24, marginBottom: 16, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, elevation: 5 },
+    earningsCard: { backgroundColor: Colors.primary, borderRadius: 20, padding: 24, marginBottom: 16, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, elevation: 5 },
     earningsCardTitle: { color: '#9CA3AF', fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 20 },
     earningsMainRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
     earningsMainBox: { flex: 1, alignItems: 'center' },
@@ -502,7 +502,7 @@ const styles = StyleSheet.create({
     modalActions: { flexDirection: 'row', gap: 12, marginTop: 10 },
     modalCancel: { flex: 1, padding: 16, backgroundColor: Colors.background, borderRadius: 12, alignItems: 'center' },
     modalCancelText: { fontWeight: '700', color: '#374151', fontSize: 16 },
-    modalSave: { flex: 1, padding: 16, backgroundColor: Colors.text, borderRadius: 12, alignItems: 'center' },
+    modalSave: { flex: 1, padding: 16, backgroundColor: Colors.primary, borderRadius: 12, alignItems: 'center' },
     modalSaveText: { fontWeight: '700', color: Colors.white, fontSize: 16 },
     setPrimaryBtn: { marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: Colors.border, alignItems: 'center' },
     setPrimaryText: { color: Colors.text, fontWeight: '700', fontSize: 13 },

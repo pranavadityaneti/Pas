@@ -134,13 +134,6 @@ export default function SettingsScreen() {
             iconType: 'MaterialCommunityIcons'
         },
         {
-            icon: 'printer-outline',
-            label: 'Printer Settings',
-            subtitle: 'Connect thermal printers',
-            route: '/(main)/settings/printer',
-            iconType: 'MaterialCommunityIcons'
-        },
-        {
             icon: 'account-group-outline',
             label: 'Staff Management',
             subtitle: 'Add or remove employees',

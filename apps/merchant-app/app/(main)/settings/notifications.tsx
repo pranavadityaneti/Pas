@@ -122,7 +122,7 @@ export default function NotificationsScreen() {
                     <Switch
                         value={settings.newOrder}
                         onValueChange={() => toggle('newOrder')}
-                        trackColor={{ true: Colors.text, false: Colors.border }}
+                        trackColor={{ true: Colors.primary, false: Colors.border }}
                     />
                 </View>
 
@@ -134,7 +134,7 @@ export default function NotificationsScreen() {
                     <Switch
                         value={settings.orderCancelled}
                         onValueChange={() => toggle('orderCancelled')}
-                        trackColor={{ true: Colors.text, false: Colors.border }}
+                        trackColor={{ true: Colors.primary, false: Colors.border }}
                     />
                 </View>
 
@@ -148,7 +148,7 @@ export default function NotificationsScreen() {
                     <Switch
                         value={settings.sound}
                         onValueChange={() => toggle('sound')}
-                        trackColor={{ true: Colors.text, false: Colors.border }}
+                        trackColor={{ true: Colors.primary, false: Colors.border }}
                     />
                 </View>
 
@@ -174,7 +174,7 @@ export default function NotificationsScreen() {
                     <Switch
                         value={settings.vibration}
                         onValueChange={() => toggle('vibration')}
-                        trackColor={{ true: Colors.text, false: Colors.border }}
+                        trackColor={{ true: Colors.primary, false: Colors.border }}
                     />
                 </View>
 

@@ -1,5 +1,5 @@
 export const Colors = {
-    primary: '#DC2626', // Brand Red from Admin Dashboard
+    primary: '#b42926', // Brand Red
     background: '#F9FAFB',
     card: '#FFFFFF',
     text: '#111827',
