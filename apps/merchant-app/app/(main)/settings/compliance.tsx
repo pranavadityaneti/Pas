@@ -23,6 +23,7 @@ export default function ComplianceScreen() {
 
     const getPublicUrl = (path: string | null) => {
         if (!path) return null;
+        if (path.startsWith('http')) return path;
         const { data } = supabase.storage.from('merchant-docs').getPublicUrl(path);
         return data.publicUrl;
     };
