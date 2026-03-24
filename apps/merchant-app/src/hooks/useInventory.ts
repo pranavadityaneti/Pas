@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Alert } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { useStore } from './useStore';
 
@@ -68,6 +69,7 @@ export function useInventory() {
                     )
                 `)
                 .eq('storeId', storeId)
+                .eq('is_deleted', false)
                 .order('updatedAt', { ascending: false })
                 .limit(50);
 
@@ -138,15 +140,23 @@ export function useInventory() {
     };
 
     const deleteItem = async (id: string) => {
-        // Optimistic
+        // Store the previous state to revert if the network request fails
+        const previousState = [...inventory];
+        
+        // Optimistic UI update
         setInventory(prev => prev.filter(item => item.id !== id));
 
         const { error } = await supabase
             .from('StoreProduct')
-            .delete()
+            .update({ is_deleted: true })
             .eq('id', id);
 
-        if (error) fetchInventory();
+        if (error) {
+            console.error('Delete failed:', error);
+            // Revert the UI back to what it was
+            setInventory(previousState);
+            Alert.alert('Error', error.message || 'Failed to delete the product.');
+        }
     };
 
     const toggleStatus = async (id: string, currentStatus: boolean) => {
