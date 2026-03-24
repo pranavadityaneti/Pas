@@ -10,27 +10,7 @@ import ConfigureProductsModal from '../../src/components/ConfigureProductsModal'
 import FilterModal, { FilterState } from '../../src/components/FilterModal';
 import AddCustomProductModal from '../../src/components/AddCustomProductModal';
 
-const VERTICALS = [
-    'Grocery & Kirana', 'Fruits & Vegetables', 'Restaurants & Cafes', 
-    'Bakeries & Desserts', 'Meat & Seafood', 'Pharmacy & Wellness', 
-    'Electronics & Accessories', 'Fashion & Apparel', 'Home & Lifestyle', 
-    'Beauty & Personal Care', 'Pet Care & Supplies'
-];
 
-const PRODUCT_CATEGORIES = [
-    'Dairy & Milk', 'Staples & Pulse', 'Snacks & Munchies', 'Beverages', 
-    'Personal Care', 'Home Essentials', 'Ready-to-Eat', 'Household Supply'
-];
-
-const CATEGORY_MAP: Record<string, string> = {
-    '1c4ebf02-778e-44be-a50a-3442233202ba': 'Grocery & Staples',
-    'f3ca935e-85b4-4b55-aed0-8a1ef96b4ad9': 'Dairy & Bakery',
-    'b48873ad-bb3e-4c7a-9fb7-c88f1883395d': 'Personal Care',
-    'd8315228-4e8c-40ad-bc42-5f6af1587af0': 'Snacks & Beverages',
-    'c2caba79-0520-4b2a-aec5-b2864205511e': 'Household Items'
-};
-
-const ALL_CATEGORIES = Array.from(new Set([...VERTICALS, ...PRODUCT_CATEGORIES, ...Object.values(CATEGORY_MAP)]));
 
 const DEFAULT_FILTERS: FilterState = {
     sortBy: 'price_low',
@@ -61,6 +41,16 @@ export default function CatalogPicker() {
     // Filter State
     const [filterVisible, setFilterVisible] = useState(false);
     const [appliedFilters, setAppliedFilters] = useState<FilterState | null>(null);
+
+    // Vertical pills fetched from master Vertical table
+    const [verticalPills, setVerticalPills] = useState<{ id: string; name: string }[]>([]);
+
+    useEffect(() => {
+        supabase.from('Vertical').select('id, name').order('name').then(({ data, error }) => {
+            if (error) console.error('Failed to fetch verticals:', error);
+            if (data) setVerticalPills(data);
+        });
+    }, []);
 
     useEffect(() => {
         fetchGlobalCatalog();
@@ -93,9 +83,7 @@ export default function CatalogPicker() {
                 data.forEach(p => {
                     const cleanName = p.name.replace(/\s*\([^)]+\)/g, '').trim();
                     if (!uniqueMap.has(cleanName)) {
-                        const mappedCat = CATEGORY_MAP[p.category_id || ''] || 'Others';
-                        const displayCat = p.subcategory || mappedCat;
-                        uniqueMap.set(cleanName, { ...p, name: cleanName, category: displayCat });
+                        uniqueMap.set(cleanName, { ...p, name: cleanName });
                     }
                 });
                 setProducts(Array.from(uniqueMap.values()));
@@ -110,9 +98,7 @@ export default function CatalogPicker() {
                 data.forEach(p => {
                     const cleanName = p.name.replace(/\s*\([^)]+\)/g, '').trim();
                     if (!uniqueMap.has(cleanName)) {
-                        const mappedCat = CATEGORY_MAP[p.category_id || ''] || 'Others';
-                        const displayCat = p.subcategory || mappedCat;
-                        uniqueMap.set(cleanName, { ...p, name: cleanName, category: displayCat });
+                        uniqueMap.set(cleanName, { ...p, name: cleanName });
                     }
                 });
                 setProducts(Array.from(uniqueMap.values()));
@@ -166,9 +152,7 @@ export default function CatalogPicker() {
 
         if (appliedFilters) {
             if (appliedFilters.categories.length > 0) {
-                const isMatch = appliedFilters.categories.includes(p.category) || 
-                               appliedFilters.categories.includes(p.vertical);
-                if (!isMatch) matchesFilter = false;
+                if (!appliedFilters.categories.includes(p.vertical_id)) matchesFilter = false;
             }
             if (appliedFilters.brands.length > 0 && !appliedFilters.brands.includes(p.brand)) matchesFilter = false;
             if (p.mrp < appliedFilters.priceRange[0] || p.mrp > appliedFilters.priceRange[1]) matchesFilter = false;
@@ -298,24 +282,34 @@ export default function CatalogPicker() {
                     showsHorizontalScrollIndicator={false} 
                     contentContainerStyle={styles.categoryScroll}
                 >
-                    {ALL_CATEGORIES.map(cat => {
-                        const isSelected = appliedFilters?.categories.includes(cat);
+                    {/* "All" pill */}
+                    <TouchableOpacity
+                        style={[styles.catChip, (!appliedFilters || appliedFilters.categories.length === 0) && styles.catChipActive]}
+                        onPress={() => setAppliedFilters(prev => prev ? { ...prev, categories: [] } : null)}
+                    >
+                        <Text style={[styles.catChipText, (!appliedFilters || appliedFilters.categories.length === 0) && styles.catChipTextActive]}>
+                            All
+                        </Text>
+                    </TouchableOpacity>
+
+                    {verticalPills.map(v => {
+                        const isSelected = appliedFilters?.categories.includes(v.id) ?? false;
                         return (
                             <TouchableOpacity
-                                key={cat}
+                                key={v.id}
                                 style={[styles.catChip, isSelected && styles.catChipActive]}
                                 onPress={() => {
                                     setAppliedFilters(prev => {
                                         const currentCats = prev?.categories || [];
-                                        const nextCats = currentCats.includes(cat) 
-                                            ? currentCats.filter(c => c !== cat) 
-                                            : [...currentCats, cat];
+                                        const nextCats = currentCats.includes(v.id)
+                                            ? currentCats.filter(c => c !== v.id)
+                                            : [...currentCats, v.id];
                                         return { ...(prev || DEFAULT_FILTERS), categories: nextCats };
                                     });
                                 }}
                             >
                                 <Text style={[styles.catChipText, isSelected && styles.catChipTextActive]}>
-                                    {cat}
+                                    {v.name}
                                 </Text>
                             </TouchableOpacity>
                         );
