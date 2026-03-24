@@ -86,11 +86,9 @@ export default function ComplianceScreen() {
                             source={{ uri: url }} 
                             style={{ 
                                 width: '100%', 
-                                height: 100, 
-                                borderRadius: 8,
-                                backgroundColor: '#F3F4F6'
+                                height: '100%', 
+                                resizeMode: 'cover'
                             }} 
-                            resizeMode="cover" 
                         />
                         <View style={styles.zoomOverlay}>
                             <Ionicons name="scan-outline" size={20} color="#FFFFFF" />
@@ -213,10 +211,10 @@ const styles = StyleSheet.create({
     docsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
     docCard: { backgroundColor: '#fff', borderRadius: 12, padding: 12, width: '48%', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
     docLabel: { fontSize: 12, fontWeight: '600', color: '#374151', marginBottom: 8 },
-    docImageContainer: { height: 100, borderRadius: 8, overflow: 'hidden', backgroundColor: '#F3F4F6', position: 'relative' },
+    docImageContainer: { height: 120, width: '100%', borderRadius: 8, overflow: 'hidden', backgroundColor: '#F3F4F6', position: 'relative' },
     docImage: { width: '100%', height: '100%' },
     zoomOverlay: { position: 'absolute', right: 8, bottom: 8, backgroundColor: 'rgba(0,0,0,0.5)', padding: 4, borderRadius: 6 },
-    noDocBox: { height: 100, borderRadius: 8, backgroundColor: '#F9FAFB', borderStyle: 'dashed', borderWidth: 1, borderColor: '#D1D5DB', justifyContent: 'center', alignItems: 'center' },
+    noDocBox: { height: 120, borderRadius: 8, backgroundColor: '#F9FAFB', borderStyle: 'dashed', borderWidth: 1, borderColor: '#D1D5DB', justifyContent: 'center', alignItems: 'center' },
     noDocText: { fontSize: 10, color: '#9CA3AF', marginTop: 4, textAlign: 'center' },
     footerNote: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 10, gap: 8 },
     footerNoteText: { fontSize: 11, color: '#6B7280', textAlign: 'center' },
