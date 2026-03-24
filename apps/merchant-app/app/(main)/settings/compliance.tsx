@@ -14,7 +14,7 @@ export default function ComplianceScreen() {
     // Realtime Compliance Details
     const { data: merchants, loading: tableLoading } = useRealtimeTable({
         tableName: 'merchants',
-        select: 'pan_number, aadhar_number, gst_number, turnover_range, pan_document_url, aadhar_front_url, aadhar_back_url, gst_certificate_url, fssai_number, fssai_certificate_url',
+        select: 'pan_number, aadhar_number, gst_number, turnover_range, pan_doc_url, aadhar_front_url, aadhar_back_url, gst_certificate_url, fssai_number, fssai_certificate_url',
         filter: user?.id ? `id=eq.${user.id}` : undefined,
         enabled: !!user?.id
     });
@@ -28,7 +28,7 @@ export default function ComplianceScreen() {
                 gstNumber: data.gst_number || 'Not Provided',
                 fssaiNumber: data.fssai_number || 'Not Provided',
                 turnoverRange: data.turnover_range || 'Not Specified',
-                panDocUrl: data.pan_document_url,
+                panDocUrl: data.pan_doc_url,
                 aadharFrontUrl: data.aadhar_front_url,
                 aadharBackUrl: data.aadhar_back_url,
                 gstCertificateUrl: data.gst_certificate_url,
@@ -63,7 +63,7 @@ export default function ComplianceScreen() {
 
             const data = merchants[0];
             const rawPaths = [
-                data.pan_document_url,
+                data.pan_doc_url,
                 data.aadhar_front_url,
                 data.aadhar_back_url,
                 data.gst_certificate_url,
@@ -137,7 +137,7 @@ export default function ComplianceScreen() {
                     </View>
                 ) : signedUrl ? (
                     <View style={styles.docImageContainer}>
-                        <Image source={{ uri: signedUrl }} style={styles.docImage} resizeMode="cover" />
+                        <Image source={{ uri: signedUrl }} style={{ width: '100%', height: '100%', resizeMode: 'cover', borderRadius: 8 }} />
                         <View style={styles.zoomOverlay}>
                             <Ionicons name="scan-outline" size={20} color="#FFFFFF" />
                         </View>
