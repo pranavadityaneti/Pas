@@ -5,7 +5,7 @@ import {
     Platform, KeyboardAvoidingView, ScrollView
 } from 'react-native';
 import { supabase } from '../lib/supabase';
-import { Mail, Lock, Eye, EyeOff, X } from 'lucide-react-native';
+import { MessageCircle, X } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 
 interface TransactionalAuthModalProps {
@@ -23,58 +23,15 @@ export default function TransactionalAuthModal({
     title = 'Login Required',
     subtitle = 'Please login or sign up to continue.'
 }: TransactionalAuthModalProps) {
-    const [isLogin, setIsLogin] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
-    const [showPassword, setShowPassword] = useState(false);
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
 
     const triggerHaptic = (style = Haptics.ImpactFeedbackStyle.Medium) => {
         Haptics.impactAsync(style);
     };
 
     const handleAuth = async () => {
-        if (!email || !password) {
-            triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-            Alert.alert('Required', 'Please fill in all fields');
-            return;
-        }
-
-        setIsLoading(true);
-        triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
-
-        const timeout = (ms: number) => new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Request timed out. Please check your connection.')), ms)
-        );
-
-        try {
-            if (isLogin) {
-                const { error } = await Promise.race([
-                    supabase.auth.signInWithPassword({ email, password }),
-                    timeout(30000)
-                ]) as any;
-                if (error) throw error;
-            } else {
-                const { error, data } = await Promise.race([
-                    supabase.auth.signUp({ email, password }),
-                    timeout(30000)
-                ]) as any;
-                if (error) throw error;
-                if (!data.session) {
-                    Alert.alert('Verification Required', 'Please check your email to verify your account.');
-                    return;
-                }
-            }
-
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            onSuccess();
-        } catch (error: any) {
-            console.error('Transactional Auth Error:', error);
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            Alert.alert('Authentication Error', error.message || 'Something went wrong');
-        } finally {
-            setIsLoading(false);
-        }
+        // TODO: Implement Phone OTP flow mirroring AuthScreen.tsx
+        Alert.alert('Coming Soon', 'Phone authentication for transactions is being implemented.');
     };
 
     return (
@@ -97,35 +54,11 @@ export default function TransactionalAuthModal({
                     </View>
 
                     <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
-                        {/* Form */}
-                        <View className="space-y-4">
-                            <View className="flex-row items-center border border-gray-200 rounded-2xl px-4 h-14 bg-gray-50">
-                                <Mail color="#9CA3AF" size={20} />
-                                <TextInput
-                                    className="flex-1 ml-3 font-medium text-black text-base"
-                                    placeholder="Email"
-                                    placeholderTextColor="#9CA3AF"
-                                    autoCapitalize="none"
-                                    keyboardType="email-address"
-                                    value={email}
-                                    onChangeText={setEmail}
-                                />
-                            </View>
-
-                            <View className="flex-row items-center border border-gray-200 rounded-2xl px-4 h-14 bg-gray-50 mt-4">
-                                <Lock color="#9CA3AF" size={20} />
-                                <TextInput
-                                    className="flex-1 ml-3 font-medium text-black text-base"
-                                    placeholder="Password"
-                                    placeholderTextColor="#9CA3AF"
-                                    secureTextEntry={!showPassword}
-                                    value={password}
-                                    onChangeText={setPassword}
-                                />
-                                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} className="p-2">
-                                    {showPassword ? <Lock size={20} color="#B52725" /> : <Lock size={20} color="#9CA3AF" />}
-                                </TouchableOpacity>
-                            </View>
+                        <View className="items-center justify-center py-8">
+                            <MessageCircle size={48} color="#B52725" />
+                            <Text className="text-gray-400 mt-4 text-center">
+                                Secure phone verification for transactions is coming soon.
+                            </Text>
                         </View>
 
                         {/* Action Button */}
@@ -137,20 +70,12 @@ export default function TransactionalAuthModal({
                             {isLoading ? (
                                 <ActivityIndicator color="white" />
                             ) : (
-                                <Text className="text-white font-bold text-lg">{isLogin ? 'Login' : 'Sign Up'}</Text>
+                                <Text className="text-white font-bold text-lg">Verify & Continue</Text>
                             )}
                         </TouchableOpacity>
 
-                        {/* Toggle Mode */}
-                        <View className="flex-row justify-center mt-6">
-                            <Text className="text-gray-500 font-medium">
-                                {isLogin ? 'Need an account? ' : 'Already have an account? '}
-                            </Text>
-                            <TouchableOpacity onPress={() => setIsLogin(!isLogin)}>
-                                <Text className="text-[#B52725] font-bold underline">
-                                    {isLogin ? 'Sign up' : 'Login'}
-                                </Text>
-                            </TouchableOpacity>
+                        <View className="items-center mt-6">
+                            <Text className="text-gray-400 text-sm">Use the main login screen for account access.</Text>
                         </View>
                     </ScrollView>
                 </View>

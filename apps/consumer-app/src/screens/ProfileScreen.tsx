@@ -10,14 +10,12 @@ import { decode } from 'base64-arraybuffer';
 import {
     ChevronRight,
     User,
-    Lock,
     Bell,
     Globe,
     Info,
     Moon,
     Calendar,
     HelpCircle,
-    ShieldCheck,
     LogOut,
     X,
     ChevronLeft,
@@ -28,9 +26,8 @@ import {
     Mail,
     Cake,
     Smartphone,
-    Fingerprint,
-    Shield,
     SmartphoneNfc,
+    ShieldCheck,
     MessageSquare,
     Layers,
     ShoppingBag,
@@ -46,6 +43,8 @@ import { supabase } from '../lib/supabase';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
+import * as SecureStore from 'expo-secure-store';
+import { apiClient, purgeAuthSession } from '../lib/api';
 
 export default function ProfileScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -59,11 +58,9 @@ export default function ProfileScreen() {
     // Edit Profile Modal State
     const [isEditModalVisible, setIsEditModalVisible] = useState(false);
     const [newName, setNewName] = useState('');
-    const [newEmail, setNewEmail] = useState('');
     const [newDob, setNewDob] = useState('');
 
     // Security & Notification Modal State
-    const [isSecurityModalVisible, setIsSecurityModalVisible] = useState(false);
     const [isNotificationsModalVisible, setIsNotificationsModalVisible] = useState(false);
 
     // Prefs State
@@ -79,97 +76,72 @@ export default function ProfileScreen() {
         two_factor: false, biometric: false
     });
 
-    // Password Change State
-    const [currentPassword, setCurrentPassword] = useState('');
-    const [newPassword, setNewPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
-    const [isChangingPassword, setIsChangingPassword] = useState(false);
-    const isChangingPasswordRef = useRef(false);
 
     useEffect(() => {
         fetchUserProfile();
-
-        // Listen for internal auth updates to catch successful password changes that might hang the promise
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-            if (event === 'USER_UPDATED' && isChangingPasswordRef.current) {
-                console.log("Detected USER_UPDATED via listener - Triggering Success UI");
-                handlePasswordSuccess();
-            }
-        });
-
-        return () => subscription.unsubscribe();
     }, []);
 
     const fetchUserProfile = async (isRetry = false) => {
-        try {
-            if (!isRetry && !refreshing) setLoading(true);
-            
-            // Use getSession instead of getUser to avoid blocking network requests that can hang
-            // Wrap in a Promise.race to prevent infinite spinning if the network completely drops
-            const sessionResponse = await Promise.race([
-                supabase.auth.getSession(),
-                new Promise<any>((_, reject) => 
-                    setTimeout(() => reject(new Error('Network timeout fetching session')), 8000)
-                )
+        const cycleStart = Date.now();
+        console.log(`[Profile] Starting fetch cycle...`);
+
+        // Anti-hang safety wrapper for native keystone operations
+        const withTimeout = (promise: Promise<any>, ms = 2000) => 
+            Promise.race([
+                promise, 
+                new Promise((_, ref) => setTimeout(() => ref(new Error('SecureStore Timeout')), ms))
             ]);
-            
-            const { data: { session }, error: authError } = sessionResponse;
-            const user = session?.user;
-            
-            if (authError || !user) {
-                console.error('Session validation failed:', authError);
-                await supabase.auth.signOut();
-                navigation.replace('Auth');
+
+        try {
+            // 1. Load from SECURE cache immediately (Mandate 2 - Secure Enclave)
+            try {
+                const cached = await withTimeout(SecureStore.getItemAsync('last_known_profile'));
+                if (cached) {
+                    const parsed = JSON.parse(cached);
+                    setProfile(parsed);
+                    setNewName(parsed.full_name || '');
+                    if (parsed.notification_preferences) {
+                        setNotifPrefs((prev: any) => ({ ...prev, ...parsed.notification_preferences }));
+                    }
+                    console.log("[Profile] Loaded from SecureStore in", Date.now() - cycleStart, "ms");
+                }
+            } catch (cacheErr: any) {
+                console.warn("[Profile] Bypassed local cache lock:", cacheErr.message);
+            }
+
+            if (!refreshing) setLoading(true);
+
+            // 2. Fetch via global hardened apiClient (Mandate 1 - Global Interceptor)
+            const response = await apiClient.fetch('/auth/me', { timeout: 8000 });
+
+            if (response.ok) {
+                const data = await response.json();
+                const profileData = data.profile;
+                const userData = data.user;
+
+                setUser(userData);
+                setProfile(profileData);
+                setNewName(profileData.full_name || '');
+                
+                if (profileData.notification_preferences) {
+                    setNotifPrefs((prev: any) => ({ ...prev, ...profileData.notification_preferences }));
+                }
+                
+                
+                // Securely Cache PII (with timeout protection)
+                try {
+                    await withTimeout(SecureStore.setItemAsync('last_known_profile', JSON.stringify(profileData)));
+                } catch(e: any) {
+                    console.warn("[Profile] Could not update cache:", e.message);
+                }
+                console.log(`[Profile] API sync completed in ${Date.now() - cycleStart}ms`);
+            } else if (response.status === 401) {
+                // Global interceptor in apiClient already handles redirect/purge
                 return;
             }
 
-            setUser(user);
-
-            if (user) {
-                // Wrap the profile fetch in a timeout too to prevent hanging
-                const profileResponse = await Promise.race([
-                    supabase.from('profiles').select('*').eq('id', user.id).single(),
-                    new Promise<any>((_, reject) => 
-                        setTimeout(() => reject(new Error('Network timeout fetching profile')), 8000)
-                    )
-                ]);
-                
-                const { data: profileData, error } = profileResponse;
-
-                if (!error) {
-                    if (profileData.avatar_url) {
-                        profileData.avatar_url = `${profileData.avatar_url}?v=${Date.now()}`;
-                    }
-
-                    setProfile(profileData);
-                    setNewName(profileData.full_name || '');
-                    setNewEmail(profileData.email || '');
-
-                    if (profileData.notification_preferences) {
-                        // Merge with default structure to avoid crashes on missing keys
-                        setNotifPrefs({
-                            ...notifPrefs,
-                            ...profileData.notification_preferences
-                        });
-                    }
-                    if (profileData.security_preferences) {
-                        setSecPrefs(profileData.security_preferences);
-                    }
-
-                    // Convert YYYY-MM-DD from DB to DD-MM-YYYY for UI
-                    if (profileData.date_of_birth) {
-                        const [y, m, d] = profileData.date_of_birth.split('-');
-                        setNewDob(`${d}-${m}-${y}`);
-                    } else {
-                        setNewDob('');
-                    }
-                } else if (error.code === 'PGRST116' && !isRetry) {
-                    setTimeout(() => fetchUserProfile(true), 2000);
-                    return;
-                }
-            }
         } catch (error) {
-            console.error(error);
+            console.error("[Profile] fetchUserProfile failure:", error);
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -249,6 +221,11 @@ export default function ProfileScreen() {
     };
 
     const handleUpdateProfile = async () => {
+        if (!user?.id) {
+            Alert.alert("Session Expired", "Please login again to update your profile.");
+            return;
+        }
+
         if (!newName || newName.length < 3) {
             Alert.alert("Invalid Name", "Name must be at least 3 characters long.");
             return;
@@ -259,10 +236,6 @@ export default function ProfileScreen() {
             return;
         }
 
-        if (newEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
-            Alert.alert('Invalid Email', 'Please enter a valid email address.');
-            return;
-        }
 
         if (newDob) {
             const [checkD, checkM, checkY] = newDob.split('-');
@@ -288,7 +261,6 @@ export default function ProfileScreen() {
                 .from('profiles')
                 .update({
                     full_name: newName,
-                    email: newEmail.trim() || null,
                     date_of_birth: formattedDob,
                     updated_at: new Date()
                 })
@@ -308,79 +280,6 @@ export default function ProfileScreen() {
         }
     };
 
-    const handlePasswordSuccess = () => {
-        if (!isChangingPasswordRef.current) return;
-
-        setIsChangingPassword(false);
-        isChangingPasswordRef.current = false;
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-
-        // CLOSE MODAL FIRST to avoid trapped alerts
-        setIsSecurityModalVisible(false);
-        setTimeout(() => {
-            Alert.alert("Success", "Password updated successfully.");
-            setNewPassword('');
-            setConfirmPassword('');
-        }, 500);
-    };
-
-    const handleChangePassword = async () => {
-        console.log("Password change initiated...");
-        if (!newPassword || newPassword !== confirmPassword) {
-            Alert.alert("Error", "Passwords do not match.");
-            return;
-        }
-        if (newPassword.length < 6) {
-            Alert.alert("Error", "Password must be at least 6 characters.");
-            return;
-        }
-
-        if (isChangingPasswordRef.current) return;
-
-        setIsChangingPassword(true);
-        isChangingPasswordRef.current = true;
-        triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-
-        console.log("Invoking supabase.auth.updateUser with race...");
-
-        // Fail-safe timer to ensure spinner doesn't hang forever
-        const timeout = setTimeout(() => {
-            if (isChangingPasswordRef.current) {
-                console.log("Password update hit 10s timeout - Force clearing.");
-                setIsChangingPassword(false);
-                isChangingPasswordRef.current = false;
-                // We don't alert here yet, as it might have actually succeeded (as seen in user tests)
-                // We'll just close and let them check.
-                setIsSecurityModalVisible(false);
-                Alert.alert("Request Processing", "We've sent your request. If the password hasn't changed in 1 minute, please try again.");
-            }
-        }, 10000);
-
-        try {
-            // Race the update against a timeout that succeeds (to handle the hang case gracefully)
-            const result = await supabase.auth.updateUser({ password: newPassword });
-            console.log("Supabase promise resolved!");
-
-            clearTimeout(timeout);
-            const { error } = result;
-
-            if (error) {
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-                Alert.alert("Error", error.message);
-                setIsChangingPassword(false);
-                isChangingPasswordRef.current = false;
-            } else {
-                handlePasswordSuccess();
-            }
-        } catch (error: any) {
-            clearTimeout(timeout);
-            console.error("Password update exception:", error);
-            setIsSecurityModalVisible(false);
-            setIsChangingPassword(false);
-            isChangingPasswordRef.current = false;
-            Alert.alert("Error", "An unexpected error occurred.");
-        }
-    };
 
     const updateNotifPrefs = async (category: string, channel: string | null, value: boolean) => {
         let newPrefs: any;
@@ -468,15 +367,8 @@ export default function ProfileScreen() {
                     text: "Logout",
                     style: "destructive",
                     onPress: async () => {
-                        // Force local token wipe instantly regardless of network/server state
-                        const { error } = await supabase.auth.signOut({ scope: 'local' });
-                        if (error) {
-                            console.error("Logout error:", error);
-                            Alert.alert("Notice", "You have been logged out locally, but the server couldn't be reached.");
-                        }
-                        
-                        // Force navigation back to Auth immediately
-                        navigation.replace('Auth');
+                        // Global purge: clears SecureStore, cancels session, and redirects to Auth
+                        await purgeAuthSession();
                     }
                 }
             ]
@@ -606,7 +498,7 @@ export default function ProfileScreen() {
                     <MenuItem
                         icon={CreditCard}
                         label="Payment Methods"
-                        onPress={() => Alert.alert("Payments", "Payment methods coming soon.")}
+                        onPress={() => navigation.navigate('PaymentMethods')}
                     />
                     <MenuItem
                         icon={Heart}
@@ -626,11 +518,6 @@ export default function ProfileScreen() {
                             triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
                             setIsEditModalVisible(true);
                         }}
-                    />
-                    <MenuItem
-                        icon={Lock}
-                        label="Password & Security"
-                        onPress={() => setIsSecurityModalVisible(true)}
                     />
                     <MenuItem
                         icon={Bell}
@@ -730,20 +617,6 @@ export default function ProfileScreen() {
                                 />
                             </View>
 
-                            {/* Email Address */}
-                            <Text className="text-gray-400 font-bold mb-2 ml-2 uppercase text-[10px] tracking-widest">Email Address</Text>
-                            <View className="flex-row items-center border border-gray-100 rounded-3xl px-4 h-14 bg-gray-50 mb-6">
-                                <Mail size={18} color="#9CA3AF" />
-                                <TextInput
-                                    className="flex-1 font-bold text-black text-base ml-3"
-                                    placeholder="your.email@example.com"
-                                    keyboardType="email-address"
-                                    autoCapitalize="none"
-                                    value={newEmail}
-                                    onChangeText={setNewEmail}
-                                    style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
-                                />
-                            </View>
 
                             {/* Phone Number (Read-only) */}
                             {user?.phone && (
@@ -786,99 +659,6 @@ export default function ProfileScreen() {
                                 ) : (
                                     <Text className="text-white font-bold text-lg">Save Changes</Text>
                                 )}
-                            </TouchableOpacity>
-                        </ScrollView>
-                    </KeyboardAvoidingView>
-                </View>
-            </Modal>
-            {/* Password & Security Modal */}
-            <Modal
-                animationType="slide"
-                transparent={true}
-                visible={isSecurityModalVisible}
-                onRequestClose={() => setIsSecurityModalVisible(false)}
-            >
-                <View className="flex-1 justify-end bg-black/50">
-                    <KeyboardAvoidingView
-                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                        className="bg-white rounded-t-[40px] p-8 pb-12"
-                    >
-                        <View className="flex-row justify-between items-center mb-6">
-                            <Text className="text-xl font-bold text-black">Security</Text>
-                            <TouchableOpacity
-                                onPress={() => setIsSecurityModalVisible(false)}
-                                className="bg-gray-100 p-2 rounded-full"
-                            >
-                                <X size={16} color="#000" />
-                            </TouchableOpacity>
-                        </View>
-
-                        <ScrollView showsVerticalScrollIndicator={false} className="max-h-[70vh]">
-                            <Text className="text-gray-400 font-bold mb-4 uppercase text-[10px] tracking-widest">Login Security</Text>
-                            <View className="bg-gray-50 rounded-3xl p-6 mb-8">
-                                <View className="flex-row items-center justify-between mb-6">
-                                    <View className="flex-row items-center">
-                                        <Fingerprint size={20} color="#111827" />
-                                        <Text className="ml-4 font-bold text-gray-900">Biometric Login</Text>
-                                    </View>
-                                    <Switch
-                                        value={secPrefs.biometric}
-                                        onValueChange={(v) => updateSecPrefs('biometric', v)}
-                                        trackColor={{ false: '#E5E7EB', true: '#B52725' }}
-                                    />
-                                </View>
-                                <View className="flex-row items-center justify-between">
-                                    <View className="flex-row items-center">
-                                        <Shield size={20} color="#111827" />
-                                        <Text className="ml-4 font-bold text-gray-900">2-Factor Auth (2FA)</Text>
-                                    </View>
-                                    <Switch
-                                        value={secPrefs.two_factor}
-                                        onValueChange={(v) => updateSecPrefs('two_factor', v)}
-                                        trackColor={{ false: '#E5E7EB', true: '#B52725' }}
-                                    />
-                                </View>
-                            </View>
-
-                            <Text className="text-gray-400 font-bold mb-4 uppercase text-[10px] tracking-widest">Update Password</Text>
-                            <View className="space-y-4 mb-8">
-                                <View className="flex-row items-center border border-gray-100 rounded-2xl px-4 h-14 bg-gray-50">
-                                    <Lock size={18} color="#9CA3AF" />
-                                    <TextInput
-                                        className="flex-1 font-bold text-black text-base ml-3"
-                                        placeholder="New Password"
-                                        secureTextEntry
-                                        value={newPassword}
-                                        onChangeText={setNewPassword}
-                                        style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
-                                    />
-                                </View>
-                                <View className="flex-row items-center border border-gray-100 rounded-2xl px-4 h-14 bg-gray-50 mt-4">
-                                    <Lock size={18} color="#9CA3AF" />
-                                    <TextInput
-                                        className="flex-1 font-bold text-black text-base ml-3"
-                                        placeholder="Confirm New Password"
-                                        secureTextEntry
-                                        value={confirmPassword}
-                                        onChangeText={setConfirmPassword}
-                                        style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
-                                    />
-                                </View>
-                                <TouchableOpacity
-                                    onPress={handleChangePassword}
-                                    disabled={isChangingPassword}
-                                    className={`h-14 rounded-2xl items-center justify-center mt-4 ${isChangingPassword ? 'bg-gray-300' : 'bg-[#111827]'}`}
-                                >
-                                    {isChangingPassword ? <ActivityIndicator color="white" /> : <Text className="text-white font-bold">Update Password</Text>}
-                                </TouchableOpacity>
-                            </View>
-
-                            <Text className="text-gray-400 font-bold mb-4 uppercase text-[10px] tracking-widest">Danger Zone</Text>
-                            <TouchableOpacity
-                                onPress={() => Alert.alert("Deactivate Account", "This action is irreversible. Please contact support.")}
-                                className="bg-red-50 rounded-3xl p-6 border border-red-100 mb-6"
-                            >
-                                <Text className="text-[#B52725] font-bold text-center">Deactivate Account</Text>
                             </TouchableOpacity>
                         </ScrollView>
                     </KeyboardAvoidingView>

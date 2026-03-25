@@ -12,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import * as SecureStore from 'expo-secure-store';
 import { supabase, setSessionFromTokens } from '../lib/supabase';
-import { Phone, Mail, Lock, Eye, EyeOff, X, ArrowLeft, MessageCircle } from 'lucide-react-native';
+import { Phone, ArrowLeft, MessageCircle } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -25,7 +25,7 @@ const getApiUrl = () => {
         return process.env.EXPO_PUBLIC_API_URL;
     }
     return __DEV__
-        ? 'http://192.168.29.171:3000' // Fallback to current local device IP
+        ? 'http://192.168.29.184:3000' // Fallback to current local device IP
         : 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
 };
 
@@ -50,7 +50,7 @@ const fetchWithTimeout = async (resource: RequestInfo | string, options: Request
     }
 };
 
-type AuthMode = 'choose' | 'phone-input' | 'phone-otp' | 'email-login' | 'email-signup';
+type AuthMode = 'choose' | 'phone-input' | 'phone-otp';
 
 export default function AuthScreen() {
     const navigation = useNavigation<any>();
@@ -65,10 +65,6 @@ export default function AuthScreen() {
     const [resendTimer, setResendTimer] = useState(0);
     const otpRefs = useRef<(TextInput | null)[]>([]);
 
-    // Email state
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [showPassword, setShowPassword] = useState(false);
 
     // Bottom sheet animation
     const slideAnim = useRef(new Animated.Value(0)).current;
@@ -212,73 +208,12 @@ export default function AuthScreen() {
     const handleResendOtp = () => {
         if (resendTimer > 0) return;
         handleSendOtp();
-    };
-
-    // ==================== EMAIL AUTH FLOW ====================
-
-    const handleEmailAuth = async () => {
-        if (!email || !password) {
-            haptic();
-            Alert.alert('Required', 'Please fill in all fields');
-            return;
-        }
-
-        setIsLoading(true);
-        haptic(Haptics.ImpactFeedbackStyle.Light);
-
-        try {
-            if (mode === 'email-login') {
-                const { error } = await supabase.auth.signInWithPassword({ email, password });
-                if (error) throw error;
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            } else {
-                const { error, data } = await supabase.auth.signUp({ email, password });
-                if (error) throw error;
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-
-                // Check if user actually requires email confirmation
-                if (data.user?.identities?.length === 0) {
-                    Alert.alert('Exists', 'An account with this email already exists. Please log in.');
-                    setMode('email-login');
-                } else if (!data.session) {
-                    Alert.alert('Success', 'Account created! Please check your email to verify your account.');
-                    // Don't set pending_profile_setup here if they have to verify email first
-                } else {
-                    // Set flag BEFORE signup completes since session is active
-                    await SecureStore.setItemAsync('pending_profile_setup', 'true');
-                }
-                // If data.session exists, the RootNavigator will naturally route to ProfileSetup 
-                // because the flag was already set in AsyncStorage.
-            }
-        } catch (error: any) {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            Alert.alert('Error', error.message || 'Authentication failed');
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const handleForgotPassword = async () => {
-        if (!email) {
-            Alert.alert('Email Required', 'Please enter your email address.');
-            return;
-        }
-        setIsLoading(true);
-        try {
-            const { error } = await supabase.auth.resetPasswordForEmail(email);
-            if (error) throw error;
-            Alert.alert('Reset Email Sent', 'Check your email for a password reset link.');
-        } catch (error: any) {
-            Alert.alert('Error', error.message);
-        } finally {
-            setIsLoading(false);
-        }
-    };
+     };
 
     const goBack = () => {
         haptic(Haptics.ImpactFeedbackStyle.Light);
         if (mode === 'phone-otp') setMode('phone-input');
-        else if (mode === 'phone-input' || mode === 'email-login' || mode === 'email-signup') setMode('choose');
+        else if (mode === 'phone-input') setMode('choose');
     };
 
     // ==================== RENDER HELPERS ====================
@@ -304,14 +239,6 @@ export default function AuthScreen() {
                 <Text className="text-white font-bold text-[15px] ml-3">Continue with Phone</Text>
             </TouchableOpacity>
 
-            {/* Continue with Email — Secondary */}
-            <TouchableOpacity
-                onPress={() => { haptic(); setMode('email-login'); }}
-                className="bg-gray-100 h-14 rounded-2xl items-center justify-center flex-row mt-3"
-            >
-                <Mail size={18} color="#374151" />
-                <Text className="text-gray-700 font-bold text-[15px] ml-3">Continue with Email</Text>
-            </TouchableOpacity>
 
             {/* Guest Access */}
             <TouchableOpacity
@@ -440,97 +367,13 @@ export default function AuthScreen() {
         </View>
     );
 
-    const renderEmailAuth = () => (
-        <View>
-            <TouchableOpacity onPress={goBack} className="mb-4 flex-row items-center">
-                <ArrowLeft size={18} color="#B52725" />
-                <Text className="ml-2 font-bold text-gray-600 text-sm">Back</Text>
-            </TouchableOpacity>
-
-            <Text className="text-xl font-bold text-[#B52725] mb-1">
-                {mode === 'email-login' ? 'Welcome Back' : 'Create Account'}
-            </Text>
-            <Text className="text-gray-400 text-sm font-medium mb-6">
-                {mode === 'email-login' ? 'Sign in with your email & password' : 'Sign up with your email'}
-            </Text>
-
-            {/* Email Field */}
-            <View className="flex-row items-center border border-gray-200 rounded-2xl px-4 h-14 bg-gray-50">
-                <Mail color="#9CA3AF" size={18} />
-                <TextInput
-                    className="flex-1 ml-3 font-bold text-black text-base"
-                    placeholder="Email"
-                    placeholderTextColor="#9CA3AF"
-                    autoCapitalize="none"
-                    keyboardType="email-address"
-                    value={email}
-                    onChangeText={setEmail}
-                    style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
-                />
-            </View>
-
-            {/* Password Field */}
-            <View className="flex-row items-center border border-gray-200 rounded-2xl px-4 h-14 bg-gray-50 mt-3">
-                <Lock color="#9CA3AF" size={18} />
-                <TextInput
-                    className="flex-1 ml-3 font-bold text-black text-base"
-                    placeholder="Password"
-                    placeholderTextColor="#9CA3AF"
-                    secureTextEntry={!showPassword}
-                    value={password}
-                    onChangeText={setPassword}
-                    style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
-                />
-                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} className="p-2 -mr-2">
-                    {showPassword ? <EyeOff color="#9CA3AF" size={18} /> : <Eye color="#9CA3AF" size={18} />}
-                </TouchableOpacity>
-            </View>
-
-            {/* Forgot Password (Login only) */}
-            {mode === 'email-login' && (
-                <TouchableOpacity className="self-end mt-3" onPress={handleForgotPassword}>
-                    <Text className="font-bold text-gray-500 text-xs underline">Forgot Password?</Text>
-                </TouchableOpacity>
-            )}
-
-            {/* Submit Button */}
-            <TouchableOpacity
-                onPress={handleEmailAuth}
-                disabled={isLoading}
-                className={`mt-6 h-14 rounded-2xl items-center justify-center ${
-                    isLoading ? 'bg-gray-300' : 'bg-[#B52725]'
-                }`}
-            >
-                {isLoading ? (
-                    <ActivityIndicator color="white" />
-                ) : (
-                    <Text className="text-white font-bold text-[15px]">
-                        {mode === 'email-login' ? 'Login' : 'Sign Up'}
-                    </Text>
-                )}
-            </TouchableOpacity>
-
-            {/* Toggle Login/Signup */}
-            <View className="flex-row justify-center mt-5">
-                <Text className="text-gray-400 font-medium text-sm">
-                    {mode === 'email-login' ? 'Need an account? ' : 'Already have an account? '}
-                </Text>
-                <TouchableOpacity onPress={() => setMode(mode === 'email-login' ? 'email-signup' : 'email-login')}>
-                    <Text className="text-[#B52725] font-bold text-sm underline">
-                        {mode === 'email-login' ? 'Sign up' : 'Login'}
-                    </Text>
-                </TouchableOpacity>
-            </View>
-        </View>
-    );
 
     const getCurrentContent = () => {
         switch (mode) {
             case 'choose': return renderChooseMode();
             case 'phone-input': return renderPhoneInput();
             case 'phone-otp': return renderPhoneOtp();
-            case 'email-login':
-            case 'email-signup': return renderEmailAuth();
+            case 'phone-otp': return renderPhoneOtp();
         }
     };
 
