@@ -177,7 +177,11 @@ export default function TransactionalAuthModal({
                         </TouchableOpacity>
                     </View>
 
-                    <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
+                    <ScrollView 
+                        showsVerticalScrollIndicator={false} 
+                        bounces={false}
+                        keyboardShouldPersistTaps="handled"
+                    >
                         {mode === 'phone-input' ? (
                             <View>
                                 <Text className="text-xl font-bold text-[#B52725] mb-1">Enter Phone Number</Text>
