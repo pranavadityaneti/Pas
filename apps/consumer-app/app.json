@@ -17,7 +17,7 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
-          "NSAllowsArbitraryLoads": false,
+          "NSAllowsArbitraryLoads": true,
           "NSExceptionDomains": {
             "pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com": {
               "NSExceptionAllowsInsecureHTTPLoads": true,
