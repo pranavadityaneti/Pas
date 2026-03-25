@@ -31,7 +31,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.pas.merchant",
-      "buildNumber": "10",
+      "buildNumber": "11",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Your location is used to set your shop address, allowing customers to find your store correctly on the map.",
         "NSCameraUsageDescription": "Camera access is required to capture and upload KYC documents for account verification.",
