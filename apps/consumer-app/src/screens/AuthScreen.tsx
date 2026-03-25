@@ -14,20 +14,10 @@ import * as SecureStore from 'expo-secure-store';
 import { supabase, setSessionFromTokens } from '../lib/supabase';
 import { Phone, ArrowLeft, MessageCircle } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import { getApiUrl } from '../lib/api';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-// Backend API URL — using environment variables with local fallback
-const getApiUrl = () => {
-    // In development, the API runs locally (can be overridden via EXPO_PUBLIC_API_URL in .env)
-    // In production, it should be the deployed server URL
-    if (process.env.EXPO_PUBLIC_API_URL) {
-        return process.env.EXPO_PUBLIC_API_URL;
-    }
-    return __DEV__
-        ? 'http://192.168.29.184:3000' // Fallback to current local device IP
-        : 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
-};
 
 // Helper to prevent infinite fetch hangs on physical devices
 const fetchWithTimeout = async (resource: RequestInfo | string, options: RequestInit & { timeout?: number } = {}) => {

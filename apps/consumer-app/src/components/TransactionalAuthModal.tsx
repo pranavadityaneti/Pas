@@ -8,6 +8,7 @@ import { Phone, ArrowLeft, MessageCircle, X } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import { setSessionFromTokens } from '../lib/supabase';
 import * as Haptics from 'expo-haptics';
+import { getApiUrl } from '../lib/api';
 
 interface TransactionalAuthModalProps {
     visible: boolean;
@@ -17,13 +18,6 @@ interface TransactionalAuthModalProps {
     subtitle?: string;
 }
 
-// Backend API URL — using environment variables with local fallback
-const getApiUrl = () => {
-    if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
-    return __DEV__
-        ? 'http://192.168.29.184:3000' 
-        : 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
-};
 
 // Helper to prevent infinite fetch hangs on physical devices
 const fetchWithTimeout = async (resource: RequestInfo | string, options: RequestInit & { timeout?: number } = {}) => {
