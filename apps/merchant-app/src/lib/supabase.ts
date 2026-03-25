@@ -3,12 +3,15 @@ import { createClient } from '@supabase/supabase-js';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+let supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+let supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-    console.error('CRITICAL: Supabase environment variables are missing!');
-    throw new Error('Supabase URL or Anon Key not found. Check your environment configuration.');
+    console.error('CRITICAL: Supabase URL or Anon Key missing. App will not function correctly.');
+    // Initialize with dummy data to prevent immediate crash, 
+    // the network requests will fail later but the app will boot.
+    supabaseUrl = 'https://missing-url.supabase.co';
+    supabaseAnonKey = 'missing-key';
 }
 
 // Custom storage adapter for React Native using SecureStore
