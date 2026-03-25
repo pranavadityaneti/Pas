@@ -9,6 +9,7 @@
             "distribution": "internal"
         },
         "production": {
+            "credentialsSource": "local",
             "distribution": "store",
             "env": {
                 "NPM_CONFIG_LEGACY_PEER_DEPS": "true"
