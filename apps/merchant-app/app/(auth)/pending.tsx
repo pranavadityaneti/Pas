@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -64,7 +64,7 @@ export default function PendingScreen() {
                     </Text>
                 </View>
 
-                <TouchableOpacity style={styles.contactButton}>
+                <TouchableOpacity style={styles.contactButton} onPress={() => Linking.openURL('mailto:support@pickatstore.io?subject=Merchant%20Application%20Inquiry')}>
                     <Ionicons name="mail-outline" size={20} color={Colors.primary} />
                     <Text style={styles.contactButtonText}>Contact Support</Text>
                 </TouchableOpacity>
