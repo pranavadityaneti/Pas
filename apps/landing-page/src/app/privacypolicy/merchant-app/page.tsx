@@ -68,23 +68,23 @@ export default function MerchantAppPrivacyPolicy() {
                             <ul className="space-y-3 text-black-shadow/70">
                                 <li className="flex items-start gap-3">
                                     <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
-                                    <span><strong>Personal Identification Information:</strong> Name, email address, phone number, and business address for account creation and communication.</span>
+                                    <span><strong>Location Data:</strong> We collect precise and approximate location data (GPS coordinates) when you use the app to accurately map your physical store for local customer deliveries.</span>
                                 </li>
                                 <li className="flex items-start gap-3">
                                     <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
-                                    <span><strong>KYC Documents:</strong> National ID cards, business permits, and related documentation required for regulatory compliance and account verification.</span>
+                                    <span><strong>Camera and Photo Library Access:</strong> We require access to your device's camera and photo library strictly for capturing and uploading KYC documents, business certificates, and store photographs.</span>
                                 </li>
                                 <li className="flex items-start gap-3">
                                     <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
-                                    <span><strong>Business Information:</strong> Store name, product inventory, pricing data, and operational hours.</span>
+                                    <span><strong>Financial Information:</strong> We collect your bank account details (Account Number, IFSC code) strictly to process payouts for your completed orders.</span>
                                 </li>
                                 <li className="flex items-start gap-3">
                                     <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
-                                    <span><strong>Transaction Data:</strong> Order history, payment records, and sales analytics.</span>
+                                    <span><strong>KYC Documents:</strong> Government-issued identification (including PAN and Aadhaar), business permits (GST, FSSAI, MSME), and related documentation required for regulatory compliance, identity verification, and fraud prevention.</span>
                                 </li>
                                 <li className="flex items-start gap-3">
                                     <span className="w-2 h-2 rounded-full bg-store-red mt-2 flex-shrink-0"></span>
-                                    <span><strong>Device Information:</strong> Device type, operating system, and app version for technical support and optimization.</span>
+                                    <span><strong>Razorpay:</strong> Our secure payment processing partner for handling financial transactions and merchant payouts.</span>
                                 </li>
                             </ul>
                         </section>
