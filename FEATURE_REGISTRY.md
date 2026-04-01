@@ -34,6 +34,7 @@
 | Location Picker | `src/screens/LocationPickerScreen.tsx` | 🔒 LOCKED | Feb 27, 2026 | Interactive map + Google Places Autocomplete search. |
 | Storefront | `src/screens/StorefrontScreen.tsx` | 🔒 LOCKED | Feb 27, 2026 | Hero carousel, restaurant info, category pills, 2-col product grid, cart integration. |
 | Cart | `src/screens/CartScreen.tsx` | 🔒 LOCKED | Apr 1, 2026 | Full implementation with global sync and fallback logic. |
+| Support / FAQ | `src/screens/SupportScreen.tsx` | 🔒 LOCKED | Apr 1, 2026 | Comprehensive FAQ accordion with brand-red search UI. |
 
 ### Navigation
 

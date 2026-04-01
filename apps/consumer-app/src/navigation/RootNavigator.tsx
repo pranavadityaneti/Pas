@@ -21,14 +21,18 @@ import CategoryDetailScreen from '../screens/CategoryDetailScreen';
 import YourOrdersScreen from '../screens/YourOrdersScreen';
 import CartScreen from '../screens/CartScreen';
 import FavoritesScreen from '../screens/FavoritesScreen';
+import PaymentMethodsScreen from '../screens/PaymentMethodsScreen';
+import SupportScreen from '../screens/SupportScreen';
 
 import { RootStackParamList } from './types';
+
+import { useAuth } from '../context/AuthContext';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function RootNavigator() {
+    const { session, isLoading: authLoading } = useAuth();
     const [isLoading, setIsLoading] = useState(true);
-    const [session, setSession] = useState<any>(null);
     const [hasSeenOnboarding, setHasSeenOnboarding] = useState(false);
     const [pendingProfileSetup, setPendingProfileSetup] = useState(false);
 
@@ -41,43 +45,32 @@ export default function RootNavigator() {
                 if (mounted && seen === 'true') {
                     setHasSeenOnboarding(true);
                 }
-            } catch (err) {
-                console.warn(err);
-            }
-        };
-
-        loadLocalData();
-
-        // Listen for auth state changes (automatically triggers INITIAL_SESSION event)
-        const { data: authListener } = supabase.auth.onAuthStateChange(
-            async (_event, session) => {
-                if (!mounted) return;
                 
+                // Track pending profile setup status from SecureStore
                 if (session) {
                     const pending = await SecureStore.getItemAsync('pending_profile_setup');
-                    if (pending === 'true') {
-                        setPendingProfileSetup(true);
-                        // Removed: await SecureStore.deleteItemAsync('pending_profile_setup');
-                        // ProfileSetupScreen must remove it when completed or skipped to prevent a race condition
-                    } else {
-                        setPendingProfileSetup(false);
-                    }
+                    setPendingProfileSetup(pending === 'true');
                 } else {
                     setPendingProfileSetup(false);
                 }
                 
-                setSession(session);
-                setIsLoading(false);
+            } catch (err) {
+                console.warn(err);
+            } finally {
+                if (mounted) setIsLoading(false);
             }
-        );
+        };
+
+        if (!authLoading) {
+            loadLocalData();
+        }
 
         return () => {
             mounted = false;
-            authListener.subscription.unsubscribe();
         };
-    }, []);
+    }, [authLoading, session]);
 
-    if (isLoading) {
+    if (isLoading || authLoading) {
         return (
             <View className="flex-1 items-center justify-center bg-white">
                 <ActivityIndicator size="large" color="#B52725" />
@@ -104,6 +97,8 @@ export default function RootNavigator() {
                     <Stack.Screen name="LocationPicker" component={LocationPickerScreen} options={{ presentation: 'fullScreenModal' }} />
                     <Stack.Screen name="Profile" component={ProfileScreen} />
                     <Stack.Screen name="Favorites" component={FavoritesScreen} />
+                    <Stack.Screen name="PaymentMethods" component={PaymentMethodsScreen} />
+                    <Stack.Screen name="Support" component={SupportScreen} />
                 </>
             ) : (
                 <>
@@ -128,6 +123,7 @@ export default function RootNavigator() {
                     <Stack.Screen name="LocationPicker" component={LocationPickerScreen} options={{ presentation: 'fullScreenModal' }} />
                     <Stack.Screen name="Profile" component={ProfileScreen} />
                     <Stack.Screen name="Favorites" component={FavoritesScreen} />
+                    <Stack.Screen name="Support" component={SupportScreen} />
                 </>
             )}
         </Stack.Navigator>

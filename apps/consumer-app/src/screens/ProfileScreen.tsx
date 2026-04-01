@@ -499,8 +499,8 @@ export default function ProfileScreen() {
                     />
                     <MenuItem
                         icon={HelpCircle}
-                        label="Help Center"
-                        onPress={() => Alert.alert("Support", "Connecting to Help Center...")}
+                        label="Support"
+                        onPress={() => navigation.navigate('Support' as any)}
                     />
                     <MenuItem
                         icon={ShieldCheck}
