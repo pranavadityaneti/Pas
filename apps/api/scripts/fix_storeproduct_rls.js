@@ -11,7 +11,7 @@ async function run() {
             ON "public"."StoreProduct" 
             FOR INSERT 
             WITH CHECK (
-                "storeId" IN (SELECT id FROM "public"."Store" WHERE "merchant_id" = auth.uid()::text)
+                "storeId" IN (SELECT id FROM "public"."Store" WHERE "merchant_id" = auth.uid()::text OR "managerId" = auth.uid())
             )
         `);
 
@@ -21,7 +21,7 @@ async function run() {
             ON "public"."StoreProduct" 
             FOR UPDATE 
             USING (
-                "storeId" IN (SELECT id FROM "public"."Store" WHERE "merchant_id" = auth.uid()::text)
+                "storeId" IN (SELECT id FROM "public"."Store" WHERE "merchant_id" = auth.uid()::text OR "managerId" = auth.uid())
             )
         `);
 

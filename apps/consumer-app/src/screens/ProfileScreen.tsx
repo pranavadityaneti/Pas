@@ -1,4 +1,4 @@
-// @lock — Do NOT overwrite. Approved layout as of Mar 12, 2026.
+// @lock — Do NOT overwrite. Approved upsert & hydration logic as of April 1, 2026.
 // Profile Screen: User profile with avatar, details, address management, logout.
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Image, Alert, ActivityIndicator, RefreshControl, Modal, TextInput, KeyboardAvoidingView, Platform, Switch } from 'react-native';
@@ -45,12 +45,12 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import * as SecureStore from 'expo-secure-store';
 import { apiClient, purgeAuthSession } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 
 export default function ProfileScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-    const [user, setUser] = useState<any>(null);
-    const [profile, setProfile] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
+    const { user, session, profile, isProfileLoading, refreshProfile } = useAuth();
+    const [loading, setLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
 
     const [isSaving, setIsSaving] = useState(false);
@@ -78,74 +78,29 @@ export default function ProfileScreen() {
 
 
     useEffect(() => {
-        fetchUserProfile();
+        if (!profile) {
+            refreshProfile();
+        }
     }, []);
 
-    const fetchUserProfile = async (isRetry = false) => {
-        const cycleStart = Date.now();
-        console.log(`[Profile] Starting fetch cycle...`);
-
-        // Anti-hang safety wrapper for native keystone operations
-        const withTimeout = (promise: Promise<any>, ms = 2000) => 
-            Promise.race([
-                promise, 
-                new Promise((_, ref) => setTimeout(() => ref(new Error('SecureStore Timeout')), ms))
-            ]);
-
-        try {
-            // 1. Load from SECURE cache immediately (Mandate 2 - Secure Enclave)
-            try {
-                const cached = await withTimeout(SecureStore.getItemAsync('last_known_profile'));
-                if (cached) {
-                    const parsed = JSON.parse(cached);
-                    setProfile(parsed);
-                    setNewName(parsed.full_name || '');
-                    if (parsed.notification_preferences) {
-                        setNotifPrefs((prev: any) => ({ ...prev, ...parsed.notification_preferences }));
-                    }
-                    console.log("[Profile] Loaded from SecureStore in", Date.now() - cycleStart, "ms");
-                }
-            } catch (cacheErr: any) {
-                console.warn("[Profile] Bypassed local cache lock:", cacheErr.message);
+    // Sync modal state when profile loads or modal opens
+    useEffect(() => {
+        if (profile && isEditModalVisible) {
+            setNewName(profile.full_name || '');
+            if (profile.date_of_birth) {
+                // Convert YYYY-MM-DD to DD-MM-YYYY for display
+                const [y, m, d] = profile.date_of_birth.split('-');
+                setNewDob(`${d}-${m}-${y}`);
+            } else {
+                setNewDob('');
             }
-
-            if (!refreshing) setLoading(true);
-
-            // 2. Fetch via global hardened apiClient (Mandate 1 - Global Interceptor)
-            const response = await apiClient.fetch('/auth/me', { timeout: 8000 });
-
-            if (response.ok) {
-                const data = await response.json();
-                const profileData = data.profile;
-                const userData = data.user;
-
-                setUser(userData);
-                setProfile(profileData);
-                setNewName(profileData.full_name || '');
-                
-                if (profileData.notification_preferences) {
-                    setNotifPrefs((prev: any) => ({ ...prev, ...profileData.notification_preferences }));
-                }
-                
-                
-                // Securely Cache PII (with timeout protection)
-                try {
-                    await withTimeout(SecureStore.setItemAsync('last_known_profile', JSON.stringify(profileData)));
-                } catch(e: any) {
-                    console.warn("[Profile] Could not update cache:", e.message);
-                }
-                console.log(`[Profile] API sync completed in ${Date.now() - cycleStart}ms`);
-            } else if (response.status === 401) {
-                // Global interceptor in apiClient already handles redirect/purge
-                return;
-            }
-
-        } catch (error) {
-            console.error("[Profile] fetchUserProfile failure:", error);
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
         }
+    }, [profile, isEditModalVisible]);
+
+    const fetchUserProfile = async () => {
+        setRefreshing(true);
+        await refreshProfile();
+        setRefreshing(false);
     };
 
     const onRefresh = useCallback(() => {
@@ -175,6 +130,7 @@ export default function ProfileScreen() {
     const uploadAvatar = async (base64: string, extension: string) => {
         setIsSaving(true);
         try {
+            if (!user?.id) throw new Error('No user ID found');
             const fileName = `${user.id}-${Math.random()}.${extension}`;
             const { data, error: uploadError } = await supabase.storage
                 .from('avatars')
@@ -192,11 +148,11 @@ export default function ProfileScreen() {
             const { error: updateError } = await supabase
                 .from('profiles')
                 .update({ avatar_url: publicUrl })
-                .eq('id', user.id);
+                .eq('id', user?.id);
 
             if (updateError) throw updateError;
 
-            await fetchUserProfile();
+            await refreshProfile();
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         } catch (error: any) {
             Alert.alert("Upload Error", error.message);
@@ -259,17 +215,17 @@ export default function ProfileScreen() {
 
             const { error } = await supabase
                 .from('profiles')
-                .update({
+                .upsert({
+                    id: user.id,
                     full_name: newName,
                     date_of_birth: formattedDob,
                     updated_at: new Date()
-                })
-                .eq('id', user.id);
+                });
 
             if (error) throw error;
 
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            await fetchUserProfile();
+            await refreshProfile();
             setIsEditModalVisible(false);
             Alert.alert("Success", "Profile updated successfully!");
         } catch (error: any) {
@@ -309,7 +265,7 @@ export default function ProfileScreen() {
             const { error } = await supabase
                 .from('profiles')
                 .update({ notification_preferences: newPrefs })
-                .eq('id', user.id);
+                .eq('id', user?.id);
             if (error) throw error;
             triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
         } catch (error: any) {
@@ -348,7 +304,7 @@ export default function ProfileScreen() {
             const { error } = await supabase
                 .from('profiles')
                 .update({ security_preferences: newPrefs })
-                .eq('id', user.id);
+                .eq('id', user?.id);
             if (error) throw error;
             triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
         } catch (error: any) {
@@ -422,7 +378,7 @@ export default function ProfileScreen() {
         </View>
     );
 
-    if (loading) {
+    if (loading || isProfileLoading) {
         return (
             <View className="flex-1 bg-gray-50 items-center justify-center">
                 <ActivityIndicator size="large" color="#B52725" />
@@ -466,19 +422,25 @@ export default function ProfileScreen() {
                     </View>
 
                     <View className="mt-4 items-center">
-                        <Text className="text-2xl font-bold text-[#111827]">
-                            {profile?.full_name || user?.email?.split('@')[0] || 'Member'}
-                        </Text>
-                        {(profile?.email || user?.email) && (
-                            <Text className="text-gray-400 font-medium text-sm mt-1">
-                                {profile?.email || user?.email}
-                            </Text>
-                        )}
-                        {user?.phone && (
-                            <Text className="text-gray-400 font-medium text-sm mt-1">
-                                +{user.phone.replace(/^\+/, '')}
-                            </Text>
-                        )}
+                        {(() => {
+                            const rawPhone = user?.phone || '';
+                            const formattedPhone = rawPhone ? `(+91) ${rawPhone.replace(/^\+?91/, '').trim()}` : '';
+                            const displayName = profile?.full_name || formattedPhone || 'Guest User';
+                            const isShowingPhoneAsPrimary = !profile?.full_name && formattedPhone;
+
+                            return (
+                                <>
+                                    <Text className="text-2xl font-bold text-[#111827]">
+                                        {displayName}
+                                    </Text>
+                                    {user?.phone && !isShowingPhoneAsPrimary && (
+                                        <Text className="text-gray-400 font-medium text-sm mt-1">
+                                            {formattedPhone}
+                                        </Text>
+                                    )}
+                                </>
+                            );
+                        })()}
                     </View>
                 </View>
 

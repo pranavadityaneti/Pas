@@ -252,18 +252,18 @@ app.post('/payments/verify', (req, res) => {
 app.get('/payments/methods', async (req, res) => {
     try {
         const user = await getAuthUser(req);
-        const profile = await prisma.profiles.findUnique({
+        const profile = await prisma.profile.findUnique({
             where: { id: user.id },
-            select: { razorpay_customer_id: true }
+            select: { razorpayCustomerId: true }
         });
 
-        if (!profile?.razorpay_customer_id) {
+        if (!profile?.razorpayCustomerId) {
             return res.json([]);
         }
 
         if (!razorpayInstance) return res.status(500).json({ error: 'Razorpay not configured' });
 
-        const tokens = await razorpayInstance.customers.fetchTokens(profile.razorpay_customer_id);
+        const tokens = await razorpayInstance.customers.fetchTokens(profile.razorpayCustomerId);
         res.json(tokens.items || []);
     } catch (error: any) {
         const status = (error.message === 'Unauthorized' || error.message === 'Missing or invalid token') ? 401 : 500;
@@ -281,12 +281,12 @@ app.delete('/payments/methods/:tokenId', async (req, res) => {
     try {
         const { tokenId } = req.params;
         const user = await getAuthUser(req);
-        const profile = await prisma.profiles.findUnique({
+        const profile = await prisma.profile.findUnique({
             where: { id: user.id },
-            select: { razorpay_customer_id: true }
+            select: { razorpayCustomerId: true }
         });
 
-        if (!profile?.razorpay_customer_id) {
+        if (!profile?.razorpayCustomerId) {
             return res.status(403).json({ error: 'Forbidden: No associated payment account' });
         }
 
@@ -301,7 +301,7 @@ app.delete('/payments/methods/:tokenId', async (req, res) => {
             throw err;
         }
 
-        if (rzpToken.customer_id !== profile.razorpay_customer_id) {
+        if (rzpToken.customer_id !== profile.razorpayCustomerId) {
             console.error(`[SECURITY] IDOR attempt detected! User ${user.id} tried to delete token ${tokenId}`);
             return res.status(403).json({ error: 'Forbidden: You do not own this payment method' });
         }
@@ -523,7 +523,7 @@ app.get('/products/export', async (req, res) => {
         const data = products.map(p => ({
             name: p.name,
             mrp: p.mrp,
-            vertical: p.vertical,
+            vertical: p.category,
             category: p.category,
             brand: p.brand,
             ean: p.ean,
@@ -581,7 +581,7 @@ app.post('/products/export-selected', async (req, res) => {
             worksheet.addRow({
                 name: p.name,
                 mrp: p.mrp,
-                vertical: p.vertical,
+                vertical: p.category,
                 category: p.category,
                 brand: p.brand,
                 ean: p.ean,
@@ -796,7 +796,6 @@ async function processScraperDataset(datasetId: string) {
                     brand,
                     mrp: mrp > 0 ? mrp : sellingPrice,
                     category,
-                    vertical,
                     subcategory,
                     packsize,
                     image,
@@ -807,7 +806,6 @@ async function processScraperDataset(datasetId: string) {
                     brand,
                     mrp: mrp > 0 ? mrp : sellingPrice,
                     category,
-                    vertical,
                     subcategory,
                     packsize,
                     image,
@@ -976,7 +974,7 @@ async function validateTaxonomy(verticalId: string, category_id: string): Promis
     const category = await (prisma as any).tier2Category.findUnique({
         where: { id: category_id }
     });
-    return category && category.vertical_id === vertical_id;
+    return category && category.verticalId === verticalId;
 }
 
 // Get All Verticals and Categories (API-driven taxonomy)
@@ -1213,8 +1211,7 @@ app.post('/products/bulk', upload.single('file'), async (req, res) => {
                         ean: row.ean ? String(row.ean) : null,
                         sourceProductId: row.source_product_id ? String(row.source_product_id) : null,
                         updatedAt: new Date(),
-                        category_id: row.category_id,
-                        verticalId: row.vertical_id,
+                        category: row.category_id || row.category,
                         // New Fields
                         unitType: row.unitType || null,
                         unitValue: unitValue,
@@ -1714,7 +1711,7 @@ app.get('/consumer/stores', async (req, res) => {
                 take,
                 include: {
                     city: { select: { name: true } },
-                    _count: { select: { storeProduct: { where: { active: true } } } }
+                    _count: { select: { products: { where: { active: true } } } }
                 },
                 orderBy: { name: 'asc' }
             }),
@@ -1727,11 +1724,11 @@ app.get('/consumer/stores', async (req, res) => {
             name: store.name,
             address: store.address,
             image: store.image,
-            city: store.city?.name || null,
+            city: (store as any).city?.name || null,
             active: store.active,
-            operating_hours: store.operating_hours,
-            operating_days: store.operating_days,
-            product_count: (store as any)._count?.storeProduct || 0,
+            operating_hours: store.operatingHours,
+            operating_days: store.operatingDays,
+            product_count: (store as any)._count?.products || 0,
         }));
 
         res.json({
@@ -1821,8 +1818,8 @@ app.get('/consumer/stores/:id', async (req, res) => {
                 address: store.address,
                 image: store.image,
                 city: store.city?.name || null,
-                operating_hours: store.operating_hours,
-                operating_days: store.operating_days,
+                operating_hours: (store as any).operatingHours,
+                operating_days: (store as any).operatingDays,
             },
             sections,
             totalProducts: storeProducts.length,
@@ -1897,7 +1894,7 @@ app.post('/orders', async (req, res) => {
                 totalAmount,
                 status: 'PENDING',
                 isPaid: false,
-                orderItems: {
+                items: {
                     create: items.map((item: any) => ({
                         storeProductId: item.storeProductId,
                         quantity: item.quantity,
@@ -1906,7 +1903,7 @@ app.post('/orders', async (req, res) => {
                 }
             },
             include: {
-                orderItems: { include: { storeProduct: { include: { product: true } } } },
+                items: { include: { storeProduct: { include: { product: true } } } },
                 store: true
             }
         });
@@ -2013,17 +2010,17 @@ app.patch('/orders/:id/status', async (req, res) => {
         const order = await prisma.order.update({
             where: { id },
             data,
-            include: { user: true, orderItems: { include: { storeProduct: { include: { product: true } } } }, store: { include: { manager: true } } }
+            include: { user: true, items: { include: { storeProduct: { include: { product: true } } } }, store: { include: { manager: true } } }
         });
 
-        if (status === 'READY' && order.user?.phone && order.otp) {
-            smsService.sendOtp(order.user.phone, order.otp).catch(err => console.error('OTP SMS Failed:', err));
+        if (status === 'READY' && (order as any).user?.phone && order.otp) {
+            smsService.sendOtp((order as any).user.phone, order.otp).catch(err => console.error('OTP SMS Failed:', err));
         }
 
         // --- Notification & Stock Restoration on Cancellation ---
         if (status === 'CANCELLED') {
             // Restore Stock
-            for (const item of order.orderItems) {
+            for (const item of (order as any).items) {
                 await prisma.storeProduct.update({
                     where: { id: item.storeProductId },
                     data: { stock: { increment: item.quantity } }
@@ -2032,11 +2029,11 @@ app.patch('/orders/:id/status', async (req, res) => {
         }
 
         // Notify Manager & User (Common logic)
-        if (order.store?.managerId) {
+        if ((order as any).store?.managerId) {
             // Notify Manager
             const notifTitle = `Order ${status.replace('_', ' ')}`;
             await createNotification(
-                order.store.managerId,
+                (order as any).store.managerId,
                 'ORDER',
                 notifTitle,
                 `Order #${order.orderNumber} status updated to ${status}`,
@@ -2044,7 +2041,7 @@ app.patch('/orders/:id/status', async (req, res) => {
             );
         }
 
-        if (order.user?.phone) {
+        if ((order as any).user?.phone) {
             const smsStatusMap: Record<string, string> = {
                 'CONFIRMED': 'Confirmed',
                 'PREPARING': 'Being Prepared',
@@ -2057,7 +2054,7 @@ app.patch('/orders/:id/status', async (req, res) => {
             const smsStatus = smsStatusMap[status];
 
             if (smsStatus) {
-                smsService.sendOrderUpdate(order.user.phone, id, smsStatus).catch(err => console.error('SMS Failed:', err));
+                smsService.sendOrderUpdate((order as any).user.phone, id, smsStatus).catch(err => console.error('SMS Failed:', err));
             }
         }
 
@@ -2156,7 +2153,7 @@ app.post('/webhooks/payment', async (req, res) => {
             const order = await prisma.order.update({
                 where: { id: orderId },
                 data: { isPaid: true },
-                include: { user: true, orderItems: { include: { storeProduct: { include: { product: true } } } } }
+                include: { user: true, items: { include: { storeProduct: { include: { product: true } } } } }
             });
             io.emit('order_updated', order);
             return res.json({ message: 'Payment captured' });
@@ -2182,7 +2179,7 @@ app.post('/orders/:id/verify-otp', async (req, res) => {
         const updatedOrder = await prisma.order.update({
             where: { id },
             data: { status: 'COMPLETED' },
-            include: { user: true, orderItems: { include: { storeProduct: { include: { product: true } } } } }
+            include: { user: true, items: { include: { storeProduct: { include: { product: true } } } } }
         });
 
         io.emit('order_updated', updatedOrder);
@@ -2730,6 +2727,17 @@ app.get('/debug/list-users', async (req, res) => {
  * Body: { phone: "91XXXXXXXXXX" }
  */
 app.post('/auth/send-otp', async (req, res) => {
+    // [INJECT: Send OTP Reviewer Bypass]
+    console.log('>>> [DEBUG] INCOMING BODY:', JSON.stringify(req.body));
+    const rawInput = req.body.phone || req.body.phoneNumber || '';
+    const incomingPhone = String(rawInput).replace(/\D/g, '');
+    console.log('>>> [DEBUG] PARSED PHONE:', incomingPhone);
+    
+    if (incomingPhone.endsWith('9959777027')) {
+        console.log('[Reviewer Bypass] Intercepted Send OTP request. Bypassing WhatsApp API.');
+        return res.status(200).json({ success: true, message: 'Mock OTP sent successfully.' });
+    }
+
     try {
         const { phone, isSignup, isLogin } = req.body;
 
@@ -2812,6 +2820,70 @@ app.post('/auth/send-otp', async (req, res) => {
  * Body: { phone: "91XXXXXXXXXX", otp: "123456" }
  */
 app.post('/auth/verify-otp', async (req, res) => {
+    // [INJECT: Verify OTP Reviewer Bypass - Static Credential Method]
+    console.log('>>> [DEBUG] INCOMING BODY:', JSON.stringify(req.body));
+    const rawInput = req.body.phone || req.body.phoneNumber || '';
+    const incomingPhone = String(rawInput).replace(/\D/g, '');
+    console.log('>>> [DEBUG] PARSED PHONE:', incomingPhone);
+    const TEST_OTP = '123456';
+    let targetUserId = null;
+
+    if (incomingPhone.endsWith('9959777027') && req.body.otp === TEST_OTP) {
+        targetUserId = '200ea527-0fb9-4db0-8165-ca1286ea91b0'; // Merchant Test UUID
+    }
+
+    if (targetUserId) {
+        console.log('[Reviewer Bypass] Test credentials verified. Fetching email for UUID:', targetUserId);
+        
+        try {
+            // 1. Ensure static password environment variable exists
+            const staticPassword = process.env.REVIEWER_STATIC_PWD;
+            if (!staticPassword) {
+                console.error('[Reviewer Bypass] Missing REVIEWER_STATIC_PWD env variable.');
+                return res.status(500).json({ error: 'Server configuration error' });
+            }
+
+            // 2. Resolve the target user's email securely via admin client
+            const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(targetUserId);
+            
+            if (userError || !userData?.user?.email) {
+                console.error('[Reviewer Bypass] Failed to resolve email:', userError);
+                return res.status(500).json({ error: 'Failed to resolve reviewer email.' });
+            }
+            
+            // 3. Issue the live session directly from Supabase via static password signin
+            await supabaseAdmin.auth.admin.updateUserById(targetUserId, { password: staticPassword });
+            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+                email: userData.user.email,
+                password: staticPassword
+            });
+            
+            if (signInError || !signInData.session) {
+                 console.error('[Reviewer Bypass] Auth failed:', signInError);
+                 return res.status(500).json({ error: 'Failed to mint reviewer session.' });
+            }
+
+            return res.status(200).json({ 
+                success: true, 
+                session: {
+                    access_token: signInData.session.access_token,
+                    refresh_token: signInData.session.refresh_token,
+                    expires_in: signInData.session.expires_in,
+                    expiresAt: signInData.session.expires_at
+                },
+                user: {
+                    id: signInData.user.id,
+                    phone: `+${incomingPhone}`,
+                    email: signInData.user.email
+                },
+                isNewUser: false
+            });
+        } catch (e) {
+            console.error('[Reviewer Bypass] Mint execution error:', e);
+            return res.status(500).json({ error: 'Bypass internal error' });
+        }
+    }
+
     try {
         console.log(`[Auth] POST /auth/verify-otp hit`);
         const { phone, otp } = req.body;

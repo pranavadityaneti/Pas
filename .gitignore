@@ -9,3 +9,4 @@ build/
 .npmrc
 root_dev.log
 Thumbs.db
+**/.env

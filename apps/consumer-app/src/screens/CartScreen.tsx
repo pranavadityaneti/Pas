@@ -1,5 +1,6 @@
+// @lock — Do NOT overwrite. Approved layout & sync logic as of April 1, 2026.
 import React, { useState, useMemo, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Image, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Image, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ShoppingBag, ArrowLeftCircle, Minus, Plus, ChevronRight, ChevronDown, Ticket, CheckCircle } from 'lucide-react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -9,6 +10,7 @@ import { MainTabParamList } from '../navigation/MainTabNavigator';
 import { useCart } from '../context/CartContext';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 import TransactionalAuthModal from '../components/TransactionalAuthModal';
 import { STORES, RESTAURANTS } from '../lib/data';
 
@@ -16,7 +18,9 @@ export default function CartScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const route = useRoute<RouteProp<MainTabParamList, 'Cart'>>();
     const { items, updateQuantity, getItemCount, getTotal, clearCart } = useCart();
+    const { session: currentSession, isLoading: authLoading, user, isProfileLoading } = useAuth();
     const [authModalVisible, setAuthModalVisible] = useState(false);
+    const [isWaitingForAuthSync, setIsWaitingForAuthSync] = useState(false);
     const [coupon, setCoupon] = useState<any>(null);
 
     // Receive coupon from OffersScreen
@@ -45,31 +49,55 @@ export default function CartScreen() {
     const discount = coupon ? coupon.discount : 0;
     const total = Math.max(0, subtotal + gst - discount);
 
-    const handleCheckout = async () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    // Reactive Auth Sync Watcher
+    // This hook waits for background session sync AND profile hydration to complete
+    useEffect(() => {
+        if (!isWaitingForAuthSync) return;
 
-        try {
-            // Race the session check against a timeout
-            const sessionPromise = supabase.auth.getSession();
-            const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Session check timed out')), 15000)
-            );
-
-            const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise]) as any;
-
-            if (!session) {
-                setAuthModalVisible(true);
-                return;
-            }
+        // 1. The Success Condition
+        if (user && !isProfileLoading) {
+            setIsWaitingForAuthSync(false);
             const isRestaurantOrder = items.length > 0 && items[0].storeId < 100;
             if (isRestaurantOrder) {
                 navigation.navigate('DiningCheckout', { selectedCoupon: coupon } as any);
             } else {
                 navigation.navigate('Checkout', { selectedCoupon: coupon } as any);
             }
-        } catch (err) {
-            // On timeout/error, show auth modal as fallback
+            return; // Exit early
+        }
+
+        // 2. The Waiting Condition (Fallback)
+        // If we are here, we are still waiting. Start the timer.
+        const timeoutId = setTimeout(() => {
+            setIsWaitingForAuthSync(false);
+            Alert.alert(
+                'Sync Delayed',
+                'Login synchronization is taking longer than expected. Please try proceeding to checkout again.'
+            );
+        }, 8000);
+
+        // 3. The Cleanup
+        // If user or isProfileLoading changes BEFORE 8 seconds, this cleanup runs, 
+        // kills the old timeout, and the effect re-evaluates with fresh state.
+        return () => clearTimeout(timeoutId);
+    }, [user, isProfileLoading, isWaitingForAuthSync, navigation, items, coupon]);
+
+    const handleCheckout = async () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+        if (authLoading || isWaitingForAuthSync) return;
+
+        // Use the global session from context as primary check
+        if (!currentSession) {
             setAuthModalVisible(true);
+            return;
+        }
+
+        const isRestaurantOrder = items.length > 0 && items[0].storeId < 100;
+        if (isRestaurantOrder) {
+            navigation.navigate('DiningCheckout', { selectedCoupon: coupon } as any);
+        } else {
+            navigation.navigate('Checkout', { selectedCoupon: coupon } as any);
         }
     };
 
@@ -206,12 +234,22 @@ export default function CartScreen() {
                 <TouchableOpacity
                     delayPressIn={0}
                     onPress={handleCheckout}
-                    className="bg-[#212121] rounded-[20px] flex-row items-center justify-between px-6"
+                    disabled={isWaitingForAuthSync}
+                    className={`${isWaitingForAuthSync ? 'bg-gray-400' : 'bg-[#212121]'} rounded-[20px] flex-row items-center justify-between px-6`}
                     style={{ height: 64, shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.2, shadowRadius: 10 }}
                     activeOpacity={0.9}
                 >
-                    <Text className="text-white text-[17px] font-bold">Proceed to Pay</Text>
-                    <Text className="text-white text-[17px] font-bold">₹{total.toFixed(2)}</Text>
+                    {isWaitingForAuthSync ? (
+                        <View className="flex-row items-center justify-center w-full">
+                            <ActivityIndicator color="white" size="small" className="mr-3" />
+                            <Text className="text-white text-[17px] font-bold">Synchronizing...</Text>
+                        </View>
+                    ) : (
+                        <>
+                            <Text className="text-white text-[17px] font-bold">Proceed to Pay</Text>
+                            <Text className="text-white text-[17px] font-bold">₹{total.toFixed(2)}</Text>
+                        </>
+                    )}
                 </TouchableOpacity>
             </View>
 
@@ -222,7 +260,7 @@ export default function CartScreen() {
                     onClose={() => setAuthModalVisible(false)}
                     onSuccess={() => {
                         setAuthModalVisible(false);
-                        handleCheckout();
+                        setIsWaitingForAuthSync(true);
                     }}
                     title="Secure Checkout"
                     subtitle="Login or sign up to complete your purchase."

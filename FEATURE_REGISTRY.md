@@ -28,12 +28,12 @@
 | Pickup Discovery | `src/screens/HomeFeedScreen.tsx` | 🔒 LOCKED | Feb 27, 2026 | Hero slider, category grid, product carousels, cross-promo card. |
 | Dining Discovery | `src/screens/DiningScreen.tsx` | 🔒 LOCKED | Feb 27, 2026 | Redesigned: Spotlights, 4 category carousels, All Restaurants list. |
 | Auth / Login | `src/screens/AuthScreen.tsx` | 🔒 LOCKED | Mar 12, 2026 | Phone OTP authentication flow with network timeouts. |
-| Profile | `src/screens/ProfileScreen.tsx` | 🔒 LOCKED | Mar 12, 2026 | User profile with avatar, details, address management. |
+| Profile | `src/screens/ProfileScreen.tsx` | 🔒 LOCKED | Apr 1, 2026 | User profile with avatar, upsert logic & global hydration. |
 | Complete Profile | `src/screens/ProfileSetupScreen.tsx` | 🔒 LOCKED | Mar 12, 2026 | Post-signup profile completion (name, DOB, avatar). |
 | Onboarding | `src/screens/OnboardingScreen.tsx` | 🔒 LOCKED | Feb 27, 2026 | First-launch onboarding slides. |
 | Location Picker | `src/screens/LocationPickerScreen.tsx` | 🔒 LOCKED | Feb 27, 2026 | Interactive map + Google Places Autocomplete search. |
 | Storefront | `src/screens/StorefrontScreen.tsx` | 🔒 LOCKED | Feb 27, 2026 | Hero carousel, restaurant info, category pills, 2-col product grid, cart integration. |
-| Cart | `src/screens/CartScreen.tsx` | 🟢 OPEN | — | Placeholder. Needs full implementation. |
+| Cart | `src/screens/CartScreen.tsx` | 🔒 LOCKED | Apr 1, 2026 | Full implementation with global sync and fallback logic. |
 
 ### Navigation
 
@@ -47,6 +47,7 @@
 | Component | File | Status | Notes |
 |-----------|------|--------|-------|
 | Location Context | `src/context/LocationContext.tsx` | 🔒 LOCKED | Haversine proximity detection + address management. |
+| Auth Context | `src/context/AuthContext.tsx` | 🔒 LOCKED | Apr 1, 2026 | Global auth, profile hydration, and network timeout logic. |
 
 ### Components
 

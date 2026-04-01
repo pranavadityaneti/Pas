@@ -22,3 +22,6 @@ Dockerfile
 api_dev.log
 root_dev.log
 test.*
+
+# Force include compiled JS for AWS deployment
+!dist/

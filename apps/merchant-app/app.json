@@ -2,7 +2,7 @@
   "expo": {
     "name": "PAS Partner",
     "slug": "pas-merchant-app",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "scheme": "pasmerchant",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -18,7 +18,6 @@
       "router": {
         "origin": false
       },
-      "apiUrl": "http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com",
       "eas": {
         "projectId": "795d700d-a871-4f9e-a6d2-df905ae9f4ff"
       }
@@ -31,11 +30,12 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.pas.merchant",
-      "buildNumber": "11",
+      "buildNumber": "12",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Your location is used to set your shop address, allowing customers to find your store correctly on the map.",
         "NSCameraUsageDescription": "Camera access is required to capture and upload KYC documents for account verification.",
         "NSPhotoLibraryUsageDescription": "Photo library access is needed to select and upload stored KYC documents for merchant verification.",
+        "NSMicrophoneUsageDescription": "Microphone access is required to capture audio when recording videos for store verification.",
         "ITSAppUsesNonExemptEncryption": false
       },
       "config": {
@@ -43,8 +43,8 @@
       }
     },
     "android": {
-      "package": "com.pas.merchant",
-      "versionCode": 12,
+      "package": "io.pickatstore.merchant",
+      "versionCode": 14,
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyAZPXR9kkXQj_JkrLM2V8L1qvBYwoI5bN4"
