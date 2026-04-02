@@ -1,3 +1,4 @@
+// @lock — Do NOT overwrite.
 // Pickup Discovery Screen (UX Overhauled): Hyper-local venue discovery, distance badges, curated sections.
 import React, { useEffect, useState, useMemo } from 'react';
 import { View, Text, ScrollView, Image, TouchableOpacity, TextInput, Dimensions, FlatList } from 'react-native';

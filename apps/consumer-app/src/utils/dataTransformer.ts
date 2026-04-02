@@ -1,3 +1,4 @@
+// @lock — Do NOT overwrite.
 /**
  * Data Transformer Utility
  * Handles mapping between Supabase Database rows and Consumer App UI contracts.

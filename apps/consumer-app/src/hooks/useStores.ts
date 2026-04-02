@@ -1,3 +1,4 @@
+// @lock — Do NOT overwrite.
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useCategories } from '../context/CategoryContext';
