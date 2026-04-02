@@ -4,17 +4,17 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { View, Text, ScrollView, Image, TouchableOpacity, TextInput, Dimensions, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Search, ChevronRight, Star, Clock, Sparkles, BadgeCheck, Mic, User, Calendar, UtensilsCrossed, X, Check } from 'lucide-react-native';
-import { RESTAURANTS } from '../lib/data';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocation } from '../context/LocationContext';
 import * as Haptics from 'expo-haptics';
-import { supabase } from '../lib/supabase';
+import GlobalHeader from '../components/GlobalHeader';
 import { useCart } from '../context/CartContext';
 import CartSummaryBar from '../components/CartSummaryBar';
 import BookingModal from '../components/BookingModal';
+import { useStores } from '../hooks/useStores';
+import { ActivityIndicator } from 'react-native';
 
 const { width } = Dimensions.get('window');
 
@@ -75,11 +75,10 @@ const CUISINE_FILTERS = ['All', 'North Indian', 'South Indian', 'Chinese', 'Stre
 
 export default function DiningScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-    const { activeLocation } = useLocation();
     const { getItemCount, getTotal } = useCart();
-    const [profile, setProfile] = useState<any>(null);
     const [searchText, setSearchText] = useState('');
     const [selectedCuisine, setSelectedCuisine] = useState('All');
+    const { diningStores, loading } = useStores();
     const [bookingVisible, setBookingVisible] = useState(false);
     const [bookingRestaurant, setBookingRestaurant] = useState<any>(null);
     const [vegFilter, setVegFilter] = useState<'all' | 'veg'>('all');
@@ -91,53 +90,11 @@ export default function DiningScreen() {
         setBookingVisible(true);
     };
 
-    useEffect(() => {
-        fetchProfile();
 
-        const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            if (!session) {
-                setProfile(null);
-            } else {
-                fetchProfile();
-            }
-        });
-
-        return () => {
-            authSubscription.unsubscribe();
-        };
-    }, []);
-
-    const fetchProfile = async () => {
-        try {
-            const { data: { session } } = await supabase.auth.getSession();
-            
-            if (!session) {
-                setProfile(null);
-                return;
-            }
-
-            const timeout = (ms: number) => new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms));
-
-            const { data, error } = await Promise.race([
-                supabase
-                    .from('profiles')
-                    .select('avatar_url')
-                    .eq('id', session.user.id)
-                    .single(),
-                timeout(5000)
-            ]) as any;
-
-            if (error) throw error;
-            setProfile(data);
-        } catch (error) {
-            console.error('Error fetching profile avatar:', error);
-            setProfile(null);
-        }
-    };
 
     // --- Filtered & Categorized Restaurants ---
     const filteredRestaurants = useMemo(() => {
-        let list = [...RESTAURANTS];
+        let list = [...diningStores];
         if (selectedCuisine !== 'All') {
             list = list.filter(r => r.cuisine === selectedCuisine);
         }
@@ -156,7 +113,11 @@ export default function DiningScreen() {
     }, [selectedCuisine, vegFilter, searchText]);
 
     const topRated = useMemo(() =>
-        [...filteredRestaurants].sort((a, b) => parseFloat(b.rating) - parseFloat(a.rating)).slice(0, 8),
+        [...filteredRestaurants].sort((a, b) => {
+            const rA = a.rating ? parseFloat(a.rating) : 0;
+            const rB = b.rating ? parseFloat(b.rating) : 0;
+            return rB - rA;
+        }).slice(0, 8),
         [filteredRestaurants]
     );
 
@@ -174,6 +135,14 @@ export default function DiningScreen() {
         filteredRestaurants.slice(-8).reverse(),
         [filteredRestaurants]
     );
+
+    if (loading) {
+        return (
+            <SafeAreaView className="flex-1 bg-white items-center justify-center">
+                <ActivityIndicator size="large" color="#B52725" />
+            </SafeAreaView>
+        );
+    }
 
     // --- Compact Restaurant Card (for carousels) ---
     const CompactCard = ({ restaurant, isNew = false }: { restaurant: any; isNew?: boolean }) => (
@@ -195,8 +164,14 @@ export default function DiningScreen() {
                 />
                 {/* Rating badge */}
                 <View className="absolute top-3 right-3 bg-gray-800/90 px-2.5 py-1 rounded-full flex-row items-center">
-                    <Star size={10} color="#FBBF24" fill="#FBBF24" />
-                    <Text className="text-[11px] font-bold text-white ml-1">{restaurant.rating}</Text>
+                    {restaurant.rating ? (
+                        <>
+                            <Star size={10} color="#FBBF24" fill="#FBBF24" />
+                            <Text className="text-[11px] font-bold text-white ml-1">{restaurant.rating}</Text>
+                        </>
+                    ) : (
+                        <Text className="text-[9px] font-extrabold text-blue-400 uppercase">NEW</Text>
+                    )}
                 </View>
                 {/* Cuisine tag */}
                 <View className="absolute bottom-3 left-3 bg-gray-900/80 px-2.5 py-1 rounded-lg">
@@ -261,8 +236,14 @@ export default function DiningScreen() {
                 <Image source={{ uri: restaurant.image }} className="w-full h-full" />
                 {/* Rating badge */}
                 <View className="absolute top-4 right-4 bg-gray-800/90 px-3 py-1.5 rounded-full flex-row items-center shadow-sm">
-                    <Star size={12} color="#FBBF24" fill="#FBBF24" />
-                    <Text className="text-[12px] font-bold text-white ml-1">{restaurant.rating}</Text>
+                    {restaurant.rating ? (
+                        <>
+                            <Star size={12} color="#FBBF24" fill="#FBBF24" />
+                            <Text className="text-[12px] font-bold text-white ml-1">{restaurant.rating}</Text>
+                        </>
+                    ) : (
+                        <Text className="text-[10px] font-extrabold text-blue-400 uppercase">NEW</Text>
+                    )}
                 </View>
                 {/* Cuisine tag */}
                 <View className="absolute bottom-4 left-4 flex-row items-center gap-2">
@@ -322,64 +303,17 @@ export default function DiningScreen() {
 
     return (
         <SafeAreaView edges={['top']} className="flex-1 bg-white">
-            {/* Sticky Header — Matching Home Screen */}
-            <View className="px-6 pt-2 pb-4 bg-white z-20 border-b border-gray-100">
-                <View className="flex-row items-start justify-between mb-4">
-                    <TouchableOpacity
-                        onPress={() => navigation.navigate('LocationPicker')}
-                        className="flex-1 pr-4"
-                    >
-                        <View className="flex-row items-center">
-                            <Text className="text-lg font-bold text-gray-900">
-                                {activeLocation?.type || 'Select Location'}
-                            </Text>
-                            <ChevronRight size={16} color="#B52725" />
-                        </View>
-                        <Text className="text-[11px] font-medium text-gray-500 mt-0.5" numberOfLines={1}>
-                            {activeLocation?.address || 'Set your delivery address'}
-                        </Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        onPress={async () => {
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                            const { data: { session } } = await supabase.auth.getSession();
-                            if (session) {
-                                navigation.navigate('Profile');
-                            } else {
-                                navigation.navigate('Auth');
-                            }
-                        }}
-                        className="w-10 h-10 rounded-xl bg-gray-100 items-center justify-center shadow-sm overflow-hidden border border-gray-100"
-                    >
-                        {profile?.avatar_url ? (
-                            <Image source={{ uri: profile.avatar_url }} className="w-full h-full" />
-                        ) : (
-                            <User size={20} color="#9CA3AF" />
-                        )}
-                    </TouchableOpacity>
-                </View>
-
-                {/* Search Bar & Veg Filter */}
-                <View className="flex-row items-center">
-                    <View className="flex-1 h-12 bg-white rounded-xl border border-gray-200 shadow-sm flex-row items-center px-4">
-                        <Search size={18} color="#000" />
-                        <TextInput
-                            className="flex-1 ml-3 font-semibold text-sm text-gray-800"
-                            placeholder="Search for 'Biryani' or 'Bistro'..."
-                            placeholderTextColor="#9CA3AF"
-                            value={searchText}
-                            onChangeText={setSearchText}
-                        />
-                    </View>
-
-                    {/* Veg Toggle Button */}
+            <GlobalHeader 
+                searchText={searchText} 
+                onSearchChange={setSearchText} 
+                searchPlaceholder="Search for 'Biryani' or 'Bistro'..."
+                rightContent={
                     <TouchableOpacity
                         onPress={() => {
                             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                             setVegModalVisible(true);
                         }}
-                        className={`ml-3 px-3 h-12 rounded-xl border items-center justify-center flex-row ${vegFilter === 'veg' ? 'bg-green-50 border-green-200' : 'bg-white border-gray-200'
+                        className={`px-3 h-12 rounded-xl border items-center justify-center flex-row ${vegFilter === 'veg' ? 'bg-green-50 border-green-200' : 'bg-white border-gray-200'
                             }`}
                     >
                         <View className="w-3 h-3 border border-green-600 items-center justify-center mr-1.5" style={{ borderWidth: 1 }}>
@@ -389,8 +323,8 @@ export default function DiningScreen() {
                             Veg
                         </Text>
                     </TouchableOpacity>
-                </View>
-            </View>
+                }
+            />
 
             <ScrollView className="flex-1 bg-[#F8F9FA]" contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
 
@@ -426,7 +360,7 @@ export default function DiningScreen() {
                                 key={spot.id}
                                 onPress={() => {
                                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                                    navigation.navigate('SpotlightDetail', { spotlightId: spot.id });
+                                    navigation.navigate('SpotlightDetail', { spotlightId: String(spot.id) });
                                 }}
                                 className="mr-4 rounded-[20px] overflow-hidden"
                                 style={{ width: width * 0.44, height: 240 }}

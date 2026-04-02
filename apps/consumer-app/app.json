@@ -15,16 +15,7 @@
         "googleMapsApiKey": "AIzaSyAQAg7zpYvmd2BJGCGmf1opDLDC4KXbKUg"
       },
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false,
-        "NSAppTransportSecurity": {
-          "NSAllowsArbitraryLoads": true,
-          "NSExceptionDomains": {
-            "pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com": {
-              "NSExceptionAllowsInsecureHTTPLoads": true,
-              "NSIncludesSubdomains": true
-            }
-          }
-        }
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

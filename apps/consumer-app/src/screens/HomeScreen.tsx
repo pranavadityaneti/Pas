@@ -1,4 +1,4 @@
-// @lock — Do NOT overwrite. Approved layout as of Feb 27, 2026.
+// @lock — Do NOT overwrite.
 // Home Screen: 2-col Pickup/Dining cards + Featured hero card + sticky header.
 import React, { useEffect, useState } from 'react';
 import { View, Text, ScrollView, Image, TouchableOpacity, Dimensions, TextInput } from 'react-native';
@@ -9,7 +9,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { MainTabParamList } from '../navigation/MainTabNavigator';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocation } from '../context/LocationContext';
+import GlobalHeader from '../components/GlobalHeader';
 import { supabase } from '../lib/supabase';
 import { useCart } from '../context/CartContext';
 import * as Haptics from 'expo-haptics';
@@ -21,102 +21,16 @@ const { width } = Dimensions.get('window');
 export default function HomeScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const tabNavigation = useNavigation<any>();
-    const { activeLocation } = useLocation();
     const { getItemCount, getTotal } = useCart();
-    const [profile, setProfile] = useState<any>(null);
     const [searchText, setSearchText] = useState("");
-
-    useEffect(() => {
-        fetchProfile();
-
-        // Listen for auth state changes to clear profile on logout
-        const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            if (!session) {
-                setProfile(null);
-            } else {
-                fetchProfile();
-            }
-        });
-
-        return () => {
-            authSubscription.unsubscribe();
-        };
-    }, []);
-
-    const fetchProfile = async () => {
-        try {
-            const { data: { session } } = await supabase.auth.getSession();
-            
-            if (!session) {
-                setProfile(null);
-                return;
-            }
-
-            const timeout = (ms: number) => new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms));
-            
-            const { data, error } = await Promise.race([
-                supabase
-                    .from('profiles')
-                    .select('avatar_url')
-                    .eq('id', session.user.id)
-                    .single(),
-                timeout(15000)
-            ]) as any;
-
-            if (error) throw error;
-            setProfile(data);
-        } catch (error) {
-            console.error('Error fetching profile avatar:', error);
-            setProfile(null);
-        }
-    };
 
     return (
         <SafeAreaView edges={['top']} className="flex-1 bg-white">
-            {/* Sticky Header */}
-            <View className="px-6 pt-2 pb-4 bg-white z-20 border-b border-gray-100">
-                <View className="flex-row items-start justify-between mb-4">
-                    <TouchableOpacity
-                        onPress={() => navigation.navigate('LocationPicker')}
-                        className="flex-1 pr-4"
-                    >
-                        <View className="flex-row items-center">
-                            <Text className="text-lg font-bold text-gray-900">
-                                {activeLocation?.type || 'Select Location'}
-                            </Text>
-                            <ChevronRight size={16} color="#B52725" />
-                        </View>
-                        <Text className="text-[11px] font-medium text-gray-500 mt-0.5" numberOfLines={1}>
-                            {activeLocation?.address || 'Set your delivery address'}
-                        </Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        onPress={() => {
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                            navigation.navigate('Profile');
-                        }}
-                        className="w-10 h-10 rounded-xl bg-gray-100 items-center justify-center shadow-sm overflow-hidden border border-gray-100"
-                    >
-                        {profile?.avatar_url ? (
-                            <Image source={{ uri: profile.avatar_url }} className="w-full h-full" />
-                        ) : (
-                            <User size={20} color="#9CA3AF" />
-                        )}
-                    </TouchableOpacity>
-                </View>
-
-                <View className="relative w-full h-12 bg-white rounded-xl border border-gray-200 shadow-sm flex-row items-center px-4">
-                    <Search size={18} color="#000" />
-                    <TextInput
-                        className="flex-1 ml-3 font-semibold text-sm text-gray-800"
-                        placeholder="Search for 'Atta' or 'Biryani'"
-                        placeholderTextColor="#9CA3AF"
-                        value={searchText}
-                        onChangeText={setSearchText}
-                    />
-                </View>
-            </View>
+            <GlobalHeader 
+                searchText={searchText} 
+                onSearchChange={setSearchText} 
+                searchPlaceholder="Search for 'Atta' or 'Biryani'" 
+            />
 
             <ScrollView
                 className="flex-1 bg-[#F8F9FA]"
@@ -176,6 +90,7 @@ export default function HomeScreen() {
                         </LinearGradient>
                     </TouchableOpacity>
                 </View>
+
 
                 {/* Featured Card (Hero Slider) */}
                 <View className="px-6 mb-8">

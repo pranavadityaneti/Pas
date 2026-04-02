@@ -55,32 +55,57 @@ export const INDIAN_CITIES = ["Chennai", "Bangalore", "Mumbai", "Delhi", "Hydera
 export const AREAS = ["Indiranagar", "Koramangala", "Jayanagar", "Whitefield", "HSR Layout", "Anna Nagar", "T. Nagar", "Velachery", "Bandra", "Andheri", "Connaught Place"];
 
 export const SUB_CATEGORIES: Record<string, string[]> = {
-  grocery: ["Daily Essentials", "Fruits & Vegetables", "Dairy & Eggs", "Rice, Flours & Dals", "Snacks & Munchies", "Beverages", "Household Care"],
-  fashion: ["Men's Clothing", "Women's Clothing", "Kids' Fashion", "Footwear", "Watches & Accessories", "Winter Wear"],
-  electronics: ["Mobiles & Tablets", "Laptops & Computers", "Audio & Headphones", "Cameras", "Smart Wearables", "Mobile Accessories", "Home Appliances"],
-  pharmacy: ["Medicines", "Vitamins & Supplements", "First Aid", "Healthcare Devices", "Personal Hygiene", "Ayurvedic"],
-  bakery: ["Breads & Buns", "Cakes & Pastries", "Cookies & Biscuits", "Desserts", "Savouries", "Party Supplies"],
-  meat: ["Chicken", "Mutton", "Fish & Seafood", "Eggs", "Marinades", "Frozen Meat"],
-  stationery: ["Notebooks & Diaries", "Pens & Writing", "Art Supplies", "Office Supplies", "Calculators", "Files & Folders"],
-  home: ["Bedding", "Home Decor", "Kitchen & Dining", "Storage & Organizers", "Lighting", "Bath Essentials"],
-  pet: ["Dog Food", "Cat Food", "Pet Toys", "Grooming & Hygiene", "Pet Accessories", "Treats"],
-  beauty: ["Skincare", "Makeup", "Haircare", "Bath & Body", "Fragrances", "Men's Grooming"]
+  'Grocery & Kirana': ["Daily Essentials", "Dairy & Eggs", "Rice, Flours & Dals", "Snacks & Munchies", "Beverages", "Household Care"],
+  'Fruits & Vegetables': ["Fresh Fruits", "Fresh Vegetables", "Organic Produce", "Exotic Fruits"],
+  'Fashion & Apparel': ["Men's Clothing", "Women's Clothing", "Kids' Fashion", "Footwear", "Watches & Accessories"],
+  'Electronics & Accessories': ["Mobiles & Tablets", "Laptops & Computers", "Audio & Headphones", "Smart Wearables", "Accessories"],
+  'Pharmacy & Wellness': ["Medicines", "Vitamins & Supplements", "First Aid", "Healthcare Devices", "Personal Hygiene"],
+  'Bakeries & Desserts': ["Breads & Buns", "Cakes & Pastries", "Cookies & Biscuits", "Desserts", "Savouries"],
+  'Meat & Seafood': ["Chicken", "Mutton", "Fish & Seafood", "Eggs", "Frozen Meat"],
+  'Home & Lifestyle': ["Bedding", "Home Decor", "Kitchen & Dining", "Storage & Organizers", "Cleaning"],
+  'Pet Care & Supplies': ["Dog Food", "Cat Food", "Pet Toys", "Grooming & Hygiene"],
+  'Beauty & Personal Care': ["Skincare", "Makeup", "Haircare", "Bath & Body", "Fragrances"]
 };
 
 export const STORE_CATEGORIES = [
-  { id: "cafe", name: "Restaurants & Cafes", sub: "Breakfast & Snacks", ionicon: "restaurant", color: "bg-orange-100 text-orange-700", iconColor: "#C2410C" },
-  { id: "bakery", name: "Bakeries & Desserts", sub: "Cakes & Pastries", ionicon: "cafe", color: "bg-amber-100 text-amber-700", iconColor: "#B45309" },
-  { id: "fastfood", name: "Fast Food & Quick Bites", sub: "Burgers & Pizza", ionicon: "fast-food", color: "bg-yellow-100 text-yellow-800", iconColor: "#A16207" },
-  { id: "sweetshop", name: "Sweet Shops & Namkeen", sub: "Indian Sweets", ionicon: "ice-cream", color: "bg-rose-100 text-rose-700", iconColor: "#BE123C" },
-  { id: "grocery", name: "Fresh Groceries & Supermarkets", sub: "Daily Needs", ionicon: "cart", color: "bg-green-100 text-green-700", iconColor: "#15803D" },
-  { id: "meat", name: "Fresh Meat & Seafood", sub: "Raw Meat & Seafood", ionicon: "fish", color: "bg-red-100 text-red-700", iconColor: "#B91C1C" },
-  { id: "pharmacy", name: "Pharmacy & Wellness", sub: "Medicines", ionicon: "medkit", color: "bg-teal-100 text-teal-700", iconColor: "#0F766E" },
-  { id: "electronics", name: "Electronics & Accessories", sub: "Gadgets", ionicon: "phone-portrait", color: "bg-blue-100 text-blue-700", iconColor: "#1D4ED8" },
-  { id: "books", name: "Books & Stationery", sub: "Stationery", ionicon: "book", color: "bg-indigo-100 text-indigo-700", iconColor: "#4338CA" },
-  { id: "pet", name: "Pet Care & Supplies", sub: "Food & Toys", ionicon: "paw", color: "bg-orange-100 text-orange-700", iconColor: "#B45309" },
-  { id: "beauty", name: "Beauty & Personal Care", sub: "Skincare", ionicon: "sparkles", color: "bg-pink-100 text-pink-700", iconColor: "#BE123C" },
-  { id: "fashion", name: "Fashion & Apparel", sub: "Clothing", ionicon: "shirt", color: "bg-purple-100 text-purple-700", iconColor: "#7E22CE" },
-  { id: "home", name: "Home & Lifestyle", sub: "Decor & Tools", ionicon: "home", color: "bg-cyan-100 text-cyan-700", iconColor: "#0E7490" },
+  { id: '1', name: 'Grocery & Kirana', subLabel: 'Daily Essentials', icon: 'basket', color: 'bg-green-100', text: 'text-green-600' },
+  { id: '3', name: 'Fruits & Vegetables', subLabel: 'Fresh & Organic', icon: 'leaf', color: 'bg-orange-100', text: 'text-orange-600' },
+  { id: '2', name: 'Restaurants & Cafes', subLabel: 'Order Hot Food', icon: 'restaurant', color: 'bg-red-100', text: 'text-red-600' },
+  { id: '4', name: 'Bakeries & Desserts', subLabel: 'Cakes & Treats', icon: 'ice-cream', color: 'bg-pink-100', text: 'text-pink-600' },
+  { id: '5', name: 'Meat & Seafood', subLabel: 'Fresh & Frozen', icon: 'fish', color: 'bg-blue-100', text: 'text-blue-600' },
+  { id: '6', name: 'Pharmacy & Wellness', subLabel: 'Meds & Hygiene', icon: 'medical', color: 'bg-teal-100', text: 'text-teal-600' },
+  { id: '7', name: 'Electronics & Accessories', subLabel: 'Tech & Gadgets', icon: 'watch', color: 'bg-indigo-100', text: 'text-indigo-600' },
+  { id: '8', name: 'Fashion & Apparel', subLabel: 'Trendy Styles', icon: 'shirt', color: 'bg-purple-100', text: 'text-purple-600' },
+  { id: '9', name: 'Home & Lifestyle', subLabel: 'Decor & Living', icon: 'home', color: 'bg-yellow-100', text: 'text-yellow-600' },
+  { id: '10', name: 'Beauty & Personal Care', subLabel: 'Skin & Beauty', icon: 'color-palette', color: 'bg-rose-100', text: 'text-rose-600' },
+  { id: '11', name: 'Pet Care & Supplies', subLabel: 'Furry Friend Needs', icon: 'paw', color: 'bg-stone-100', text: 'text-stone-600' },
+];
+
+export const PICKUP_SPOTLIGHTS = [
+  {
+    id: "1",
+    title: 'Free Delivery',
+    subtitle: 'On your first 3 orders',
+    badge: 'New User',
+    badgeColor: '#B52725',
+    image: 'https://images.unsplash.com/photo-1562178101-02e243762ffa?auto=format&fit=crop&w=800&q=80',
+  },
+  {
+    id: "2",
+    title: 'Premium Groceries',
+    subtitle: 'Fresh from local farms',
+    badge: 'Fresh',
+    badgeColor: '#15803D',
+    image: 'https://images.unsplash.com/photo-1748268263747-225c52414f81?auto=format&fit=crop&w=800&q=80',
+  },
+  {
+    id: "3",
+    title: 'Instant Pharmacy',
+    subtitle: 'Medicines in 30 mins',
+    badge: 'Health',
+    badgeColor: '#0F766E',
+    image: 'https://images.unsplash.com/photo-1578960281840-cb36759fb109?auto=format&fit=crop&w=800&q=80',
+  },
 ];
 
 export const generateProducts = (category: string, startId: number) => {
@@ -94,7 +119,7 @@ export const generateProducts = (category: string, startId: number) => {
       const discountPct = hasDiscount ? Math.floor(Math.random() * 30) + 10 : 0;
       const rating = (3.5 + Math.random() * 1.5).toFixed(1);
       products.push({
-        id: startId++,
+        id: String(startId++),
         name: `${baseName}`,
         price: price,
         category: category,
@@ -115,8 +140,9 @@ export const generateProducts = (category: string, startId: number) => {
 
   if (category === "cafe") {
     generateItems(["Cappuccino", "Americano", "Espresso", "Mocha", "Cold Coffee", "Iced Latte", "Frappe"], "Coffee & Beverages", "bakery", "unit", [100, 250], 8);
-    generateItems(["Butter Croissant", "Chocolate Croissant", "Blueberry Muffin", "Choco Lava Cake", "Pineapple Pastry", "Black Forest Slice", "Red Velvet Pastry"], "Fresh Pastries", "bakery", "unit", [80, 200], 7);
     generateItems(["Paneer Tikka Sandwich", "Chicken Sandwich", "Veg Puff", "Chicken Puff", "Garlic Bread", "Cheese Chilli Toast", "Veg Burger"], "Savouries", "bakery", "unit", [50, 150], 7);
+  } else if (category === "bakery") {
+    generateItems(["Butter Croissant", "Chocolate Croissant", "Blueberry Muffin", "Choco Lava Cake", "Pineapple Pastry", "Black Forest Slice", "Red Velvet Pastry"], "Fresh Pastries", "bakery", "unit", [80, 200], 7);
     generateItems(["White Bread", "Brown Bread", "Multigrain Bread", "Burger Buns", "Pav (6 pcs)"], "Breads", "bakery", "unit", [40, 80], 5);
   } else if (category === "grocery") {
     generateItems(["Tomatoes", "Onions", "Potatoes", "Carrots", "Spinach", "Cauliflower", "Green Chilies"], "Fresh Veggies", "grocery", "weight", [40, 100], 7);
@@ -133,21 +159,15 @@ export const generateProducts = (category: string, startId: number) => {
     generateItems(["Mutton Curry Cut", "Mutton Keema", "Mutton Chops", "Mutton Biryani Cut", "Mutton Liver"], "Mutton", "meat", "weight", [600, 1000], 6);
     generateItems(["Rohu Fish", "Catla Fish", "Prawns", "Seer Fish", "Crab", "Pomfret"], "Fish & Seafood", "meat", "weight", [300, 800], 6);
     generateItems(["Chicken Tikka Marinade", "Malai Tikka Paste", "Mutton Seekh Kebab", "Fish Fry Mix", "Galouti Kebab", "Peri Peri Marinade"], "Marinades", "meat", "unit", [150, 300], 6);
-  } else if (category === "snacks") {
-    generateItems(["Lays Classic", "Lays Magic Masala", "Kurkure", "Bingo Mad Angles", "Haldiram Bhujia", "Moong Dal Snack", "Doritos"], "Chips & Namkeen", "food", "unit", [10, 50], 7);
-    generateItems(["Dairy Milk Silk", "KitKat", "Snickers", "Ferrero Rocher", "Bounty", "5 Star", "Gems"], "Chocolates", "food", "unit", [20, 400], 7);
-    generateItems(["Coca-Cola", "Sprite", "Thums Up", "Red Bull", "Tropicana Apple", "Maaza", "Bisleri Water"], "Cold Beverages", "food", "unit", [20, 110], 7);
-    generateItems(["Maggi Masala", "Yippee Noodles", "Cup Noodles", "Oreo", "Good Day", "Bourbon"], "Quick Bites", "food", "unit", [10, 80], 6);
   } else if (category === "electronics") {
     generateItems(["Type-C Cable", "Lightning Cable", "Micro USB Cable", "Fast Charger", "Car Charger", "Multi-Pin Cable"], "Charging", "electronics", "unit", [150, 500], 6);
     generateItems(["boAt Earbuds", "JBL Earphones", "Sony Headphones", "Neckband", "AirPods Case", "Speaker"], "Audio", "electronics", "unit", [400, 3000], 6);
     generateItems(["iPhone 15 Case", "Samsung S24 Cover", "Screen Protector", "Pop Socket", "Mobile Stand", "Ring Light"], "Accessories", "electronics", "unit", [100, 600], 6);
     generateItems(["Power Bank 10000mAh", "SanDisk 64GB Pen Drive", "SD Card 128GB", "Wireless Mouse", "Mousepad", "Laptop Sleeve"], "Gadgets & Storage", "electronics", "unit", [400, 2000], 7);
-  } else if (category === "books") {
-    generateItems(["Sprial Notebook", "A4 Notebook", "Ruled Register", "Diary 2026", "Sketch Book", "Drawing Copy"], "Notebooks", "stationery", "unit", [50, 250], 6);
-    generateItems(["Reynolds Pen Pack", "Cello Gripper Assorted", "Parker Pen", "Highlighters", "Whiteboard Markers", "Permanent Markers"], "Writing", "stationery", "unit", [30, 300], 6);
-    generateItems(["A4 Printer Paper", "Sticky Notes", "Stapler", "Paper Clips", "Clear File Folder", "Scissors", "Glue Stick"], "Office Supplies", "stationery", "unit", [20, 200], 7);
-    generateItems(["Acrylic Paints", "Watercolor Set", "Paint Brushes", "Canvas Board", "Crayons", "Color Pencils"], "Art & Craft", "stationery", "unit", [80, 500], 6);
+  } else if (category === "fashion") {
+    generateItems(["Men's T-Shirt", "Slim Fit Jeans", "Floral Summer Dress", "Cotton Kurta", "Formal Blazer", "Sneakers", "Leather Belt"], "Fashion & Style", "fashion", "unit", [500, 2500], 7);
+  } else if (category === "home") {
+    generateItems(["Cotton Bedding Set", "Ceramic Flower Vase", "Non-Stick Frying Pan", "Storage Organizers", "LED Table Lamp", "Bath Towel Set"], "Home & Decor", "home", "unit", [300, 1500], 6);
   } else if (category === "pet") {
     generateItems(["Pedigree Adult", "Pedigree Puppy", "Drools Chicken & Egg", "Royal Canin Mini", "Chappi", "Purepet"], "Dog Food", "pet", "unit", [200, 1500], 6);
     generateItems(["Whiskas Adult", "Whiskas Kitten", "Me-O Cat Food", "Drools Cat Filets", "Sheba pouches", "Royal Canin Kitten"], "Cat Food", "pet", "unit", [100, 1200], 6);
@@ -159,22 +179,21 @@ export const generateProducts = (category: string, startId: number) => {
     generateItems(["Lipstick", "Kajal", "Mascara", "Foundation", "Compact Powder", "Eyeliner", "Nail Polish"], "Makeup", "beauty", "unit", [200, 1200], 7);
     generateItems(["Deodorant", "Body Wash", "Body Lotion", "Shaving Cream", "Razors", "Talcum Powder"], "Bath & Body", "beauty", "unit", [100, 500], 6);
   } else {
-    // Restaurant / Food categories
+    // Fallback for Restaurants / Food
     generateItems(["Spring Rolls", "Chicken Tikka", "Paneer Chilli", "Momos"], "Starters", "food", "unit", [150, 250], 4);
     generateItems(["Butter Chicken", "Paneer Butter Masala", "Dal Makhani", "Mutton Rogan Josh"], "Main Course", "food", "unit", [250, 450], 4);
     generateItems(["Garlic Naan", "Tandoori Roti", "Lachha Paratha", "Rumali Roti"], "Breads", "food", "unit", [40, 100], 4);
     generateItems(["Veg Biryani", "Chicken Biryani", "Jeera Rice", "Pulao"], "Rice & Biryani", "food", "unit", [150, 350], 4);
-    generateItems(["Gulab Jamun", "Rasmalai", "Ice Cream", "Brownie"], "Desserts", "food", "unit", [100, 200], 4);
   }
 
   return products;
 };
 
 export const OFFERS = [
-  { id: 1, title: "10% OFF", subtitle: "Axis Bank Cards", color: "bg-[#e0e7ff] text-indigo-700" },
-  { id: 2, title: "Flat ₹50", subtitle: "On orders above ₹299", color: "bg-[#dcfce7] text-green-700" },
-  { id: 3, title: "Free Delivery", subtitle: "For new users", color: "bg-[#fef9c3] text-yellow-700" },
-  { id: 4, title: "20% Cashback", subtitle: "Using Paytm UPI", color: "bg-[#fae8ff] text-purple-700" }
+  { id: "1", title: "10% OFF", subtitle: "Axis Bank Cards", color: "bg-[#e0e7ff] text-indigo-700" },
+  { id: "2", title: "Flat ₹50", subtitle: "On orders above ₹299", color: "bg-[#dcfce7] text-green-700" },
+  { id: "3", title: "Free Delivery", subtitle: "For new users", color: "bg-[#fef9c3] text-yellow-700" },
+  { id: "4", title: "20% Cashback", subtitle: "Using Paytm UPI", color: "bg-[#fae8ff] text-purple-700" }
 ];
 
 export const RESTAURANTS = Array.from({ length: 25 }, (_, i) => {
@@ -186,7 +205,7 @@ export const RESTAURANTS = Array.from({ length: 25 }, (_, i) => {
   const area = AREAS[i % AREAS.length];
 
   return {
-    id: i + 1,
+    id: String(i + 1),
     name: name,
     type: types[i % types.length],
     cuisine: cuisines[i % cuisines.length],
@@ -200,6 +219,7 @@ export const RESTAURANTS = Array.from({ length: 25 }, (_, i) => {
     isVeg: i % 4 === 0, // Roughly 25% are pure veg
     openingTime: ["08:00", "09:00", "09:30", "10:00"][i % 4],
     closingTime: ["20:00", "21:30", "22:00", "23:00"][i % 4],
+    vertical_id: '4e8633b4-81e0-4ecd-b182-2efdad903987', // Restaurants & Cafes
     products: generateProducts("food", 1000 + (i * 100))
   };
 });
@@ -211,11 +231,12 @@ export const STORES = Array.from({ length: 45 }, (_, i) => {
     grocery: ["Green Leaf Mart", "Fresh Choice", "Daily Needs", "Family Supermarket", "Nature's Basket"],
     pharmacy: ["City Health", "Apollo Plus", "MediCare", "LifeSpan Pharmacy", "True Tabs"],
     meat: ["Tender Cuts", "Licious Hub", "Meat & More", "Ocean Catch", "Butcher's Block"],
-    snacks: ["Midnight Munch", "Quick Grab", "Snack Point", "Crave Station", "Bite & Go"],
+    bakery: ["The French Loaf", "Cake Walk", "Bakers Den", "Sweet Obsession", "Just Bake"],
     electronics: ["Croma Express", "Reliance Digital Mini", "Gizmo Hub", "Tech World", "Mobile & More"],
-    books: ["Sapna Book House", "Crossword Lite", "Pen & Paper", "Campus Store", "The Read Shop"],
+    fashion: ["Trendz Fashion", "The Style Studio", "Wardrobe Essentials", "Urban Wear", "Apparel Hub"],
+    home: ["Home & Beyond", "Lifestyle Decor", "Kitchen Comforts", "Nested Home", "Modern Living"],
     pet: ["Heads Up for Tails", "Pet Paradise", "Paw & Purr", "Furry Friends", "Doggo Hub"],
-    beauty: ["Health & Glow", "Nykaa Store", "Beauty Plus", "Glow & Co", "The Cosmetic Shop"]
+    beauty: ["Health & Glow", "Nykaa Luxe", "Beauty Plus", "Glow & Co", "The Cosmetic Shop"]
   };
   const storeNames = names[cat.id as keyof typeof names] || ["Generic Store"];
   const area = AREAS[i % AREAS.length];
@@ -228,7 +249,7 @@ export const STORES = Array.from({ length: 45 }, (_, i) => {
   const isAllVeg = products.length > 0 && products.every(p => p.isVeg === true);
 
   return {
-    id: 100 + i,
+    id: String(100 + i),
     name: `${storeNames[(i) % storeNames.length]} - ${area}`,
     category: cat.id,
     description: `Your trusted ${cat.name} store in ${area}`,
@@ -239,6 +260,22 @@ export const STORES = Array.from({ length: 45 }, (_, i) => {
     branches: [`${area}`],
     openingTime: ["07:30", "08:00", "09:00", "09:30"][i % 4],
     closingTime: ["21:00", "22:00", "22:30", "23:00"][i % 4],
+    vertical_id: (() => {
+      const mapping: Record<string, string> = {
+        '1': 'c307b78e-b924-47a1-a5a7-4405777fa50c', // Grocery
+        '3': '0c90698a-2c46-4615-afd2-cc2e64206e25', // Fruits
+        '2': '4e8633b4-81e0-4ecd-b182-2efdad903987', // Restaurants
+        '4': '5dc2aefb-7aa9-4e7f-a712-845c60f0fe1b', // Bakeries
+        '5': '835a8009-f598-433b-a6e9-f508e53bf960', // Meat
+        '6': '1c4ebf02-778e-44be-a50a-3442233202ba', // Pharmacy
+        '7': '62a1dab9-a278-4b6b-83f8-1b2bb7ef5edb', // Electronics
+        '8': '587a4b75-8bbf-4bee-8f7c-e2618f598d39', // Fashion
+        '9': '221cb690-b7f5-499a-a92a-e86c48e44d48', // Home
+        '10': '9a1f48a0-d9b8-4fe6-a685-2a14946085d6', // Beauty
+        '11': 'cb1883b2-ca64-45bb-b836-b6bebe6b2988', // Pet
+      };
+      return mapping[cat.id] || 'other';
+    })(),
     products,
     avgPrice,
     isAllVeg,
@@ -246,9 +283,10 @@ export const STORES = Array.from({ length: 45 }, (_, i) => {
 });
 
 // Helper for finding alternative stores when a store rejects an order
-export const findAlternativeStores = (rejectedStoreId: number, itemNames: string[]) => {
+export const findAlternativeStores = (rejectedStoreId: string, itemNames: string[]) => {
   // Find the original store 
-  const isInternalRestaurant = rejectedStoreId < 100;
+  const storeNum = Number(rejectedStoreId);
+  const isInternalRestaurant = !isNaN(storeNum) && storeNum < 100;
   const originalStore = isInternalRestaurant
     ? RESTAURANTS.find(r => r.id === rejectedStoreId)
     : STORES.find(s => s.id === rejectedStoreId);
@@ -269,14 +307,15 @@ export const findAlternativeStores = (rejectedStoreId: number, itemNames: string
       const matchedItems = store.products.filter(p => itemNames.includes(p.name));
       const matchPercentage = itemNames.length > 0 ? (matchedItems.length / itemNames.length) : 0;
 
-      return {
-        storeId: store.id,
-        storeName: store.name,
-        distance: store.distance,
-        image: store.image,
-        matchedItems: matchedItems,
-        matchPercentage: matchPercentage
-      };
+        return {
+          storeId: store.id,
+          storeName: store.name,
+          distance: store.distance,
+          image: store.image,
+          isDining: isInternalRestaurant,
+          matchedItems: matchedItems,
+          matchPercentage: matchPercentage
+        };
     })
     // Only return stores that have at least 1 matching item, sorted by best match then closest distance
     .filter(alt => alt.matchedItems.length > 0)

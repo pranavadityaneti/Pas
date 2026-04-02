@@ -15,6 +15,7 @@ import { useNavigation, useRoute, RouteProp, CommonActions } from '@react-naviga
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
 import { useOrderRequests, OrderRequest } from '../hooks/useOrderRequests';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../lib/supabase';
@@ -74,11 +75,11 @@ export default function CheckoutScreen() {
     const [step, setStep] = useState<'form' | 'waiting' | 'results' | 'confirmed' | 'error'>('form');
     const [finalTotalToPay, setFinalTotalToPay] = useState(0);
     const [finalGstToPay, setFinalGstToPay] = useState(0);
-    const [selectedTime, setSelectedTime] = useState<Record<number, string>>({});
+    const [selectedTime, setSelectedTime] = useState<Record<string, string>>({});
     const [isTimeModalVisible, setIsTimeModalVisible] = useState(false);
-    const [activeStoreForTime, setActiveStoreForTime] = useState<number | null>(null);
+    const [activeStoreForTime, setActiveStoreForTime] = useState<string | null>(null);
     const [selectedDay, setSelectedDay] = useState<'Today' | 'Tomorrow'>('Today');
-    const [confirmedOrders, setConfirmedOrders] = useState<{ storeId: number, storeName: string, items: any[], total: number, otp: string }[]>([]);
+    const [confirmedOrders, setConfirmedOrders] = useState<{ storeId: string, storeName: string, items: any[], total: number, otp: string }[]>([]);
     const [specialInstructions, setSpecialInstructions] = useState('');
     const [couponCode, setCouponCode] = useState('');
     const [couponApplied, setCouponApplied] = useState(false);
@@ -89,21 +90,21 @@ export default function CheckoutScreen() {
     const [pickupMode, setPickupMode] = useState<'myself' | 'other'>('myself');
     const [pickupName, setPickupName] = useState('');
     const [pickupPhone, setPickupPhone] = useState('');
-    const [storeLocations, setStoreLocations] = useState<Record<number, any>>({});
-    const [currentUser, setCurrentUser] = useState<any>(null);
+    const [storeLocations, setStoreLocations] = useState<Record<string, any>>({});
+    const { user, profile, isProfileLoading } = useAuth();
     const [paymentMethod, setPaymentMethod] = useState<'upi' | 'card'>('upi');
     const [contactsModalVisible, setContactsModalVisible] = useState(false);
     const [contactsList, setContactsList] = useState<Contacts.Contact[]>([]);
     const [developerMode, setDeveloperMode] = useState(false);
     const [nowTimer, setNowTimer] = useState(Date.now());
-    const [storeOtps, setStoreOtps] = useState<Record<number, string>>({});
+    const [storeOtps, setStoreOtps] = useState<Record<string, string>>({});
     const [contactSearchText, setContactSearchText] = useState('');
 
     // Hooks: Effects
     useEffect(() => {
         if (items.length === 0) return; // Don't reset OTPs when cart is cleared
         const uniqueStoreIds = Array.from(new Set(items.map(i => i.storeId)));
-        const otps: Record<number, string> = {};
+        const otps: Record<string, string> = {};
         uniqueStoreIds.forEach(id => {
             otps[id] = Math.floor(1000 + Math.random() * 9000).toString();
         });
@@ -146,37 +147,22 @@ export default function CheckoutScreen() {
     }, [step]);
 
     useEffect(() => {
-        const fetchUserProfile = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-                setCurrentUser(user);
-                // Try to fetch real name from User table
-                let userName = user.user_metadata?.full_name || '';
-                try {
-                    const { data: profile } = await supabase
-                        .from('profiles')
-                        .select('full_name')
-                        .eq('id', user.id)
-                        .single();
-                    if (profile?.full_name) userName = profile.full_name;
-                } catch (e) { /* ignore */ }
+        if (user) {
+            // Use profile name if exists, fallback to metadata name, then "User" or phone
+            const userName = profile?.full_name || user.user_metadata?.full_name || 'New User';
+            const userPhone = user.phone || '';
 
-                const userPhone = user.phone || '';
-                // Store profile name on the user object for later pickup mode switching
-                (user as any)._profileName = userName;
-                if (pickupMode === 'myself') {
-                    setPickupName(userName || 'User');
-                    setPickupPhone(userPhone);
-                }
+            if (pickupMode === 'myself') {
+                setPickupName(userName);
+                setPickupPhone(userPhone);
             }
-        };
-        fetchUserProfile();
-    }, []);
+        }
+    }, [user, profile, pickupMode]);
 
     useEffect(() => {
         if (items.length === 0) return;
         const uniqueStoreIds = Array.from(new Set(items.map(i => i.storeId)));
-        const locMap: Record<number, any> = {};
+        const locMap: Record<string, any> = {};
         uniqueStoreIds.forEach(id => {
             const s = STORES.find(st => st.id === id) || RESTAURANTS.find(r => r.id === id);
             if (s) locMap[id] = s;
@@ -231,8 +217,8 @@ export default function CheckoutScreen() {
     const total = Math.max(0, subtotal + gst - discount);
 
     // Helpers
-    const getIsVeg = (productId: number) => {
-        const p = ALL_PRODUCTS.find((p: any) => p.id === productId);
+    const getIsVeg = (productId: string) => {
+        const p = ALL_PRODUCTS.find((p: any) => String(p.id) === String(productId));
         return p?.isVeg ?? true;
     };
 
@@ -312,7 +298,7 @@ export default function CheckoutScreen() {
 
         try {
             // Verify Signature
-            const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
+            const apiUrl = process.env.EXPO_PUBLIC_API_URL;
             const verifyRes = await fetch(`${apiUrl}/payments/verify`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -342,8 +328,8 @@ export default function CheckoutScreen() {
                     const groupDiscount = Math.round(discount * share);
                     const groupFinalTotal = Math.max(0, req.subtotal + groupGst - groupDiscount);
 
-                    const storeIdNum = parseInt(req.store_id, 10);
-                    const storeOtp = storeOtps[storeIdNum] || Math.floor(1000 + Math.random() * 9000).toString();
+                    const storeIdStr = String(req.store_id);
+                    const storeOtp = storeOtps[storeIdStr] || Math.floor(1000 + Math.random() * 9000).toString();
                     const now = new Date().toISOString();
 
                     const { data: orderData, error: orderError } = await supabase
@@ -363,7 +349,7 @@ export default function CheckoutScreen() {
                             items_count: req.items.length,
                             status: 'PENDING',
                             special_instructions: specialInstructions,
-                            arrival_time: selectedTime[storeIdNum] || 'Not selected',
+                            arrival_time: selectedTime[storeIdStr] || 'Not selected',
                             guests_count: null,
                             created_at: now,
                             updated_at: now
@@ -386,7 +372,7 @@ export default function CheckoutScreen() {
 
                 // Save OTPs into confirmedOrders BEFORE clearing cart (clearCart wipes storeOtps via useEffect)
                 setConfirmedOrders(acceptedRequests.map((r: any) => {
-                    const sid = parseInt(r.store_id, 10);
+                    const sid = String(r.store_id);
                     return {
                         storeId: sid,
                         storeName: r.store_name,
@@ -523,7 +509,7 @@ export default function CheckoutScreen() {
 
             try {
                 // Fetch the API URL from process.env
-                const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
+                const apiUrl = process.env.EXPO_PUBLIC_API_URL;
                 const { data: { user } } = await supabase.auth.getUser();
                 const res = await fetch(`${apiUrl}/payments/create-order`, {
                     method: 'POST',
@@ -546,15 +532,15 @@ export default function CheckoutScreen() {
         const handleSwapStore = async (req: OrderRequest, alt: any) => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             req.items.forEach(reqItem => {
-                if (reqItem.id) removeItem(reqItem.id);
+                if (reqItem.id) removeItem(String(reqItem.id));
                 else {
-                    const cartMatch = items.find(i => i.storeId === parseInt(req.store_id) && i.name === reqItem.name);
-                    if (cartMatch) removeItem(cartMatch.id);
+                    const cartMatch = items.find(i => String(i.storeId) === String(req.store_id) && i.name === reqItem.name);
+                    if (cartMatch) removeItem(String(cartMatch.id));
                 }
             });
             alt.matchedItems.forEach((altItem: any) => {
                 const originalReqItem = req.items.find((i: any) => i.name === altItem.name);
-                addItem({ ...altItem, storeId: alt.storeId, storeName: alt.storeName, uom: String(originalReqItem?.quantity || 1) });
+                addItem({ ...altItem, storeId: alt.storeId, storeName: alt.storeName, isDining: alt.isDining, uom: String(originalReqItem?.quantity || 1) });
             });
             const newTotal = alt.matchedItems.reduce((sum: number, item: any) => {
                 const originalReqItem = req.items.find((i: any) => i.name === item.name);
@@ -646,7 +632,7 @@ export default function CheckoutScreen() {
                         <View className="px-5 mb-6">
                             <Text className="text-[13px] font-extrabold text-red-600 uppercase tracking-wider mb-3 px-1">Unavailable</Text>
                             {rejectedRequests.map((req: any) => {
-                                const alternatives = findAlternativeStores(parseInt(req.store_id, 10), req.items.map((i: any) => i.name));
+                                const alternatives = findAlternativeStores(req.store_id, req.items.map((i: any) => i.name));
                                 return (
                                     <View key={req.id} className="bg-white p-5 rounded-2xl mb-3 border border-red-100 shadow-sm">
                                         <View className="flex-row items-center mb-2">
@@ -855,11 +841,11 @@ export default function CheckoutScreen() {
                     <View className="flex-row bg-gray-100/80 rounded-xl p-1 mb-4">
                         <TouchableOpacity onPress={() => {
                             setPickupMode('myself');
-                            // Restore user's own name/phone
-                            if (currentUser) {
-                                const userName = currentUser._profileName || currentUser.user_metadata?.full_name || 'User';
+                            // Restore user's own name/phone from global context
+                            if (user) {
+                                const userName = profile?.full_name || user.user_metadata?.full_name || 'New User';
                                 setPickupName(userName);
-                                setPickupPhone(currentUser.phone || '');
+                                setPickupPhone(user.phone || '');
                             }
                         }} className={`flex-1 py-3 rounded-lg items-center ${pickupMode === 'myself' ? 'bg-white shadow-sm' : ''}`}><Text className={`text-[14px] font-bold ${pickupMode === 'myself' ? 'text-gray-900' : 'text-gray-500'}`}>Myself</Text></TouchableOpacity>
                         <TouchableOpacity onPress={selectContact} className={`flex-1 py-3 rounded-lg items-center ${pickupMode === 'other' ? 'bg-white shadow-sm' : ''}`}><Text className={`text-[14px] font-bold ${pickupMode === 'other' ? 'text-gray-900' : 'text-gray-500'}`}>Someone Else</Text></TouchableOpacity>
@@ -868,7 +854,9 @@ export default function CheckoutScreen() {
                         <View className="bg-gray-50 rounded-xl px-4 py-3.5 border border-gray-100">
                             <View className="flex-row items-center mb-2">
                                 <User size={16} color="#6B7280" />
-                                <Text className="text-[14px] font-bold text-gray-900 ml-3">{pickupName || 'Loading...'}</Text>
+                                <Text className="text-[14px] font-bold text-gray-900 ml-3">
+                                    {isProfileLoading ? 'Loading Profile...' : (pickupName || user?.phone || 'New User')}
+                                </Text>
                             </View>
                             {pickupPhone ? (
                                 <Text className="text-[13px] text-gray-500 font-medium ml-7">{pickupPhone}</Text>

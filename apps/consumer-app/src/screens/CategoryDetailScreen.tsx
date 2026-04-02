@@ -17,6 +17,7 @@ import * as Haptics from 'expo-haptics';
 import CartSummaryBar from '../components/CartSummaryBar';
 import ProductCard from '../components/ProductCard';
 import StoreFilterModal, { StoreModalFilters, DEFAULT_MODAL_FILTERS } from '../components/StoreFilterModal';
+import { getIsDining } from '../utils/dataTransformer';
 
 const { width } = Dimensions.get('window');
 
@@ -91,13 +92,10 @@ export default function CategoryDetailScreen() {
             list = [...list].sort((a, b) => parseFloat(a.distance || '0') - parseFloat(b.distance || '0'));
         } else if (storeQuickFilter === 'open_now') {
             list = list.filter(isStoreOpenNow);
-        } else if (storeQuickFilter === 'new_arrivals') {
-            // Simulate: stores with higher IDs are newer
-            if (list.length > 0) {
-                const maxId = Math.max(...list.map(s => s.id));
-                const threshold = maxId - Math.ceil(list.length * 0.3);
-                list = list.filter(s => s.id >= threshold);
-            }
+        } else if (storeQuickFilter === "new_arrivals") {
+            const count = Math.ceil(list.length * 0.3);
+            list = list.slice(0, count);
+        
         } else if (storeQuickFilter === 'pure_veg') {
             list = list.filter(s => (s as any).isAllVeg === true);
         }
@@ -186,6 +184,7 @@ export default function CategoryDetailScreen() {
             image: product.image,
             storeId: product.storeId,
             storeName: product.store?.name || store?.name || 'Partner Store',
+            isDining: getIsDining(categoryName),
             uom: product.uom || '1 Pc',
         });
     };
@@ -429,7 +428,7 @@ export default function CategoryDetailScreen() {
                                 </View>
                                 <ScrollView horizontal showsHorizontalScrollIndicator={false} className="px-5">
                                     {topPicks.map((item) => {
-                                        const quantity = getItemQuantity(item.id);
+                                        const quantity = getItemQuantity(String(item.id));
                                         return (
                                             <View key={item.id} className="mr-5 pb-2" style={{ width: (width - 40 - 16) / 2 }}>
                                                 <ProductCard
@@ -437,8 +436,8 @@ export default function CategoryDetailScreen() {
                                                     item={item}
                                                     quantity={quantity}
                                                     onAdd={handleAddToCart}
-                                                    onIncrement={(id, newQty) => updateQuantity(Number(id), newQty)}
-                                                    onDecrement={(id, newQty) => updateQuantity(Number(id), newQty)}
+                                                    onIncrement={(id, newQty) => updateQuantity(id, newQty)}
+                                                    onDecrement={(id, newQty) => updateQuantity(id, newQty)}
                                                     onPress={() => navigation.navigate('Storefront', { storeId: item.storeId as any })}
                                                 />
                                             </View>
@@ -457,15 +456,15 @@ export default function CategoryDetailScreen() {
 
                             <View className="flex-row flex-wrap justify-between gap-y-6">
                                 {categoryProducts.map((item) => {
-                                    const quantity = getItemQuantity(item.id);
+                                    const quantity = getItemQuantity(String(item.id));
                                     return (
                                         <ProductCard
                                             key={item.id}
                                             item={item}
                                             quantity={quantity}
                                             onAdd={handleAddToCart}
-                                            onIncrement={(id, newQty) => updateQuantity(Number(id), newQty)}
-                                            onDecrement={(id, newQty) => updateQuantity(Number(id), newQty)}
+                                            onIncrement={(id, newQty) => updateQuantity(id, newQty)}
+                                            onDecrement={(id, newQty) => updateQuantity(id, newQty)}
                                             onPress={() => navigation.navigate('Storefront', { storeId: item.storeId as any })}
                                         />
                                     );

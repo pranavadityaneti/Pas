@@ -25,8 +25,8 @@ type SpotlightConfig = {
     description: string;
 };
 
-const SPOTLIGHT_CONFIGS: Record<number, SpotlightConfig> = {
-    1: {
+const SPOTLIGHT_CONFIGS: Record<string, SpotlightConfig> = {
+    '1': {
         filterFn: () => true,
         ctaLabel: 'Book Now',
         ctaAction: 'book',
@@ -35,7 +35,7 @@ const SPOTLIGHT_CONFIGS: Record<number, SpotlightConfig> = {
         offerBanner: { text: '20% OFF on all bookings', subtext: 'Valid this weekend only • No minimum order • Auto-applied at checkout' },
         description: 'Enjoy flat 20% off on table bookings at all partner restaurants this weekend. Make your reservations now!',
     },
-    2: {
+    '2': {
         filterFn: (r) => r.type === 'Fine Dining',
         ctaLabel: 'Reserve Table',
         ctaAction: 'book',
@@ -43,7 +43,7 @@ const SPOTLIGHT_CONFIGS: Record<number, SpotlightConfig> = {
         icon: Sparkles,
         description: 'Handpicked fine dining experiences with premium ambiance, curated menus, and exclusive table reservations.',
     },
-    3: {
+    '3': {
         filterFn: () => true,
         ctaLabel: 'Pre-order Now',
         ctaAction: 'order',
@@ -51,7 +51,7 @@ const SPOTLIGHT_CONFIGS: Record<number, SpotlightConfig> = {
         icon: Clock,
         description: 'Skip the wait! Browse menus, place your order ahead of time, and walk in to a ready meal.',
     },
-    4: {
+    '4': {
         filterFn: (r) => r.type === 'Fine Dining',
         ctaLabel: 'Book Now',
         ctaAction: 'book',
@@ -59,7 +59,7 @@ const SPOTLIGHT_CONFIGS: Record<number, SpotlightConfig> = {
         icon: UtensilsCrossed,
         description: 'Exclusive multi-course tasting menus crafted by top chefs. An unforgettable culinary journey.',
     },
-    5: {
+    '5': {
         filterFn: () => true,
         ctaLabel: 'Book for Group',
         ctaAction: 'book',
@@ -67,7 +67,7 @@ const SPOTLIGHT_CONFIGS: Record<number, SpotlightConfig> = {
         icon: Users,
         description: 'Perfect for birthdays, anniversaries, and get-togethers. Find restaurants that welcome large groups.',
     },
-    6: {
+    '6': {
         filterFn: () => true,
         ctaLabel: 'Order Now',
         ctaAction: 'order',
@@ -85,8 +85,8 @@ export default function SpotlightDetailScreen() {
     const [bookingVisible, setBookingVisible] = useState(false);
     const [bookingRestaurant, setBookingRestaurant] = useState<any>(null);
 
-    const spotlight = DINING_SPOTLIGHTS.find(s => s.id === spotlightId);
-    const config = SPOTLIGHT_CONFIGS[spotlightId] || SPOTLIGHT_CONFIGS[1];
+    const spotlight = DINING_SPOTLIGHTS.find(s => String(s.id) === spotlightId);
+    const config = SPOTLIGHT_CONFIGS[spotlightId] || SPOTLIGHT_CONFIGS['1'];
     const AccentIcon = config.icon;
 
     const restaurants = useMemo(() => {

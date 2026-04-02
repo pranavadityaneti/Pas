@@ -61,8 +61,8 @@ export default function DiningCheckoutScreen() {
     const [couponCode, setCouponCode] = useState('');
 
     // Get restaurant info from cart items
-    const restaurantId = items.length > 0 ? items[0].storeId : null;
-    const restaurant = restaurantId ? RESTAURANTS.find(r => r.id === restaurantId) : null;
+    const restaurantId = items.length > 0 ? String(items[0].storeId) : null;
+    const restaurant = restaurantId ? RESTAURANTS.find(r => String(r.id) === restaurantId) : null;
     const restaurantName = restaurant?.name || (items.length > 0 ? items[0].storeName : 'Restaurant');
     const restaurantAddress = restaurant?.address || '';
 
@@ -94,8 +94,8 @@ export default function DiningCheckoutScreen() {
     const discount = couponApplied ? couponDiscount : 0;
     const total = Math.max(0, subtotal + gst - discount);
 
-    const getIsVeg = (productId: number) => {
-        const p = ALL_PRODUCTS.find((p: any) => p.id === productId);
+    const getIsVeg = (productId: string) => {
+        const p = ALL_PRODUCTS.find((p: any) => String(p.id) === String(productId));
         return p?.isVeg ?? true;
     };
 
@@ -103,7 +103,7 @@ export default function DiningCheckoutScreen() {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
         try {
-            const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
+            const apiUrl = process.env.EXPO_PUBLIC_API_URL;
             const { data: { user } } = await supabase.auth.getUser();
             const res = await fetch(`${apiUrl}/payments/create-order`, {
                 method: 'POST',
@@ -129,7 +129,7 @@ export default function DiningCheckoutScreen() {
 
         try {
             // Verify Signature
-            const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
+            const apiUrl = process.env.EXPO_PUBLIC_API_URL;
             const verifyRes = await fetch(`${apiUrl}/payments/verify`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -394,8 +394,8 @@ export default function DiningCheckoutScreen() {
                         <View key={item.id} className={`flex-row justify-between items-center py-3 ${idx < items.length - 1 ? 'border-b border-gray-50' : ''}`}>
                             <View className="flex-row items-center flex-1">
                                 {/* Veg/Non-veg indicator */}
-                                <View className={`w-4 h-4 border items-center justify-center mr-3 ${getIsVeg(item.id) ? 'border-green-600' : 'border-red-600'}`}>
-                                    <View className={`w-2 h-2 rounded-full ${getIsVeg(item.id) ? 'bg-green-600' : 'bg-red-600'}`} />
+                                <View className={`w-4 h-4 border items-center justify-center mr-3 ${getIsVeg(String(item.id)) ? 'border-green-600' : 'border-red-600'}`}>
+                                    <View className={`w-2 h-2 rounded-full ${getIsVeg(String(item.id)) ? 'bg-green-600' : 'bg-red-600'}`} />
                                 </View>
                                 <View className="bg-gray-100 rounded-lg w-7 h-7 items-center justify-center mr-3">
                                     <Text className="text-[12px] font-bold text-gray-600">{item.quantity}</Text>

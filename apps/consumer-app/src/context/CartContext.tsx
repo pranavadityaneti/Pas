@@ -3,27 +3,29 @@ import React, { createContext, useContext, useState, ReactNode, useEffect, useRe
 import { Alert } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../lib/supabase';
+import { RESTAURANTS } from '../lib/data';
 
 interface CartItem {
-    id: number;
+    id: string;
     name: string;
     price: number;
     image: string;
     quantity: number;
-    storeId: number;
+    storeId: string;
     storeName: string;
+    isDining: boolean;
     uom?: string;
 }
 
 interface CartContextType {
     items: CartItem[];
     addItem: (item: Omit<CartItem, 'quantity'>) => void;
-    removeItem: (id: number) => void;
-    updateQuantity: (id: number, quantity: number) => void;
+    removeItem: (id: string) => void;
+    updateQuantity: (id: string, quantity: number) => void;
     clearCart: () => void;
     getItemCount: () => number;
     getTotal: () => number;
-    getItemQuantity: (id: number) => number;
+    getItemQuantity: (id: string) => number;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
@@ -117,13 +119,15 @@ export function CartProvider({ children }: { children: ReactNode }) {
             // Merge logic
             let mergedItems: CartItem[] = [];
             const cloudItems: CartItem[] = cartData.cart_items.map((ci: any) => ({
-                id: Number(ci.product_id),
+                id: String(ci.product_id),
                 name: ci.product_name,
                 price: ci.price,
                 image: ci.image,
                 quantity: ci.quantity,
-                storeId: Number(ci.store_id),
-                storeName: ci.store_name
+                storeId: String(ci.store_id),
+                storeName: ci.store_name,
+                // Derive isDining for legacy persistence or items without it since DB schema is locked
+                isDining: RESTAURANTS.some(r => String(r.id) === String(ci.store_id))
             }));
 
             if (localItemsToMerge.length > 0) {
@@ -198,11 +202,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
     // ------ Cart Operations ------
 
     const addItem = (item: Omit<CartItem, 'quantity'>) => {
-        // VALIDATION: Prevent mixing Dine-in (storeId < 100) and Pickup (storeId >= 100)
-        const isNewItemDining = item.storeId < 100;
+        // VALIDATION: Prevent mixing Dine-in and Pickup
+        // Now using explicit isDining flag from the data source
+        const isNewItemDining = item.isDining;
 
         if (items.length > 0) {
-            const isExistingDining = items[0].storeId < 100;
+            const isExistingDining = items[0].isDining;
             if (isNewItemDining !== isExistingDining) {
                 Alert.alert(
                     "Clear Cart?",
@@ -214,7 +219,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
                             style: "destructive",
                             onPress: () => {
                                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                                setItems([{ ...item, quantity: 1 }]);
+                                setItems([{ ...item, id: String(item.id), storeId: String(item.storeId), quantity: 1 }]);
                             }
                         }
                     ]
@@ -225,24 +230,24 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         setItems(prev => {
-            const existing = prev.find(i => i.id === item.id);
+            const existing = prev.find(i => String(i.id) === String(item.id));
             if (existing) {
-                return prev.map(i => i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i);
+                return prev.map(i => String(i.id) === String(item.id) ? { ...i, quantity: i.quantity + 1 } : i);
             }
-            return [...prev, { ...item, quantity: 1 }];
+            return [...prev, { ...item, id: String(item.id), storeId: String(item.storeId), quantity: 1 }];
         });
     };
 
-    const removeItem = (id: number) => {
-        setItems(prev => prev.filter(i => i.id !== id));
+    const removeItem = (id: string) => {
+        setItems(prev => prev.filter(i => String(i.id) !== String(id)));
     };
 
-    const updateQuantity = (id: number, quantity: number) => {
+    const updateQuantity = (id: string, quantity: number) => {
         if (quantity <= 0) {
             removeItem(id);
             return;
         }
-        setItems(prev => prev.map(i => i.id === id ? { ...i, quantity } : i));
+        setItems(prev => prev.map(i => String(i.id) === String(id) ? { ...i, quantity } : i));
     };
 
     const clearCart = () => {
@@ -257,8 +262,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
     const getTotal = () => items.reduce((sum, i) => sum + (i.price * i.quantity), 0);
 
-    const getItemQuantity = (id: number) => {
-        const item = items.find(i => i.id === id);
+    const getItemQuantity = (id: string) => {
+        const item = items.find(i => String(i.id) === String(id));
         return item ? item.quantity : 0;
     };
 

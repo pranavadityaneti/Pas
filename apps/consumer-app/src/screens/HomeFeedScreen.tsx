@@ -4,7 +4,7 @@ import { View, Text, ScrollView, Image, TouchableOpacity, TextInput, Dimensions,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Search, User, ChevronRight, Star, Clock, ArrowRight } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { STORES, RESTAURANTS, STORE_CATEGORIES } from '../lib/data';
+import { STORE_CATEGORIES, PICKUP_SPOTLIGHTS } from '../lib/data';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
@@ -14,6 +14,10 @@ import * as Haptics from 'expo-haptics';
 import { useCart } from '../context/CartContext';
 import CartSummaryBar from '../components/CartSummaryBar';
 import { LinearGradient } from 'expo-linear-gradient';
+import GlobalHeader from '../components/GlobalHeader';
+import { useCategories } from '../context/CategoryContext';
+import { useStores } from '../hooks/useStores';
+import { ActivityIndicator } from 'react-native';
 
 const { width } = Dimensions.get('window');
 
@@ -22,11 +26,34 @@ type FilterType = 'nearest' | 'top_rated' | 'food' | 'grocery' | 'bakery';
 export default function HomeFeedScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const { activeLocation, isLoadingLocation } = useLocation();
-    const [profile, setProfile] = useState<any>(null);
     const [searchText, setSearchText] = useState('');
     const [activeFilter, setActiveFilter] = useState<FilterType>('nearest');
-
+    const { stores, loading } = useStores();
     const { items, getTotal } = useCart();
+    const { verticals } = useCategories();
+
+
+    const getCategoryUI = (name: string) => {
+        const mapping: Record<string, { ionicon: string, iconColor: string, colorClass: string, sub: string }> = {
+            'Grocery & Kirana': { ionicon: 'basket', iconColor: '#16A34A', colorClass: 'bg-green-100', sub: 'Daily Essentials' },
+            'Fruits & Vegetables': { ionicon: 'leaf', iconColor: '#EA580C', colorClass: 'bg-orange-100', sub: 'Fresh & Organic' },
+            'Restaurants & Cafes': { ionicon: 'restaurant', iconColor: '#B52725', colorClass: 'bg-red-100', sub: 'Order Hot Food' },
+            'Bakeries & Desserts': { ionicon: 'ice-cream', iconColor: '#DB2777', colorClass: 'bg-pink-100', sub: 'Cakes & Treats' },
+            'Meat & Seafood': { ionicon: 'fish', iconColor: '#2563EB', colorClass: 'bg-blue-100', sub: 'Fresh & Frozen' },
+            'Pharmacy & Wellness': { ionicon: 'medical', iconColor: '#0D9488', colorClass: 'bg-teal-100', sub: 'Meds & Hygiene' },
+            'Electronics & Accessories': { ionicon: 'watch', iconColor: '#4F46E5', colorClass: 'bg-indigo-100', sub: 'Tech & Gadgets' },
+            'Fashion & Apparel': { ionicon: 'shirt', iconColor: '#9333EA', colorClass: 'bg-purple-100', sub: 'Trendy Styles' },
+            'Home & Lifestyle': { ionicon: 'home', iconColor: '#CA8A04', colorClass: 'bg-yellow-100', sub: 'Decor & Living' },
+            'Beauty & Personal Care': { ionicon: 'color-palette', iconColor: '#E11D48', colorClass: 'bg-rose-100', sub: 'Skin & Beauty' },
+            'Pet Care & Supplies': { ionicon: 'paw', iconColor: '#44403C', colorClass: 'bg-stone-100', sub: 'Furry Friend Needs' },
+            'Stationery, Gifting & Toys': { ionicon: 'gift', iconColor: '#0891B2', colorClass: 'bg-cyan-100', sub: 'Gifts & Toys' },
+            'Electricals, Paints & Automotive': { ionicon: 'flash', iconColor: '#475569', colorClass: 'bg-slate-100', sub: 'Hardware' },
+            'Hardware & Plumbing': { ionicon: 'construct', iconColor: '#92400E', colorClass: 'bg-orange-200', sub: 'Plumbing' },
+            'Pooja & Festive Needs': { ionicon: 'sparkles', iconColor: '#854D0E', colorClass: 'bg-yellow-200', sub: 'Festive' },
+            'Sports & Fitness': { ionicon: 'football', iconColor: '#15803D', colorClass: 'bg-emerald-100', sub: 'Fitness' },
+        };
+        return mapping[name] || { ionicon: 'grid', iconColor: '#6B7280', colorClass: 'bg-gray-100', sub: 'Explore More' };
+    };
 
     const getTimeBadgeColor = (distanceStr: string) => {
         const dist = parseFloat(distanceStr) || 0;
@@ -35,65 +62,24 @@ export default function HomeFeedScreen() {
         return '#DC2626'; // Red
     };
 
-    useEffect(() => {
-        const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            if (!session) {
-                setProfile(null);
-            } else {
-                fetchProfile(session.user.id);
-            }
-        });
-
-        const profileSubscription = supabase
-            .channel('profile-changes')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
-                supabase.auth.getSession().then(({ data }) => {
-                    if (data.session) fetchProfile(data.session.user.id);
-                });
-            })
-            .subscribe();
-
-        return () => {
-            authSubscription.unsubscribe();
-            supabase.removeChannel(profileSubscription);
-        };
-    }, []);
-
-    const fetchProfile = async (userId: string) => {
-        try {
-            let profileTimerId: any;
-            const profileTimeout = new Promise((_, reject) => {
-                profileTimerId = setTimeout(() => reject(new Error('timeout')), 5000);
-            });
-
-            const { data, error } = await Promise.race([
-                supabase.from('profiles').select('avatar_url').eq('id', userId).single(),
-                profileTimeout
-            ]).finally(() => clearTimeout(profileTimerId)) as any;
-
-            if (data?.avatar_url) {
-                // Append a timestamp to the URL to bypass React Native's aggressive Image cache
-                data.avatar_url = `${data.avatar_url}?v=${Date.now()}`;
-            }
-            setProfile(data);
-        } catch (error) {
-            console.error('Error fetching profile avatar:', error);
-            setProfile(null);
-        }
-    };
 
     // --- Venues Data Logic ---
     const allVenues = useMemo(() => {
-        let list = [
-            ...RESTAURANTS.map(r => ({ ...r, isRestaurant: true, rawDist: parseFloat(r.distance) })),
-            ...STORES.map(s => ({ ...s, isRestaurant: false, rawDist: parseFloat(s.distance) }))
-        ];
+        let list = stores.map(s => ({ 
+            ...s, 
+            isRestaurant: s.isDining, 
+            rawDist: parseFloat(s.distance) 
+        }));
 
         // Apply filters
         if (activeFilter === 'nearest') {
             list.sort((a, b) => a.rawDist - b.rawDist);
         } else if (activeFilter === 'top_rated') {
-            list.sort((a, b) => parseFloat(b.rating) - parseFloat(a.rating));
+            list.sort((a, b) => {
+                const rA = a.rating ? parseFloat(a.rating) : 0;
+                const rB = b.rating ? parseFloat(b.rating) : 0;
+                return rB - rA;
+            });
         } else if (activeFilter === 'grocery') {
             list = list.filter(v => (v as any).category === 'grocery');
         } else if (activeFilter === 'food') {
@@ -124,7 +110,12 @@ export default function HomeFeedScreen() {
 
     // Curated store sections
     const trendingStores = useMemo(() => {
-        return allVenues.filter(v => parseFloat(v.rating) >= 4.0 && v.rawDist <= 5).sort((a, b) => parseFloat(b.rating) - parseFloat(a.rating)).slice(0, 6);
+        return allVenues.filter(v => (v.rating ? parseFloat(v.rating) : 0) >= 4.0 && v.rawDist <= 5)
+            .sort((a, b) => {
+                const rA = a.rating ? parseFloat(a.rating) : 0;
+                const rB = b.rating ? parseFloat(b.rating) : 0;
+                return rB - rA;
+            }).slice(0, 6);
     }, [allVenues]);
 
     const readyIn10 = useMemo(() => {
@@ -148,6 +139,14 @@ export default function HomeFeedScreen() {
         { id: 'grocery', label: 'Groceries', ionicon: 'cart' },
         { id: 'bakery', label: 'Coffee & Bites', ionicon: 'cafe' },
     ];
+
+    if (loading) {
+        return (
+            <SafeAreaView className="flex-1 bg-white items-center justify-center">
+                <ActivityIndicator size="large" color="#B52725" />
+            </SafeAreaView>
+        );
+    }
 
     const StandardVenueCard = ({ venue, tagType }: { venue: any, tagType?: 'trending' | 'fast' | 'deal' }) => (
         <TouchableOpacity
@@ -184,8 +183,14 @@ export default function HomeFeedScreen() {
                 <View className="flex-row justify-between items-start mb-2">
                     <Text className="text-[16px] font-bold text-gray-900 flex-1 pr-2" numberOfLines={1}>{venue.name}</Text>
                     <View className="flex-row items-center bg-gray-50 px-1.5 py-0.5 rounded-lg border border-gray-100">
-                        <Star size={12} color="#F59E0B" fill="#F59E0B" />
-                        <Text className="text-[11px] font-bold text-gray-800 ml-1">{venue.rating}</Text>
+                        {venue.rating ? (
+                            <>
+                                <Star size={12} color="#F59E0B" fill="#F59E0B" />
+                                <Text className="text-[11px] font-bold text-gray-800 ml-1">{venue.rating}</Text>
+                            </>
+                        ) : (
+                            <Text className="text-[10px] font-extrabold text-blue-600 uppercase">NEW</Text>
+                        )}
                     </View>
                 </View>
                 <View className="flex-row items-center justify-between">
@@ -205,84 +210,84 @@ export default function HomeFeedScreen() {
 
     return (
         <SafeAreaView edges={['top']} className="flex-1 bg-white">
-            {/* Sticky Header */}
-            <View className="px-6 pt-2 pb-3 bg-white z-20 overflow-visible">
-                <View className="flex-row items-start justify-between mb-4">
-                    <TouchableOpacity
-                        className="flex-1 pr-4"
-                        onPress={() => {
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                            navigation.navigate('LocationPicker');
-                        }}
-                    >
-                        <View className="flex-row items-center">
-                            <Text className="text-xl font-bold text-gray-900 tracking-tight">
-                                {activeLocation?.type || 'Select Location'}
-                            </Text>
-                            <ChevronRight size={18} color="#B52725" />
-                        </View>
-                        <Text className="text-xs font-medium text-gray-500 mt-0.5" numberOfLines={1}>
-                            {isLoadingLocation ? "Finding target delivery zone..." : (activeLocation?.address || 'Tap to set your current location')}
-                        </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        onPress={() => {
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                            (navigation as any).navigate('Profile');
-                        }}
-                        className="w-11 h-11 rounded-full bg-gray-100 items-center justify-center border border-gray-200 overflow-hidden"
-                    >
-                        {profile?.avatar_url ? (
-                            <Image source={{ uri: profile.avatar_url }} className="w-full h-full" />
-                        ) : (
-                            <User size={22} color="#9CA3AF" />
-                        )}
-                    </TouchableOpacity>
-                </View>
-
-                {/* Search Bar */}
-                <View className="flex-row items-center mb-4">
-                    <View className="flex-1 flex-row items-center px-4 h-12 bg-gray-50 rounded-2xl border border-gray-100">
-                        <Search size={18} color="#9CA3AF" />
-                        <TextInput
-                            className="flex-1 ml-3 font-semibold text-[14px] text-gray-800"
-                            style={{ paddingVertical: 0, height: 20, lineHeight: 20 }}
-                            placeholder="Find places to pick up near you..."
-                            placeholderTextColor="#9CA3AF"
-                            value={searchText}
-                            onChangeText={setSearchText}
-                        />
-                    </View>
-                </View>
-
-                {/* Quick Action Pills */}
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row overflow-visible">
-                    {filters.map(filter => {
-                        const isActive = activeFilter === filter.id;
-                        return (
-                            <TouchableOpacity
-                                delayPressIn={0}
-                                key={filter.id}
-                                onPress={() => {
-                                    Haptics.selectionAsync();
-                                    setActiveFilter(filter.id);
-                                }}
-                                className={`flex-row items-center px-4 h-9 rounded-full mr-2 border ${isActive
-                                    ? 'bg-[#B52725] border-[#B52725]'
-                                    : 'bg-white border-gray-200 shadow-sm'
-                                    }`}
-                            >
-                                <Ionicons name={isActive ? filter.ionicon as any : `${filter.ionicon}-outline` as any} size={14} color={isActive ? '#FFFFFF' : '#4B5563'} />
-                                <Text className={`ml-1.5 font-bold text-[12px] ${isActive ? 'text-white' : 'text-gray-700'}`}>
-                                    {filter.label}
-                                </Text>
-                            </TouchableOpacity>
-                        );
-                    })}
-                </ScrollView>
-            </View>
+            <GlobalHeader 
+                searchText={searchText} 
+                onSearchChange={setSearchText} 
+                searchPlaceholder="Find places to pick up near you..."
+                bottomContent={
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row overflow-visible">
+                        {filters.map(filter => {
+                            const isActive = activeFilter === filter.id;
+                            return (
+                                <TouchableOpacity
+                                    delayPressIn={0}
+                                    key={filter.id}
+                                    onPress={() => {
+                                        Haptics.selectionAsync();
+                                        setActiveFilter(filter.id);
+                                    }}
+                                    className={`flex-row items-center px-4 h-9 rounded-full mr-2 border ${isActive
+                                        ? 'bg-[#B52725] border-[#B52725]'
+                                        : 'bg-white border-gray-200 shadow-sm'
+                                        }`}
+                                >
+                                    <Ionicons name={isActive ? filter.ionicon as any : `${filter.ionicon}-outline` as any} size={14} color={isActive ? '#FFFFFF' : '#4B5563'} />
+                                    <Text className={`ml-1.5 font-bold text-[12px] ${isActive ? 'text-white' : 'text-gray-700'}`}>
+                                        {filter.label}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
+                }
+            />
 
             <ScrollView className="flex-1 bg-[#F8F9FA]" contentContainerStyle={{ paddingBottom: 120, paddingTop: 10 }} showsVerticalScrollIndicator={false}>
+
+                {/* Banner Carousel */}
+                <View className="mb-6 mt-2">
+                    <ScrollView 
+                        horizontal 
+                        showsHorizontalScrollIndicator={false} 
+                        pagingEnabled
+                        snapToInterval={width * 0.85 + 16}
+                        decelerationRate="fast"
+                        contentContainerStyle={{ paddingHorizontal: 24 }}
+                    >
+                        {PICKUP_SPOTLIGHTS.map((spot) => (
+                            <TouchableOpacity
+                                key={spot.id}
+                                onPress={() => {
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                                    // navigation.navigate('SpotlightDetail', { spotlightId: spot.id });
+                                }}
+                                className="mr-4 rounded-[24px] overflow-hidden bg-white shadow-sm border border-black/5"
+                                style={{ width: width * 0.85, height: 180 }}
+                                activeOpacity={0.9}
+                            >
+                                <Image source={{ uri: spot.image }} className="absolute w-full h-full" />
+                                <LinearGradient
+                                    colors={['transparent', 'rgba(0,0,0,0.7)']}
+                                    style={{ position: 'absolute', left: 0, right: 0, bottom: 0, top: 0, padding: 20, justifyContent: 'flex-end' }}
+                                >
+                                    {/* Badge */}
+                                    <View 
+                                        className="rounded-lg px-2.5 py-1 self-start absolute top-4 left-4"
+                                        style={{ backgroundColor: spot.badgeColor }}
+                                    >
+                                        <Text className="text-[10px] font-bold text-white uppercase tracking-wider">{spot.badge}</Text>
+                                    </View>
+                                    
+                                    {/* Title & Subtitle */}
+                                    <View>
+                                        <Text className="text-xl font-extrabold text-white leading-tight">{spot.title}</Text>
+                                        <Text className="text-[13px] font-semibold mt-1" style={{ color: 'rgba(255,255,255,0.9)' }}>{spot.subtitle}</Text>
+                                    </View>
+                                </LinearGradient>
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                </View>
 
                 {/* Categories Section */}
                 <View className="mb-8 mt-2">
@@ -294,8 +299,8 @@ export default function HomeFeedScreen() {
                         showsHorizontalScrollIndicator={false}
                         contentContainerStyle={{ paddingHorizontal: 24 }}
                     >
-                        {STORE_CATEGORIES.map((category) => {
-                            const colorClass = category.color.split(' ')[0];
+                        {(verticals.length > 0 ? verticals : STORE_CATEGORIES).map((category) => {
+                            const ui = getCategoryUI(category.name);
 
                             return (
                                 <TouchableOpacity
@@ -310,11 +315,11 @@ export default function HomeFeedScreen() {
                                     }}
                                     className="items-center mr-5"
                                 >
-                                    <View className={`w-[72px] h-[72px] rounded-full ${colorClass} items-center justify-center mb-2 shadow-sm border border-black/5`}>
-                                        <Ionicons name={category.ionicon as any} size={30} color={category.iconColor} />
+                                    <View className={`w-16 h-16 rounded-full ${ui.colorClass} items-center justify-center mb-2 shadow-sm border border-black/5`}>
+                                        <Ionicons name={ui.ionicon as any} size={26} color={ui.iconColor} />
                                     </View>
-                                    <Text className="text-[12px] font-bold text-gray-800 text-center">{category.name}</Text>
-                                    <Text className="text-[10px] font-medium text-gray-400 text-center mt-0.5">{category.sub}</Text>
+                                    <Text className="text-[11px] font-bold text-gray-800 text-center" numberOfLines={1}>{category.name}</Text>
+                                    <Text className="text-[9px] font-medium text-gray-400 text-center mt-0.5">{ui.sub}</Text>
                                 </TouchableOpacity>
                             );
                         })}
@@ -431,8 +436,14 @@ export default function HomeFeedScreen() {
                                 {/* Order Again / Highlights Bar */}
                                 <View className="px-4 py-3 flex-row justify-between items-center bg-gray-50/50">
                                     <View className="flex-row items-center">
-                                        <Star size={14} color="#F59E0B" fill="#F59E0B" />
-                                        <Text className="text-[12px] font-bold text-gray-700 ml-1.5">{venue.rating}</Text>
+                                        {venue.rating ? (
+                                            <>
+                                                <Star size={14} color="#F59E0B" fill="#F59E0B" />
+                                                <Text className="text-[12px] font-bold text-gray-700 ml-1.5">{venue.rating}</Text>
+                                            </>
+                                        ) : (
+                                            <Text className="text-[10px] font-extrabold text-blue-600 uppercase">NEW</Text>
+                                        )}
                                         <Text className="text-[12px] text-gray-400 mx-2">•</Text>
                                         <Text className="text-[12px] font-semibold text-gray-500">Pick up here</Text>
                                     </View>

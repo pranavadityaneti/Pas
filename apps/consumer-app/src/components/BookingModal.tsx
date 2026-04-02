@@ -77,7 +77,7 @@ export default function BookingModal({ visible, onClose, restaurant }: BookingMo
 
         try {
             const user = session.user;
-            const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
+            const apiUrl = process.env.EXPO_PUBLIC_API_URL;
             const res = await fetch(`${apiUrl}/payments/create-order`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -98,7 +98,7 @@ export default function BookingModal({ visible, onClose, restaurant }: BookingMo
 
     const handlePaymentSuccess = async (id: string, orderId?: string, signature?: string) => {
         try {
-            const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
+            const apiUrl = process.env.EXPO_PUBLIC_API_URL;
             const verifyRes = await fetch(`${apiUrl}/payments/verify`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },

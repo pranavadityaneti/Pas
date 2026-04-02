@@ -57,7 +57,7 @@ export default function CartScreen() {
         // 1. The Success Condition
         if (user && !isProfileLoading) {
             setIsWaitingForAuthSync(false);
-            const isRestaurantOrder = items.length > 0 && items[0].storeId < 100;
+            const isRestaurantOrder = items.length > 0 && RESTAURANTS.some(r => String(r.id) === String(items[0].storeId));
             if (isRestaurantOrder) {
                 navigation.navigate('DiningCheckout', { selectedCoupon: coupon } as any);
             } else {
@@ -93,7 +93,7 @@ export default function CartScreen() {
             return;
         }
 
-        const isRestaurantOrder = items.length > 0 && items[0].storeId < 100;
+        const isRestaurantOrder = items.length > 0 && RESTAURANTS.some(r => String(r.id) === String(items[0].storeId));
         if (isRestaurantOrder) {
             navigation.navigate('DiningCheckout', { selectedCoupon: coupon } as any);
         } else {
@@ -125,7 +125,11 @@ export default function CartScreen() {
                     Looks like you haven&apos;t added anything to your cart yet.
                 </Text>
                 <TouchableOpacity
-                    onPress={() => navigation.navigate('Main')}
+                    onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        // Direct navigation to the 'Home' tab sibling
+                        navigation.navigate('Home' as any);
+                    }}
                     className="bg-[#B52725] px-8 py-3.5 rounded-2xl shadow-sm"
                 >
                     <Text className="text-white font-bold text-base">Start Shopping</Text>
@@ -171,7 +175,7 @@ export default function CartScreen() {
                                 <View className="flex-row justify-between items-center mb-1">
                                     <Text className="text-[17px] font-bold text-gray-900 flex-1 mr-2" numberOfLines={1} ellipsizeMode="tail">{group.storeName}</Text>
                                 </View>
-                                <Text className="text-[12px] text-gray-400 font-medium mb-5">{group.storeId < 100 ? 'Pre-order items' : 'Items to be picked up from here'}</Text>
+                                <Text className="text-[12px] text-gray-400 font-medium mb-5">{RESTAURANTS.some(r => String(r.id) === String(group.storeId)) ? 'Pre-order items' : 'Items to be picked up from here'}</Text>
 
                                 {group.items.map((item: any, index: number) => (
                                     <View key={item.id} className={`flex-row items-center py-3 ${index < group.items.length - 1 ? 'border-b border-gray-50' : ''}`}>

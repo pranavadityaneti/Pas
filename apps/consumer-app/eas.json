@@ -15,7 +15,7 @@
       "autoIncrement": true,
       "credentialsSource": "local",
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com"
+        "EXPO_PUBLIC_API_URL": "https://api.pickatstore.io"
       }
     }
   },

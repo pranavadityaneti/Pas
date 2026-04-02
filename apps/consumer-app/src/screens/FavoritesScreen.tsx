@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Dimensions } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, Store, ShoppingBag } from 'lucide-react-native';
@@ -6,9 +6,12 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as Haptics from 'expo-haptics';
 import { RootStackParamList } from '../navigation/types';
-import { supabase } from '../lib/supabase';
 import { useCart } from '../context/CartContext';
 import ProductCard from '../components/ProductCard';
+import { useFavorites } from '../hooks/useFavorites';
+import { useStores } from '../hooks/useStores';
+import { useProductFavorites } from '../hooks/useProductFavorites';
+import { supabase } from '../lib/supabase';
 
 // Dummy Data Imports logic since Stores/Products aren't populated from DB originally in this app's architecture
 import { RESTAURANTS, STORES } from '../lib/data';
@@ -42,68 +45,57 @@ export default function FavoritesScreen() {
     const { addItem, updateQuantity, getItemQuantity } = useCart();
     
     const [activeTab, setActiveTab] = useState<'stores' | 'products'>('stores');
-    const [isLoading, setIsLoading] = useState(true);
+    const { favorites, loading: favoritesLoading } = useFavorites();
+    const { stores, loading: storesLoading } = useStores();
     
-    // Extracted Full objects from static data based on stored IDs
-    const [favoriteStores, setFavoriteStores] = useState<any[]>([]);
-    const [favoriteProducts, setFavoriteProducts] = useState<any[]>([]);
+    const favoriteStoresList = useMemo(() => {
+        return stores.filter(s => favorites.includes(s.id));
+    }, [stores, favorites]);
 
-    const fetchFavorites = useCallback(async () => {
-        try {
-            setIsLoading(true);
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session?.user) {
-                setIsLoading(false);
+    const { productFavorites, loading: productFavoritesLoading } = useProductFavorites();
+    const [favoriteItems, setFavoriteItems] = useState<any[]>([]);
+    const [isHydrating, setIsHydrating] = useState(false);
+
+    useEffect(() => {
+        const hydrateProducts = async () => {
+            if (!productFavorites.length) {
+                setFavoriteItems([]);
                 return;
             }
 
-            // 1. Fetch Store IDs
-            const { data: storesData } = await supabase
-                .from('favorite_stores')
-                .select('store_id')
-                .eq('user_id', session.user.id);
-            
-            // 2. Fetch Product IDs
-            const { data: productsData } = await supabase
-                .from('favorite_products')
-                .select('store_product_id')
-                .eq('user_id', session.user.id);
+            try {
+                setIsHydrating(true);
+                const { data, error } = await supabase
+                    .from('StoreProduct')
+                    .select('*, product:Product(*), store:Store(name)')
+                    .in('id', productFavorites);
 
-            // 3. Map IDs to Memory Static Models (Since this app uses static data natively)
-            const ALL_VENDORS = [...RESTAURANTS, ...STORES];
-            
-            if (storesData) {
-                const storeIds = storesData.map(s => s.store_id);
-                const matchedStores = ALL_VENDORS.filter(v => storeIds.includes(String(v.id)));
-                setFavoriteStores(matchedStores);
+                if (error) throw error;
+
+                if (data) {
+                    const hydrated = data.map((res: any) => ({
+                        id: res.id,
+                        name: res.product?.name,
+                        price: res.price || res.product?.mrp,
+                        mrp: res.product?.mrp,
+                        image: res.product?.image,
+                        uom: res.product?.uom,
+                        isVeg: res.product?.isVeg,
+                        storeId: res.storeId,
+                        storeName: res.store?.name,
+                        isDining: true // Fallback, could query store for this
+                    }));
+                    setFavoriteItems(hydrated);
+                }
+            } catch (err) {
+                console.error("Hydration error:", err);
+            } finally {
+                setIsHydrating(false);
             }
+        };
 
-            if (productsData) {
-                const productIds = productsData.map(p => p.store_product_id);
-                let matchedProducts: any[] = [];
-                ALL_VENDORS.forEach(vendor => {
-                    const found = vendor.products.filter(p => productIds.includes(String(p.id)));
-                    found.forEach(p => {
-                        // Inject store reference to ProductCard
-                        matchedProducts.push({...p, storeId: vendor.id, storeName: vendor.name});
-                    });
-                });
-                setFavoriteProducts(matchedProducts);
-            }
-
-        } catch (error) {
-            console.error("Error fetching favorites:", error);
-        } finally {
-            setIsLoading(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        const unsubscribe = navigation.addListener('focus', () => {
-            fetchFavorites();
-        });
-        return unsubscribe;
-    }, [navigation, fetchFavorites]);
+        hydrateProducts();
+    }, [productFavorites]);
 
     const handleAddToCart = (product: any) => {
         addItem({
@@ -113,6 +105,7 @@ export default function FavoritesScreen() {
             image: product.image,
             storeId: product.storeId,
             storeName: product.storeName,
+            isDining: product.isDining,
             uom: product.uom || '1 Pc',
         });
     };
@@ -164,13 +157,13 @@ export default function FavoritesScreen() {
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
             >
-                {isLoading ? (
+                {(favoritesLoading || storesLoading || productFavoritesLoading || isHydrating) ? (
                     <View className="mt-20 items-center justify-center">
                         <ActivityIndicator size="large" color="#B52725" />
                     </View>
                 ) : activeTab === 'stores' ? (
-                    favoriteStores.length > 0 ? (
-                        favoriteStores.map((store: any, idx) => (
+                    favoriteStoresList.length > 0 ? (
+                        favoriteStoresList.map((store: any, idx: number) => (
                             <StoreCard 
                                 key={`store-${idx}`} 
                                 store={store} 
@@ -185,16 +178,16 @@ export default function FavoritesScreen() {
                         </View>
                     )
                 ) : (
-                    favoriteProducts.length > 0 ? (
+                    favoriteItems.length > 0 ? (
                         <View className="flex-row flex-wrap justify-between mt-2">
-                            {favoriteProducts.map((product: any, idx) => (
+                            {favoriteItems.map((product: any, idx: number) => (
                                 <ProductCard
                                     key={`prod-${idx}`}
                                     item={product}
                                     quantity={getItemQuantity(product.id)}
                                     onAdd={handleAddToCart}
-                                    onIncrement={(id, newQty) => updateQuantity(Number(id), newQty)}
-                                    onDecrement={(id, newQty) => updateQuantity(Number(id), newQty)}
+                                    onIncrement={(id: string, newQty: number) => updateQuantity(id, newQty)}
+                                    onDecrement={(id: string, newQty: number) => updateQuantity(id, newQty)}
                                 />
                             ))}
                         </View>

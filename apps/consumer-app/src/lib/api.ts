@@ -6,19 +6,7 @@ import { Alert } from 'react-native';
 import Constants from 'expo-constants';
 
 export const getApiUrl = () => {
-    // 1. Manually set environment variable (Priority)
-    if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
-
-    // 2. Dynamic Local Development IP
-    if (__DEV__) {
-        const debuggerHost = Constants.expoConfig?.hostUri;
-        const address = debuggerHost?.split(':')[0];
-        if (address) return `http://${address}:3000`;
-        return 'http://localhost:3000'; // Pure fallback
-    }
-
-    // 3. Production Fallback
-    return 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
+    return process.env.EXPO_PUBLIC_API_URL as string;
 };
 
 export const API_URL = getApiUrl();

@@ -91,6 +91,9 @@ export default function TransactionalAuthModal({
             setResendTimer(60);
             setOtpValues(['', '', '', '', '', '']);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            
+            // Add success confirmation
+            Alert.alert('Success', 'A new verification code has been sent via WhatsApp.');
         } catch (error: any) {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             Alert.alert('Error', error.message || 'Failed to send OTP. Please try again.');
@@ -119,19 +122,28 @@ export default function TransactionalAuthModal({
             });
 
             const data = await response.json();
-            if (!response.ok) throw new Error(data.error || 'OTP verification failed');
+            
+            if (!response.ok) {
+                throw new Error(data.error || 'OTP verification failed');
+            }
 
             // 1. Handle New User Setup
             if (data.isNewUser) {
                 await SecureStore.setItemAsync('pending_profile_setup', 'true');
             }
 
-            // 2. Set Supabase Session
-            await setSessionFromTokens(data.session.access_token, data.session.refresh_token);
+            // 2. Set Supabase Session (Fire & Forget)
+            // We decouple this from the UI thread to prevent hangs if storage/context sync is slow.
+            // The global AuthContext will react to the session change in the background.
+            setSessionFromTokens(data.session.access_token, data.session.refresh_token)
+                .catch(err => console.error('[AuthModal] Background session sync error:', err));
 
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            
+            // Fire parent callback synchronously
             onSuccess();
         } catch (error: any) {
+            console.error('[AuthModal] Verification Error:', error.message);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             Alert.alert('Verification Failed', error.message || 'Incorrect OTP. Please try again.');
         } finally {

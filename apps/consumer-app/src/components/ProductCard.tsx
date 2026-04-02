@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, Image, TouchableOpacity, Dimensions, Alert } from 'react-native';
 import { Plus, Minus, Heart } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import { supabase } from '../lib/supabase';
+import { useProductFavorites } from '../hooks/useProductFavorites';
 import Svg, { Path } from 'react-native-svg';
 
 const { width } = Dimensions.get('window');
@@ -25,8 +25,8 @@ interface ProductCardProps {
     };
     quantity: number;
     onAdd: (item: any) => void;
-    onIncrement: (id: number | string, newQty: number) => void;
-    onDecrement: (id: number | string, newQty: number) => void;
+    onIncrement: (id: string, newQty: number) => void;
+    onDecrement: (id: string, quantity: number) => void;
     onPress?: () => void;
     fullWidth?: boolean;
 }
@@ -42,75 +42,8 @@ export default function ProductCard({
 }: ProductCardProps) {
     const cardWidthStyle = fullWidth ? { width: '100%' } : { width: CARD_WIDTH };
 
-    const [isFavorited, setIsFavorited] = useState(false);
-    const [isFavoriteLoading, setIsFavoriteLoading] = useState(false);
-
-    // Initial check to see if the item is already loved
-    useEffect(() => {
-        const checkFavorite = async () => {
-            try {
-                const { data: { session } } = await supabase.auth.getSession();
-                if (!session?.user) return;
-                
-                const { data } = await supabase
-                    .from('favorite_products')
-                    .select('*')
-                    .eq('user_id', session.user.id)
-                    .eq('store_product_id', String(item.id))
-                    .single();
-                    
-                if (data) setIsFavorited(true);
-            } catch (err) {
-                // Ignore silent errors for unauthenticated users
-            }
-        };
-        checkFavorite();
-    }, [item.id]);
-
-    const toggleFavorite = async () => {
-        if (isFavoriteLoading) return;
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-        try {
-            setIsFavoriteLoading(true);
-            const { data: { session } } = await supabase.auth.getSession();
-            
-            if (!session?.user) {
-                Alert.alert("Login Required", "Please log in to save your favorite items.");
-                return;
-            }
-
-            if (isFavorited) {
-                // Remove Favorite
-                const { error } = await supabase
-                    .from('favorite_products')
-                    .delete()
-                    .eq('user_id', session.user.id)
-                    .eq('store_product_id', String(item.id));
-                if (error) console.error("Remove favorite_product error:", error);
-                else setIsFavorited(false);
-            } else {
-                // Add Favorite
-                const { error } = await supabase
-                    .from('favorite_products')
-                    .insert({
-                        user_id: session.user.id,
-                        store_product_id: String(item.id)
-                    });
-                if (error) {
-                    console.error("Insert favorite_product error:", error);
-                    Alert.alert("Error", "Could not save item.");
-                } else {
-                    setIsFavorited(true);
-                }
-            }
-        } catch (error) {
-            console.error("Favorite toggle error:", error);
-            // Non-blocking failure UI since it's just a heart icon
-        } finally {
-            setIsFavoriteLoading(false);
-        }
-    };
+    const { productFavorites, toggleProductFavorite } = useProductFavorites();
+    const isFavorited = productFavorites.includes(String(item.id));
 
     return (
         <TouchableOpacity
@@ -135,11 +68,12 @@ export default function ProductCard({
                     </View>
                 )}
 
-                {/* Inline Favorite Button */}
                 <TouchableOpacity
                     delayPressIn={0}
-                    onPress={toggleFavorite}
-                    disabled={isFavoriteLoading}
+                    onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        toggleProductFavorite(String(item.id));
+                    }}
                     className="absolute top-2 right-2 bg-white/90 rounded-full items-center justify-center shadow-sm"
                     style={{ width: 28, height: 28 }}
                 >
@@ -197,7 +131,7 @@ export default function ProductCard({
                         <View className="flex-row items-center bg-[#B52725] rounded-full h-8 px-1 shadow-sm">
                             <TouchableOpacity
                                 delayPressIn={0}
-                                onPress={() => onDecrement(item.id, quantity - 1)}
+                                onPress={() => onDecrement(String(item.id), quantity - 1)}
                                 className="w-6 h-full items-center justify-center active:opacity-70"
                             >
                                 <Minus size={14} color="white" strokeWidth={3} />
@@ -207,7 +141,7 @@ export default function ProductCard({
                             </Text>
                             <TouchableOpacity
                                 delayPressIn={0}
-                                onPress={() => onIncrement(item.id, quantity + 1)}
+                                onPress={() => onIncrement(String(item.id), quantity + 1)}
                                 className="w-6 h-full items-center justify-center active:opacity-70"
                             >
                                 <Plus size={14} color="white" strokeWidth={3} />

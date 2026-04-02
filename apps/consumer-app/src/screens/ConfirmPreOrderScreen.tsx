@@ -56,9 +56,9 @@ export default function ConfirmPreOrderScreen() {
 
     // Restaurant info from cart items
     const restaurantInfo = useMemo(() => {
-        if (items.length === 0) return { name: '', storeId: 0 };
+        if (items.length === 0) return { name: '', storeId: '' };
         const first = items[0];
-        return { name: first.storeName, storeId: first.storeId };
+        return { name: first.storeName, storeId: String(first.storeId) };
     }, [items]);
 
     // Find the restaurant address from static data
@@ -74,8 +74,8 @@ export default function ConfirmPreOrderScreen() {
     const total = Math.max(0, subtotal + gst - discount);
 
     // Veg/Non-veg helper
-    const getIsVeg = (productId: number) => {
-        const p = ALL_PRODUCTS.find(p => p.id === productId);
+    const getIsVeg = (productId: string) => {
+        const p = ALL_PRODUCTS.find(p => String(p.id) === String(productId));
         return p?.isVeg ?? true; // Default to veg if not found
     };
 
@@ -94,7 +94,7 @@ export default function ConfirmPreOrderScreen() {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
         try {
-            const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
+            const apiUrl = process.env.EXPO_PUBLIC_API_URL;
             const res = await fetch(`${apiUrl}/payments/create-order`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -118,7 +118,7 @@ export default function ConfirmPreOrderScreen() {
         setShowPayment(false);
 
         try {
-            const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
+            const apiUrl = process.env.EXPO_PUBLIC_API_URL;
             const verifyRes = await fetch(`${apiUrl}/payments/verify`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -254,7 +254,7 @@ export default function ConfirmPreOrderScreen() {
                     </View>
 
                     {items.map((item) => {
-                        const isVeg = getIsVeg(item.id);
+                        const isVeg = getIsVeg(String(item.id));
                         return (
                             <View key={item.id} className="flex-row items-center justify-between mb-4">
                                 <View className="flex-row items-center flex-1">

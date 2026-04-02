@@ -457,11 +457,13 @@ export default function ProfileScreen() {
                         label="Saved Addresses"
                         onPress={() => navigation.navigate('LocationPicker' as any)}
                     />
+                    {/* 
                     <MenuItem
                         icon={CreditCard}
                         label="Payment Methods"
                         onPress={() => navigation.navigate('PaymentMethods')}
                     />
+                    */}
                     <MenuItem
                         icon={Heart}
                         label="Favorites"

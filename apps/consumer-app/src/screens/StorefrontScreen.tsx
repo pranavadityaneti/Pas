@@ -1,4 +1,4 @@
-// @lock — Storefront with hero carousel, info, search, category pills, product grid, cart integration.
+// @lock — Do NOT overwrite.
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
     View, Text, ScrollView, Image, TouchableOpacity,
@@ -12,6 +12,9 @@ import {
 } from 'lucide-react-native';
 import { RESTAURANTS, STORES } from '../lib/data';
 import { useNavigation } from '@react-navigation/native';
+import { useStores } from '../hooks/useStores';
+import { useProducts } from '../hooks/useProducts';
+import { ActivityIndicator } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,6 +23,9 @@ import * as Haptics from 'expo-haptics';
 import { supabase } from '../lib/supabase';
 import TransactionalAuthModal from '../components/TransactionalAuthModal';
 import ProductCard from '../components/ProductCard';
+import { transformStoreData, TransformedStore } from '../utils/dataTransformer';
+import { useCategories } from '../context/CategoryContext';
+import { useFavorites } from '../hooks/useFavorites';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2;
@@ -40,14 +46,15 @@ const VegIndicator = ({ isVeg }: { isVeg: boolean }) => (
 export default function StorefrontScreen({ route }: any) {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const { addItem, updateQuantity, getItemQuantity, getItemCount, getTotal } = useCart();
+    const { getVerticalName } = useCategories();
+    const { stores, loading } = useStores();
     const storeId = route.params.storeId;
+    const { products: fetchedProducts, loading: productsLoading } = useProducts(String(storeId));
 
     const restaurant = useMemo(() => {
-        const r = RESTAURANTS.find(r => r.id === storeId);
-        if (r) return r;
-        const s = STORES.find(s => s.id === storeId);
-        return s || null;
-    }, [storeId]);
+        if (loading) return null;
+        return stores.find(s => s.id === String(storeId)) || null;
+    }, [stores, storeId, loading]);
 
     const insets = useSafeAreaInsets();
     const [searchText, setSearchText] = useState('');
@@ -59,27 +66,7 @@ export default function StorefrontScreen({ route }: any) {
 
     // Stable Viewability Configs to prevent SectionList Thrashing on Android
     const viewabilityConfig = useRef({ viewAreaCoveragePercentThreshold: 50 }).current;
-    const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
-        const firstViewable = viewableItems[0];
-        if (firstViewable?.section) {
-            setActiveSectionIndex((prev) => {
-                // Must calculate index without depending on groupedProducts directly in closure scope
-                const sectionTitle = firstViewable.section.title;
-                return prev; // We will handle this state update cleanly in a useEffect or via a stable method if tracking is needed.
-            });
-        }
-    }).current;
     
-    // We will use a safe effect-based viewable index tracker to avoid closure staleness
-    const handleViewableItemsChanged = useRef(({ viewableItems }: any) => {
-        const firstViewable = viewableItems[0];
-        if (firstViewable?.section) {
-            // Because we can't easily access groupedProducts in this stable ref without side effects,
-            // we will just use a simpler check or rely on the titles.
-            // For now, we update a local state if it's different.
-        }
-    }).current;
-
     // Filter States
     const [vegFilter, setVegFilter] = useState<'all' | 'veg' | 'non-veg'>('all');
     const [bestSellerOnly, setBestSellerOnly] = useState(false);
@@ -88,85 +75,19 @@ export default function StorefrontScreen({ route }: any) {
     const [under300Only, setUnder300Only] = useState(false);
     const [offersOnly, setOffersOnly] = useState(false);
 
-    const [isFavorited, setIsFavorited] = useState(false);
-    const [isFavoriteLoading, setIsFavoriteLoading] = useState(false);
     const [heroIndex, setHeroIndex] = useState(0);
     const heroScrollRef = useRef<ScrollView>(null);
 
-    // Fetch initial favorite status
-    useEffect(() => {
-        const checkFavorite = async () => {
-            if (!restaurant) return;
-            try {
-                const { data: { session } } = await supabase.auth.getSession();
-                if (!session?.user) return;
-
-                const { data } = await supabase
-                    .from('favorite_stores')
-                    .select('*')
-                    .eq('user_id', session.user.id)
-                    .eq('store_id', String(restaurant.id))
-                    .single();
-
-                if (data) setIsFavorited(true);
-            } catch (err) {
-                // Ignore silent errors for unauthenticated users
-            }
-        };
-        checkFavorite();
-    }, [restaurant]);
-
-    const toggleStoreFavorite = async () => {
-        if (isFavoriteLoading || !restaurant) return;
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        
-        try {
-            setIsFavoriteLoading(true);
-            const { data: { session } } = await supabase.auth.getSession();
-            
-            if (!session?.user) {
-                setAuthModalVisible(true);
-                return;
-            }
-
-            if (isFavorited) {
-                // Remove Favorite
-                const { error } = await supabase
-                    .from('favorite_stores')
-                    .delete()
-                    .eq('user_id', session.user.id)
-                    .eq('store_id', String(restaurant.id));
-                if (error) console.error("Delete favorite error:", error);
-                else setIsFavorited(false);
-            } else {
-                // Add Favorite
-                const { error } = await supabase
-                    .from('favorite_stores')
-                    .insert({
-                        user_id: session.user.id,
-                        store_id: String(restaurant.id)
-                    });
-                if (error) {
-                    console.error("Insert favorite error:", error);
-                    Alert.alert("Error", "Could not save to favorites.");
-                } else {
-                    setIsFavorited(true);
-                }
-            }
-        } catch (error) {
-            Alert.alert("Error", "Could not update favorites. Please try again.");
-            console.error("Favorite toggle error:", error);
-        } finally {
-            setIsFavoriteLoading(false);
-        }
-    };
+    const { favorites, toggleFavorite } = useFavorites(() => setAuthModalVisible(true));
+    const isFavorited = useMemo(() => favorites.includes(String(storeId)), [favorites, storeId]);
 
     // Hero images: cover + product images (6 total for carousel testing)
     const heroImages = useMemo(() => {
         if (!restaurant) return [];
+        const productsList = fetchedProducts.length > 0 ? fetchedProducts : (restaurant.products || []);
         const images = [restaurant.image];
         const seen = new Set([restaurant.image]);
-        for (const p of restaurant.products) {
+        for (const p of productsList) {
             if (!seen.has((p as any).image)) {
                 images.push((p as any).image);
                 seen.add((p as any).image);
@@ -174,76 +95,76 @@ export default function StorefrontScreen({ route }: any) {
             if (images.length >= 6) break;
         }
         return images;
-    }, [restaurant]);
+    }, [restaurant, fetchedProducts]);
 
-    // Dynamic Category List (from store's exact products)
-    const storeCategories = useMemo(() => {
-        if (!restaurant) return [];
-        const cats = new Set<string>();
-        for (const p of restaurant.products) {
-            if (p.subCategory) cats.add(p.subCategory);
-        }
-        return Array.from(cats);
-    }, [restaurant]);
-
-    // Filtered & Grouped products (Chunked into pairs for grid rendering inside SectionList)
     const groupedProducts = useMemo(() => {
         if (!restaurant) return [];
-        let products = [...restaurant.products];
+        let productsList = fetchedProducts.length > 0 ? fetchedProducts : [...restaurant.products];
 
         // Search Filter
         if (searchText.trim()) {
             const q = searchText.toLowerCase();
-            products = products.filter((p: any) => p.name.toLowerCase().includes(q));
+            productsList = productsList.filter((p: any) => p.name.toLowerCase().includes(q));
         }
 
         // Detailed Filters
-        if (vegFilter === 'veg') products = products.filter((p: any) => p.isVeg);
-        if (vegFilter === 'non-veg') products = products.filter((p: any) => p.isVeg === false);
-        if (bestSellerOnly) products = products.filter((p: any) => p.isBestseller);
-        if (ratingHighOnly) products = products.filter((p: any) => parseFloat(p.rating) >= 4.0);
-        if (under300Only) products = products.filter((p: any) => p.price <= 300);
-        if (offersOnly) products = products.filter((p: any) => p.discount > 0);
+        if (vegFilter === 'veg') productsList = productsList.filter((p: any) => p.isVeg);
+        if (vegFilter === 'non-veg') productsList = productsList.filter((p: any) => p.isVeg === false);
+        if (bestSellerOnly) productsList = productsList.filter((p: any) => p.isBestseller);
+        if (ratingHighOnly) productsList = productsList.filter((p: any) => parseFloat(p.rating) >= 4.0);
+        if (under300Only) productsList = productsList.filter((p: any) => p.price <= 300);
+        if (offersOnly) productsList = productsList.filter((p: any) => p.discount > 0);
 
-        // Group by subCategory
-        const groups: Record<string, any[]> = {};
-        products.forEach(p => {
-            const sub = p.subCategory || 'Other';
-            if (!groups[sub]) groups[sub] = [];
-            groups[sub].push(p);
+        // Group by subCategory using a Map for strict uniqueness to prevent duplicate header key crashes
+        const groupMap = new Map<string, { title: string, rawData: any[] }>();
+        
+        productsList.forEach(p => {
+            const categoryName = (p as any).product?.subcategory || p.subCategory || (p as any).category || 'Other';
+            
+            if (!groupMap.has(categoryName)) {
+                groupMap.set(categoryName, { title: categoryName, rawData: [] });
+            }
+            groupMap.get(categoryName)!.rawData.push(p);
         });
-
-        // Convert to SectionList formatting and chunk into pairs (for 2-columns)
-        const sections = [];
-        for (const cat of storeCategories) { // Keep original category order
-            if (groups[cat] && groups[cat].length > 0) {
-                const chunks = [];
-                for (let i = 0; i < groups[cat].length; i += 2) {
-                    chunks.push(groups[cat].slice(i, i + 2));
-                }
-                sections.push({ title: cat, data: chunks });
-            }
-        }
-
-        // Add "Other" if anything fell through
-        if (groups['Other'] && groups['Other'].length > 0) {
+        
+        // Transform to SectionList format with chunked pairs for 2-column grid rendering
+        return Array.from(groupMap.values()).map(section => {
             const chunks = [];
-            for (let i = 0; i < groups['Other'].length; i += 2) {
-                chunks.push(groups['Other'].slice(i, i + 2));
+            for (let i = 0; i < section.rawData.length; i += 2) {
+                chunks.push(section.rawData.slice(i, i + 2));
             }
-            sections.push({ title: 'Other', data: chunks });
-        }
+            return { title: section.title, data: chunks };
+        });
+    }, [restaurant, searchText, vegFilter, bestSellerOnly, ratingHighOnly, under300Only, offersOnly, fetchedProducts]);
 
-        return sections;
-    }, [restaurant, storeCategories, searchText, vegFilter, bestSellerOnly, ratingHighOnly, under300Only, offersOnly]);
+    // Use groupedProducts as the source of truth for categories to ensure perfect alignment
+    const storeCategories = useMemo(() => {
+        return groupedProducts.map(s => s.title);
+    }, [groupedProducts]);
+
+    // --- Loading & Not Found Guards (below all hooks) ---
+    if (loading) {
+        return (
+            <SafeAreaView className="flex-1 bg-white items-center justify-center">
+                <ActivityIndicator size="large" color="#B52725" />
+            </SafeAreaView>
+        );
+    }
 
     if (!restaurant) {
         return (
             <SafeAreaView className="flex-1 bg-white items-center justify-center">
-                <Text className="text-lg text-gray-500">Restaurant not found</Text>
+                <Text className="text-lg text-gray-500 font-bold">Restaurant not found</Text>
+                <TouchableOpacity 
+                    onPress={() => navigation.goBack()}
+                    className="mt-4 px-6 py-2 bg-gray-100 rounded-xl"
+                >
+                    <Text className="text-gray-900 font-bold">Go Back</Text>
+                </TouchableOpacity>
             </SafeAreaView>
         );
     }
+
 
     const scrollToSection = (index: number) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -277,8 +198,9 @@ export default function StorefrontScreen({ route }: any) {
             name: product.name,
             price: product.price,
             image: product.image,
-            storeId: restaurant.id,
+            storeId: String(restaurant.id),
             storeName: restaurant.name,
+            isDining: restaurant.isDining,
             uom: product.uom || '1 Pc',
         });
     };
@@ -389,7 +311,7 @@ export default function StorefrontScreen({ route }: any) {
                         {groupedProducts.map((section, idx) => (
                             <TouchableOpacity
                                 delayPressIn={0}
-                                key={section.title}
+                                key={`sticky-cat-${section.title}`}
                                 onPress={() => scrollToSection(idx)}
                                 className={`rounded-xl py-2 px-4 mr-3 ${activeSectionIndex === idx ? 'bg-[#1F2937]' : 'bg-white border border-gray-100 shadow-sm'
                                     }`}
@@ -416,8 +338,8 @@ export default function StorefrontScreen({ route }: any) {
                                         item={product}
                                         quantity={getItemQuantity(product.id)}
                                         onAdd={handleAddToCart}
-                                        onIncrement={(id, newQty) => updateQuantity(Number(id), newQty)}
-                                        onDecrement={(id, newQty) => updateQuantity(Number(id), newQty)}
+                                        onIncrement={(id, newQty) => updateQuantity(String(id), newQty)}
+                                        onDecrement={(id, newQty) => updateQuantity(String(id), newQty)}
                                     />
                                 </View>
                             ))}
@@ -500,8 +422,7 @@ export default function StorefrontScreen({ route }: any) {
                             {/* Favorite button (Safe area inside 324px bound) */}
                             <TouchableOpacity
                                 delayPressIn={0}
-                                onPress={toggleStoreFavorite}
-                                disabled={isFavoriteLoading}
+                                onPress={() => toggleFavorite(String(restaurant.id))}
                                 className="absolute bg-gray-900/80 rounded-full items-center justify-center shadow-md"
                                 style={{ bottom: 22, right: 24, width: 44, height: 44, zIndex: 20, elevation: 20 }}
                             >
@@ -516,8 +437,16 @@ export default function StorefrontScreen({ route }: any) {
 
                             <View className="flex-row items-center" style={{ marginTop: 16 }}>
                                 <View className="flex-row items-center px-3 py-2">
-                                    <Star size={16} color="#1F2937" fill="#1F2937" />
-                                    <Text className="text-[14px] font-bold text-gray-900 ml-1.5">{restaurant.rating}</Text>
+                                    {restaurant.rating ? (
+                                        <>
+                                            <Star size={16} color="#1F2937" fill="#1F2937" />
+                                            <Text className="text-[14px] font-bold text-gray-900 ml-1.5">{restaurant.rating}</Text>
+                                        </>
+                                    ) : (
+                                        <View className="bg-gray-100 px-2 py-0.5 rounded-md">
+                                            <Text className="text-[11px] font-extrabold text-gray-400 uppercase tracking-wider">NEW</Text>
+                                        </View>
+                                    )}
                                 </View>
                                 <View className="w-[1px] h-5 bg-gray-200 mx-2" />
                                 <View className="flex-row items-center px-3 py-2">
@@ -527,7 +456,9 @@ export default function StorefrontScreen({ route }: any) {
                                 <View className="w-[1px] h-5 bg-gray-200 mx-2" />
                                 <View className="flex-row items-center px-3 py-2">
                                     <UtensilsCrossed size={16} color="#6B7280" />
-                                    <Text className="text-[14px] font-medium text-gray-600 ml-1.5">Dine-in</Text>
+                                    <Text className="text-[14px] font-medium text-gray-600 ml-1.5">
+                                        {restaurant.isDining ? 'Dine-in' : 'Pickup'}
+                                    </Text>
                                 </View>
                             </View>
                         </View>
@@ -568,7 +499,7 @@ export default function StorefrontScreen({ route }: any) {
                                 {groupedProducts.map((section, idx) => (
                                     <TouchableOpacity
                                         delayPressIn={0}
-                                        key={section.title}
+                                        key={`inline-cat-${section.title}`}
                                         onPress={() => scrollToSection(idx)}
                                         className={`rounded-xl py-2 px-4 mr-3 ${activeSectionIndex === idx ? 'bg-[#1F2937]' : 'bg-white border border-gray-100 shadow-sm'
                                             }`}
@@ -587,6 +518,14 @@ export default function StorefrontScreen({ route }: any) {
                             <Text className="px-5 text-[14px] font-bold text-gray-500 mb-6 mt-4">
                                 Resulting items for &quot;{searchText}&quot;
                             </Text>
+                        )}
+
+                        {/* Product Loading State for Grid Area */}
+                        {productsLoading && (
+                            <View className="py-10 items-center justify-center">
+                                <ActivityIndicator size="large" color="#B52725" />
+                                <Text className="text-gray-400 mt-2 font-medium">Fetching fresh menu...</Text>
+                            </View>
                         )}
                     </View>
                 }
