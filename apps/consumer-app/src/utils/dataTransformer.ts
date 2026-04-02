@@ -32,9 +32,9 @@ export const getIsDining = (verticalName: string): boolean => {
 /**
  * Transforms a raw Supabase 'Store' row into a UI-compatible 'Store' object.
  * @param row Raw Supabase row with camelCase or snake_case fields
- * @param verticalName Resolved name from the CategoryContext
  */
-export const transformStoreData = (row: any, verticalName: string = 'General'): TransformedStore => {
+export const transformStoreData = (row: any): TransformedStore => {
+  const verticalName = row.vertical?.name || 'Uncategorized';
   const isDining = getIsDining(verticalName);
   
   return {
@@ -45,7 +45,7 @@ export const transformStoreData = (row: any, verticalName: string = 'General'): 
     // Injected defaults for fields missing in DB
     rating: row.rating ? String(row.rating) : null,
     distance: row.distance ? String(row.distance) : 'Near you',
-    // Map vertical_id to human-readable category via name-based logic
+    // Map strictly to the joined vertical name for frontend category parity
     category: verticalName,
     isDining: isDining,
     isVeg: row.is_veg ?? row.isVeg ?? false,

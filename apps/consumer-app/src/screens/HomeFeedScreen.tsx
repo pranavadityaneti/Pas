@@ -21,10 +21,29 @@ import { ActivityIndicator } from 'react-native';
 
 const { width } = Dimensions.get('window');
 
+const CATEGORIES = [
+    { name: "Grocery & Kirana", image: "https://images.unsplash.com/photo-1542838132-92c53300491e?w=200&h=200&fit=crop" },
+    { name: "Fresh items", image: "https://images.unsplash.com/photo-1610832958506-aa56368176cf?w=200&h=200&fit=crop" },
+    { name: "Restaurants & Cafes", image: "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=200&h=200&fit=crop" },
+    { name: "Bakeries & Desserts", image: "https://images.unsplash.com/photo-1550617931-e17a7b70dce2?w=200&h=200&fit=crop" },
+    { name: "Sports and fitness", image: "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=200&h=200&fit=crop" },
+    { name: "Pharmacy & Wellness", image: "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=200&h=200&fit=crop" },
+    { name: "Electronics & Accessories", image: "https://images.unsplash.com/photo-1498049794561-7780e7231661?w=200&h=200&fit=crop" },
+    { name: "Fashion & Apparel", image: "https://images.unsplash.com/photo-1445205170230-053b830c6046?w=200&h=200&fit=crop" },
+    { name: "Home & Lifestyle", image: "https://images.unsplash.com/photo-1583847268964-b28dc8f51f92?w=200&h=200&fit=crop" },
+    { name: "Beauty & Personal Care", image: "https://images.unsplash.com/photo-1596462502278-27bfdc4033c8?w=200&h=200&fit=crop" },
+    { name: "Pet Care & Supplies", image: "https://images.unsplash.com/photo-1583337130417-3346a1be7dee?w=200&h=200&fit=crop" },
+    { name: "Stationery, Gifting & Toys", image: "https://images.unsplash.com/photo-1456735190827-d1262f71b8a3?w=200&h=200&fit=crop" },
+    { name: "Electricals, Paints & Automotive", image: "https://images.unsplash.com/photo-1513828583688-c52646db42da?w=200&h=200&fit=crop" },
+    { name: "Hardware and plumbing", image: "https://images.unsplash.com/photo-1581141849291-1110b9c1d30a?w=200&h=200&fit=crop" },
+    { name: "Pooja and festive needs", image: "https://images.unsplash.com/photo-1513410191585-79cee3e047fb?w=200&h=200&fit=crop" },
+];
+
 type FilterType = 'nearest' | 'top_rated' | 'food' | 'grocery' | 'bakery';
 
 export default function HomeFeedScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+    const tabNavigation = useNavigation<any>();
     const { activeLocation, isLoadingLocation } = useLocation();
     const [searchText, setSearchText] = useState('');
     const [activeFilter, setActiveFilter] = useState<FilterType>('nearest');
@@ -289,41 +308,40 @@ export default function HomeFeedScreen() {
                     </ScrollView>
                 </View>
 
-                {/* Categories Section */}
-                <View className="mb-8 mt-2">
-                    <View className="px-6 mb-4">
-                        <Text className="text-[18px] font-extrabold text-gray-900 tracking-tight">Shop by Category</Text>
+                {/* Shop by Category: 5-Column Grid */}
+                <View className="px-5 mb-8 mt-4">
+                    <View className="mb-5">
+                        <Text className="text-xl font-bold text-gray-900">Shop by Category</Text>
                     </View>
-                    <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={{ paddingHorizontal: 24 }}
-                    >
-                        {(verticals.length > 0 ? verticals : STORE_CATEGORIES).map((category) => {
-                            const ui = getCategoryUI(category.name);
 
-                            return (
-                                <TouchableOpacity
-                                    delayPressIn={0}
-                                    key={category.id}
-                                    onPress={() => {
-                                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                        navigation.navigate('CategoryDetail', {
-                                            categoryId: category.id,
-                                            categoryName: category.name
-                                        });
-                                    }}
-                                    className="items-center mr-5"
+                    <View className="flex-row flex-wrap justify-between">
+                        {CATEGORIES.map((category, idx) => (
+                            <TouchableOpacity
+                                key={`cat-${idx}`}
+                                activeOpacity={0.7}
+                                onPress={() => {
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                    tabNavigation.navigate('Pickup', { category: category.name });
+                                }}
+                                style={{ width: (width - 40) / 5 }}
+                                className="items-center mb-6"
+                            >
+                                <View className="w-14 h-14 rounded-full bg-gray-100 shadow-sm border border-gray-100 overflow-hidden mb-2">
+                                    <Image
+                                        source={{ uri: category.image }}
+                                        className="w-full h-full"
+                                        resizeMode="cover"
+                                    />
+                                </View>
+                                <Text
+                                    className="text-[10px] font-medium text-gray-800 text-center leading-tight px-0.5"
+                                    numberOfLines={2}
                                 >
-                                    <View className={`w-16 h-16 rounded-full ${ui.colorClass} items-center justify-center mb-2 shadow-sm border border-black/5`}>
-                                        <Ionicons name={ui.ionicon as any} size={26} color={ui.iconColor} />
-                                    </View>
-                                    <Text className="text-[11px] font-bold text-gray-800 text-center" numberOfLines={1}>{category.name}</Text>
-                                    <Text className="text-[9px] font-medium text-gray-400 text-center mt-0.5">{ui.sub}</Text>
-                                </TouchableOpacity>
-                            );
-                        })}
-                    </ScrollView>
+                                    {category.name}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
                 </View>
 
                 {/* Nearest Feature: Horizontal Cards */}

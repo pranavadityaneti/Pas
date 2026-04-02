@@ -19,16 +19,13 @@ export const useStores = () => {
             setLoading(true);
             const { data, error: fetchError } = await supabase
                 .from('Store')
-                .select('*')
+                .select('*, vertical:Vertical(name)')
                 .eq('active', true);
 
             if (fetchError) throw fetchError;
 
             if (data) {
-                const transformed = data.map(row => {
-                    const vertical = verticals.find(v => v.id === row.vertical_id);
-                    return transformStoreData(row, vertical?.name || 'General');
-                });
+                const transformed = data.map(row => transformStoreData(row));
                 setStores(transformed);
             }
         } catch (err: any) {
