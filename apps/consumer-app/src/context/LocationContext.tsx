@@ -15,6 +15,7 @@ interface DeliveryLocation {
 interface LocationContextType {
     activeLocation: DeliveryLocation | null;
     isLoadingLocation: boolean;
+    permissionDenied: boolean;
     refreshLocation: () => Promise<void>;
     selectLocation: (location: DeliveryLocation) => void;
 }
@@ -41,6 +42,7 @@ function deg2rad(deg: number) {
 export const LocationProvider = ({ children }: { children: ReactNode }) => {
     const [activeLocation, setActiveLocation] = useState<DeliveryLocation | null>(null);
     const [isLoadingLocation, setIsLoadingLocation] = useState(true);
+    const [permissionDenied, setPermissionDenied] = useState(false);
     const [isManualSelection, setIsManualSelection] = useState(false);
     const lastRefreshTime = useRef<number>(0);
     const isRefreshing = useRef<boolean>(false);
@@ -78,9 +80,11 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
             // 2. Request GPS Permissions
             const { status } = await Location.requestForegroundPermissionsAsync();
             if (status !== 'granted') {
+                setPermissionDenied(true);
                 setIsLoadingLocation(false);
                 return;
             }
+            setPermissionDenied(false);
 
             // 3. Ping Live GPS
             // Try last known first for snappiness
@@ -191,7 +195,7 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
     }, []);
 
     return (
-        <LocationContext.Provider value={{ activeLocation, isLoadingLocation, refreshLocation, selectLocation }}>
+        <LocationContext.Provider value={{ activeLocation, isLoadingLocation, permissionDenied, refreshLocation, selectLocation }}>
             {children}
         </LocationContext.Provider>
     );

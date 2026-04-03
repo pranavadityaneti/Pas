@@ -208,10 +208,32 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
         if (items.length > 0) {
             const isExistingDining = items[0].isDining;
+            const existingStoreId = items[0].storeId;
+
             if (isNewItemDining !== isExistingDining) {
                 Alert.alert(
                     "Clear Cart?",
                     `You currently have ${isExistingDining ? 'Dine-in' : 'Pickup'} items in your cart. You cannot mix Dine-in and Pickup orders. Would you like to clear your cart and start a new ${isNewItemDining ? 'Dine-in' : 'Pickup'} order?`,
+                    [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                            text: "Clear Cart",
+                            style: "destructive",
+                            onPress: () => {
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                                setItems([{ ...item, id: String(item.id), storeId: String(item.storeId), quantity: 1 }]);
+                            }
+                        }
+                    ]
+                );
+                return;
+            }
+
+            // CRITICAL EXECUTE: Enforce Single-Store Constraint
+            if (String(item.storeId) !== String(existingStoreId)) {
+                Alert.alert(
+                    "Different Store",
+                    "Your cart contains items from another store. Would you like to clear your cart and start a new order from this store?",
                     [
                         { text: "Cancel", style: "cancel" },
                         {

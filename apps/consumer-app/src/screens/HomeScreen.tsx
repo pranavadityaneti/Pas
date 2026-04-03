@@ -20,7 +20,7 @@ const { width } = Dimensions.get('window');
 
 const CATEGORIES = [
     { name: "Grocery & Kirana", image: "https://images.unsplash.com/photo-1542838132-92c53300491e?w=200&h=200&fit=crop" },
-    { name: "Fresh items", image: "https://images.unsplash.com/photo-1610832958506-aa56368176cf?w=200&h=200&fit=crop" },
+    { name: "Fresh Fruits", image: "https://images.unsplash.com/photo-1610832958506-aa56368176cf?w=200&h=200&fit=crop" },
     { name: "Restaurants & Cafes", image: "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=200&h=200&fit=crop" },
     { name: "Bakeries & Desserts", image: "https://images.unsplash.com/photo-1550617931-e17a7b70dce2?w=200&h=200&fit=crop" },
     { name: "Sports and fitness", image: "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=200&h=200&fit=crop" },
@@ -145,7 +145,7 @@ export default function HomeScreen() {
                                 activeOpacity={0.7}
                                 onPress={() => {
                                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                    tabNavigation.navigate('Pickup', { category: category.name });
+                                    navigation.navigate('CategoryDetail', { categoryId: category.name, categoryName: category.name });
                                 }}
                                 style={{ width: (width - 40) / 5 }}
                                 className="items-center mb-6"

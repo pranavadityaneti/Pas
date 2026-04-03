@@ -74,8 +74,7 @@ export default function SignupScreen() {
     const otpRefs = useRef<(TextInput | null)[]>([]);
 
     const getApiUrl = () => {
-        if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
-        return __DEV__ ? 'http://192.168.29.184:3000' : 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
+        return process.env.EXPO_PUBLIC_API_URL;
     };
 
     const fetchWithTimeout = async (resource: string, options: any = {}) => {

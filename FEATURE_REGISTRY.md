@@ -35,6 +35,8 @@
 | Storefront | `src/screens/StorefrontScreen.tsx` | 🔒 LOCKED | Feb 27, 2026 | Hero carousel, restaurant info, category pills, 2-col product grid, cart integration. |
 | Cart | `src/screens/CartScreen.tsx` | 🔒 LOCKED | Apr 1, 2026 | Full implementation with global sync and fallback logic. |
 | Support / FAQ | `src/screens/SupportScreen.tsx` | 🔒 LOCKED | Apr 1, 2026 | Comprehensive FAQ accordion with brand-red search UI. |
+| Payment Methods | `src/screens/PaymentMethodsScreen.tsx` | 🟡 HIDDEN / VAULTED | - | Dynamic management screen. UI entry point hidden. |
+| Add Payment Selection | `src/screens/AddPaymentMethodScreen.tsx` | 🟡 HIDDEN / VAULTED | - | Fintech selection hub. UI entry point hidden. |
 
 ### Navigation
 

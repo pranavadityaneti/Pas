@@ -23,15 +23,16 @@ const STEPS = [
 
 const STORE_CATEGORIES = [
     'Grocery & Kirana',
-    'Supermarket',
-    'Restaurant & Cafe',
-    'Bakery & Sweets',
-    'Pharmacy',
-    'Electronics',
+    'Fruits & Vegetables',
+    'Restaurants & Cafes',
+    'Bakeries & Desserts',
+    'Meat & Seafood',
+    'Pharmacy & Wellness',
+    'Electronics & Accessories',
     'Fashion & Apparel',
     'Home & Lifestyle',
     'Beauty & Personal Care',
-    'Other'
+    'Pet Care & Supplies'
 ];
 
 interface Branch {
@@ -173,6 +174,7 @@ export default function SignupWizard() {
                     owner_name: identity.owner_name,
                     store_name: storeInfo.store_name,
                     category: storeInfo.category,
+                    vertical: storeInfo.category,
                     email: identity.email,
                     phone: identity.phone,
                     city: storeInfo.city,

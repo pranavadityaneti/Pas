@@ -2828,6 +2828,7 @@ app.post('/auth/verify-otp', async (req, res) => {
     const TEST_OTP = '123456';
     let targetUserId = null;
 
+
     if (incomingPhone.endsWith('9959777027') && req.body.otp === TEST_OTP) {
         targetUserId = '200ea527-0fb9-4db0-8165-ca1286ea91b0'; // Merchant Test UUID
     }

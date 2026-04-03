@@ -87,6 +87,7 @@ interface Product {
   uom?: string;
   hsnCode?: string;
   gstRate?: number;
+  vertical?: string | null;
 }
 
 interface SyncItem {
@@ -98,28 +99,26 @@ interface SyncItem {
   subcategory: string | null;
   packsize: string | null;
   image: string | null;
+  vertical: string | null;
   sourceProductId: string;
   status: string;
   createdAt: string;
   metadata?: any;
 }
 // Centralized category list for consistency across all dropdowns
-const CATEGORIES = [
-  'Dairy',
-  'Bakery',
-  'Snacks',
-  'Staples',
-  'Condiments',
-  'Confectionery',
-  'Grocery',
-  'Beverages',
-  'Personal Care',
-  'Home Essentials',
-  'Fashion',
-  'Pharmacy',
-  'Meat',
-  'Fruits & Vegetables'
+const VERTICALS = [
+    'Grocery & Kirana', 'Fruits & Vegetables', 'Restaurants & Cafes', 
+    'Bakeries & Desserts', 'Meat & Seafood', 'Pharmacy & Wellness', 
+    'Electronics & Accessories', 'Fashion & Apparel', 'Home & Lifestyle', 
+    'Beauty & Personal Care', 'Pet Care & Supplies'
 ];
+
+const PRODUCT_CATEGORIES = [
+    'Dairy & Milk', 'Staples & Pulse', 'Snacks & Munchies', 'Beverages', 
+    'Personal Care', 'Home Essentials', 'Ready-to-Eat', 'Household Supply'
+];
+
+const CATEGORIES = [...VERTICALS, ...PRODUCT_CATEGORIES];
 
 export function MasterCatalog() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -548,6 +547,7 @@ export function MasterCatalog() {
       const payload = {
         name,
         category,
+        vertical: editingProduct.vertical || null,
         mrp: Number(mrp), // Explicit number conversion
         brand: brand || null,
         ean: ean || null,
@@ -877,9 +877,8 @@ export function MasterCatalog() {
                       />
                     </TableHead>
                     <TableHead className="w-[80px]">Image</TableHead>
-                    <TableHead>Product Info</TableHead>
-                    <TableHead className="w-[120px]">Packsize</TableHead>
-                    <TableHead className="w-[200px]">Category</TableHead>
+                    <TableHead className="w-[180px]">Vertical (Tier 1)</TableHead>
+                    <TableHead className="w-[180px]">Category (Tier 2)</TableHead>
                     <TableHead className="w-[150px]">Global MRP (₹)</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
@@ -935,14 +934,29 @@ export function MasterCatalog() {
                           </TableCell>
                           <TableCell>
                             <Select
+                              value={item.vertical || ''}
+                              onValueChange={(value) => handleSyncQueueEdit(item.id, 'vertical', value)}
+                            >
+                              <SelectTrigger className="w-full h-8 text-xs bg-amber-50 border-amber-200 font-semibold text-amber-900">
+                                <SelectValue placeholder="Vertical" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {VERTICALS.map(v => (
+                                  <SelectItem key={v} value={v}>{v}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>
+                            <Select
                               value={item.category || ''}
                               onValueChange={(value) => handleSyncQueueEdit(item.id, 'category', value)}
                             >
                               <SelectTrigger className="w-full h-8 text-xs bg-white border-gray-200 shadow-sm">
-                                <SelectValue placeholder="Select Category" />
+                                <SelectValue placeholder="Category" />
                               </SelectTrigger>
                               <SelectContent>
-                                {CATEGORIES.map(cat => (
+                                {PRODUCT_CATEGORIES.map(cat => (
                                   <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                                 ))}
                               </SelectContent>
@@ -1000,12 +1014,22 @@ export function MasterCatalog() {
                           <span className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
                             <Barcode className="w-3 h-3" /> {product.ean || 'N/A'} • {product.brand || 'Generic'}
                           </span>
-                          {product.createdByStoreId && (
-                            <Badge variant="outline" className="mt-1 w-fit bg-purple-50 text-purple-700 border-purple-200">
-                              Store: {product.createdByStoreId}
-                            </Badge>
-                          )}
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={product.vertical || ''}
+                          onValueChange={(value) => handleUpdateProduct(product.id, 'vertical', value)}
+                        >
+                          <SelectTrigger className="w-full h-8 text-xs bg-amber-50 border-amber-200 font-semibold text-amber-900">
+                            <SelectValue placeholder="Vertical" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {VERTICALS.map(v => (
+                              <SelectItem key={v} value={v}>{v}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </TableCell>
                       <TableCell>
                         <span className="text-sm text-gray-600 font-medium">{product.uom || 'N/A'}</span>
@@ -1019,7 +1043,7 @@ export function MasterCatalog() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {CATEGORIES.map(cat => (
+                            {PRODUCT_CATEGORIES.map(cat => (
                               <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                             ))}
                           </SelectContent>
@@ -1166,28 +1190,35 @@ export function MasterCatalog() {
                   </div>
 
                   {/* Brand & Category Grid */}
-                  {/* Brand & Category Grid */}
+                  {/* Vertical & Category Grid */}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <Label className="block text-sm font-medium text-gray-700 mb-1.5">Brand</Label>
-                      <Input
-                        value={editingProduct?.brand || ''}
-                        onChange={(e) => setEditingProduct(prev => prev ? { ...prev, brand: e.target.value } : null)}
-                        className="h-10 text-sm bg-white border-gray-300 shadow-sm"
-                        placeholder="Generic"
-                      />
+                      <Label className="block text-sm font-medium text-gray-700 mb-1.5">Store Vertical</Label>
+                      <Select
+                        value={editingProduct?.vertical || ''}
+                        onValueChange={(v) => setEditingProduct(prev => prev ? { ...prev, vertical: v } : null)}
+                      >
+                        <SelectTrigger className="h-10 text-sm bg-white border-gray-300 shadow-sm">
+                          <SelectValue placeholder="Select Vertical" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {VERTICALS.map(v => (
+                            <SelectItem key={v} value={v}>{v}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div>
-                      <Label className="block text-sm font-medium text-gray-700 mb-1.5">Category</Label>
+                      <Label className="block text-sm font-medium text-gray-700 mb-1.5">Product Category</Label>
                       <Select
                         value={editingProduct?.category}
                         onValueChange={(v) => setEditingProduct(prev => prev ? { ...prev, category: v } : null)}
                       >
                         <SelectTrigger className="h-10 text-sm bg-white border-gray-300 shadow-sm">
-                          <SelectValue />
+                          <SelectValue placeholder="Select Category" />
                         </SelectTrigger>
                         <SelectContent>
-                          {CATEGORIES.map(cat => (
+                          {PRODUCT_CATEGORIES.map(cat => (
                             <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                           ))}
                         </SelectContent>

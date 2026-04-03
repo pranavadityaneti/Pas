@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useStore } from './useStore';
 import Constants from 'expo-constants';
 
-const API_URL = Constants.expoConfig?.extra?.apiUrl || 'http://pas-api-prod.eba-njbp437w.ap-south-1.elasticbeanstalk.com';
+const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
 export type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED' | 'RETURN_REQUESTED' | 'RETURN_APPROVED' | 'RETURN_REJECTED' | 'REFUNDED';
 

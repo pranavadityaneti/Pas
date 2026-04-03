@@ -1,32 +1,35 @@
 {
-    "cli": {},
-    "build": {
-        "development": {
-            "developmentClient": true,
-            "distribution": "internal"
-        },
-        "preview": {
-            "distribution": "internal"
-        },
-        "production": {
-            "distribution": "store",
-            "env": {
-                "NPM_CONFIG_LEGACY_PEER_DEPS": "true"
-            },
-            "android": {
-                "credentialsSource": "local"
-            },
-            "ios": {
-                "credentialsSource": "remote"
-            }
-        }
+  "cli": {
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
     },
-    "submit": {
-        "production": {
-            "ios": {
-                "ascAppId": "6758596562",
-                "appleId": "pranavadityaneti@icloud.com"
-            }
-        }
+    "preview": {
+      "distribution": "internal"
+    },
+    "production": {
+      "autoIncrement": true,
+      "distribution": "store",
+      "env": {
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true"
+      },
+      "android": {
+        "credentialsSource": "local"
+      },
+      "ios": {
+        "credentialsSource": "remote"
+      }
     }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "ascAppId": "6758596562",
+        "appleId": "pranav.n@ideaye.in"
+      }
+    }
+  }
 }
