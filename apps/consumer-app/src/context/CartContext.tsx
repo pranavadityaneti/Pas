@@ -19,6 +19,9 @@ interface CartItem {
 
 interface CartContextType {
     items: CartItem[];
+    pickupTimes: Record<string, string>;
+    setPickupTime: (storeId: string, time: string) => void;
+    groupedItems: Record<string, CartItem[]>;
     addItem: (item: Omit<CartItem, 'quantity'>) => void;
     removeItem: (id: string) => void;
     updateQuantity: (id: string, quantity: number) => void;
@@ -32,8 +35,19 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export function CartProvider({ children }: { children: ReactNode }) {
     const [items, setItems] = useState<CartItem[]>([]);
+    const [pickupTimes, setPickupTimes] = useState<Record<string, string>>({});
     const [isInitialized, setIsInitialized] = useState(false);
     const [cartId, setCartId] = useState<string | null>(null);
+
+    const setPickupTime = (storeId: string, time: string) => {
+        setPickupTimes(prev => ({ ...prev, [storeId]: time }));
+    };
+
+    const groupedItems = items.reduce((acc, item) => {
+        if (!acc[item.storeId]) acc[item.storeId] = [];
+        acc[item.storeId].push(item);
+        return acc;
+    }, {} as Record<string, CartItem[]>);
 
     // Initial load and Auth Listener
     useEffect(() => {
@@ -208,7 +222,6 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
         if (items.length > 0) {
             const isExistingDining = items[0].isDining;
-            const existingStoreId = items[0].storeId;
 
             if (isNewItemDining !== isExistingDining) {
                 Alert.alert(
@@ -221,26 +234,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
                             style: "destructive",
                             onPress: () => {
                                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                                setItems([{ ...item, id: String(item.id), storeId: String(item.storeId), quantity: 1 }]);
-                            }
-                        }
-                    ]
-                );
-                return;
-            }
-
-            // CRITICAL EXECUTE: Enforce Single-Store Constraint
-            if (String(item.storeId) !== String(existingStoreId)) {
-                Alert.alert(
-                    "Different Store",
-                    "Your cart contains items from another store. Would you like to clear your cart and start a new order from this store?",
-                    [
-                        { text: "Cancel", style: "cancel" },
-                        {
-                            text: "Clear Cart",
-                            style: "destructive",
-                            onPress: () => {
-                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                                setPickupTimes({});
                                 setItems([{ ...item, id: String(item.id), storeId: String(item.storeId), quantity: 1 }]);
                             }
                         }
@@ -261,7 +255,22 @@ export function CartProvider({ children }: { children: ReactNode }) {
     };
 
     const removeItem = (id: string) => {
-        setItems(prev => prev.filter(i => String(i.id) !== String(id)));
+        setItems(prev => {
+            const itemToRemove = prev.find(i => String(i.id) === String(id));
+            const newItems = prev.filter(i => String(i.id) !== String(id));
+            
+            if (itemToRemove) {
+                const storeItemsLeft = newItems.filter(i => String(i.storeId) === String(itemToRemove.storeId));
+                if (storeItemsLeft.length === 0) {
+                    setPickupTimes(times => {
+                        const newTimes = { ...times };
+                        delete newTimes[itemToRemove.storeId];
+                        return newTimes;
+                    });
+                }
+            }
+            return newItems;
+        });
     };
 
     const updateQuantity = (id: string, quantity: number) => {
@@ -274,6 +283,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
     const clearCart = () => {
         setItems([]);
+        setPickupTimes({});
         // Explicitly clear from Supabase if we have a cartId
         if (cartId) {
             syncCartToSupabase(cartId, []);
@@ -290,7 +300,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     };
 
     return (
-        <CartContext.Provider value={{ items, addItem, removeItem, updateQuantity, clearCart, getItemCount, getTotal, getItemQuantity }}>
+        <CartContext.Provider value={{ items, pickupTimes, setPickupTime, groupedItems, addItem, removeItem, updateQuantity, clearCart, getItemCount, getTotal, getItemQuantity }}>
             {children}
         </CartContext.Provider>
     );

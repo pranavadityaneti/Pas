@@ -24,6 +24,7 @@ import FavoritesScreen from '../screens/FavoritesScreen';
 import PaymentMethodsScreen from '../screens/PaymentMethodsScreen';
 import SupportScreen from '../screens/SupportScreen';
 import AddPaymentMethodScreen from '../screens/AddPaymentMethodScreen';
+import WaitingRoomScreen from '../screens/WaitingRoomScreen';
 
 import { RootStackParamList } from './types';
 
@@ -101,6 +102,7 @@ export default function RootNavigator() {
                     <Stack.Screen name="PaymentMethods" component={PaymentMethodsScreen} />
                     <Stack.Screen name="Support" component={SupportScreen} />
                     <Stack.Screen name="AddPaymentMethod" component={AddPaymentMethodScreen} />
+                    <Stack.Screen name="WaitingRoomScreen" component={WaitingRoomScreen} />
                 </>
             ) : (
                 <>
@@ -128,6 +130,7 @@ export default function RootNavigator() {
                     <Stack.Screen name="Support" component={SupportScreen} />
                     <Stack.Screen name="PaymentMethods" component={PaymentMethodsScreen} />
                     <Stack.Screen name="AddPaymentMethod" component={AddPaymentMethodScreen} />
+                    <Stack.Screen name="WaitingRoomScreen" component={WaitingRoomScreen} />
                 </>
             )}
         </Stack.Navigator>

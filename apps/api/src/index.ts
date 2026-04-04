@@ -523,8 +523,8 @@ app.get('/products/export', async (req, res) => {
         const data = products.map(p => ({
             name: p.name,
             mrp: p.mrp,
-            vertical: p.category,
-            category: p.category,
+            vertical: p.subcategory,
+            category: p.subcategory,
             brand: p.brand,
             ean: p.ean,
             image: p.image,
@@ -581,8 +581,8 @@ app.post('/products/export-selected', async (req, res) => {
             worksheet.addRow({
                 name: p.name,
                 mrp: p.mrp,
-                vertical: p.category,
-                category: p.category,
+                vertical: p.subcategory,
+                category: p.subcategory,
                 brand: p.brand,
                 ean: p.ean,
                 unitType: p.unitType,
@@ -795,7 +795,6 @@ async function processScraperDataset(datasetId: string) {
                     name,
                     brand,
                     mrp: mrp > 0 ? mrp : sellingPrice,
-                    category,
                     subcategory,
                     packsize,
                     image,
@@ -805,7 +804,6 @@ async function processScraperDataset(datasetId: string) {
                     name,
                     brand,
                     mrp: mrp > 0 ? mrp : sellingPrice,
-                    category,
                     subcategory,
                     packsize,
                     image,
@@ -1211,7 +1209,7 @@ app.post('/products/bulk', upload.single('file'), async (req, res) => {
                         ean: row.ean ? String(row.ean) : null,
                         sourceProductId: row.source_product_id ? String(row.source_product_id) : null,
                         updatedAt: new Date(),
-                        category: row.category_id || row.category,
+                        category_id: row.category_id || null,
                         // New Fields
                         unitType: row.unitType || null,
                         unitValue: unitValue,
@@ -1783,7 +1781,7 @@ app.get('/consumer/stores/:id', async (req, res) => {
         // Group products by category/subcategory for the storefront
         const groupedByCategory: Record<string, any[]> = {};
         for (const sp of storeProducts) {
-            const cat = sp.product.subcategory || sp.product.category || 'Other';
+            const cat = sp.product.subcategory || 'Other';
             if (!groupedByCategory[cat]) groupedByCategory[cat] = [];
             groupedByCategory[cat].push({
                 id: sp.id,
@@ -1796,7 +1794,7 @@ app.get('/consumer/stores/:id', async (req, res) => {
                 active: sp.active,
                 variant: sp.variant,
                 isBestSeller: sp.is_best_seller,
-                category: sp.product.category,
+                category: sp.product.subcategory,
                 subcategory: sp.product.subcategory,
                 brand: sp.product.brand,
                 uom: sp.product.uom || sp.product.unitType ? `${sp.product.unitValue || ''}${sp.product.unitType || ''}` : null,
@@ -2435,7 +2433,6 @@ app.get('/coupons', async (req, res) => {
 
         const coupon = await prisma.coupon.findMany({
             where,
-            include: { store: { select: { id: true, name: true } } },
             orderBy: { createdAt: 'desc' }
         });
 
@@ -2494,8 +2491,7 @@ app.post('/coupon', async (req, res) => {
                 startDate: startDate ? new Date(startDate) : new Date(),
                 endDate: endDate ? new Date(endDate) : null,
                 updatedAt: new Date(),
-            },
-            include: { store: { select: { id: true, name: true } } }
+            }
         });
 
         res.status(201).json(coupon);
@@ -2538,8 +2534,7 @@ app.patch('/coupon/:id', async (req, res) => {
 
         const coupon = await prisma.coupon.update({
             where: { id },
-            data: updateData,
-            include: { store: { select: { id: true, name: true } } }
+            data: updateData
         });
 
         res.json(coupon);

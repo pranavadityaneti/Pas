@@ -1,126 +1,15 @@
-# 🛡️ PROJECT GUIDELINES — Pick At Store (PAS) Monorepo
+# GLOBAL PROJECT GUIDELINES & AI RESTRICTIONS
 
-> **Purpose**: This document defines the rules that ALL development agents (AI or human) must follow  
-> to prevent accidental overwrites, regressions, and loss of implemented work.  
-> **Created**: February 27, 2026  
-> **Last Updated**: March 22, 2026
+## 1. THE PRIME DIRECTIVE
+You are acting as a strict executor. You must never assume authorization to modify infrastructure, rewrite architecture, or trigger deployments without an explicit, approved plan.
 
----
+## 2. INFRASTRUCTURE LOCK
+The rules defined in `apps/api/ANTIGRAVITY_RULES.md` and `apps/merchant-app/ANTIGRAVITY_RULES.md` are absolute. 
+- **Frontend:** `eas.json` and `app.json` are locked. Target API is always `https://api.pickatstore.io`.
+- **Backend:** `package.json` and `.elasticbeanstalk/*` are locked. Target environment is always `pas-api-prod-v2`.
 
-## ⚠️ CRITICAL RULES
-
-### Rule 1: Never Overwrite Locked Files
-Any file marked with the `// @lock` comment at the top, or listed as 🔒 LOCKED in `FEATURE_REGISTRY.md`, **must not have its core layout, structure, or styling altered** without explicit user approval.
-
-**Allowed on locked files:**
-- Bug fixes (e.g., adding a null check, fixing a navigation error)
-- Additive enhancements (e.g., adding a new prop, wiring up an event handler)
-- Import additions for new features
-
-**Forbidden on locked files:**
-- Changing the component's JSX layout/structure
-- Replacing or removing existing UI elements
-- Changing styling classes or inline styles
-- Refactoring the file's architecture
-
-### Rule 2: Check the Feature Registry Before Every Edit
-Before modifying **any** existing file, consult `FEATURE_REGISTRY.md` to determine its lock status:
-- 🔒 **LOCKED** — Do NOT modify layout/structure. Bug fixes only.
-- 🟡 **IN PROGRESS** — Active development. Coordinate with the user.
-- 🟢 **OPEN** — Safe to modify freely.
-- 📋 **PLANNED** — Not yet implemented. Safe to create.
-
-### Rule 3: Prefer Additive Changes Over Rewrites
-When implementing a new feature:
-1. **Create new files** for new screens, components, or modules.
-2. **Add imports and routes** to existing navigators/routers (additive).
-3. **Never replace** an existing screen's content with a new feature's content.
-
-### Rule 4: One Screen = One File = One Responsibility
-Each screen file owns its own layout. Do NOT merge multiple screens into one file or render a different screen's content inside another screen's file.
-
-### Rule 5: Preserve the Home Screen
-The Home Screen (`HomeScreen.tsx`) is a critical entry point. It must always display:
-- 2-column Pickup & Dining cards
-- Featured hero card
-- Sticky header with location and profile icon
-
-Any changes to the Home Screen require **explicit approval**.
-
-### Rule 6: Always Add `@lock` to Newly Completed Work
-When a screen or component is completed and approved by the user, immediately:
-1. Add `// @lock — Do NOT overwrite. Approved layout as of [DATE].` to the top of the file.
-2. Update `FEATURE_REGISTRY.md` to mark the file as 🔒 LOCKED.
-
-### Rule 7: Test Before and After
-Before modifying any file:
-1. Note the current working state of the app.
-2. After changes, verify the app still renders correctly.
-3. If an existing screen breaks, **revert immediately**.
-
-### Rule 8: The Database Schema is Sacred
-The database is the backbone of the application. AI agents often attempt to add or delete columns in `schema.prisma` to simplify frontend features, which can lead to catastrophic data loss in production.
-- **Never modify** `apps/api/prisma/schema.prisma` without explicit permission.
-- If a feature requires new database fields, **propose the schema change first** and wait for approval.
-- **Never execute** `prisma db push` or `prisma migrate` without direct user confirmation.
-- Assume all existing tables contain **live production data**.
-
-### Rule 9: Zero-Trust Dependency Management
-To protect the bundle size and prevent build failures in Expo or Vercel, we maintain a strict dependency diet.
-- **Do NOT install new packages** (via `npm`, `yarn`, or `pnpm`) without explicit approval.
-- **Always check `package.json`** to use existing libraries first (e.g., use an existing date library instead of installing a new one).
-- In React Native/Expo, **prioritize built-in standard APIs** before suggesting external community packages.
-
-### Rule 10: Strict Secret Management
-Security is non-negotiable. We must prevent accidental leaks of API keys or credentials.
-- **Never read, write, or modify `.env` files** unless explicitly instructed by the user.
-- **Never print API keys, JWTs, or database URLs** in code comments, console logs, or PR descriptions.
-- Before executing any `git commit`, **verify that `.gitignore` is actively protecting** `node_modules` and `.env` files.
-
----
-
-## 📂 Project Structure Reference
-
-```
-Pas/
-├── apps/
-│   ├── consumer-app/      # React Native (Expo) — Customer-facing mobile app
-│   ├── merchant-app/       # React Native (Expo) — Merchant-facing mobile app
-│   ├── merchant-web/       # Capacitor + React — Merchant web/hybrid app
-│   ├── admin-web/          # React — Super admin dashboard
-│   ├── consumer-web-legacy/ # React — Consumer web app (legacy)
-│   ├── landing-page/       # Next.js — Public marketing site
-│   └── api/                # Express.js — Backend API server
-├── packages/               # Shared packages
-├── PROJECT_GUIDELINES.md   # ← THIS FILE (development rules)
-└── FEATURE_REGISTRY.md     # ← Feature manifest with lock statuses
-```
-
----
-
-## 🔄 Workflow for Making Changes
-
-```
-1. User requests a change
-         │
-         ▼
-2. Check FEATURE_REGISTRY.md
-   ├── 🔒 LOCKED? → Only bug fixes. Ask user before layout changes.
-   ├── 🟡 IN PROGRESS? → Coordinate with user.
-   └── 🟢 OPEN / 📋 PLANNED? → Proceed freely.
-         │
-         ▼
-3. Check for // @lock comment in target file
-   ├── Present? → Treat as LOCKED.
-   └── Absent? → Proceed, but verify registry.
-         │
-         ▼
-4. Implement changes (prefer additive)
-         │
-         ▼
-5. After approval, add @lock + update registry
-```
-
----
-
-**This document is the source of truth. Follow it strictly.**
+## 3. AUDIT-DRIVEN EXECUTION
+Before executing ANY command that modifies state (e.g., `git`, `npm install`, `eb deploy`, `eas build`, Prisma migrations), you MUST:
+1. Provide a step-by-step Execution Plan.
+2. Stop and wait for the human operator to reply "Approved".
+3. Blind execution is strictly forbidden.
