@@ -1,6 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import { supabase } from './supabase';
-import { navigationRef } from '../../App';
+import { navigationRef } from '../navigation/navigationRef';
 import { Alert } from 'react-native';
 
 import Constants from 'expo-constants';

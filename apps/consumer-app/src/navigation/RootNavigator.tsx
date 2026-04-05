@@ -25,7 +25,8 @@ import PaymentMethodsScreen from '../screens/PaymentMethodsScreen';
 import SupportScreen from '../screens/SupportScreen';
 import AddPaymentMethodScreen from '../screens/AddPaymentMethodScreen';
 import WaitingRoomScreen from '../screens/WaitingRoomScreen';
-
+import PaymentScreen from '../screens/PaymentScreen';
+import SwapScreen from '../screens/SwapScreen';
 import { RootStackParamList } from './types';
 
 import { useAuth } from '../context/AuthContext';
@@ -103,6 +104,8 @@ export default function RootNavigator() {
                     <Stack.Screen name="Support" component={SupportScreen} />
                     <Stack.Screen name="AddPaymentMethod" component={AddPaymentMethodScreen} />
                     <Stack.Screen name="WaitingRoomScreen" component={WaitingRoomScreen} />
+                    <Stack.Screen name="PaymentScreen" component={PaymentScreen} />
+                    <Stack.Screen name="SwapScreen" component={SwapScreen} />
                 </>
             ) : (
                 <>
@@ -131,6 +134,8 @@ export default function RootNavigator() {
                     <Stack.Screen name="PaymentMethods" component={PaymentMethodsScreen} />
                     <Stack.Screen name="AddPaymentMethod" component={AddPaymentMethodScreen} />
                     <Stack.Screen name="WaitingRoomScreen" component={WaitingRoomScreen} />
+                    <Stack.Screen name="PaymentScreen" component={PaymentScreen} />
+                    <Stack.Screen name="SwapScreen" component={SwapScreen} />
                 </>
             )}
         </Stack.Navigator>

@@ -7,8 +7,7 @@ import { CartProvider } from './src/context/CartContext';
 import { CategoryProvider } from './src/context/CategoryContext';
 
 import { AuthProvider } from './src/context/AuthContext';
-
-export const navigationRef = createNavigationContainerRef<any>();
+import { navigationRef } from './src/navigation/navigationRef';
 
 export default function App() {
     return (

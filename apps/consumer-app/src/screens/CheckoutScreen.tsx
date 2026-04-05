@@ -256,34 +256,43 @@ export default function CheckoutScreen() {
     const submitMultiVendorOrders = async () => {
         setIsSubmitting(true);
         try {
+            console.log("Starting checkout process...");
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) { throw new Error("Authentication required"); }
+
             const orderIds = [];
             for (const storeId of Object.keys(groupedItems)) {
                 const storeItems = groupedItems[storeId];
-                
+
                 const storeSubtotal = storeItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
                 const storeTotal = Math.round(storeSubtotal * 1.18);
                 
                 const otp = Math.floor(100000 + Math.random() * 900000).toString();
                 const pickupTime = pickupTimes[storeId] || 'ASAP';
                 
+                console.log(`Inserting order for store ${storeId}...`);
                 const { data: orderData, error: orderError } = await supabase
                     .from('orders')
                     .insert({
+                        user_id: user.id,
+                        order_number: 'ORD-' + Math.floor(Math.random() * 1000000),
                         store_id: storeId,
                         total_amount: storeTotal,
-                        status: 'PENDING_APPROVAL',
-                        pickup_time: pickupTime,
-                        pickup_otp: otp
+                        status: 'PENDING',
+                        arrival_time: pickupTime,
+                        otp_code: otp,
+                        updated_at: new Date().toISOString()
                     })
                     .select()
                     .single();
                 
-                if (orderError) throw orderError;
+                if (orderError) throw new Error(orderError.message || "Database operation failed on order insert");
                 orderIds.push(orderData.id);
                 
+                console.log(`Inserting ${storeItems.length} order items...`);
                 const dbOrderItems = storeItems.map(item => ({
                     order_id: orderData.id,
-                    product_id: item.id,
+                    store_product_id: item.id,
                     quantity: item.quantity,
                     price: item.price
                 }));
@@ -292,12 +301,15 @@ export default function CheckoutScreen() {
                     .from('order_items')
                     .insert(dbOrderItems);
                     
-                if (itemsError) throw itemsError;
+                if (itemsError) throw new Error(itemsError.message || "Database operation failed on order_items insert");
             }
+            
+            console.log("All orders dispatched! Navigating to WaitingRoomScreen...");
             clearCart();
-            navigation.replace('WaitingRoomScreen' as any);
+            navigation.replace('WaitingRoomScreen' as any, { orderIds });
         } catch (e: any) {
-            Alert.alert('Error', 'Failed to submit order requests. Please try again.');
+            console.error("CHECKOUT CRASH:", e);
+            Alert.alert("Checkout Failed", e.message || JSON.stringify(e));
         } finally {
             setIsSubmitting(false);
         }

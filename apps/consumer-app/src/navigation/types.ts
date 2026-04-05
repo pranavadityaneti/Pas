@@ -27,6 +27,7 @@ export type RootStackParamList = {
         selectedCoupon?: { code: string; discount: number },
         specialInstructions?: string
     };
-    WaitingRoomScreen: undefined;
+    WaitingRoomScreen: { orderIds: string[] };
+    PaymentScreen: undefined;
+    SwapScreen: undefined;
 };
-
