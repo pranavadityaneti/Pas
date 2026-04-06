@@ -1967,7 +1967,7 @@ app.patch('/orders/:id/status', async (req, res) => {
         // 1. Fetch current order to validate transition
         const currentOrder = await (prisma as any).order.findUnique({
             where: { id },
-            include: { user: true, orderItems: { include: { storeProduct: { include: { product: true } } } }, store: { include: { manager: true } } }
+            include: { user: true, items: { include: { storeProduct: { include: { product: true } } } }, store: { include: { manager: true } } }
         });
 
         if (!currentOrder) {

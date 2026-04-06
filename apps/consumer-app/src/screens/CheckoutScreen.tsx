@@ -20,7 +20,7 @@ import { useOrderRequests, OrderRequest } from '../hooks/useOrderRequests';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../lib/supabase';
 import TransactionalAuthModal from '../components/TransactionalAuthModal';
-import { findAlternativeStores, ALL_PRODUCTS } from '../lib/data';
+import { STORES, RESTAURANTS, findAlternativeStores, ALL_PRODUCTS } from '../lib/data';
 import RazorpayCheckout from '../components/RazorpayCheckout';
 import * as Contacts from 'expo-contacts';
 
@@ -62,8 +62,7 @@ export default function CheckoutScreen() {
     // 1. ALL HOOKS AT THE VERY TOP (UNCONDITIONAL)
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const route = useRoute<RouteProp<RootStackParamList, 'Checkout'>>();
-    const { items, getTotal, clearCart, updateQuantity, addItem, removeItem, groupedItems, pickupTimes } = useCart();
-    const [isSubmitting, setIsSubmitting] = useState(false);
+    const { items, getTotal, clearCart, updateQuantity, addItem, removeItem } = useCart();
     const {
         requests,
         allResolved,
@@ -91,7 +90,7 @@ export default function CheckoutScreen() {
     const [pickupMode, setPickupMode] = useState<'myself' | 'other'>('myself');
     const [pickupName, setPickupName] = useState('');
     const [pickupPhone, setPickupPhone] = useState('');
-    const [storeAddresses, setStoreAddresses] = useState<Record<string, string>>({});
+    const [storeLocations, setStoreLocations] = useState<Record<string, any>>({});
     const { user, profile, isProfileLoading } = useAuth();
     const [paymentMethod, setPaymentMethod] = useState<'upi' | 'card'>('upi');
     const [contactsModalVisible, setContactsModalVisible] = useState(false);
@@ -163,16 +162,12 @@ export default function CheckoutScreen() {
     useEffect(() => {
         if (items.length === 0) return;
         const uniqueStoreIds = Array.from(new Set(items.map(i => i.storeId)));
-        
-        uniqueStoreIds.forEach(async (storeId) => {
-            const { data } = await supabase.from('stores').select('address, location').eq('id', storeId).single();
-            if (data) {
-                setStoreAddresses(prev => ({ 
-                    ...prev, 
-                    [storeId]: data.address || data.location || 'Address not found' 
-                }));
-            }
+        const locMap: Record<string, any> = {};
+        uniqueStoreIds.forEach(id => {
+            const s = STORES.find(st => st.id === id) || RESTAURANTS.find(r => r.id === id);
+            if (s) locMap[id] = s;
         });
+        setStoreLocations(locMap);
     }, [items]);
 
     useEffect(() => {
@@ -203,9 +198,16 @@ export default function CheckoutScreen() {
         return Array.from(storeMap.values());
     }, [items]);
 
-    const restaurantAddress = '';
+    const restaurantAddress = useMemo(() => {
+        if (groupedStores.length === 0) return '';
+        const r = RESTAURANTS.find((r: any) => r.id === groupedStores[0].storeId);
+        return r?.address || '';
+    }, [groupedStores]);
 
-    const availableSlots: string[] = [];
+    const availableSlots = useMemo(() => {
+        if (!activeStoreForTime) return [];
+        return generateTimeSlots(storeLocations[activeStoreForTime], selectedDay);
+    }, [activeStoreForTime, selectedDay, storeLocations]);
 
     // Derived Logic (Non-hook)
     const storeNamesList = groupedStores.map(g => g.storeName).join(', ');
@@ -253,65 +255,40 @@ export default function CheckoutScreen() {
         }
     };
 
-    const submitMultiVendorOrders = async () => {
-        setIsSubmitting(true);
-        try {
-            console.log("Starting checkout process...");
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) { throw new Error("Authentication required"); }
+    const handlePayConfirm = async () => {
+        const missingTimeStores = groupedStores.filter(g => !selectedTime[g.storeId]);
 
-            const orderIds = [];
-            for (const storeId of Object.keys(groupedItems)) {
-                const storeItems = groupedItems[storeId];
 
-                const storeSubtotal = storeItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-                const storeTotal = Math.round(storeSubtotal * 1.18);
-                
-                const otp = Math.floor(100000 + Math.random() * 900000).toString();
-                const pickupTime = pickupTimes[storeId] || 'ASAP';
-                
-                console.log(`Inserting order for store ${storeId}...`);
-                const { data: orderData, error: orderError } = await supabase
-                    .from('orders')
-                    .insert({
-                        user_id: user.id,
-                        order_number: 'ORD-' + Math.floor(Math.random() * 1000000),
-                        store_id: storeId,
-                        total_amount: storeTotal,
-                        status: 'PENDING',
-                        arrival_time: pickupTime,
-                        otp_code: otp,
-                        updated_at: new Date().toISOString()
-                    })
-                    .select()
-                    .single();
-                
-                if (orderError) throw new Error(orderError.message || "Database operation failed on order insert");
-                orderIds.push(orderData.id);
-                
-                console.log(`Inserting ${storeItems.length} order items...`);
-                const dbOrderItems = storeItems.map(item => ({
-                    order_id: orderData.id,
-                    store_product_id: item.id,
-                    quantity: item.quantity,
-                    price: item.price
-                }));
-                
-                const { error: itemsError } = await supabase
-                    .from('order_items')
-                    .insert(dbOrderItems);
-                    
-                if (itemsError) throw new Error(itemsError.message || "Database operation failed on order_items insert");
+        if (missingTimeStores.length > 0) {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            const msg = missingTimeStores.length === 1
+                ? `Please select a pickup time for ${missingTimeStores[0].storeName} before placing your order.`
+                : 'Please select a pickup time for all your orders before proceeding.';
+            Alert.alert('Select Pickup Time', msg);
+            return;
+        }
+
+        if (pickupMode === 'other') {
+            const cleanPhone = pickupPhone.replace('+91', '').trim();
+            if (!pickupName.trim() || cleanPhone.length < 10) {
+                Alert.alert('Missing Details', 'Please provide a valid name and mobile number for the person picking up.');
+                return;
             }
-            
-            console.log("All orders dispatched! Navigating to WaitingRoomScreen...");
-            clearCart();
-            navigation.replace('WaitingRoomScreen' as any, { orderIds });
-        } catch (e: any) {
-            console.error("CHECKOUT CRASH:", e);
-            Alert.alert("Checkout Failed", e.message || JSON.stringify(e));
-        } finally {
-            setIsSubmitting(false);
+        }
+
+
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+        try {
+            await createRequests(groupedStores.map(g => ({
+                storeId: g.storeId,
+                storeName: g.storeName,
+                items: g.items,
+                total: g.total
+            })));
+            setStep('waiting');
+        } catch (e) {
+            Alert.alert('Error', 'Failed to submit order requests. Please try again.');
         }
     };
 
@@ -830,24 +807,26 @@ export default function CheckoutScreen() {
                 </View>
 
                 {groupedStores.map((group, idx) => {
+                    const storeData = storeLocations[group.storeId];
                     return (
                         <View key={group.storeId} className="mx-5 mb-4 bg-white rounded-[20px] border border-gray-100 p-5 shadow-sm">
                             <View className="flex-row items-center mb-4">
-                                <Text className="text-[17px] font-extrabold text-[#111827] leading-tight flex-1">{group.storeName}</Text>
+                                <View className="w-6 h-6 bg-[#B52725] rounded-full items-center justify-center mr-3"><Text className="text-white text-[12px] font-bold">{idx + 1}</Text></View>
+                                <Text className="text-[17px] font-extrabold text-[#111827] leading-tight flex-1">Stop {idx + 1}: {group.storeName}</Text>
                             </View>
                             <View className="flex-row items-start mb-4 bg-gray-50 rounded-xl p-3.5 border border-gray-100">
                                 <MapPin size={18} color="#B52725" className="mt-0.5" />
                                 <View className="ml-3 flex-1">
                                     <Text className="text-[14px] font-bold text-gray-900 mb-1">Location</Text>
-                                    <Text className="text-[13px] text-gray-500 font-medium leading-5" numberOfLines={2}>{storeAddresses[group.storeId] || 'Fetching address...'}</Text>
+                                    <Text className="text-[13px] text-gray-500 font-medium leading-5" numberOfLines={2}>{storeData?.address || storeData?.location || 'Fetching address...'}</Text>
                                 </View>
                             </View>
                             <View className="flex-row items-center justify-between bg-gray-50 rounded-xl px-4 py-3.5 border border-gray-100 mt-2">
                                 <View className="flex-row items-center flex-1">
                                     <Clock size={18} color="#4B5563" />
-                                    <Text className="text-[14px] font-bold text-gray-900 ml-3 flex-1" numberOfLines={1}>{pickupTimes[group.storeId] || 'Select Pickup Time'}</Text>
+                                    <Text className="text-[14px] font-bold text-gray-900 ml-3 flex-1" numberOfLines={1}>{selectedTime[group.storeId] || 'Select Pickup Time'}</Text>
                                 </View>
-                                <TouchableOpacity onPress={() => navigation.navigate('Cart' as any)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                                <TouchableOpacity onPress={() => { setActiveStoreForTime(group.storeId); setIsTimeModalVisible(true); }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                                     <Text className="text-[13px] font-bold text-gray-900 underline">Change</Text>
                                 </TouchableOpacity>
                             </View>
@@ -913,15 +892,9 @@ export default function CheckoutScreen() {
             </ScrollView>
 
             <View className="absolute bottom-0 left-0 right-0 px-4 pb-8 bg-white border-t border-gray-50 pt-4">
-                <TouchableOpacity onPress={submitMultiVendorOrders} disabled={isSubmitting} className={`w-full rounded-[20px] items-center justify-between flex-row px-6 ${isSubmitting ? 'bg-gray-400' : 'bg-[#212121]'}`} style={{ height: 60 }}>
-                    {isSubmitting ? (
-                        <ActivityIndicator color="white" className="mx-auto" />
-                    ) : (
-                        <>
-                            <Text className="text-[16px] font-bold text-white">Request Orders</Text>
-                            <Text className="text-[16px] font-bold text-white">₹{total}</Text>
-                        </>
-                    )}
+                <TouchableOpacity onPress={handlePayConfirm} disabled={loading} className={`w-full rounded-[20px] items-center justify-between flex-row px-6 ${loading ? 'bg-gray-400' : 'bg-[#212121]'}`} style={{ height: 60 }}>
+                    <Text className="text-[16px] font-bold text-white">{loading ? 'Processing...' : 'Place Order'}</Text>
+                    {!loading && <Text className="text-[16px] font-bold text-white">₹{total}</Text>}
                 </TouchableOpacity>
             </View>
 
