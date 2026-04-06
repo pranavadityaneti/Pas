@@ -2,9 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import {
     View, Text, TouchableOpacity, Modal, Pressable,
-    Platform, Alert
+    Platform, Alert, ActivityIndicator
 } from 'react-native';
-import { Minus, Plus, ChevronDown, CheckCircle, Info } from 'lucide-react-native';
+import { Minus, Plus, ChevronDown, CheckCircle, Info, MapPin } from 'lucide-react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import * as Haptics from 'expo-haptics';
 import RazorpayCheckout from './RazorpayCheckout';
@@ -16,10 +16,11 @@ interface BookingModalProps {
     visible: boolean;
     onClose: () => void;
     restaurant: {
-        id: number;
+        id: number | string;
         name: string;
         address: string;
-        branches: string[];
+        merchantId?: string;
+        branches?: string[];
     };
 }
 
@@ -32,7 +33,9 @@ const getDefaultTime = () => {
 export default function BookingModal({ visible, onClose, restaurant }: BookingModalProps) {
     const navigation = useNavigation<any>();
     const [step, setStep] = useState<'form' | 'confirmed'>('form');
-    const [selectedBranch, setSelectedBranch] = useState(restaurant.branches[0] || '');
+    const [branchesData, setBranchesData] = useState<{ name: string; address?: string }[]>([]);
+    const [branchesLoading, setBranchesLoading] = useState(false);
+    const [selectedBranch, setSelectedBranch] = useState('');
     const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
     const [guestCount, setGuestCount] = useState(2);
     const [date, setDate] = useState(new Date());
@@ -46,20 +49,58 @@ export default function BookingModal({ visible, onClose, restaurant }: BookingMo
     // Booking Fee Calculation: ₹25 per 2 guests, capped at ₹100
     const bookingFee = Math.min(100, Math.ceil(guestCount / 2) * 25);
 
-    // Reset state when restaurant changes or modal opens
+    const hasBranches = branchesData.length > 1;
+
+    // Fetch branches dynamically when modal opens
     useEffect(() => {
-        if (visible) {
-            setStep('form');
-            setSelectedBranch(restaurant.branches[0] || '');
-            setBranchDropdownOpen(false);
-            setGuestCount(2);
-            setDate(new Date());
-            setTime(getDefaultTime());
-            setShowDatePicker(false);
-            setShowTimePicker(false);
-            setShowPayment(false);
-        }
-    }, [visible, restaurant.id]);
+        if (!visible) return;
+
+        // Reset all form state
+        setStep('form');
+        setBranchDropdownOpen(false);
+        setGuestCount(2);
+        setDate(new Date());
+        setTime(getDefaultTime());
+        setShowDatePicker(false);
+        setShowTimePicker(false);
+        setShowPayment(false);
+
+        const fetchBranches = async () => {
+            if (!restaurant.merchantId) {
+                setBranchesData([]);
+                setSelectedBranch('');
+                return;
+            }
+
+            setBranchesLoading(true);
+            try {
+                const { data, error } = await supabase
+                    .from('merchant_branches')
+                    .select('branch_name, address')
+                    .eq('merchant_id', restaurant.merchantId)
+                    .eq('is_active', true);
+
+                if (error) throw error;
+
+                if (data && data.length > 0) {
+                    const mapped = data.map(b => ({ name: b.branch_name, address: b.address || undefined }));
+                    setBranchesData(mapped);
+                    setSelectedBranch(mapped[0].name);
+                } else {
+                    setBranchesData([]);
+                    setSelectedBranch('');
+                }
+            } catch (err) {
+                console.error('[BookingModal] Failed to fetch branches:', err);
+                setBranchesData([]);
+                setSelectedBranch('');
+            } finally {
+                setBranchesLoading(false);
+            }
+        };
+
+        fetchBranches();
+    }, [visible, restaurant.id, restaurant.merchantId]);
 
     // Max date: 7 days from now
     const maxDate = new Date();
@@ -132,7 +173,7 @@ export default function BookingModal({ visible, onClose, restaurant }: BookingMo
                         customer_name: user.user_metadata?.full_name || user.email?.split('@')[0],
                         customer_phone: user.phone || '',
                         store_id: restaurant.id ? String(restaurant.id) : null,
-                        store_name: `${restaurant.name} (${selectedBranch})`,
+                        store_name: `${restaurant.name}${selectedBranch ? ` (${selectedBranch})` : ''}`,
                         amount: bookingFee,
                         total_amount: bookingFee,
                         order_type: 'dine-in',
@@ -217,7 +258,7 @@ export default function BookingModal({ visible, onClose, restaurant }: BookingMo
                         {/* Details card */}
                         <View className="w-full bg-gray-50 rounded-2xl mt-6" style={{ paddingVertical: 16, paddingHorizontal: 20 }}>
                             <DetailRow label="Restaurant" value={restaurant.name} />
-                            <DetailRow label="Branch" value={selectedBranch} />
+                            {selectedBranch ? <DetailRow label="Branch" value={selectedBranch} /> : null}
                             <DetailRow label="Date & Time" value={`${formatDate(date)}, ${formatTime(time)}`} />
                             <DetailRow label="Guests" value={`${guestCount} ${guestCount === 1 ? 'Person' : 'People'}`} />
                             <DetailRow label="Booking Fee Paid" value={`₹${bookingFee}`} isLast />
@@ -269,33 +310,60 @@ export default function BookingModal({ visible, onClose, restaurant }: BookingMo
                 <Text className="text-[22px] font-bold text-gray-900">{restaurant.name}</Text>
                 <Text className="text-[13px] text-gray-500 font-medium" style={{ marginTop: 4 }}>{restaurant.address}</Text>
 
-                {/* SELECT BRANCH */}
-                <Text className="text-[11px] font-bold text-gray-400 uppercase tracking-wider" style={{ marginTop: 24 }}>Select Branch</Text>
-                <TouchableOpacity
-                    onPress={() => setBranchDropdownOpen(!branchDropdownOpen)}
-                    className="flex-row items-center justify-between border border-gray-200 rounded-xl mt-2"
-                    style={{ height: 48, paddingHorizontal: 16 }}
-                >
-                    <Text className="text-[14px] font-bold text-gray-900">{selectedBranch}</Text>
-                    <ChevronDown size={18} color="#9CA3AF" />
-                </TouchableOpacity>
+                {/* SELECT BRANCH — Only shown when 2+ branches exist */}
+                {branchesLoading ? (
+                    <View className="items-center py-4">
+                        <ActivityIndicator size="small" color="#9CA3AF" />
+                    </View>
+                ) : hasBranches ? (
+                    <>
+                        <Text className="text-[11px] font-bold text-gray-400 uppercase tracking-wider" style={{ marginTop: 24 }}>Select Branch</Text>
+                        <TouchableOpacity
+                            onPress={() => setBranchDropdownOpen(!branchDropdownOpen)}
+                            className="flex-row items-center justify-between border border-gray-200 rounded-xl mt-2"
+                            style={{ height: 48, paddingHorizontal: 16 }}
+                        >
+                            <View className="flex-1 pr-4">
+                                <Text className="text-[14px] font-bold text-gray-900">{selectedBranch}</Text>
+                                {branchesData.find(b => b.name === selectedBranch)?.address && (
+                                    <Text className="text-[11px] text-gray-400 font-medium mt-0.5" numberOfLines={1}>
+                                        {branchesData.find(b => b.name === selectedBranch)?.address}
+                                    </Text>
+                                )}
+                            </View>
+                            <ChevronDown size={18} color="#9CA3AF" />
+                        </TouchableOpacity>
 
-                {/* Branch dropdown */}
-                {branchDropdownOpen && (
-                    <View className="border border-gray-200 rounded-xl mt-1 overflow-hidden">
-                        {restaurant.branches.map((branch, idx) => (
-                            <TouchableOpacity
-                                key={idx}
-                                onPress={() => {
-                                    setSelectedBranch(branch);
-                                    setBranchDropdownOpen(false);
-                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                }}
-                                className={`px-4 py-3 ${branch === selectedBranch ? 'bg-gray-100' : 'bg-white'} ${idx < restaurant.branches.length - 1 ? 'border-b border-gray-100' : ''}`}
-                            >
-                                <Text className={`text-[13px] font-medium ${branch === selectedBranch ? 'text-gray-900 font-bold' : 'text-gray-600'}`}>{branch}</Text>
-                            </TouchableOpacity>
-                        ))}
+                        {/* Branch dropdown */}
+                        {branchDropdownOpen && (
+                            <View className="border border-gray-200 rounded-xl mt-1 overflow-hidden">
+                                {branchesData.map((branch, idx) => (
+                                    <TouchableOpacity
+                                        key={idx}
+                                        onPress={() => {
+                                            setSelectedBranch(branch.name);
+                                            setBranchDropdownOpen(false);
+                                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                        }}
+                                        className={`px-4 py-3 ${branch.name === selectedBranch ? 'bg-gray-100' : 'bg-white'} ${idx < branchesData.length - 1 ? 'border-b border-gray-100' : ''}`}
+                                    >
+                                        <Text className={`text-[13px] font-medium ${branch.name === selectedBranch ? 'text-gray-900 font-bold' : 'text-gray-600'}`}>{branch.name}</Text>
+                                        {branch.address && (
+                                            <Text className="text-[11px] text-gray-400 font-medium mt-0.5" numberOfLines={1}>{branch.address}</Text>
+                                        )}
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        )}
+                    </>
+                ) : (
+                    /* Single-location: show prominent address card */
+                    <View className="flex-row items-start bg-gray-50 rounded-xl p-4 border border-gray-100" style={{ marginTop: 20 }}>
+                        <MapPin size={18} color="#B52725" style={{ marginTop: 2 }} />
+                        <View className="ml-3 flex-1">
+                            <Text className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Location</Text>
+                            <Text className="text-[14px] font-semibold text-gray-900 mt-1" numberOfLines={2}>{restaurant.address}</Text>
+                        </View>
                     </View>
                 )}
 

@@ -19,6 +19,7 @@ export interface TransformedStore {
   products: any[];
   cuisine: string;
   type: string;
+  merchantId?: string;
 }
 
 /**
@@ -55,5 +56,6 @@ export const transformStoreData = (row: any): TransformedStore => {
     // Legacy support for cuisine/type filtering
     cuisine: row.cuisine || (isDining ? 'North Indian' : verticalName),
     type: row.type || (isDining ? 'Casual Dining' : 'Retail Store'),
+    merchantId: row.merchant_id || row.merchantId || undefined,
   };
 };
