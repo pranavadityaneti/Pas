@@ -1,17 +1,22 @@
 import axios from 'axios';
+import { supabase } from './supabaseClient';
 
 const api = axios.create({
-    baseURL: '/api', // Proxied by Vite to localhost:3000
+    baseURL: import.meta.env.VITE_API_URL || '/api',
     headers: {
         'Content-Type': 'application/json',
     },
 });
 
-// Add auth token interceptor later
-api.interceptors.request.use((config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
+// Inject Supabase JWT into every outgoing request
+api.interceptors.request.use(async (config) => {
+    try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+            config.headers.Authorization = `Bearer ${session.access_token}`;
+        }
+    } catch (e) {
+        console.warn('[API Interceptor] Failed to attach auth token:', e);
     }
     return config;
 });

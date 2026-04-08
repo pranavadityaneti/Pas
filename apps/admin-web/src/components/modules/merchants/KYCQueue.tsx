@@ -123,7 +123,7 @@ export function KYCQueue() {
         </div>
         <ScrollArea className="flex-1">
           <div className="divide-y divide-gray-200">
-            {pendingApplications.map((app) => (
+            {(Array.isArray(pendingApplications) ? pendingApplications : []).map((app) => (
               <button
                 key={app.id}
                 onClick={() => setSelectedApp(app)}

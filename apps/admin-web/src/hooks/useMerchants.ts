@@ -452,8 +452,9 @@ async function fetchMerchantsGlobal() {
 
             if (fallbackError) throw fallbackError;
 
-            // Process fallback data with defaults
-            const enrichedData = (fallbackData || []).map((m: any) => ({
+            // DATA GUARD: Strict type check before .map()
+            const safeData = Array.isArray(fallbackData) ? fallbackData : [];
+            const enrichedData = safeData.map((m: any) => ({
                 ...m,
                 orders_30d: 0,
                 revenue_30d: 0,
@@ -466,8 +467,9 @@ async function fetchMerchantsGlobal() {
             return;
         }
 
-        // Format the RPC response for display
-        const enrichedData = (data || []).map((m: any) => {
+        // DATA GUARD: Strict type check before .map()
+        const safeRpcData = Array.isArray(data) ? data : [];
+        const enrichedData = safeRpcData.map((m: any) => {
             // Format last_active for display
             let lastActiveDisplay = 'Never';
             if (m.last_active) {
@@ -485,10 +487,8 @@ async function fetchMerchantsGlobal() {
 
             return {
                 ...m,
-                // RPC returns these as computed values
                 orders_30d: m.orders_30d || 0,
                 revenue_30d: m.revenue_30d || 0,
-                // is_online is already computed by RPC (last_active within 10 mins)
                 is_online: m.is_online || false,
                 last_active: lastActiveDisplay,
                 rating: m.rating || 0

@@ -74,7 +74,10 @@ export function MerchantDirectory() {
   const [editMerchant, setEditMerchant] = useState<Merchant | null>(null);
   const [reportMerchant, setReportMerchant] = useState<Merchant | null>(null);
 
-  const cities = useMemo(() => [...new Set(merchants.map(m => m.city))], [merchants]);
+  const cities = useMemo(() => {
+    const rawMerchants = Array.isArray(merchants) ? merchants : [];
+    return [...new Set(rawMerchants.map(m => m.city))];
+  }, [merchants]);
 
   const toggleSelectAll = (filteredMerchants: Merchant[]) => {
     if (selectedMerchants.length === filteredMerchants.length && filteredMerchants.length > 0) {
@@ -371,8 +374,7 @@ export function MerchantDirectory() {
                     No merchants found
                   </TableCell>
                 </TableRow>
-              ) : (
-                filteredAndSortedMerchants.map((merchant) => (
+              ) : (Array.isArray(filteredAndSortedMerchants) ? filteredAndSortedMerchants : []).map((merchant) => (
                   <TableRow
                     key={merchant.id}
                     className={`group transition-colors ${merchant.kyc_status === 'pending'
@@ -508,7 +510,7 @@ export function MerchantDirectory() {
                     </TableCell>
                   </TableRow>
                 ))
-              )}
+              }
             </TableBody>
           </Table>
         </div>

@@ -59,12 +59,12 @@ export function useCustomers() {
             });
 
             setCustomers(mappedData);
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error fetching customers:', error);
-            // Fallback to mock data for dev visibility if table is missing
-            setCustomers([
-                { id: '1', name: 'Rahul Sharma', phone: '+91 98765 43210', city: 'Hyderabad', ltv: 12500, last_order: '1/25/2026', status: 'active', avatar_url: null, created_at: '2025-12-01' },
-            ]);
+            toast.error('Failed to load customers', {
+                description: error?.message || 'Check your network connection and try again.'
+            });
+            setCustomers([]);
         } finally {
             setLoading(false);
         }
