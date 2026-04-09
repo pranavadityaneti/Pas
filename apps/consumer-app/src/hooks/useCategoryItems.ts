@@ -14,6 +14,7 @@ export interface CategoryItem {
     image: string | null;
     description: string | null;
     vertical_id: string | null;
+    category_id: string | null;
     mrp: number;
   };
   store: {
@@ -41,7 +42,7 @@ export function useCategoryItems(storeIds: string[], verticalId: string) {
       // CRITICAL NESTED JOIN: Restricted payloads only!
       const { data, error: supabaseError } = await supabase
         .from('StoreProduct')
-        .select('id, store_id:storeId, product_id:productId, price, stock, active, product:Product!inner(id, name, image, vertical_id, mrp), store:Store(id, name)')
+        .select('id, store_id:storeId, product_id:productId, price, stock, active, product:Product!inner(id, name, image, vertical_id, category_id, mrp), store:Store(id, name)')
         .in('storeId', storeIds)
         .eq('product.vertical_id', verticalId)
         .eq('active', true);

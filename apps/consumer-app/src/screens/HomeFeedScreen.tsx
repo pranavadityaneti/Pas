@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { View, Text, ScrollView, Image, TouchableOpacity, TextInput, Dimensions, FlatList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Search, User, ChevronRight, Star, Clock, ArrowRight, MapPinOff } from 'lucide-react-native';
+import { Search, User, ChevronRight, Star, Clock, ArrowRight, MapPinOff, WifiOff } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { STORE_CATEGORIES, PICKUP_SPOTLIGHTS } from '../lib/data';
 import { useNavigation } from '@react-navigation/native';
@@ -46,10 +46,10 @@ type FilterType = 'nearest' | 'food' | 'grocery' | 'bakery';
 export default function HomeFeedScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const tabNavigation = useNavigation<any>();
-    const { activeLocation, isLoadingLocation, permissionDenied } = useLocation();
+    const { activeLocation, isLoadingLocation, permissionDenied, refreshLocation } = useLocation();
     const [searchText, setSearchText] = useState('');
     const [activeFilter, setActiveFilter] = useState<FilterType | null>('nearest');
-    const { stores, loading } = useStores();
+    const { stores, loading, refresh: refreshStores } = useStores();
     const { nearbyStoreIds, distanceMap } = useNearbyStores();
     const { items, getTotal } = useCart();
     const { verticals } = useCategories();
@@ -368,11 +368,28 @@ export default function HomeFeedScreen() {
                         allVenues.map((venue) => (
                             <StandardVenueCard key={venue.id} venue={venue} isFullWidth />
                         ))
+                    ) : isLoadingLocation ? (
+                        <View className="py-20 items-center justify-center">
+                            <ActivityIndicator size="large" color="#B52725" />
+                            <Text className="text-gray-400 text-[13px] font-bold mt-4 uppercase tracking-widest">
+                                Locating nearby stores...
+                            </Text>
+                        </View>
                     ) : (
                         <View className="py-12 items-center justify-center">
-                            <Ionicons name="storefront-outline" size={48} color="#E5E7EB" />
-                            <Text className="text-gray-900 text-[16px] font-bold mt-4">No places found</Text>
-                            <Text className="text-gray-400 text-[13px] font-medium mt-1 text-center px-10">Try adjusting your filters or location to discover more venues.</Text>
+                            <WifiOff size={48} color="#D1D5DB" strokeWidth={1.5} />
+                            <Text className="text-gray-900 text-[16px] font-bold mt-4">Could not reach the server</Text>
+                            <Text className="text-gray-400 text-[13px] font-medium mt-1 text-center px-10">Check your connection and try again.</Text>
+                            <TouchableOpacity
+                                onPress={() => {
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                                    refreshLocation();
+                                    refreshStores();
+                                }}
+                                className="mt-5 px-6 py-3 bg-[#B52725] rounded-xl"
+                            >
+                                <Text className="text-white font-bold text-[13px]">Retry</Text>
+                            </TouchableOpacity>
                         </View>
                     )}
                 </View>

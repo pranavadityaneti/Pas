@@ -13,13 +13,26 @@
     },
     "production": {
       "autoIncrement": true,
-      "credentialsSource": "local",
+      "android": {
+        "credentialsSource": "local"
+      },
+      "ios": {
+        "credentialsSource": "remote"
+      },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.pickatstore.io"
+        "EXPO_PUBLIC_API_URL": "https://api.pickatstore.io",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://llhxkonraqaxtradyycj.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxsaHhrb25yYXFheHRyYWR5eWNqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkxNTc5MDUsImV4cCI6MjA4NDczMzkwNX0.pZ5TxEEfPRiihRT3h4evAzvcSEUlz0YdhDzyMEqcdEk",
+        "EXPO_PUBLIC_RAZORPAY_KEY_ID": "rzp_live_SSeKHj9pRCv5be"
       }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "ascAppId": "6760038157",
+        "appleId": "pranav.n@ideaye.in"
+      }
+    }
   }
 }

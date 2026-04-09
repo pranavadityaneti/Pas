@@ -10,7 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import axios from 'axios';
@@ -44,7 +44,7 @@ const FSSAI_CATEGORIES = [
 ];
 
 const PREMIUM_CATEGORIES = [
-    'Restaurants & Cafes', 'Bakeries & Desserts'
+    'Restaurants & Cafes'
 ];
 
 interface Branch {
@@ -91,6 +91,12 @@ export default function SignupScreen() {
             throw error;
         }
     };
+
+    // TEMPORARY WIPE DIRECTIVE
+    useEffect(() => {
+        AsyncStorage.removeItem('@merchant_signup_draft').catch();
+        setStep(1);
+    }, []);
 
     useEffect(() => {
         if (resendTimer > 0) {
@@ -150,7 +156,7 @@ export default function SignupScreen() {
                 .eq('id', data.user.id)
                 .maybeSingle();
 
-            if (existingMerchant) {
+            if (existingMerchant && existingMerchant.status !== 'draft') {
                 Alert.alert('Already Registered', 'An application with this phone number already exists. Please login instead.');
                 await supabase.auth.signOut();
                 router.replace('/(auth)/login');
@@ -159,6 +165,19 @@ export default function SignupScreen() {
 
             setOtpVerified(true);
             Alert.alert('Success', 'Phone number verified successfully!');
+
+            // Fetch remote state to check for existing subscription (Guard)
+            fetchRemoteMerchantState(data.session.access_token);
+
+            try {
+                await fetchWithTimeout(`${getApiUrl()}/auth/merchant/draft`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${data.session.access_token}` },
+                    body: JSON.stringify({ ownerName: identity.ownerName, email: identity.email.trim(), phone: `91${cleaned}` })
+                });
+            } catch (err: any) {
+                console.warn('[Signup] Draft creation failed', err);
+            }
         } catch (error: any) {
             console.error('[Signup] Verify OTP Error:', error);
             Alert.alert('Verification Failed', error.message || 'Incorrect OTP or network error. Please try again.');
@@ -220,8 +239,40 @@ export default function SignupScreen() {
     const [storePhotos, setStorePhotos] = useState<string[]>([]);
 
     // Step 6: Payment
-    const [paymentStatus, setPaymentStatus] = useState<'pending' | 'success'>('pending');
     const [paymentDetails, setPaymentDetails] = useState<any>(null);
+
+    const fetchRemoteMerchantState = async (token?: string) => {
+        try {
+            let activeToken = token;
+            if (!activeToken) {
+                const { data: sessionData } = await supabase.auth.getSession();
+                activeToken = sessionData?.session?.access_token;
+            }
+            if (!activeToken) return;
+
+            const response = await fetchWithTimeout(`${getApiUrl()}/auth/merchant/draft`, {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${activeToken}` }
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                if (data.subscription && data.subscription.status === 'success') {
+                    console.log('[Guard] Found existing successful subscription. Bypassing Step 6.');
+                    setPaymentStatus('success');
+                    setPaymentDetails({
+                        paymentId: data.subscription.transactionId,
+                        orderId: data.subscription.orderId,
+                        amount: data.subscription.amount
+                    });
+                    // If they are on the subscription step, move them forward
+                    if (step === 6) setStep(7);
+                }
+            }
+        } catch (err) {
+            console.warn('[Guard] Pre-flight check failed:', err);
+        }
+    };
 
     // Initial Draft Restoration
     useEffect(() => {
@@ -239,6 +290,9 @@ export default function SignupScreen() {
                     if (parsed.docFiles) setDocFiles(parsed.docFiles);
                     if (parsed.storePhotos) setStorePhotos(parsed.storePhotos);
                     console.log('[Signup] Draft restored securely. Resuming from step:', parsed.step);
+                    
+                    // After restoring local draft, check remote for subscription guard
+                    fetchRemoteMerchantState();
                 }
             } catch (e) {
                 console.error('[Signup] Failed to restore draft state', e);
@@ -448,6 +502,7 @@ export default function SignupScreen() {
             description: 'Lifetime Partner Subscription',
             image: 'https://pickatstore.com/logo.png', // Replace with real logo URL
             currency: 'INR',
+            amount: subscriptionAmount * 100,
             key: process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_RnWZnS9NxCVC6V',
             order_id: orderId,
             name: 'PickAtStore',
@@ -468,12 +523,29 @@ export default function SignupScreen() {
                     {
                         text: 'Simulate Success',
                         onPress: () => {
-                            console.log('Payment Simulated');
                             setPaymentStatus('success');
                             setPaymentDetails({
                                 paymentId: 'pay_simulated_123',
                                 orderId: 'order_simulated_123',
                                 signature: 'sig_simulated_123'
+                            });
+                            
+                            // Simulate Final PATCH sync
+                            setLoading(true);
+                            syncDraftState(true, {
+                                amount: isPremium ? 2999 : 999,
+                                paymentId: 'pay_simulated_123',
+                                orderId: 'order_simulated_123',
+                                signature: 'sig_simulated_123'
+                            }).then(async () => {
+                                Alert.alert('Welcome!', 'Application simulated successfully.');
+                                await AsyncStorage.removeItem('@merchant_signup_draft');
+                                setLoading(false);
+                                router.replace('/(auth)/pending');
+                            }).catch((err) => {
+                                console.error('[Signup] Simulation sync failed:', err);
+                                setLoading(false);
+                                Alert.alert('Error', 'Failed to synchronize draft state.');
                             });
                         }
                     },
@@ -510,173 +582,153 @@ export default function SignupScreen() {
                  return;
             }
 
-            setPaymentStatus('success');
-            setPaymentDetails({
+            const paymentDetailsRecord = {
                 paymentId: data.razorpay_payment_id,
                 orderId: data.razorpay_order_id,
                 signature: data.razorpay_signature
-            });
-            Alert.alert('Success', 'Payment Successful! You can now proceed.');
+            };
+            setPaymentStatus('success');
+            setPaymentDetails(paymentDetailsRecord);
+            
+            setLoading(true);
+            try {
+                // Ensure Sync finishes before proceeding to navigation/cleanup
+                await syncDraftState(true, {
+                    amount: subscriptionAmount,
+                    ...paymentDetailsRecord
+                });
+                
+                // Final safety await for disk operation
+                await AsyncStorage.removeItem('@merchant_signup_draft');
+                
+                Alert.alert('Welcome!', 'Application completed successfully.');
+                setLoading(false);
+                
+                // Final async push to pending
+                setTimeout(() => {
+                    router.replace('/(auth)/pending');
+                }, 100);
+            } catch (err) {
+                setLoading(false);
+                console.error('[Signup] Post-payment sync crash prevented:', err);
+                Alert.alert('Warning', 'Payment verified but failed to synchronize online. Support will contact you.');
+            }
         } catch (error: any) {
             console.error('Payment Error:', error);
-            Alert.alert('Error', `Payment failed: ${error.description || error.reason || 'Unknown error'}`);
+            Alert.alert('Payment Cancelled', 'Payment failed or cancelled. Please try again.');
         }
     };
 
-    const handleNext = () => {
+    const syncDraftState = async (finalize = false, paymentOverrides?: any) => {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (!sessionData?.session) return;
+        const userId = sessionData.session.user.id;
+
+        const uploadFile = async (uri: string, path: string, maxRetries = 3) => {
+            if (!uri) return null;
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+                    const { error } = await supabase.storage.from('merchant-docs').upload(path, decode(base64), { contentType: 'image/jpeg', upsert: true });
+                    if (error) throw error;
+                    return path;
+                } catch (error) {
+                    if (attempt === maxRetries) throw new Error('Upload failed');
+                    await new Promise(resolve => setTimeout(resolve, attempt * 1500));
+                }
+            }
+            throw new Error('Upload failed');
+        };
+
+        const docUrlsLocal = {
+            pan: docFiles.pan ? await uploadFile(docFiles.pan, `${userId}/pan.jpg`) : null,
+            aadharFront: docFiles.aadharFront ? await uploadFile(docFiles.aadharFront, `${userId}/aadhar_front.jpg`) : null,
+            aadharBack: docFiles.aadharBack ? await uploadFile(docFiles.aadharBack, `${userId}/aadhar_back.jpg`) : null,
+            msme: docFiles.msme ? await uploadFile(docFiles.msme, `${userId}/msme.jpg`) : null,
+            gst: docFiles.gst ? await uploadFile(docFiles.gst, `${userId}/gst.jpg`) : null,
+            fssai: docFiles.fssai ? await uploadFile(docFiles.fssai, `${userId}/fssai.jpg`) : null,
+        };
+
+        const storePhotoUrls = await Promise.all(storePhotos.map((uri, idx) => uploadFile(uri, `${userId}/store_photo_${idx}.jpg`)));
+
+        const payload = {
+            ownerName: identity.ownerName,
+            email: identity.email,
+            phone: identity.phone,
+            storeName: store.storeName,
+            category: store.category,
+            city: store.city,
+            address: store.address,
+            latitude: store.latitude,
+            longitude: store.longitude,
+            hasBranches: hasBranches,
+            panNumber: kyc.panNumber,
+            aadharNumber: kyc.aadharNumber,
+            msmeNumber: kyc.msmeNumber,
+            bankAccount: kyc.bankAccount,
+            ifsc: kyc.ifsc,
+            beneficiaryName: kyc.beneficiaryName,
+            turnoverRange: kyc.turnoverRange,
+            gstNumber: kyc.gstNumber,
+            fssaiNumber: kyc.fssaiNumber,
+            docUrls: docUrlsLocal,
+            storePhotos: storePhotoUrls.filter(url => url !== null),
+            branches: hasBranches ? branches : [],
+            finalize,
+            subscription: paymentOverrides
+        };
+
+        const response = await fetchWithTimeout(`${getApiUrl()}/auth/merchant/draft`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionData.session.access_token}` },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.error || 'Server rejected synchronization');
+        }
+    };
+
+    const handleNext = async () => {
         if (!validateStep()) return;
-        if (step < 7) setStep(step + 1);
-        else handleSubmit();
+        
+        if (step === 5) {
+            setLoading(true);
+            try {
+                await syncDraftState(false);
+                setStep(6);
+            } catch (err: any) {
+                Alert.alert('Sync Error', err.message || 'Failed to save progress to server.');
+            } finally {
+                setLoading(false);
+            }
+            return;
+        }
+
+        if (step < 7) {
+            // Note: Since step 7 logic was absorbed by Payment (Step 6), standard navigation works here.
+            setStep(step + 1);
+        }
+    };
+
+    const handleFinalSubmit = async () => {
+        setLoading(true);
+        try {
+            await syncDraftState(true);
+            Alert.alert('Welcome!', 'Application completed successfully.');
+            await AsyncStorage.removeItem('@merchant_signup_draft');
+            router.replace('/(auth)/pending');
+        } catch (err: any) {
+            Alert.alert('Error', err.message || 'Failed to submit application.');
+        } finally {
+            setLoading(false);
+        }
     };
 
     const handleBack = () => {
         if (step > 1) setStep(step - 1);
         else router.back();
-    };
-
-    const handleSubmit = async () => {
-        try {
-            console.log('[Signup] Starting submission. Testing Connectivity...');
-
-            // TEST 1: Google (Axios)
-            try {
-                console.log('[Signup] Testing Axios Google...');
-                const res = await axios.head('https://www.google.com');
-                console.log('[Signup] Axios Google Reachable:', res.status);
-            } catch (e: any) {
-                console.error('[Signup] Axios Google Failed:', e.message);
-            }
-
-            // TEST 2: Supabase
-            try {
-                // We just log this for comparison, but focus on Google first
-                console.log('[Signup] Testing Supabase URL...');
-            } catch (e: any) {
-                // ignore
-            }
-
-            setLoading(true);
-
-            // 1. Get current Authenticated User (verified via OTP in Step 1)
-            const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-            if (sessionError || !sessionData.session?.user) {
-                setLoading(false);
-                throw new Error('Not authenticated. Please verify your phone number on Step 1 again.');
-            }
-            
-            const userId = sessionData.session.user.id;
-            console.log('[Signup] User verified:', userId);
-
-            // 2. Upload Documents with Retry Mechanism (For Tier 3/4 Network Resilience)
-            const uploadFile = async (uri: string, path: string, maxRetries = 3) => {
-                if (!uri) return null;
-                
-                for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                    try {
-                        const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
-
-                        const { error } = await supabase.storage
-                            .from('merchant-docs')
-                            .upload(path, decode(base64), {
-                                contentType: 'image/jpeg',
-                                upsert: true
-                            });
-
-                        if (error) throw error;
-
-                        return path; // Return raw storage path for private buckets
-                    } catch (error) {
-                        console.error(`Upload Error (Attempt ${attempt}/${maxRetries}):`, error);
-                        if (attempt === maxRetries) {
-                            Alert.alert('Upload Failed', 'Network connection dropped or upload failed. Please check your internet and try again.');
-                            throw new Error('Upload failed'); // Returns execution to outer catch, stopping submission
-                        }
-                        // Exponential backoff
-                        await new Promise(resolve => setTimeout(resolve, attempt * 1500));
-                    }
-                }
-                throw new Error('Upload failed');
-            };
-
-            const docUrls = {
-                pan: docFiles.pan ? await uploadFile(docFiles.pan, `${userId}/pan.jpg`) : null,
-                aadharFront: docFiles.aadharFront ? await uploadFile(docFiles.aadharFront, `${userId}/aadhar_front.jpg`) : null,
-                aadharBack: docFiles.aadharBack ? await uploadFile(docFiles.aadharBack, `${userId}/aadhar_back.jpg`) : null,
-                msme: docFiles.msme ? await uploadFile(docFiles.msme, `${userId}/msme.jpg`) : null,
-                gst: docFiles.gst ? await uploadFile(docFiles.gst, `${userId}/gst.jpg`) : null,
-                fssai: docFiles.fssai ? await uploadFile(docFiles.fssai, `${userId}/fssai.jpg`) : null,
-            };
-
-
-
-            const storePhotoUrls = await Promise.all(
-                storePhotos.map((uri, idx) => uploadFile(uri, `${userId}/store_photo_${idx}.jpg`))
-            );
-
-            // 3. Insert Merchant Record via Secure Backend Endpoint
-            const payload = {
-                ownerName: identity.ownerName,
-                email: identity.email.trim(),
-                phone: identity.phone,
-                storeName: store.storeName,
-                category: store.category,
-                city: store.city,
-                address: store.address,
-                latitude: store.latitude,
-                longitude: store.longitude,
-                hasBranches: hasBranches,
-                status: 'inactive',
-                kycStatus: 'pending',
-                panNumber: kyc.panNumber,
-                aadharNumber: kyc.aadharNumber,
-                msmeNumber: kyc.msmeNumber,
-                bankAccount: kyc.bankAccount,
-                ifsc: kyc.ifsc,
-                beneficiaryName: kyc.beneficiaryName,
-                turnoverRange: kyc.turnoverRange,
-                gstNumber: kyc.gstNumber,
-                fssaiNumber: kyc.fssaiNumber,
-                docUrls: docUrls,
-                storePhotos: storePhotoUrls.filter(url => url !== null),
-                branches: hasBranches ? branches : [],
-                subscription: paymentStatus === 'success' && paymentDetails ? {
-                    amount: PREMIUM_CATEGORIES.includes(store.category) ? 2999 : 999,
-                    paymentId: paymentDetails.paymentId,
-                    orderId: paymentDetails.orderId,
-                    signature: paymentDetails.signature
-                } : undefined
-            };
-
-            const apiUrl = getApiUrl();
-            const response = await fetch(`${apiUrl}/auth/merchant/signup`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${sessionData.session.access_token}`
-                },
-                body: JSON.stringify(payload)
-            });
-
-            const data = await response.json();
-            if (!response.ok) {
-                console.error('[Signup] Server API Error:', data);
-                if (data.details) {
-                    // Combine Zod validation messages
-                    const detailsStr = data.details.map((d: any) => d.message).join(', ');
-                    throw new Error(`Validation Error: ${detailsStr}`);
-                }
-                throw new Error(data.error || 'Server rejected registration');
-            }
-
-            Alert.alert('Success!', 'Your application has been submitted.');
-            await AsyncStorage.removeItem('@merchant_signup_draft'); // Clear cache correctly
-            router.replace('/(auth)/pending');
-        } catch (error: any) {
-            console.error('[Signup] Submit Error:', error);
-            Alert.alert('Error', error.message || 'Submission failed. Check logs.');
-        } finally {
-            setLoading(false);
-        }
     };
 
     const addBranch = () => setBranches([...branches, { name: '', address: '', manager_name: '', phone: '' }]);
@@ -1320,7 +1372,7 @@ export default function SignupScreen() {
                                 </View>
 
                                 <View style={{ width: '100%', paddingHorizontal: 10 }}>
-                                    {['Zero Commission', 'Unlimited Listings', 'Premium Support', 'Store Analytics'].map((feat, i) => (
+                                    {['Unlimited Listings', 'Premium Support', 'Store Analytics'].map((feat, i) => (
                                         <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
                                             <Ionicons name="checkmark-circle" size={20} color="#10B981" style={{ marginRight: 10 }} />
                                             <Text style={{ fontSize: 16, color: '#374151' }}>{feat}</Text>
@@ -1423,11 +1475,11 @@ export default function SignupScreen() {
                         <Text style={styles.backButtonText}>Back</Text>
                     </TouchableOpacity>
 
-                    <Text style={styles.stepCounter}>Step {step} of 6</Text>
+                    <Text style={styles.stepCounter}>Step {step} of {STEPS.length}</Text>
 
                     <TouchableOpacity
                         style={[styles.nextButton, loading && styles.buttonDisabled]}
-                        onPress={handleNext}
+                        onPress={step === STEPS.length ? handleFinalSubmit : handleNext}
                         disabled={loading}
                     >
                         {loading ? (

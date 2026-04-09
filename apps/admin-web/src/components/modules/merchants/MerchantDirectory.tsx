@@ -162,11 +162,15 @@ export function MerchantDirectory() {
   };
 
   const filteredAndSortedMerchants = useMemo(() => {
-    let result = merchants.filter(m =>
-      m.store_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      m.owner_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      m.phone?.includes(searchTerm)
-    );
+    let result = merchants.filter(m => {
+      if (!searchTerm.trim()) return true;
+      const term = searchTerm.toLowerCase();
+      return (
+        (m.store_name?.toLowerCase() || '').includes(term) ||
+        (m.owner_name?.toLowerCase() || '').includes(term) ||
+        (m.phone || '').includes(term)
+      );
+    });
 
     // Apply city filter
     if (filterCity.length > 0) {
@@ -395,7 +399,7 @@ export function MerchantDirectory() {
                     <TableCell className="cursor-pointer" onClick={() => setSelectedMerchant(merchant)}>
                       <div className="flex items-center gap-2">
                         <span className={`font-medium ${merchant.kyc_status === 'pending' ? 'text-orange-900' : merchant.kyc_status === 'rejected' ? 'text-red-900' : 'text-gray-900'}`}>
-                          {merchant.store_name}
+                          {merchant.store_name || 'Unnamed Merchant (Incomplete Setup)'}
                         </span>
                         {merchant.kyc_status === 'pending' && (
                           <Badge variant="outline" className="h-5 px-1.5 text-[10px] border-orange-200 text-orange-600 bg-orange-100/50">KYC</Badge>

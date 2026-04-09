@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { View, Text, ScrollView, Image, TouchableOpacity, TextInput, Dimensions, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Search, ChevronRight, Star, Clock, Sparkles, BadgeCheck, Mic, User, Calendar, UtensilsCrossed, X, Check } from 'lucide-react-native';
+import { Search, ChevronRight, Star, Clock, Sparkles, BadgeCheck, Mic, User, Calendar, UtensilsCrossed, X, Check, WifiOff } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
@@ -11,6 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import GlobalHeader from '../components/GlobalHeader';
 import { useCart } from '../context/CartContext';
+import { useLocation } from '../context/LocationContext';
 import CartSummaryBar from '../components/CartSummaryBar';
 import BookingModal from '../components/BookingModal';
 import { useStores } from '../hooks/useStores';
@@ -79,6 +80,7 @@ export default function DiningScreen() {
     const [searchText, setSearchText] = useState('');
     const [selectedCuisine, setSelectedCuisine] = useState('All');
     const { diningStores, loading } = useStores();
+    const { isLoadingLocation, refreshLocation } = useLocation();
     const [bookingVisible, setBookingVisible] = useState(false);
     const [bookingRestaurant, setBookingRestaurant] = useState<any>(null);
     const [vegFilter, setVegFilter] = useState<'all' | 'veg'>('all');
@@ -437,11 +439,25 @@ export default function DiningScreen() {
                                 <Text className="text-[12px] font-medium text-gray-400 mt-[-10px] mb-5">{filteredRestaurants.length} places found</Text>
                                 {filteredRestaurants.map((r) => <FullCard key={`all-${r.id}`} restaurant={r} />)}
                             </>
+                        ) : isLoadingLocation ? (
+                            <View className="items-center justify-center py-20 bg-white rounded-3xl border border-dashed border-gray-100">
+                                <ActivityIndicator size="large" color="#B52725" />
+                                <Text className="text-gray-400 text-sm mt-4 font-bold uppercase tracking-widest">Searching for restaurants...</Text>
+                            </View>
                         ) : (
                             <View className="items-center justify-center py-20 bg-white rounded-3xl border border-dashed border-gray-200">
-                                <Search size={48} color="#E5E7EB" strokeWidth={1} />
-                                <Text className="text-gray-900 font-bold text-lg mt-4">No restaurants found</Text>
-                                <Text className="text-gray-400 text-sm mt-1">Try searching for something else</Text>
+                                <WifiOff size={48} color="#D1D5DB" strokeWidth={1.5} />
+                                <Text className="text-gray-900 font-bold text-lg mt-4">Could not reach the server</Text>
+                                <Text className="text-gray-400 text-sm mt-1">Check your connection and try again.</Text>
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                                        refreshLocation();
+                                    }}
+                                    className="mt-5 px-6 py-3 bg-[#B52725] rounded-xl"
+                                >
+                                    <Text className="text-white font-bold text-[13px]">Retry</Text>
+                                </TouchableOpacity>
                             </View>
                         )}
                     </View>

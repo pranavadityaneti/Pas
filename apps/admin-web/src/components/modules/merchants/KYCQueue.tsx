@@ -21,7 +21,7 @@ import { useMerchants, Merchant } from '../../../hooks/useMerchants';
 import { formatDistanceToNow } from 'date-fns';
 
 export function KYCQueue() {
-  const { merchants, updateMerchant, deleteMerchant, loading } = useMerchants();
+  const { merchants, updateMerchant, deleteMerchant, kycDecision, loading } = useMerchants();
   const [selectedApp, setSelectedApp] = useState<Merchant | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [activeDoc, setActiveDoc] = useState<string>('pan');
@@ -57,18 +57,11 @@ export function KYCQueue() {
     if (!selectedApp) return;
 
     try {
+      await kycDecision(selectedApp.id, decision, decision === 'reject' ? rejectionReason : undefined);
       if (decision === 'approve') {
-        await updateMerchant(selectedApp.id, {
-          kyc_status: 'approved',
-          status: 'active'
-        });
-        toast.success(`Application Approved`, { description: `${selectedApp.store_name} is now active.` });
+        toast.success(`Application Approved`, { description: `${selectedApp.store_name} is now active. Email notification sent.` });
       } else {
-        await updateMerchant(selectedApp.id, {
-          kyc_status: 'rejected',
-          kyc_rejection_reason: rejectionReason
-        });
-        toast.error(`Application Rejected`, { description: `${selectedApp.store_name} has been notified.` });
+        toast.error(`Application Rejected`, { description: `${selectedApp.store_name} has been notified via email.` });
       }
     } catch (error) {
       console.error("Decision failed", error);

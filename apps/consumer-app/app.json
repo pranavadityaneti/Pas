@@ -2,7 +2,7 @@
   "expo": {
     "name": "consumer-app",
     "slug": "consumer-app",
-    "version": "1.0.5",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "consumerapp",
@@ -95,6 +95,7 @@
       "eas": {
         "projectId": "350a8772-4cd9-439e-9d0e-a99a91c08915"
       }
-    }
+    },
+    "owner": "pranavadityaneti"
   }
 }

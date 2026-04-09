@@ -13,6 +13,7 @@ interface AuthContextType {
     user: AdminUser | null;
     session: Session | null;
     loading: boolean;
+    profileError: string | null;
     isAuthenticated: boolean;
     mustChangePassword: boolean;
     login: (email: string, password: string) => Promise<{ error: string | null }>;
@@ -27,12 +28,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<AdminUser | null>(null);
     const [session, setSession] = useState<Session | null>(null);
     const [loading, setLoading] = useState(true);
+    const [profileError, setProfileError] = useState<string | null>(null);
     const [mustChangePassword, setMustChangePassword] = useState(false);
 
     // Fetch user profile from database
-    const fetchUserProfile = async (supabaseUser: SupabaseUser): Promise<AdminUser | null> => {
+    const fetchUserProfile = async (supabaseUser: SupabaseUser): Promise<{ profile: AdminUser | null, error: string | null }> => {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
 
         try {
             // @ts-ignore
@@ -47,16 +49,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             if (error) {
                 console.error('Error fetching user profile for ID:', supabaseUser.id, error);
-                return null;
+                // 406 means row not found (usually)
+                if (error.code === 'PGRST116' || error.code === '406') {
+                    return { profile: null, error: 'User record not found in database' };
+                }
+                return { profile: null, error: error.message };
             }
 
-            return data as AdminUser;
+            return { profile: data as AdminUser, error: null };
         } catch (e: any) {
             clearTimeout(timeoutId);
-            if (e.name !== 'AbortError') {
-                console.error('Profile fetch exception:', e);
-            }
-            return null;
+            const isTimeout = e.name === 'AbortError';
+            console.error('Profile fetch exception:', isTimeout ? 'Request timed out' : e);
+            return { 
+                profile: null, 
+                error: isTimeout ? 'Network timeout while fetching profile' : 'Connection error' 
+            };
         }
     };
 
@@ -64,17 +72,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
         let isMounted = true;
 
+        const fallbackTimeout = setTimeout(() => {
+            console.warn('[Auth] getSession hung. Forcing load completion.');
+            if (isMounted) setLoading(false);
+        }, 5000);
+
         const initAuth = async () => {
             try {
-                // Add timeout to prevent hanging - increased to 5 seconds
-                const timeoutId = setTimeout(() => {
-                    console.warn('Auth initialization timeout - forcing loading complete');
-                    if (isMounted) setLoading(false);
-                }, 5000); // 5 second timeout
-
+                setProfileError(null);
                 const { data: { session }, error } = await supabase.auth.getSession();
-
-                clearTimeout(timeoutId);
+                
+                // Clear the fallback timeout once getSession resolves or fails
+                clearTimeout(fallbackTimeout);
 
                 if (error) {
                     console.error('Session error, clearing auth:', error);
@@ -88,22 +97,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 if (isMounted) setSession(session);
 
                 if (session?.user && isMounted) {
-                    const profile = await fetchUserProfile(session.user);
-                    if (profile?.role === 'SUPER_ADMIN') {
+                    const { profile, error: fetchError } = await fetchUserProfile(session.user);
+                    
+                    if (fetchError && fetchError.includes('Connection')) {
+                        // Network error - preserve session but flag error
+                        setProfileError(fetchError);
+                    } else if (profile?.role === 'SUPER_ADMIN') {
                         if (isMounted) setUser(profile);
                     } else {
-                        // User exists but is not an admin - sign out
+                        // User exists but is definitively not an admin OR record missing
+                        console.warn('Unauthorized access attempt or missing profile, signing out');
                         await supabase.auth.signOut();
-                        if (isMounted) setSession(null);
+                        if (isMounted) {
+                            setSession(null);
+                            setUser(null);
+                        }
                     }
                 }
             } catch (error) {
                 console.error('Auth initialization error:', error);
-                // On error, ensure we clear the session to show login
-                if (isMounted) {
-                    setSession(null);
-                    setUser(null);
-                }
             } finally {
                 if (isMounted) setLoading(false);
             }
@@ -112,16 +124,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         initAuth();
 
         // Listen for auth changes
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
             if (!isMounted) return;
+
+            // PREVENT DEADLOCK: Let initAuth handle the initial load exclusively
+            // This prevents race conditions where initAuth and this listener fire simultaneously
+            if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
+                console.log(`[Auth] Ignoring ${event} in listener to prevent deadlock`);
+                return;
+            }
+
+            console.log('[Auth] Event changed:', event);
             setSession(session);
+            setProfileError(null);
 
             if (session?.user) {
-                const profile = await fetchUserProfile(session.user);
-                if (profile?.role === 'SUPER_ADMIN') {
+                const { profile, error: fetchError } = await fetchUserProfile(session.user);
+                
+                if (fetchError && fetchError.includes('Connection')) {
+                    setProfileError(fetchError);
+                } else if (profile?.role === 'SUPER_ADMIN') {
                     if (isMounted) setUser(profile);
                 } else {
                     if (isMounted) setUser(null);
+                    // Only auto-signout if definitively unauthorized
+                    if (!fetchError) {
+                        await supabase.auth.signOut();
+                    }
                 }
             } else {
                 if (isMounted) setUser(null);
@@ -137,45 +166,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const login = async (email: string, password: string): Promise<{ error: string | null }> => {
         try {
             console.log('Attempting login for:', email);
-
-            const { data, error } = await supabase.auth.signInWithPassword({
-                email,
-                password,
-            });
-
+            const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+            
             if (error) {
                 console.error('Sign in error:', error);
                 return { error: error.message };
             }
-
+            
             if (data.user) {
-                console.log('User authenticated, fetching profile...');
-                const profile = await fetchUserProfile(data.user);
-                console.log('Profile fetch result:', profile);
-
-                if (!profile) {
+                console.log('User authenticated, fetching profile sequentially...');
+                const { profile, error: fetchError } = await fetchUserProfile(data.user);
+                
+                if (fetchError) {
                     await supabase.auth.signOut();
-                    return { error: 'User profile not found' };
+                    return { error: `Profile error: ${fetchError}` };
                 }
+                
+                if (profile?.role === 'SUPER_ADMIN') {
+                    // Check if user needs to change password
+                    const userMetadata = data.user.user_metadata;
+                    if (userMetadata?.mustChangePassword) {
+                        setMustChangePassword(true);
+                    }
 
-                if (profile.role !== 'SUPER_ADMIN') {
+                    setUser(profile);
+                    return { error: null };
+                } else {
                     await supabase.auth.signOut();
                     return { error: 'Access denied. Super Admin privileges required.' };
                 }
-
-                // Check if user needs to change password
-                const userMetadata = data.user.user_metadata;
-                if (userMetadata?.mustChangePassword) {
-                    setMustChangePassword(true);
-                }
-
-                setUser(profile);
             }
-
-            return { error: null };
+            return { error: 'Unknown login error' };
         } catch (err) {
             console.error('Login exception:', err);
-            return { error: `An unexpected error occurred: ${err instanceof Error ? err.message : String(err)}` };
+            return { error: `Exception: ${err instanceof Error ? err.message : String(err)}` };
         }
     };
 
@@ -259,6 +283,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 user,
                 session,
                 loading,
+                profileError,
                 isAuthenticated: !!user,
                 mustChangePassword,
                 login,

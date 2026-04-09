@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import api from '../lib/api';
 import { toast } from 'sonner';
 
 export interface Merchant {
@@ -264,6 +265,28 @@ export function useMerchants() {
         }
     };
 
+    /**
+     * Routes KYC approve/reject through the backend API so server-side
+     * email notifications are dispatched automatically.
+     */
+    const kycDecision = async (id: string, decision: 'approve' | 'reject', rejectionReason?: string) => {
+        globalLoading = true;
+        notifyListeners();
+        try {
+            const { data } = await api.post(`/merchants/${id}/kyc-decision`, { decision, rejectionReason });
+            await fetchMerchantsGlobal();
+            return data;
+        } catch (err: any) {
+            console.error('Error in KYC decision:', err);
+            const message = err.response?.data?.error || err.message;
+            toast.error('KYC decision failed', { description: message });
+            throw err;
+        } finally {
+            globalLoading = false;
+            notifyListeners();
+        }
+    };
+
     const deleteMerchant = async (id: string) => {
         const toastId = toast.loading('Initiating deep delete...');
         globalLoading = true;
@@ -430,7 +453,8 @@ export function useMerchants() {
         exportMerchants,
         addMerchantBranch,
         deleteMerchantBranch,
-        bulkDeleteMerchants
+        bulkDeleteMerchants,
+        kycDecision
     };
 }
 

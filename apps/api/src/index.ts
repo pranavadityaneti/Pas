@@ -15,6 +15,7 @@ import { z } from 'zod';
 import { smsService } from './services/sms.service';
 import { watiService } from './services/wati.service';
 import { apifyService } from './services/apify.service';
+import { sendApplicationReceivedEmail, sendStoreApprovedEmail, sendStoreRejectedEmail } from './services/email.service';
 
 // --- Configuration ---
 const app = express();
@@ -2636,60 +2637,8 @@ app.post('/checkout/validate-coupon', async (req, res) => {
 // --- DEBUG: Fix DB Route ---
 // --- DEBUG: Fix DB Route ---
 app.post('/debug/fix-db', async (req, res) => {
-    try {
-        const { email } = req.body;
-        console.log('-------------------------------------------');
-        console.log('🛠️  Fixing DB for email:', email);
-
-        // RLS Policies are now managed via SQL migrations/scripts (fix_inventory_rls.sql).
-        // Do not re-apply vulnerable policies here.
-
-        // 2. Fix Store Status
-        if (email) {
-            const merchants: any[] = await prisma.$queryRawUnsafe(`SELECT * FROM merchants WHERE email = '${email}'`);
-
-            if (merchants.length > 0) {
-                const merchant = merchants[0];
-                const userId = merchant.id;
-                console.log('👤 Found Merchant ID:', userId);
-
-                const store = await prisma.store.findFirst({ where: { managerId: userId } });
-
-                if (store) {
-                    await prisma.store.update({
-                        where: { id: store.id },
-                        data: { active: true }
-                    });
-                    console.log('✅ Activated existing store:', store.id);
-                } else {
-                    await prisma.store.create({
-                        data: {
-                            id: merchant.id,
-                            managerId: userId,
-                            name: merchant.store_name || 'My Store',
-                            address: merchant.address || 'Unknown',
-                            city: {
-                                connectOrCreate: {
-                                    where: { name: 'Hyderabad' },
-                                    create: { name: 'Hyderabad' }
-                                }
-                            }
-                        }
-                    });
-                    console.log('✅ Created new active store for merchant');
-                }
-            } else {
-                console.warn('⚠️  No merchant found for email:', email);
-                return res.status(404).json({ error: 'Merchant not found' });
-            }
-        }
-
-        console.log('-------------------------------------------');
-        res.json({ success: true, message: 'DB Fixed - Policies Updated & Store Active' });
-    } catch (e: any) {
-        console.error('🔥 Critical Error:', e);
-        res.status(500).json({ error: e.message });
-    }
+    // Disabled for security - manual activation bypassed kyc-decision approval flow
+    res.status(403).json({ error: 'This debug route is disabled in production.' });
 });
 
 // --- DEBUG: List Merchants Route ---
@@ -2940,17 +2889,32 @@ app.post('/auth/verify-otp', async (req, res) => {
         console.log(`[Auth] Existing user:`, existingUser?.id || 'None');
 
         if (!existingUser) {
+            // 2. RECOVERY CHECK: Does this phone exist in Prisma but is missing from Supabase Auth?
+            const barePhoneRaw = phone.replace(/^91/, '');
+            const phoneFormats = [barePhoneRaw, phone, formattedPhone];
+            const prismaUser = await prisma.user.findFirst({
+                where: { phone: { in: phoneFormats } }
+            });
+
             // Create new user with email and password to bypass disabled Phone provider
             tempPassword = `PAS_OTP_${phone}_${Date.now()}_${Math.random().toString(36)}`;
             
-            const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
+            const createPayload: any = {
                 phone: formattedPhone,
                 phone_confirm: true,
                 email: signInEmail,
                 email_confirm: true,
                 password: tempPassword,
                 user_metadata: { phone: formattedPhone }
-            });
+            };
+
+            // If Prisma user exists, FORCE Supabase to use the exact same ID
+            if (prismaUser) {
+                createPayload.id = prismaUser.id;
+                console.log(`[Auth Recovery] Restoring Supabase Auth row for existing Prisma ID: ${prismaUser.id}`);
+            }
+
+            const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser(createPayload);
 
             if (createError) {
                 console.error('[Auth] Create user error:', createError);
@@ -3017,6 +2981,296 @@ app.post('/auth/verify-otp', async (req, res) => {
     } catch (error: any) {
         console.error('[Auth] Verify OTP Error:', error);
         res.status(500).json({ error: 'OTP verification failed' });
+    }
+});
+
+/**
+ * GET /auth/merchant/draft
+ * Fetches the current remote state for a merchant, used for pre-flight idempotency checks.
+ */
+app.get('/auth/merchant/draft', async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ error: 'Missing token' });
+        }
+        const token = authHeader.split(' ')[1];
+        const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+        if (authError || !user) return res.status(401).json({ error: 'Invalid token' });
+
+        const userId = user.id;
+
+        const merchant = await prisma.merchant.findUnique({
+            where: { id: userId }
+        });
+
+        if (!merchant) {
+            return res.status(404).json({ error: 'Merchant draft not found' });
+        }
+
+        // Fetch the latest successful subscription for this merchant
+        const subscription = await prisma.subscription.findFirst({
+            where: { merchantId: userId, status: 'success' },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        res.json({
+            success: true,
+            merchant: {
+                status: merchant.status,
+                kycStatus: merchant.kycStatus,
+                storeName: merchant.storeName
+            },
+            subscription: subscription ? {
+                status: 'success',
+                transactionId: subscription.razorpayPaymentId,
+                orderId: subscription.razorpayOrderId,
+                amount: subscription.amount
+            } : null
+        });
+    } catch (e: any) {
+        console.error('[Draft] GET Error:', e);
+        res.status(500).json({ error: 'Failed to fetch draft', details: e.message });
+    }
+});
+
+/**
+ * POST /auth/merchant/draft
+ * Fired at Step 1 to create the initial draft record.
+ */
+app.post('/auth/merchant/draft', async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ error: 'Missing token' });
+        }
+        const token = authHeader.split(' ')[1];
+        const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+        if (authError || !user) return res.status(401).json({ error: 'Invalid token' });
+
+        const { ownerName, email, phone } = req.body;
+        const userId = user.id;
+
+        await prisma.$transaction(async (tx) => {
+            const existingUser = await tx.user.findUnique({ where: { id: userId } });
+            if (existingUser) {
+                await tx.user.update({
+                    where: { id: userId },
+                    data: { role: 'MERCHANT', name: ownerName, phone: phone }
+                });
+            } else {
+                await tx.user.create({
+                    data: { id: userId, email: email || `${phone}@phone.pickatstore.app`, name: ownerName, role: 'MERCHANT', passwordHash: 'sso_auth_active', phone: phone, updatedAt: new Date() }
+                });
+            }
+
+            const existingMerchant = await tx.merchant.findUnique({ where: { id: userId } });
+            if (existingMerchant) {
+                await tx.merchant.update({
+                    where: { id: userId },
+                    data: { ownerName, email, phone, status: 'draft' }
+                });
+            } else {
+                await tx.merchant.create({
+                    data: { id: userId, ownerName, email, phone, status: 'draft', storeName: null as any }
+                });
+            }
+        });
+
+        res.json({ success: true, message: 'Draft created' });
+    } catch (e: any) {
+        console.error('[Draft] POST Error:', e);
+        res.status(500).json({ error: 'Failed to create draft', details: e.message });
+    }
+});
+
+/**
+ * PATCH /auth/merchant/draft
+ * Incremental updates for subsequent signup steps.
+ */
+app.patch('/auth/merchant/draft', async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' });
+        const token = authHeader.split(' ')[1];
+        const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+        if (authError || !user) return res.status(401).json({ error: 'Invalid token' });
+
+        const userId = user.id;
+        const payload = req.body;
+
+        await prisma.$transaction(async (tx) => {
+            const updateData: any = {};
+            if (payload.ownerName !== undefined) updateData.ownerName = payload.ownerName;
+            if (payload.email !== undefined) updateData.email = payload.email;
+            if (payload.phone !== undefined) updateData.phone = payload.phone;
+
+            if (payload.storeName !== undefined) updateData.storeName = payload.storeName;
+            if (payload.category !== undefined) updateData.verticalId = 'c307b78e-b924-47a1-a5a7-4405777fa50c';
+            if (payload.city !== undefined) updateData.city = payload.city;
+            if (payload.address !== undefined) updateData.address = payload.address;
+            if (payload.latitude !== undefined) updateData.latitude = payload.latitude;
+            if (payload.longitude !== undefined) updateData.longitude = payload.longitude;
+            if (payload.hasBranches !== undefined) updateData.hasBranches = payload.hasBranches;
+            if (payload.kycStatus !== undefined) updateData.kycStatus = payload.kycStatus;
+            if (payload.panNumber !== undefined) updateData.panNumber = payload.panNumber;
+            if (payload.aadharNumber !== undefined) updateData.aadharNumber = payload.aadharNumber;
+            if (payload.msmeNumber !== undefined) updateData.msmeNumber = payload.msmeNumber;
+            if (payload.bankAccount !== undefined) updateData.bankAccountNumber = payload.bankAccount;
+            if (payload.ifsc !== undefined) updateData.ifscCode = payload.ifsc;
+            if (payload.beneficiaryName !== undefined) updateData.bankBeneficiaryName = payload.beneficiaryName;
+            if (payload.turnoverRange !== undefined) updateData.turnoverRange = payload.turnoverRange;
+            if (payload.gstNumber !== undefined) updateData.gstNumber = payload.gstNumber;
+            if (payload.fssaiNumber !== undefined) updateData.fssaiNumber = payload.fssaiNumber;
+            if (payload.docUrls) {
+                if (payload.docUrls.pan) updateData.panDocUrl = payload.docUrls.pan;
+                if (payload.docUrls.aadharFront) updateData.aadharFrontUrl = payload.docUrls.aadharFront;
+                if (payload.docUrls.aadharBack) updateData.aadharBackUrl = payload.docUrls.aadharBack;
+                if (payload.docUrls.msme) updateData.msmeCertificateUrl = payload.docUrls.msme;
+                if (payload.docUrls.gst) updateData.gstCertificateUrl = payload.docUrls.gst;
+                if (payload.docUrls.fssai) updateData.fssaiCertificateUrl = payload.docUrls.fssai;
+            }
+            if (payload.storePhotos) updateData.storePhotos = payload.storePhotos;
+
+            if (payload.finalize) {
+                updateData.status = 'inactive';
+                updateData.kycStatus = 'pending';
+            }
+
+            await tx.merchant.upsert({
+                where: { id: userId },
+                update: updateData,
+                create: {
+                    id: userId,
+                    phone: updateData.phone || user.phone || '0000000000',
+                    status: 'draft',
+                    kycStatus: 'not_started',
+                    ...updateData
+                }
+            });
+
+            if (payload.storeName && payload.city && payload.address) {
+                const cityRecord = await tx.city.upsert({
+                    where: { name: payload.city },
+                    update: {},
+                    create: { id: crypto.randomUUID(), name: payload.city, active: true, updatedAt: new Date() }
+                });
+                
+                const existingStore = await tx.store.findUnique({ where: { id: userId } });
+                const storeImage = payload.storePhotos && payload.storePhotos.length > 0 ? payload.storePhotos[0] : null;
+
+                if (existingStore) {
+                    await tx.store.update({
+                        where: { id: userId },
+                        data: { 
+                            name: payload.storeName, 
+                            cityId: cityRecord.id, 
+                            address: payload.address, 
+                            image: storeImage, 
+                            active: false, // Ensure it stays inactive during updates until re-approved
+                            updatedAt: new Date() 
+                        }
+                    });
+                } else {
+                    await tx.store.create({
+                        data: { id: userId, managerId: userId, name: payload.storeName, cityId: cityRecord.id, address: payload.address, active: false, image: storeImage, updatedAt: new Date() }
+                    });
+                }
+
+                if (payload.hasBranches && payload.branches) {
+                    await tx.merchantBranch.deleteMany({ where: { merchantId: userId } });
+                    await tx.merchantBranch.createMany({
+                        data: payload.branches.map((b: any) => ({
+                            merchantId: userId, branchName: b.name || 'Main Branch', managerName: b.manager_name, phone: b.phone, address: b.address, isActive: true
+                        }))
+                    });
+                }
+            }
+
+            if (payload.subscription) {
+                await tx.subscription.create({
+                    data: {
+                        merchantId: userId,
+                        amount: payload.subscription.amount,
+                        currency: 'INR',
+                        status: 'success',
+                        provider: 'razorpay',
+                        transactionId: payload.subscription.paymentId
+                    }
+                });
+            }
+        });
+
+        // Fire application-received email on finalize (non-blocking)
+        if (payload.finalize) {
+            const merchantRecord = await prisma.merchant.findUnique({ where: { id: userId } });
+            const targetEmail = merchantRecord?.email || user.email;
+            const targetName = merchantRecord?.ownerName || 'Partner';
+            if (targetEmail) {
+                sendApplicationReceivedEmail(targetEmail, targetName)
+                    .catch(err => console.error('[Email] Application received email failed:', err));
+            }
+        }
+
+        res.json({ success: true, message: 'Draft updated' });
+    } catch (e: any) {
+        console.error('[Draft] PATCH Error:', e);
+        res.status(500).json({ error: `Backend Error: ${e.message}`, details: e.message });
+    }
+});
+
+/**
+ * POST /merchants/:id/kyc-decision
+ * Admin endpoint: Approve or Reject a merchant's KYC application.
+ * Sends branded email notification to the merchant.
+ */
+app.post('/merchants/:id/kyc-decision', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { decision, rejectionReason } = req.body;
+
+        if (!decision || !['approve', 'reject'].includes(decision)) {
+            return res.status(400).json({ error: 'Invalid decision. Must be "approve" or "reject".' });
+        }
+
+        const merchant = await prisma.merchant.findUnique({ where: { id } });
+        if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
+
+        if (decision === 'approve') {
+            await prisma.merchant.update({
+                where: { id },
+                data: { kycStatus: 'approved', status: 'active' }
+            });
+
+            // Activate the associated store
+            const storeUpdate = await prisma.store.update({
+                where: { id },
+                data: { active: true }
+            });
+            console.log(`[KYC] Activated store ${id} for merchant ${merchant.storeName}. Result:`, storeUpdate.active);
+
+            if (merchant.email) {
+                sendStoreApprovedEmail(merchant.email, merchant.ownerName || 'Partner', merchant.storeName || 'Your Store')
+                    .catch(err => console.error('[Email] Approval email failed:', err));
+            }
+            console.log(`[KYC] Approved merchant ${id} (${merchant.storeName})`);
+        } else {
+            await prisma.merchant.update({
+                where: { id },
+                data: { kycStatus: 'rejected', kycRejectionReason: rejectionReason || null }
+            });
+
+            if (merchant.email) {
+                sendStoreRejectedEmail(merchant.email, merchant.ownerName || 'Partner', rejectionReason || '')
+                    .catch(err => console.error('[Email] Rejection email failed:', err));
+            }
+            console.log(`[KYC] Rejected merchant ${id} (${merchant.storeName})`);
+        }
+
+        res.json({ success: true, decision });
+    } catch (e: any) {
+        console.error('[KYC Decision] Error:', e);
+        res.status(500).json({ error: e.message });
     }
 });
 
@@ -3435,7 +3689,7 @@ app.get('/auth/merchant/profile', async (req, res) => {
 });
 
 // --- Server Start ---
-server.listen(port, () => {
-    console.log(`[API] Server running on http://localhost:${port}`);
+server.listen(Number(port), '0.0.0.0', () => {
+    console.log(`[API] Server running on http://0.0.0.0:${port}`);
     console.log(`[API] Socket.io ready`);
 });

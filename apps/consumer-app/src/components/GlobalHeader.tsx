@@ -5,6 +5,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as Haptics from 'expo-haptics';
 import { useLocation } from '../context/LocationContext';
+import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 
 interface GlobalHeaderProps {
@@ -24,66 +25,10 @@ export default function GlobalHeader({
 }: GlobalHeaderProps) {
     const navigation = useNavigation<NativeStackNavigationProp<any>>();
     const { activeLocation, isLoadingLocation } = useLocation();
-    const [profile, setProfile] = useState<any>(null);
+    const { user, profile: globalProfile } = useAuth();
 
-    useEffect(() => {
-        fetchProfile();
-
-        const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            if (!session) {
-                setProfile(null);
-            } else {
-                fetchProfile();
-            }
-        });
-
-        // Listen for profile changes (like avatar updates)
-        const profileSubscription = supabase
-            .channel('profile-changes-header')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
-                fetchProfile();
-            })
-            .subscribe();
-
-        return () => {
-            authSubscription.unsubscribe();
-            supabase.removeChannel(profileSubscription);
-        };
-    }, []);
-
-    const fetchProfile = async () => {
-        try {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session) {
-                setProfile(null);
-                return;
-            }
-
-            const timeout = (ms: number) => new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms));
-
-            const { data, error } = await Promise.race([
-                supabase
-                    .from('profiles')
-                    .select('avatar_url')
-                    .eq('id', session.user.id)
-                    .single(),
-                timeout(5000)
-            ]) as any;
-
-            if (error && error.code !== 'PGRST116') throw error; // Ignore single-row-not-found for new users
-            
-            if (data?.avatar_url) {
-                // Append a timestamp to the URL to bypass React Native's aggressive Image cache
-                data.avatar_url = `${data.avatar_url}?v=${Date.now()}`;
-                setProfile(data);
-            } else {
-                setProfile(null);
-            }
-        } catch (error) {
-            console.error('[GlobalHeader] Error fetching profile avatar:', error);
-            setProfile(null);
-        }
-    };
+    // Redundant local profile fetching removed to unify state.
+    // Deep state now managed exclusively by AuthContext.
 
     return (
         <View className="px-6 pt-2 pb-3 bg-white z-20 overflow-visible border-b border-gray-50">
@@ -98,30 +43,28 @@ export default function GlobalHeader({
                 >
                     <View className="flex-row items-center">
                         <Text className="text-xl font-bold text-gray-900 tracking-tight">
-                            {activeLocation?.type || 'Select Location'}
+                            {isLoadingLocation ? 'Finding Location...' : (activeLocation?.type || 'Select Location')}
                         </Text>
                         <ChevronRight size={18} color="#B52725" />
                     </View>
                     <Text className="text-xs font-medium text-gray-500 mt-0.5" numberOfLines={1}>
-                        {isLoadingLocation ? "Finding target delivery zone..." : (activeLocation?.address || 'Tap to set your current location')}
+                        {isLoadingLocation ? "Pinging target delivery zone..." : (activeLocation?.address || 'Tap to set your current location')}
                     </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
                     onPress={async () => {
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        const { data: { session } } = await supabase.auth.getSession();
-                        if (session) {
+                        if (user) {
                             navigation.navigate('Profile');
                         } else {
-                            // If no session, route to auth
                             navigation.navigate('Auth');
                         }
                     }}
                     className="w-11 h-11 rounded-full bg-gray-100 items-center justify-center border border-gray-200 overflow-hidden shadow-sm"
                 >
-                    {profile?.avatar_url ? (
-                        <Image source={{ uri: profile.avatar_url }} className="w-full h-full" />
+                    {globalProfile?.avatar_url ? (
+                        <Image source={{ uri: globalProfile.avatar_url }} className="w-full h-full" />
                     ) : (
                         <User size={22} color="#9CA3AF" />
                     )}

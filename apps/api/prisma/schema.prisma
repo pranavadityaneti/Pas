@@ -133,7 +133,7 @@ model Store {
   latitude       Float?
   longitude      Float?
   managerId      String?        @unique @db.Uuid
-  active         Boolean        @default(true)
+  active         Boolean        @default(false)
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   merchantId     String?        @map("merchant_id")
@@ -351,10 +351,10 @@ model OrderItem {
 
 model Merchant {
   id                  String           @id @default(uuid())
-  storeName           String           @map("store_name")
+  storeName           String?          @map("store_name")
   branchName          String?          @map("branch_name")
-  ownerName           String           @map("owner_name")
-  email               String
+  ownerName           String?          @map("owner_name")
+  email               String?
   phone               String
   city                String?
   address             String?

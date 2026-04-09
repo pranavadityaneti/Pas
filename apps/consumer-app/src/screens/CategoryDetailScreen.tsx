@@ -93,7 +93,6 @@ export default function CategoryDetailScreen() {
     const { items: categoryItems, loading: itemsLoading, error: itemsError, refetch: refetchItems } = useCategoryItems(nearbyStoreIds, currentVerticalId || '');
 
     // ── State ──
-    const [activeTab, setActiveTab] = useState<'stores' | 'items'>('stores');
     const [activeSubCategory, setActiveSubCategory] = useState<string | null>(null);
     const [searchText, setSearchText] = useState('');
     const [activeQuickFilter, setActiveQuickFilter] = useState<string | null>(null);
@@ -103,13 +102,23 @@ export default function CategoryDetailScreen() {
         // Enforce strict geospatial bounding: must match vertical + be within 15km
         let list = stores.filter(s => s.category === categoryName && nearbyStoreIds.includes(s.id));
 
+        // Subcategory filter: only show stores that carry items in the selected subcategory
+        if (activeSubCategory) {
+            const storeIdsWithSubcat = new Set(
+                categoryItems
+                    .filter(item => item.product?.category_id === activeSubCategory)
+                    .map(item => item.store_id)
+            );
+            list = list.filter(s => storeIdsWithSubcat.has(s.id));
+        }
+
         if (searchText) {
             const q = searchText.toLowerCase();
             list = list.filter(s => s.name.toLowerCase().includes(q));
         }
 
         return list;
-    }, [stores, categoryName, searchText]);
+    }, [stores, categoryName, searchText, nearbyStoreIds, activeSubCategory, categoryItems]);
 
     const heroImage = HERO_BANNERS[categoryName] || DEFAULT_HERO;
 
@@ -194,35 +203,13 @@ export default function CategoryDetailScreen() {
                     </View>
                 )}
 
-                {/* ═══════ 3. Sticky Stores / Items Toggle ═══════ */}
-                <View className="bg-white px-5 pt-3 pb-3 border-b border-gray-100">
-                    <View className="flex-row bg-gray-100 rounded-xl p-1">
-                        <TouchableOpacity
-                            onPress={() => { Haptics.selectionAsync(); setActiveTab('stores'); setSearchText(''); }}
-                            className={`flex-1 py-2.5 rounded-lg items-center justify-center ${activeTab === 'stores' ? 'bg-[#B52725] shadow-sm' : ''}`}
-                        >
-                            <Text className={`font-bold text-[13px] ${activeTab === 'stores' ? 'text-white' : 'text-gray-500'}`}>
-                                🏪  Stores
-                            </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            onPress={() => { Haptics.selectionAsync(); setActiveTab('items'); setSearchText(''); }}
-                            className={`flex-1 py-2.5 rounded-lg items-center justify-center ${activeTab === 'items' ? 'bg-[#B52725] shadow-sm' : ''}`}
-                        >
-                            <Text className={`font-bold text-[13px] ${activeTab === 'items' ? 'text-white' : 'text-gray-500'}`}>
-                                🛒  Items
-                            </Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-
-                {/* ═══════ Search Bar ═══════ */}
-                <View className="px-5 mt-4">
+                {/* ═══════ 3. Search Bar ═══════ */}
+                <View className="px-5 mt-6">
                     <View className="flex-row items-center px-4 h-12 bg-white rounded-2xl border border-gray-100 shadow-sm">
                         <Search size={18} color="#9CA3AF" />
                         <TextInput
                             className="flex-1 ml-3 font-semibold text-sm text-gray-800"
-                            placeholder={activeTab === 'stores' ? `Search stores in ${categoryName}...` : `Search items in ${categoryName}...`}
+                            placeholder={`Search stores in ${categoryName}...`}
                             placeholderTextColor="#9CA3AF"
                             value={searchText}
                             onChangeText={setSearchText}
@@ -265,157 +252,73 @@ export default function CategoryDetailScreen() {
                     })}
                 </ScrollView>
 
-                {/* ═══════ STORES TAB ═══════ */}
-                {activeTab === 'stores' && (
-                    <>
-                        {/* Store Count */}
-                        <View className="px-5 mt-5 mb-3">
-                            <Text className="text-[13px] font-semibold text-gray-500">
-                                {categoryStores.length} {categoryStores.length === 1 ? 'store' : 'stores'} found
-                            </Text>
-                        </View>
+                {/* ═══════ STORES LIST ═══════ */}
+                {/* Store Count */}
+                <View className="px-5 mt-5 mb-3">
+                    <Text className="text-[13px] font-semibold text-gray-500">
+                        {categoryStores.length} {categoryStores.length === 1 ? 'store' : 'stores'} found
+                    </Text>
+                </View>
 
-                        {loading ? (
-                            <View className="py-20 items-center">
-                                <ActivityIndicator size="large" color="#B52725" />
+                {loading ? (
+                    <View className="py-20 items-center">
+                        <ActivityIndicator size="large" color="#B52725" />
+                    </View>
+                ) : categoryStores.length > 0 ? (
+                    categoryStores.map(store => (
+                        <TouchableOpacity
+                            key={store.id}
+                            activeOpacity={0.92}
+                            onPress={() => {
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                                navigation.navigate('Storefront', { storeId: store.id });
+                            }}
+                            className="bg-white rounded-2xl overflow-hidden mb-4 shadow-sm border border-gray-100 mx-5"
+                        >
+                            {/* Store Image */}
+                            <View style={{ height: 140, overflow: 'hidden' }}>
+                                <Image source={{ uri: store.image }} className="w-full h-full" />
+                                <LinearGradient
+                                    colors={['transparent', 'rgba(0,0,0,0.5)']}
+                                    style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+                                />
+                                {/* Distance Badge */}
+                                <View className="absolute top-3 right-3 bg-white/95 px-2.5 py-1.5 rounded-xl flex-row items-center">
+                                    <MapPin size={11} color="#B52725" />
+                                    <Text className="text-[11px] font-bold text-gray-900 ml-1">{store.distance}</Text>
+                                </View>
                             </View>
-                        ) : categoryStores.length > 0 ? (
-                            categoryStores.map(store => (
-                                <TouchableOpacity
-                                    key={store.id}
-                                    activeOpacity={0.92}
-                                    onPress={() => {
-                                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                                        navigation.navigate('Storefront', { storeId: store.id });
-                                    }}
-                                    className="bg-white rounded-2xl overflow-hidden mb-4 shadow-sm border border-gray-100 mx-5"
-                                >
-                                    {/* Store Image */}
-                                    <View style={{ height: 140, overflow: 'hidden' }}>
-                                        <Image source={{ uri: store.image }} className="w-full h-full" />
-                                        <LinearGradient
-                                            colors={['transparent', 'rgba(0,0,0,0.5)']}
-                                            style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
-                                        />
-                                        {/* Distance Badge */}
-                                        <View className="absolute top-3 right-3 bg-white/95 px-2.5 py-1.5 rounded-xl flex-row items-center">
-                                            <MapPin size={11} color="#B52725" />
-                                            <Text className="text-[11px] font-bold text-gray-900 ml-1">{store.distance}</Text>
-                                        </View>
-                                    </View>
 
-                                    {/* Store Info */}
-                                    <View className="px-4 py-3">
-                                        <Text className="text-[16px] font-bold text-gray-900" numberOfLines={1}>{store.name}</Text>
-                                        <View className="flex-row items-center mt-2" style={{ gap: 12 }}>
-                                            {store.rating ? (
-                                                <View className="flex-row items-center bg-green-50 rounded-lg px-2 py-1">
-                                                    <Star size={12} color="#16a34a" fill="#16a34a" />
-                                                    <Text className="text-[12px] font-bold text-green-700 ml-1">{store.rating}</Text>
-                                                </View>
-                                            ) : (
-                                                <View className="bg-blue-50 rounded-lg px-2 py-1">
-                                                    <Text className="text-[10px] font-extrabold text-blue-600 uppercase">NEW</Text>
-                                                </View>
-                                            )}
-                                            <Text className="text-[12px] font-medium text-gray-400 capitalize">{store.category}</Text>
-                                            <View className="flex-1 flex-row justify-end items-center">
-                                                <Text className="text-[12px] font-bold text-[#B52725]">View Store</Text>
-                                                <ChevronRight size={14} color="#B52725" />
-                                            </View>
+                            {/* Store Info */}
+                            <View className="px-4 py-3">
+                                <Text className="text-[16px] font-bold text-gray-900" numberOfLines={1}>{store.name}</Text>
+                                <View className="flex-row items-center mt-2" style={{ gap: 12 }}>
+                                    {store.rating ? (
+                                        <View className="flex-row items-center bg-green-50 rounded-lg px-2 py-1">
+                                            <Star size={12} color="#16a34a" fill="#16a34a" />
+                                            <Text className="text-[12px] font-bold text-green-700 ml-1">{store.rating}</Text>
                                         </View>
+                                    ) : (
+                                        <View className="bg-blue-50 rounded-lg px-2 py-1">
+                                            <Text className="text-[10px] font-extrabold text-blue-600 uppercase">NEW</Text>
+                                        </View>
+                                    )}
+                                    <Text className="text-[12px] font-medium text-gray-400 capitalize">{store.category}</Text>
+                                    <View className="flex-1 flex-row justify-end items-center">
+                                        <Text className="text-[12px] font-bold text-[#B52725]">View Store</Text>
+                                        <ChevronRight size={14} color="#B52725" />
                                     </View>
-                                </TouchableOpacity>
-                            ))
-                        ) : (
-                            <View className="py-20 items-center justify-center">
-                                <StoreIcon size={48} color="#E5E7EB" strokeWidth={1} />
-                                <Text className="text-gray-900 font-bold mt-4">No stores found</Text>
-                                <Text className="text-gray-400 text-[13px] font-medium text-center mt-1 px-10">
-                                    We haven't onboarded stores in this category yet. Check back soon!
-                                </Text>
+                                </View>
                             </View>
-                        )}
-                    </>
-                )}
-
-                {/* ═══════ ITEMS TAB ═══════ */}
-                {activeTab === 'items' && (
-                    <View className="px-5 mt-5">
-                        {itemsLoading ? (
-                            <View className="py-20 items-center">
-                                <ActivityIndicator size="large" color="#B52725" />
-                            </View>
-                        ) : categoryItems.length > 0 ? (
-                            <View className="flex-row flex-wrap justify-between">
-                                {categoryItems.map((item) => (
-                                    <View key={item.id} className="w-[48%] mb-4 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                                        <View className="aspect-square bg-gray-50">
-                                            <Image 
-                                                source={{ uri: item.product.image || PLACEHOLDER_IMAGE }} 
-                                                className="w-full h-full"
-                                                resizeMode="cover"
-                                            />
-                                        </View>
-                                        <View className="p-3">
-                                            <Text className="text-[13px] font-medium text-gray-800 h-9" numberOfLines={2}>
-                                                {item.product.name}
-                                            </Text>
-                                            <View className="flex-row items-center justify-between mt-2">
-                                                <Text className="text-[14px] font-bold text-gray-900">
-                                                    ₹{item.price}
-                                                </Text>
-                                                <TouchableOpacity
-                                                    onPress={() => {
-                                                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                                        addItem({
-                                                            id: item.product_id,
-                                                            name: item.product.name,
-                                                            price: item.price,
-                                                            image: item.product.image || PLACEHOLDER_IMAGE,
-                                                            storeId: item.store_id,
-                                                            storeName: item.store.name,
-                                                            isDining: false // Default to false for regular retail catalog
-                                                        });
-                                                    }}
-                                                    className="border border-[#B52725] px-2.5 py-1 rounded-lg"
-                                                >
-                                                    <Text className="text-[11px] font-bold text-[#B52725]">Add</Text>
-                                                </TouchableOpacity>
-                                            </View>
-                                        </View>
-                                    </View>
-                                ))}
-                            </View>
-                        ) : permissionDenied ? (
-                            <View className="py-20 items-center justify-center">
-                                <MapPinOff size={48} color="#E5E7EB" strokeWidth={1} />
-                                <Text className="text-gray-900 font-bold mt-4">Location Required</Text>
-                                <Text className="text-gray-400 text-[13px] font-medium text-center mt-1 px-10">
-                                    We need your coordinates to find local items. Please enable GPS in your settings.
-                                </Text>
-                            </View>
-                        ) : itemsError ? (
-                            <View className="py-20 items-center justify-center">
-                                <WifiOff size={48} color="#E5E7EB" strokeWidth={1} />
-                                <Text className="text-gray-900 font-bold mt-4">Connection Lost</Text>
-                                <Text className="text-gray-400 text-[13px] font-medium text-center mt-1 px-10 mb-4">
-                                    {itemsError}
-                                </Text>
-                                <TouchableOpacity onPress={refetchItems} className="bg-gray-900 px-6 py-2 rounded-lg flex-row items-center">
-                                    <RefreshCcw size={16} color="white" className="mr-2" />
-                                    <Text className="text-white font-bold ml-2">Tap to Retry</Text>
-                                </TouchableOpacity>
-                            </View>
-                        ) : (
-                            <View className="py-20 items-center justify-center">
-                                <ShoppingBag size={48} color="#E5E7EB" strokeWidth={1} />
-                                <Text className="text-gray-900 font-bold mt-4">No Items Found</Text>
-                                <Text className="text-gray-400 text-[13px] font-medium text-center mt-1 px-10">
-                                    There are currently no items available in this category from stores near you.
-                                </Text>
-                            </View>
-                        )}
+                        </TouchableOpacity>
+                    ))
+                ) : (
+                    <View className="py-20 items-center justify-center">
+                        <StoreIcon size={48} color="#E5E7EB" strokeWidth={1} />
+                        <Text className="text-gray-900 font-bold mt-4">No stores found</Text>
+                        <Text className="text-gray-400 text-[13px] font-medium text-center mt-1 px-10">
+                            We haven't onboarded stores in this category yet. Check back soon!
+                        </Text>
                     </View>
                 )}
             </ScrollView>

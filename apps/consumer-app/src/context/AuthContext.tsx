@@ -23,9 +23,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [isLoading, setIsLoading] = useState(true);
     const [isProfileLoading, setIsProfileLoading] = useState(false);
 
+    // --- Core Sync Logic ---
+    // Decoupled from Location or other providers to prevent Cold Start hangs.
+
     const fetchProfile = async (userId: string) => {
         if (!userId) {
             setIsProfileLoading(false);
+            setIsLoading(false);
             return;
         }
 
@@ -83,6 +87,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
                 
                 setIsProfileLoading(false);
+                setIsLoading(false); // Unblock main navigation loading
                 return; // Exit loop on success
                 
             } catch (error) {
@@ -92,6 +97,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     // If we never loaded a cache, fall back gracefully
                     if (!isCached) setProfile(null); 
                     setIsProfileLoading(false);
+                    setIsLoading(false); // Unblock main navigation loading even on failure
                     return;
                 }
                 
@@ -141,8 +147,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 } else if (event === 'SIGNED_OUT') {
                     setProfile(null);
                     setIsProfileLoading(false);
+                    // Unblock UI on logout
+                    setIsLoading(false); 
                 }
                 
+                // Unblock UI regardless on first session probe 
+                // Decoupled from sub-state resolution to ensure responsiveness
                 setIsLoading(false);
             }
         );
