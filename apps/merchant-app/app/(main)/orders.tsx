@@ -30,7 +30,10 @@ const STATUS_MAP: Record<string, OrderStatus[]> = {
 
 export default function OrdersScreen() {
     const { orders, loading, refreshing, refetch, updateOrderStatus, verifyOTP } = useOrders();
-    const { store } = useStore();
+    const { store, activeStoreId, branches, merchantId } = useStore();
+    
+    const activeBranch = branches.find(b => b.id === activeStoreId);
+    const isMainStore = activeStoreId === merchantId;
     const [activeTab, setActiveTab] = useState('pending');
     const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
     const [search, setSearch] = useState('');
@@ -335,7 +338,7 @@ export default function OrdersScreen() {
         );
     };
 
-    const isOffline = !store?.active;
+    const isOffline = isMainStore ? !store?.active : !activeBranch?.isActive;
 
     return (
         <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -350,11 +353,11 @@ export default function OrdersScreen() {
                 <View style={styles.header}>
                     <Text style={styles.headerTitle}>Orders</Text>
                     <View style={styles.storeInfo}>
-                        <Text style={styles.storeName}>{store?.name || 'Loading Store...'} - Main Branch</Text>
+                        <Text style={styles.storeName}>{activeBranch?.name || store?.name || 'Loading Store...'}</Text>
                         <View style={styles.onlineBadge}>
-                            <View style={[styles.onlineDot, { backgroundColor: store?.active !== false ? '#10B981' : '#9CA3AF' }]} />
-                            <Text style={[styles.onlineText, { color: store?.active !== false ? '#10B981' : '#9CA3AF' }]}>
-                                {store?.active !== false ? 'Online' : 'Offline'}
+                            <View style={[styles.onlineDot, { backgroundColor: !isOffline ? '#10B981' : '#9CA3AF' }]} />
+                            <Text style={[styles.onlineText, { color: !isOffline ? '#10B981' : '#9CA3AF' }]}>
+                                {!isOffline ? 'Online' : 'Offline'}
                             </Text>
                         </View>
                     </View>

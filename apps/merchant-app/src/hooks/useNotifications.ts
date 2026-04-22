@@ -2,20 +2,23 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Vibration } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { playSound } from '../lib/audio';
+import { useStore } from './useStore';
 
 export interface Notification {
     id: string;
     merchantId: string;
+    storeId?: string;
     type: 'order' | 'stock' | 'payout' | 'system';
     title: string;
     message: string;
-    read: boolean;
+    is_read: boolean;
     createdAt: string;
     link?: string;
     metadata?: any;
 }
 
 export function useNotifications(user: any) {
+    const { activeStoreId } = useStore();
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [loading, setLoading] = useState(true);
     const [unreadCount, setUnreadCount] = useState(0);
@@ -23,7 +26,7 @@ export function useNotifications(user: any) {
     const fetchNotifications = useCallback(async () => {
         try {
             const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
+            if (!user || !activeStoreId) {
                 setLoading(false);
                 return;
             }
@@ -32,12 +35,13 @@ export function useNotifications(user: any) {
                 .from('notifications')
                 .select('*')
                 .eq('user_id', user.id)
+                .eq('store_id', activeStoreId)
                 .order('created_at', { ascending: false })
                 .limit(50);
 
             if (data) {
                 setNotifications(data);
-                setUnreadCount(data.filter(n => !n.read).length);
+                setUnreadCount(data.filter(n => !n.is_read).length);
             }
 
             if (error) {
@@ -48,7 +52,7 @@ export function useNotifications(user: any) {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [activeStoreId]);
 
     const prefsRef = useRef(user?.notification_preferences);
 
@@ -62,18 +66,18 @@ export function useNotifications(user: any) {
 
         const setupSubscription = async () => {
             const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            if (!user || !activeStoreId) return;
 
             fetchNotifications();
 
-            // Subscribe to real-time updates with filter for currentUser
+            // Subscribe to real-time updates scoped to user AND store
             subscription = supabase
-                .channel('notifications')
+                .channel(`notifications-${activeStoreId}`)
                 .on('postgres_changes', {
                     event: 'INSERT',
                     schema: 'public',
                     table: 'notifications',
-                    filter: `user_id=eq.${user.id}`
+                    filter: `user_id=eq.${user.id},store_id=eq.${activeStoreId}`
                 }, (payload) => {
                     const newNotif = payload.new as Notification;
 
@@ -117,17 +121,17 @@ export function useNotifications(user: any) {
         return () => {
             if (subscription) subscription.unsubscribe();
         };
-    }, [fetchNotifications]);
+    }, [fetchNotifications, activeStoreId]);
 
     const markAsRead = async (notificationId: string) => {
         const { error } = await supabase
             .from('notifications')
-            .update({ read: true })
+            .update({ is_read: true })
             .eq('id', notificationId);
 
         if (!error) {
             setNotifications(prev =>
-                prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
+                prev.map(n => n.id === notificationId ? { ...n, is_read: true } : n)
             );
             setUnreadCount(prev => Math.max(0, prev - 1));
         }
@@ -135,16 +139,17 @@ export function useNotifications(user: any) {
 
     const markAllAsRead = async () => {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        if (!user || !activeStoreId) return;
 
         const { error } = await supabase
             .from('notifications')
-            .update({ read: true })
+            .update({ is_read: true })
             .eq('user_id', user.id)
-            .eq('read', false);
+            .eq('store_id', activeStoreId)
+            .eq('is_read', false);
 
         if (!error) {
-            setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+            setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
             setUnreadCount(0);
         }
     };

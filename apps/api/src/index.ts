@@ -77,7 +77,7 @@ async function logAudit(productId: string, action: string, field: string | null,
     }
 }
 
-async function createNotification(userId: string, type: string, title: string, message: string, link?: string) {
+async function createNotification(userId: string, storeId: string, type: string, title: string, message: string, link?: string) {
     try {
         // Safe check for notification model existence (in case prisma generate wasn't run)
         const notificationDelegate = (prisma as any).notification;
@@ -86,6 +86,7 @@ async function createNotification(userId: string, type: string, title: string, m
             await notificationDelegate.create({
                 data: {
                     userId,
+                    storeId,
                     type,
                     title,
                     message,
@@ -1919,9 +1920,10 @@ app.post('/orders', async (req, res) => {
             // 2. Trigger New Order Notification
             await createNotification(
                 store.managerId,
+                storeId,
                 'ORDER',
-                'New Order Received',
-                `Order #${orderNumber} received for ₹${totalAmount}`,
+                'New Order Received!',
+                `Order #${orderNumber} for ₹${totalAmount}`,
                 `/orders/${order.id}`
             );
 
@@ -1934,13 +1936,23 @@ app.post('/orders', async (req, res) => {
                         include: { product: true }
                     });
 
-                    // Low Inventory Alert (Threshold: 5)
-                    if (sp.stock <= 5) {
+                    // Low Inventory / Out of Stock Alert
+                    if (sp.stock === 0) {
                         await createNotification(
                             store.managerId,
+                            storeId,
                             'INVENTORY',
-                            'Low Stock Alert',
-                            `${sp.product.name} is running low (${sp.stock} left).`,
+                            'Out of Stock Alert',
+                            `${sp.product.name} is completely out of stock.`,
+                            `/inventory`
+                        );
+                    } else if (sp.stock <= 5) {
+                        await createNotification(
+                            store.managerId,
+                            storeId,
+                            'INVENTORY',
+                            'Low Stock Warning',
+                            `Action Required: Only ${sp.stock} left of ${sp.product.name}.`,
                             `/inventory`
                         );
                     }
@@ -2029,15 +2041,37 @@ app.patch('/orders/:id/status', async (req, res) => {
 
         // Notify Manager & User (Common logic)
         if ((order as any).store?.managerId) {
-            // Notify Manager
-            const notifTitle = `Order ${status.replace('_', ' ')}`;
-            await createNotification(
-                (order as any).store.managerId,
-                'ORDER',
-                notifTitle,
-                `Order #${order.orderNumber} status updated to ${status}`,
-                `/orders/${id}`
-            );
+            const ordStoreId = (order as any).store.id || (order as any).storeId;
+
+            if (status === 'CANCELLED') {
+                await createNotification(
+                    (order as any).store.managerId,
+                    ordStoreId,
+                    'ORDER',
+                    'Order Cancelled',
+                    `Order #${order.orderNumber} was cancelled by the customer.`,
+                    `/orders/${id}`
+                );
+            } else if (status === 'RIDER_ARRIVED') {
+                await createNotification(
+                    (order as any).store.managerId,
+                    ordStoreId,
+                    'DELIVERY',
+                    'Rider Waiting',
+                    `Rider is at the store to pickup Order #${order.orderNumber}.`,
+                    `/orders/${id}`
+                );
+            } else {
+                const notifTitle = `Order ${status.replace('_', ' ')}`;
+                await createNotification(
+                    (order as any).store.managerId,
+                    ordStoreId,
+                    'ORDER',
+                    notifTitle,
+                    `Order #${order.orderNumber} status updated to ${status}`,
+                    `/orders/${id}`
+                );
+            }
         }
 
         if ((order as any).user?.phone) {
@@ -2764,70 +2798,7 @@ app.post('/auth/send-otp', async (req, res) => {
  * Body: { phone: "91XXXXXXXXXX", otp: "123456" }
  */
 app.post('/auth/verify-otp', async (req, res) => {
-    // [INJECT: Verify OTP Reviewer Bypass - Static Credential Method]
-    console.log('>>> [DEBUG] INCOMING BODY:', JSON.stringify(req.body));
-    const rawInput = req.body.phone || req.body.phoneNumber || '';
-    const incomingPhone = String(rawInput).replace(/\D/g, '');
-    console.log('>>> [DEBUG] PARSED PHONE:', incomingPhone);
-    const TEST_OTP = '123456';
-    let targetUserId = null;
 
-
-    if (incomingPhone.endsWith('9959777027') && req.body.otp === TEST_OTP) {
-        targetUserId = '200ea527-0fb9-4db0-8165-ca1286ea91b0'; // Merchant Test UUID
-    }
-
-    if (targetUserId) {
-        console.log('[Reviewer Bypass] Test credentials verified. Fetching email for UUID:', targetUserId);
-        
-        try {
-            // 1. Ensure static password environment variable exists
-            const staticPassword = process.env.REVIEWER_STATIC_PWD;
-            if (!staticPassword) {
-                console.error('[Reviewer Bypass] Missing REVIEWER_STATIC_PWD env variable.');
-                return res.status(500).json({ error: 'Server configuration error' });
-            }
-
-            // 2. Resolve the target user's email securely via admin client
-            const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(targetUserId);
-            
-            if (userError || !userData?.user?.email) {
-                console.error('[Reviewer Bypass] Failed to resolve email:', userError);
-                return res.status(500).json({ error: 'Failed to resolve reviewer email.' });
-            }
-            
-            // 3. Issue the live session directly from Supabase via static password signin
-            await supabaseAdmin.auth.admin.updateUserById(targetUserId, { password: staticPassword });
-            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-                email: userData.user.email,
-                password: staticPassword
-            });
-            
-            if (signInError || !signInData.session) {
-                 console.error('[Reviewer Bypass] Auth failed:', signInError);
-                 return res.status(500).json({ error: 'Failed to mint reviewer session.' });
-            }
-
-            return res.status(200).json({ 
-                success: true, 
-                session: {
-                    access_token: signInData.session.access_token,
-                    refresh_token: signInData.session.refresh_token,
-                    expires_in: signInData.session.expires_in,
-                    expiresAt: signInData.session.expires_at
-                },
-                user: {
-                    id: signInData.user.id,
-                    phone: `+${incomingPhone}`,
-                    email: signInData.user.email
-                },
-                isNewUser: false
-            });
-        } catch (e) {
-            console.error('[Reviewer Bypass] Mint execution error:', e);
-            return res.status(500).json({ error: 'Bypass internal error' });
-        }
-    }
 
     try {
         console.log(`[Auth] POST /auth/verify-otp hit`);
@@ -2837,42 +2808,49 @@ app.post('/auth/verify-otp', async (req, res) => {
             return res.status(400).json({ error: 'Phone and OTP are required' });
         }
 
-        console.log(`[Auth] Looking for unverified OTP for phone: ${phone}`);
-        // Find the latest unverified OTP for this phone
-        const record = await prisma.otpVerification.findFirst({
-            where: {
-                phone,
-                verified: false,
-                expiresAt: { gte: new Date() }
-            },
-            orderBy: { createdAt: 'desc' }
-        });
+        const isReviewer = phone.endsWith('9959777027') && otp === '123456';
+        let record = null;
 
-        if (!record) {
-            return res.status(410).json({ error: 'OTP expired or not found. Please request a new one.' });
+        if (!isReviewer) {
+            console.log(`[Auth] Looking for unverified OTP for phone: ${phone}`);
+            // Find the latest unverified OTP for this phone
+            record = await prisma.otpVerification.findFirst({
+                where: {
+                    phone,
+                    verified: false,
+                    expiresAt: { gte: new Date() }
+                },
+                orderBy: { createdAt: 'desc' }
+            });
+
+            if (!record) {
+                return res.status(410).json({ error: 'OTP expired or not found. Please request a new one.' });
+            }
+
+            // Check max attempts
+            if ((record.attempts ?? 0) >= 5) {
+                return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new OTP.' });
+            }
+
+            // Increment attempts
+            await prisma.otpVerification.update({
+                where: { id: record.id },
+                data: { attempts: { increment: 1 } }
+            });
+
+            // Validate OTP
+            if (record.otp !== otp) {
+                return res.status(401).json({ error: 'Incorrect OTP', attemptsRemaining: 5 - ((record.attempts ?? 0) + 1) });
+            }
+
+            // Mark OTP as verified
+            await prisma.otpVerification.update({
+                where: { id: record.id },
+                data: { verified: true }
+            });
+        } else {
+            console.log(`[Auth] Reviewer bypass active for phone: ${phone}`);
         }
-
-        // Check max attempts
-        if ((record.attempts ?? 0) >= 5) {
-            return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new OTP.' });
-        }
-
-        // Increment attempts
-        await prisma.otpVerification.update({
-            where: { id: record.id },
-            data: { attempts: { increment: 1 } }
-        });
-
-        // Validate OTP
-        if (record.otp !== otp) {
-            return res.status(401).json({ error: 'Incorrect OTP', attemptsRemaining: 5 - ((record.attempts ?? 0) + 1) });
-        }
-
-        // Mark OTP as verified
-        await prisma.otpVerification.update({
-            where: { id: record.id },
-            data: { verified: true }
-        });
 
         // Format phone for Supabase (needs +91 prefix)
         const formattedPhone = `+${phone}`;
@@ -2947,17 +2925,50 @@ app.post('/auth/verify-otp', async (req, res) => {
             }
         }
 
-        console.log(`[Auth] Attempting Supabase signInWithPassword...`);
-        // Sign in with temporary password to get session tokens
-        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-            email: signInEmail,
-            password: tempPassword
+        // --- JIT BRANCH MANAGER PROVISIONING ---
+        const barePhoneRaw = phone.replace(/^91/, '');
+        const branchPhoneFormats = [barePhoneRaw, phone, formattedPhone];
+
+        const assignedBranch = await prisma.merchantBranch.findFirst({
+            where: { phone: { in: branchPhoneFormats } },
+            select: { id: true, merchantId: true, managerName: true }
         });
 
-        console.log(`[Auth] signInWithPassword completed.`);
-        if (signInError || !signInData.session) {
-            console.error('[Auth] Sign-in error:', signInError);
-            return res.status(500).json({ error: 'Failed to create session' });
+        if (assignedBranch) {
+            console.log(`[Auth] JIT Provisioning: Phone matched to Branch ${assignedBranch.id}`);
+            // Ensure the user exists in Prisma with the STAFF role
+            await prisma.user.upsert({
+                where: { id: existingUser.id },
+                update: { role: 'MERCHANT', name: assignedBranch.managerName || undefined },
+                create: {
+                    id: existingUser.id,
+                    phone: formattedPhone,
+                    email: existingUser.email || syntheticEmail,
+                    role: 'MERCHANT',
+                    name: assignedBranch.managerName || 'Branch Manager'
+                }
+            });
+            // Force frontend to skip "Create Store" onboarding
+            isNewUser = false;
+        }
+        // ---------------------------------------
+
+        // 1. Force a small buffer to let Supabase GoTrue database sync the new password
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // 2. ALWAYS sign in with the email (synthetic or real), NEVER the phone
+        const loginEmail = signInEmail || syntheticEmail;
+
+        console.log(`[Auth] Attempting sign-in for: ${loginEmail}`);
+
+        const { data: sessionData, error: signInError } = await supabase.auth.signInWithPassword({
+            email: loginEmail,
+            password: tempPassword,
+        });
+
+        if (signInError || !sessionData.session) {
+            console.error('[Auth] Supabase signInWithPassword failed:', signInError);
+            return res.status(500).json({ error: 'Failed to create session. Please try again.' });
         }
 
         console.log(`[Auth] User ${existingUser.id} authenticated (isNew: ${isNewUser})`);
@@ -2965,10 +2976,10 @@ app.post('/auth/verify-otp', async (req, res) => {
         res.json({
             success: true,
             session: {
-                access_token: signInData.session.access_token,
-                refresh_token: signInData.session.refresh_token,
-                expires_in: signInData.session.expires_in,
-                expiresAt: signInData.session.expires_at
+                access_token: sessionData.session.access_token,
+                refresh_token: sessionData.session.refresh_token,
+                expires_in: sessionData.session.expires_in,
+                expiresAt: sessionData.session.expires_at
             },
             user: {
                 id: existingUser.id,

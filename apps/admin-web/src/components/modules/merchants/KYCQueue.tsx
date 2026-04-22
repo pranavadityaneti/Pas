@@ -15,7 +15,7 @@ import { Textarea } from '../../ui/textarea';
 import { Checkbox } from '../../ui/checkbox';
 import { Label } from '../../ui/label';
 import { ScrollArea } from '../../ui/scroll-area';
-import { ImageWithFallback } from '../../figma/ImageWithFallback';
+import { SecureImage } from '../../SecureImage';
 import { toast } from 'sonner';
 import { useMerchants, Merchant } from '../../../hooks/useMerchants';
 import { formatDistanceToNow } from 'date-fns';
@@ -208,18 +208,12 @@ export function KYCQueue() {
                 className="bg-white shadow-2xl transition-transform duration-200 ease-in-out"
                 style={{ transform: `scale(${zoomLevel})` }}
               >
-                {getActiveDocUrl() ? (
-                  <ImageWithFallback
-                    src={getActiveDocUrl()!}
-                    alt="Document"
-                    className="max-w-[600px] h-auto object-contain"
-                  />
-                ) : (
-                  <div className="w-[400px] h-[300px] flex flex-col items-center justify-center text-gray-400 border-2 border-dashed border-gray-200 bg-gray-50">
-                    <FileText className="w-12 h-12 mb-2 opacity-20" />
-                    <p className="text-sm">No document uploaded</p>
-                  </div>
-                )}
+                <SecureImage
+                  path={getActiveDocUrl()}
+                  bucket="merchant-docs"
+                  alt="KYC Document"
+                  className="max-w-[600px] min-w-[400px] min-h-[300px] h-auto object-contain"
+                />
               </div>
             </div>
 

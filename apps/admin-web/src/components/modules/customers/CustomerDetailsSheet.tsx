@@ -1,4 +1,4 @@
-import { Sheet, SheetContent, SheetTitle } from "../../ui/sheet";
+import { Sheet, SheetContent, SheetTitle, SheetHeader, SheetDescription } from "../../ui/sheet";
 import { Badge } from "../../ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../ui/tabs";
 import { ShoppingBag, Package, MapPin, Phone, Mail, Clock, Calendar } from "lucide-react";

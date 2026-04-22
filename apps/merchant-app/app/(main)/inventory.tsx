@@ -6,6 +6,7 @@ const Lottie = LottieView as any;
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useInventory } from '../../src/hooks/useInventory';
+import { useStore } from '../../src/context/StoreContext';
 import InventoryCard from '../../src/components/InventoryCard';
 import FilterModal, { FilterState } from '../../src/components/FilterModal';
 import AddCustomProductModal from '../../src/components/AddCustomProductModal';
@@ -34,6 +35,9 @@ const DEFAULT_FILTERS: FilterState = {
 export default function InventoryScreen() {
     const router = useRouter();
     const { inventory, loading, refreshing, error, refetch, updateItem, deleteItem, toggleStatus, storeId } = useInventory();
+    const { activeStoreId, branches } = useStore();
+
+    const activeBranch = branches.find(b => b.id === activeStoreId);
 
     const [itemToEdit, setItemToEdit] = useState<InventoryItem | null>(null);
     const [editModalVisible, setEditModalVisible] = useState(false);
@@ -139,7 +143,7 @@ export default function InventoryScreen() {
                 <View style={[styles.header, { borderBottomWidth: 0 }]}>
                     <Text style={styles.title}>Inventory</Text>
                     <View style={styles.storeBadge}>
-                        <Text style={styles.storeText}>Active Store</Text>
+                        <Text style={styles.storeText}>{activeBranch?.name || 'Active Store'}</Text>
                     </View>
                 </View>
 

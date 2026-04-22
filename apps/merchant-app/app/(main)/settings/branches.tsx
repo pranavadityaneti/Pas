@@ -1,24 +1,37 @@
 
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, TextInput, ScrollView, ActivityIndicator } from 'react-native';
+import React, { useState, useRef } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, TextInput, ScrollView, ActivityIndicator, LogBox } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import uuid from 'react-native-uuid';
+import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { useUser } from '../../../src/context/UserContext'; // Or useStore if linked strictly to store
 import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
 import { supabase } from '../../../src/lib/supabase';
-import { Colors } from '../../../constants/Colors';
+import { Colors } from '../../../constants/Colors'
 import BottomModal from '../../../src/components/BottomModal';
 
-interface Branch {
+LogBox.ignoreLogs(['VirtualizedLists should never be nested']);interface Branch {
     id: string;
     branch_name: string;
     address: string | null;
+    latitude: number | null;
+    longitude: number | null;
     manager_name: string | null;
     phone: string | null;
     is_active: boolean;
 }
+
+// Helper to extract city from Google Places address_components
+function extractCity(details: any): string {
+    const component = details?.address_components?.find((c: any) =>
+        c.types.includes('locality')
+    );
+    return component?.long_name || '';
+}
+
+const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyAQAg7zpYvmd2BJGCGmf1opDLDC4KXbKUg';
 
 export default function BranchesScreen() {
     const router = useRouter();
@@ -36,18 +49,24 @@ export default function BranchesScreen() {
     const [modalVisible, setModalVisible] = useState(false);
     const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
     const [saving, setSaving] = useState(false);
+    const placesRef = useRef<GooglePlacesAutocompleteRef | null>(null);
 
     // Form State
     const [form, setForm] = useState({
         name: '',
         address: '',
+        latitude: null as number | null,
+        longitude: null as number | null,
+        city: '',
         manager: '',
         phone: ''
     });
 
     const openAddModal = () => {
         setEditingBranch(null);
-        setForm({ name: '', address: '', manager: '', phone: '' });
+        setForm({ name: '', address: '', latitude: null, longitude: null, city: '', manager: '', phone: '' });
+        // Reset the autocomplete text after a brief delay (component needs to mount first)
+        setTimeout(() => placesRef.current?.setAddressText(''), 100);
         setModalVisible(true);
     };
 
@@ -56,9 +75,14 @@ export default function BranchesScreen() {
         setForm({
             name: branch.branch_name,
             address: branch.address || '',
+            latitude: branch.latitude ?? null,
+            longitude: branch.longitude ?? null,
+            city: '',
             manager: branch.manager_name || '',
             phone: branch.phone || ''
         });
+        // Pre-fill the autocomplete text
+        setTimeout(() => placesRef.current?.setAddressText(branch.address || ''), 100);
         setModalVisible(true);
     };
 
@@ -69,12 +93,24 @@ export default function BranchesScreen() {
             return;
         }
 
+        // Validate that coordinates were captured from place selection
+        if (form.address.trim() && (form.latitude === null || form.longitude === null)) {
+            Alert.alert(
+                'Select Address',
+                'Please select an address from the dropdown suggestions so we can capture the precise location.'
+            );
+            return;
+        }
+
         setSaving(true);
         try {
             const payload = {
                 merchant_id: user.id,
                 branch_name: form.name.trim(),
                 address: form.address.trim() || null,
+                latitude: form.latitude,
+                longitude: form.longitude,
+                city: form.city.trim() || null,
                 manager_name: form.manager.trim() || null,
                 phone: form.phone.trim() || null,
                 is_active: true
@@ -243,15 +279,88 @@ export default function BranchesScreen() {
                         />
                     </View>
 
-                    <View style={styles.inputGroup}>
+                    <View style={[styles.inputGroup, { zIndex: 9999 }]}>
                         <Text style={styles.label}>Address <Text style={{ color: '#EF4444' }}>*</Text></Text>
-                        <TextInput
-                            style={[styles.input, { height: 80 }]}
-                            placeholder="Full address"
-                            multiline
-                            value={form.address}
-                            onChangeText={t => setForm({ ...form, address: t })}
-                        />
+                        {GOOGLE_MAPS_API_KEY ? (
+                            <GooglePlacesAutocomplete
+                                ref={placesRef}
+                                placeholder="Search address..."
+                                fetchDetails={true}
+                                onPress={(data, details = null) => {
+                                    const city = extractCity(details);
+                                    setForm(prev => ({
+                                        ...prev,
+                                        address: details?.formatted_address || data.description,
+                                        latitude: details?.geometry?.location?.lat ?? null,
+                                        longitude: details?.geometry?.location?.lng ?? null,
+                                        city: city || prev.city,
+                                    }));
+                                }}
+                                onFail={(error) => {
+                                    console.error('Google API Error:', error);
+                                    Alert.alert('Google Maps Error', String(error) || 'Check terminal for details');
+                                }}
+                                textInputProps={{
+                                    onChangeText: (text: string) => {
+                                        setForm(prev => ({ ...prev, address: text, latitude: null, longitude: null }));
+                                    },
+                                    placeholderTextColor: '#9CA3AF',
+                                }}
+                                query={{
+                                    key: GOOGLE_MAPS_API_KEY,
+                                    language: 'en',
+                                    components: 'country:in',
+                                }}
+                                styles={{
+                                    container: { flex: 0, width: '100%', zIndex: 9999 },
+                                    textInput: {
+                                        borderWidth: 1,
+                                        borderColor: '#E5E7EB',
+                                        borderRadius: 8,
+                                        height: 50,
+                                        paddingHorizontal: 16,
+                                        backgroundColor: '#F9FAFB',
+                                        fontSize: 16,
+                                        color: '#000',
+                                    },
+                                    listView: {
+                                        position: 'absolute',
+                                        top: 50,
+                                        zIndex: 10000,
+                                        elevation: 10000,
+                                        backgroundColor: 'white',
+                                        shadowColor: '#000',
+                                        shadowOffset: { width: 0, height: 2 },
+                                        shadowOpacity: 0.25,
+                                        shadowRadius: 3.84,
+                                        borderRadius: 8,
+                                    },
+                                    row: { paddingVertical: 12, paddingHorizontal: 12 },
+                                    description: { fontSize: 14, color: '#374151' },
+                                    separator: { height: 1, backgroundColor: '#F3F4F6' },
+                                }}
+                                enablePoweredByContainer={false}
+                                debounce={300}
+                                minLength={3}
+                                nearbyPlacesAPI="GooglePlacesSearch"
+                            />
+                        ) : (
+                            <TextInput
+                                style={[styles.input, { height: 80 }]}
+                                placeholder="Full address (API key missing)"
+                                multiline
+                                value={form.address}
+                                onChangeText={t => setForm({ ...form, address: t })}
+                            />
+                        )}
+                        {form.latitude !== null && (
+                            <View style={styles.coordsBadge}>
+                                <Ionicons name="location" size={12} color="#10B981" />
+                                <Text style={styles.coordsText}>
+                                    📍 {form.latitude.toFixed(5)}, {form.longitude?.toFixed(5)}
+                                </Text>
+                            </View>
+                        )}
                     </View>
 
                     <View style={styles.row}>
@@ -327,5 +436,8 @@ const styles = StyleSheet.create({
     row: { flexDirection: 'row' },
 
     saveButton: { backgroundColor: Colors.primary, padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 8 },
-    saveButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 }
+    saveButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+
+    coordsBadge: { flexDirection: 'row', alignItems: 'center', marginTop: 6, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: '#F0FDF4', borderRadius: 6, alignSelf: 'flex-start', gap: 4 },
+    coordsText: { fontSize: 11, color: '#059669', fontWeight: '500' },
 });

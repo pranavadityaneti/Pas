@@ -1,14 +1,16 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
 import { useRouter } from 'expo-router';
 import { useNotificationContext } from '../../src/context/NotificationContext';
+import { useStore } from '../../src/hooks/useStore';
 
 export default function NotificationsScreen() {
     const router = useRouter();
     const { notifications, loading, markAsRead, markAllAsRead } = useNotificationContext();
+    const { activeStoreId, merchantId } = useStore();
 
     const getIcon = (type: string) => {
         switch (type) {
@@ -32,16 +34,20 @@ export default function NotificationsScreen() {
         return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
     };
 
-    const handleNotificationPress = async (notificationId: string, read: boolean, link?: string) => {
-        if (!read) {
+    const handleNotificationPress = async (notificationId: string, is_read: boolean, link?: string, notifStoreId?: string) => {
+        if (!is_read) {
             await markAsRead(notificationId);
         }
         if (link) {
-            // Check if link is a relative path or requires special handling
+            // Guard: ensure notification belongs to the currently active store
+            const currentStore = activeStoreId || merchantId;
+            if (notifStoreId && currentStore && notifStoreId !== currentStore) {
+                Alert.alert('Wrong Branch', 'Please switch to the correct branch to view this item.');
+                return;
+            }
             if (link.startsWith('/')) {
                 router.push(link as any);
             } else {
-                // Handle external links or other schemas if needed
                 console.log("External link:", link);
             }
         }
@@ -71,7 +77,7 @@ export default function NotificationsScreen() {
                     <Ionicons name="arrow-back" size={24} color="#111827" />
                 </TouchableOpacity>
                 <Text style={styles.title}>Notifications</Text>
-                {notifications.some(n => !n.read) && (
+                {notifications.some(n => !n.is_read) && (
                     <TouchableOpacity onPress={markAllAsRead}>
                         <Text style={styles.markAllRead}>Mark all read</Text>
                     </TouchableOpacity>
@@ -88,18 +94,18 @@ export default function NotificationsScreen() {
                     notifications.map((notif) => (
                         <TouchableOpacity
                             key={notif.id}
-                            style={[styles.notifCard, !notif.read && styles.unread]}
-                            onPress={() => handleNotificationPress(notif.id, notif.read, notif.link)}
+                            style={[styles.notifCard, !notif.is_read && styles.unread]}
+                            onPress={() => handleNotificationPress(notif.id, notif.is_read, notif.link, notif.storeId)}
                         >
-                            <View style={[styles.iconCircle, !notif.read && styles.iconCircleUnread]}>
-                                <Ionicons name={getIcon(notif.type) as any} size={20} color={notif.read ? '#6B7280' : Colors.primary} />
+                            <View style={[styles.iconCircle, !notif.is_read && styles.iconCircleUnread]}>
+                                <Ionicons name={getIcon(notif.type) as any} size={20} color={notif.is_read ? '#6B7280' : Colors.primary} />
                             </View>
                             <View style={styles.notifContent}>
                                 <Text style={styles.notifTitle}>{notif.title}</Text>
                                 <Text style={styles.notifMessage}>{notif.message}</Text>
                                 <Text style={styles.notifTime}>{formatTime(notif.createdAt)}</Text>
                             </View>
-                            {!notif.read && <View style={styles.unreadDot} />}
+                            {!notif.is_read && <View style={styles.unreadDot} />}
                         </TouchableOpacity>
                     ))
                 )}

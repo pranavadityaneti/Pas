@@ -41,7 +41,7 @@ export interface Order {
 // Removed Mock Data
 
 export function useOrders() {
-    const { storeId } = useStore();
+    const { storeId, merchantId, activeStoreId } = useStore();
 
     const [orders, setOrders] = useState<Order[]>([]);
     const [loading, setLoading] = useState(true);
@@ -65,7 +65,7 @@ export function useOrders() {
         else setLoading(true);
 
         try {
-            const { data, error } = await supabase
+            let query = supabase
                 .from('orders')
                 .select(`
                     *,
@@ -79,6 +79,19 @@ export function useOrders() {
                 `)
                 .eq('store_id', storeId)
                 .order('created_at', { ascending: false });
+
+            // Branch routing: scope orders to the active workspace
+            if (activeStoreId && merchantId) {
+                if (activeStoreId === merchantId) {
+                    // Main store selected — show orders without a branch
+                    query = query.is('branch_id', null);
+                } else {
+                    // Specific branch selected
+                    query = query.eq('branch_id', activeStoreId);
+                }
+            }
+
+            const { data, error } = await query;
 
             if (error) throw error;
 
@@ -126,22 +139,42 @@ export function useOrders() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [storeId]);
+    }, [storeId, activeStoreId]);
 
     useEffect(() => {
         fetchOrders();
 
         if (storeId) {
-            // Real-time updates from Supabase
-            const channel = supabase.channel(`orders-${storeId}`)
+            // Keep realtime subscription broad (store-level) to avoid
+            // Supabase filter quirks with is.null on branch_id
+            const channel = supabase.channel(`orders-${storeId}-${activeStoreId || 'main'}`)
                 .on('postgres_changes', {
                     event: '*',
                     schema: 'public',
                     table: 'orders',
                     filter: `store_id=eq.${storeId}`
                 }, (payload) => {
-                    console.log('Real-time order update:', payload);
-                    fetchOrders();
+                    const incoming = payload.new as any;
+                    const incomingBranchId = incoming?.branch_id || null;
+
+                    // Manually filter: only process if the payload matches the active workspace
+                    let isRelevant = true;
+                    if (activeStoreId && merchantId) {
+                        if (activeStoreId === merchantId) {
+                            // Main store view — only care about orders with no branch
+                            isRelevant = incomingBranchId === null;
+                        } else {
+                            // Branch view — only care about orders for this branch
+                            isRelevant = incomingBranchId === activeStoreId;
+                        }
+                    }
+
+                    if (isRelevant) {
+                        console.log('Real-time order update (relevant):', payload.eventType);
+                        fetchOrders();
+                    } else {
+                        console.log('Real-time order update (filtered out — different branch)');
+                    }
                 })
                 .subscribe();
 
@@ -149,7 +182,7 @@ export function useOrders() {
                 supabase.removeChannel(channel);
             };
         }
-    }, [storeId, fetchOrders]);
+    }, [storeId, activeStoreId, merchantId, fetchOrders]);
 
     const updateOrderStatus = async (orderId: string, status: OrderStatus, cancellationReason?: string) => {
 

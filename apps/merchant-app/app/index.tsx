@@ -1,61 +1,12 @@
 import { Redirect } from 'expo-router';
-import { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
-import { supabase } from '../src/lib/supabase';
 import { Colors } from '../constants/Colors';
+import { useStore } from '../src/context/StoreContext';
 
 export default function Index() {
-    const [loading, setLoading] = useState(true);
-    const [session, setSession] = useState<any>(null);
-    const [merchantStatus, setMerchantStatus] = useState<string | null>(null);
+    const { store, loading } = useStore();
 
-    useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            setSession(session);
-            if (session?.user) {
-                checkMerchantStatus(session.user.id);
-            } else {
-                setLoading(false);
-            }
-        });
-
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            setSession(session);
-            if (session?.user) {
-                checkMerchantStatus(session.user.id);
-            } else {
-                setMerchantStatus(null);
-                setLoading(false);
-            }
-        });
-
-        return () => subscription.unsubscribe();
-    }, []);
-
-    const checkMerchantStatus = async (userId: string) => {
-        try {
-            const { data, error } = await supabase
-                .from('merchants')
-                .select('status')
-                .eq('id', userId)
-                .maybeSingle();
-
-            if (error) throw error;
-            setMerchantStatus(data?.status || null);
-        } catch (error) {
-            console.error('Error checking merchant status:', error);
-            setMerchantStatus(null);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        if (session && merchantStatus && merchantStatus !== 'active') {
-            supabase.auth.signOut();
-        }
-    }, [session, merchantStatus]);
-
+    // If the context is still loading data, show a spinner
     if (loading) {
         return (
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F9FAFB' }}>
@@ -64,14 +15,12 @@ export default function Index() {
         );
     }
 
-    if (merchantStatus === 'active') {
-        return <Redirect href="/(main)/dashboard" />;
-    }
-
-    if (!session) {
-        console.log('[Index] Redirecting to login');
+    // If we are NOT loading and there is NO store, redirect to login
+    if (!store) {
+        console.log('[Index] No store in context, redirecting to login');
         return <Redirect href="/(auth)/login" />;
     }
 
-    return <Redirect href="/(auth)/login" />;
+    // Store exists, redirect to dashboard
+    return <Redirect href="/(main)/dashboard" />;
 }

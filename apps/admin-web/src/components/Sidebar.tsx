@@ -101,71 +101,9 @@ export function Sidebar() {
           </SidebarMenu>
         </SidebarGroup>
 
-        <SidebarGroup>
-          <SidebarGroupLabel>Growth</SidebarGroupLabel>
-          <SidebarMenu>
-            <Collapsible asChild defaultOpen={true} className="group/collapsible">
-              <SidebarMenuItem>
-                <CollapsibleTrigger asChild>
-                  <SidebarMenuButton tooltip="Growth & Engagement">
-                    <TrendingUp />
-                    <span>Growth & Engagement</span>
-                    <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
-                  </SidebarMenuButton>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <SidebarMenuButton asChild isActive={pathname === "/marketing"} size="sm" className="pl-8">
-                    <NavLink to="/marketing">
-                      <Megaphone className="size-4" />
-                      <span>Marketing</span>
-                    </NavLink>
-                  </SidebarMenuButton>
-                  <SidebarMenuButton asChild isActive={pathname === "/engagement"} size="sm" className="pl-8">
-                    <NavLink to="/engagement">
-                      <Bell className="size-4" />
-                      <span>Engagement</span>
-                    </NavLink>
-                  </SidebarMenuButton>
-                </CollapsibleContent>
-              </SidebarMenuItem>
-            </Collapsible>
-          </SidebarMenu>
-        </SidebarGroup>
 
-        <SidebarGroup>
-          <SidebarGroupLabel>Operations</SidebarGroupLabel>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive={pathname === "/finance"} tooltip="Finance">
-                <NavLink to="/finance">
-                  <Wallet />
-                  <span>Finance</span>
-                </NavLink>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive={pathname === "/analytics"} tooltip="Analytics">
-                <NavLink to="/analytics">
-                  <BarChart3 />
-                  <span>Analytics</span>
-                </NavLink>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton asChild isActive={pathname === "/settings"} tooltip="Settings">
-              <NavLink to="/settings">
-                <Settings />
-                <span>Settings</span>
-              </NavLink>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarFooter>
+
       <SidebarRail />
     </ShadcnSidebar>
   )

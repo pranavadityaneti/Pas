@@ -1,20 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, RefreshControl } from 'react-native';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { supabase } from '../lib/supabase';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
 import { formatDistanceToNow } from 'date-fns';
 import BottomModal from './BottomModal';
-
-interface Notification {
-    id: string;
-    type: 'ORDER' | 'SYSTEM' | 'INVENTORY';
-    title: string;
-    message: string;
-    is_read: boolean;
-    created_at: string;
-    link?: string;
-}
+import { useNotificationContext } from '../context/NotificationContext';
+import { Notification } from '../hooks/useNotifications';
 
 interface NotificationCenterProps {
     visible: boolean;
@@ -22,64 +13,19 @@ interface NotificationCenterProps {
 }
 
 export default function NotificationCenter({ visible, onClose }: NotificationCenterProps) {
-    const [notifications, setNotifications] = useState<Notification[]>([]);
-    const [loading, setLoading] = useState(true);
+    const { notifications, loading, markAsRead, markAllAsRead, refetch } = useNotificationContext();
     const [refreshing, setRefreshing] = useState(false);
 
     useEffect(() => {
         if (visible) {
-            fetchNotifications();
+            refetch();
         }
     }, [visible]);
 
-    const fetchNotifications = async () => {
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
-            const { data, error } = await supabase
-                .from('notifications')
-                .select('*')
-                .eq('user_id', user.id)
-                .order('created_at', { ascending: false })
-                .limit(50);
-
-            if (error) throw error;
-            setNotifications(data || []);
-        } catch (err) {
-            console.error('Error fetching notifications:', err);
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-        }
-    };
-
-    const markAsRead = async (id: string) => {
-        // Optimistic update
-        setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-
-        await supabase
-            .from('notifications')
-            .update({ is_read: true })
-            .eq('id', id);
-    };
-
-    const markAllAsRead = async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-
-        setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
-
-        await supabase
-            .from('notifications')
-            .update({ is_read: true })
-            .eq('user_id', user.id)
-            .eq('is_read', false);
-    };
-
-    const handleRefresh = () => {
+    const handleRefresh = async () => {
         setRefreshing(true);
-        fetchNotifications();
+        await refetch();
+        setRefreshing(false);
     };
 
     const renderItem = ({ item }: { item: Notification }) => (
@@ -93,7 +39,7 @@ export default function NotificationCenter({ visible, onClose }: NotificationCen
             <View style={styles.contentContainer}>
                 <View style={styles.headerRow}>
                     <Text style={styles.title}>{item.title}</Text>
-                    <Text style={styles.time}>{formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}</Text>
+                    <Text style={styles.time}>{formatDistanceToNow(new Date(item.createdAt), { addSuffix: true })}</Text>
                 </View>
                 <Text style={styles.message} numberOfLines={2}>{item.message}</Text>
             </View>

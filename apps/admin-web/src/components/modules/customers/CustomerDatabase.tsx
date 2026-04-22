@@ -169,13 +169,12 @@ export function CustomerDatabase() {
                                 <TableHead>Total LTV (₹)</TableHead>
                                 <TableHead>Last Activity</TableHead>
                                 <TableHead>Status</TableHead>
-                                <TableHead className="text-right">Actions</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {loading ? (
                                 <TableRow>
-                                    <TableCell colSpan={7} className="text-center py-20 text-gray-500">
+                                    <TableCell colSpan={6} className="text-center py-20 text-gray-500">
                                         <div className="flex items-center justify-center gap-2">
                                             <div className="w-4 h-4 border-2 border-fuchsia-500 border-t-transparent rounded-full animate-spin" />
                                             Reading customer records...
@@ -184,7 +183,7 @@ export function CustomerDatabase() {
                                 </TableRow>
                             ) : filteredCustomers.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={7} className="text-center py-20 text-gray-500">No customers found matching your filters.</TableCell>
+                                    <TableCell colSpan={6} className="text-center py-20 text-gray-500">No customers found matching your filters.</TableCell>
                                 </TableRow>
                             ) : (
                                 filteredCustomers.map((customer) => (
@@ -239,43 +238,6 @@ export function CustomerDatabase() {
                                             >
                                                 {customer.status.charAt(0).toUpperCase() + customer.status.slice(1)}
                                             </Badge>
-                                        </TableCell>
-                                        <TableCell className="text-right">
-                                            <div className="flex items-center justify-end gap-2">
-                                                <Button
-                                                    size="sm"
-                                                    variant="outline"
-                                                    className="text-fuchsia-600 border-fuchsia-100 hover:bg-fuchsia-50 hover:text-fuchsia-700 h-8 font-medium"
-                                                    onClick={() => handleGrantCredit(customer)}
-                                                >
-                                                    <Coins className="w-4 h-4 mr-1.5" />
-                                                    Credit
-                                                </Button>
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger asChild>
-                                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-gray-600">
-                                                            <MoreHorizontal className="w-4 h-4" />
-                                                        </Button>
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end">
-                                                        <DropdownMenuLabel>Support Tools</DropdownMenuLabel>
-                                                        <DropdownMenuSeparator />
-                                                        <DropdownMenuItem onClick={() => toast.info(`Viewing history for ${customer.name}`)}>
-                                                            <History className="w-4 h-4 mr-2" /> Purchase History
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuSeparator />
-                                                        {customer.status === 'active' ? (
-                                                            <DropdownMenuItem className="text-rose-600" onClick={() => blockCustomer(customer.id)}>
-                                                                <Ban className="w-4 h-4 mr-2" /> Deactivate Account
-                                                            </DropdownMenuItem>
-                                                        ) : (
-                                                            <DropdownMenuItem className="text-emerald-600">
-                                                                <Shield className="w-4 h-4 mr-2" /> Reactivate Account
-                                                            </DropdownMenuItem>
-                                                        )}
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
-                                            </div>
                                         </TableCell>
                                     </TableRow>
                                 ))

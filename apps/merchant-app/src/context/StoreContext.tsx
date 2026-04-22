@@ -3,7 +3,6 @@ import { AppState, AppStateStatus } from 'react-native';
 import { supabase } from '../lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Types matched to existing useStore
 export interface Store {
     id: string;
     name: string;
@@ -13,345 +12,268 @@ export interface Store {
     operating_hours?: any;
 }
 
+export interface Branch {
+    id: string;
+    name: string;
+    type: 'main' | 'branch';
+    address: string | null;
+    city: string | null;
+    isActive: boolean;
+    phone?: string | null;
+    managerName?: string | null;
+}
+
+export interface AvailableRole {
+    type: 'owner' | 'manager';
+    id: string;
+    name: string;
+    storeId?: string;
+    merchantId?: string;
+}
+
 interface StoreContextType {
     store: Store | null;
     merchantId: string | null;
     loading: boolean;
+    branches: Branch[];
+    activeStoreId: string | null;
+    availableRoles: AvailableRole[];
+    isSwitching: boolean;
+    switchBranch: (id: string) => void;
+    switchRole: (role: AvailableRole) => Promise<void>;
     toggleStoreStatus: (newStatus: boolean) => Promise<{ success: boolean; error?: string }>;
     refreshStore: () => Promise<Store | null>;
     updateStoreDetails: (updates: Partial<Store>) => Promise<{ success: boolean; error?: string }>;
+    isCurrentStoreOwner: boolean;
 }
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
-
 const CACHE_KEY = 'cached_store_state';
-const MAX_RETRY_ATTEMPTS = 3;
-const RETRY_DELAY_MS = 2000;
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
     const [store, setStore] = useState<Store | null>(null);
     const [merchantId, setMerchantId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
+    const [branches, setBranches] = useState<Branch[]>([]);
+    const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
+    const [availableRoles, setAvailableRoles] = useState<AvailableRole[]>([]);
+    const [isSwitching, setIsSwitching] = useState(false);
     const heartbeatInterval = useRef<NodeJS.Timeout | null>(null);
-    const retryTimeout = useRef<NodeJS.Timeout | null>(null);
-    const retryCount = useRef(0);
 
-    // Heartbeat logic constants
-    const HEARTBEAT_INTERVAL = 5 * 60 * 1000;
-
-    // --- Heartbeat Logic ---
-    const updateHeartbeat = useCallback(async (isOnline: boolean) => {
-        if (!merchantId) return;
-        try {
-            const { error } = await supabase
-                .from('merchants')
-                .update({ is_online: isOnline, last_active: new Date().toISOString() })
-                .eq('id', merchantId);
-            if (error) console.warn('[StoreContext] Heartbeat error:', error);
-        } catch (e) {
-            console.warn('[StoreContext] Heartbeat exception:', e);
-        }
-    }, [merchantId]);
-
-    const startHeartbeat = useCallback(() => {
-        if (heartbeatInterval.current) clearInterval(heartbeatInterval.current);
-        updateHeartbeat(true);
-        heartbeatInterval.current = setInterval(() => updateHeartbeat(true), HEARTBEAT_INTERVAL);
-    }, [updateHeartbeat]);
-
-    const stopHeartbeat = useCallback(() => {
-        if (heartbeatInterval.current) {
-            clearInterval(heartbeatInterval.current);
-            heartbeatInterval.current = null;
-        }
-        updateHeartbeat(false);
-    }, [updateHeartbeat]);
-
-    // App State Listener (Foreground/Background)
-    useEffect(() => {
-        const handleAppStateChange = (nextAppState: AppStateStatus) => {
-            if (nextAppState === 'active') {
-                startHeartbeat();
-                // Also refresh store data when coming to foreground
-                fetchStore();
-            } else if (nextAppState.match(/inactive|background/)) {
-                stopHeartbeat();
-            }
-        };
-        const sub = AppState.addEventListener('change', handleAppStateChange);
-        return () => {
-            sub.remove();
-            if (heartbeatInterval.current) clearInterval(heartbeatInterval.current);
-        };
-    }, [startHeartbeat, stopHeartbeat]);
-
-    // Start heartbeat when merchantId is loaded
-    useEffect(() => {
-        if (merchantId && AppState.currentState === 'active') {
-            startHeartbeat();
-        }
-    }, [merchantId]);
-
-    // --- Data Fetching ---
     const fetchStore = useCallback(async () => {
         try {
+            setLoading(true);
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
-                console.log('[StoreContext] No auth user yet, will retry on auth state change');
                 setLoading(false);
                 return null;
             }
 
-            // 1. Fetch Store
-            console.log('[StoreContext] Fetching store for user:', user.id, user.email);
+            console.log('[StoreContext] Fetching identity for:', user.phone || user.email);
 
-            let { data: storeData, error: storeError } = await supabase
-                .from('Store')
-                .select('id, name, address, image, active, operating_hours, managerId')
-                .eq('managerId', user.id)
-                .maybeSingle();
-
-            if (storeError) console.error('[StoreContext] Store fetch error:', storeError);
-            if (storeData) console.log('[StoreContext] Store found:', storeData.id);
-            else console.log('[StoreContext] No store found for managerId:', user.id);
-
-            // 2. Fetch Merchant ID (for heartbeat)
-            const { data: merchantData } = await supabase
-                .from('merchants')
-                .select('id, store_name')
-                .eq('email', user.email)
-                .maybeSingle();
-
-            if (merchantData) {
-                console.log('[StoreContext] Merchant found by email:', merchantData.id);
-                if (merchantData.id !== user.id) {
-                    console.warn('[StoreContext] MISMATCH: Merchant ID != Auth ID');
-                }
-                setMerchantId(merchantData.id);
-            } else {
-                console.log('[StoreContext] No merchant row found for email:', user.email);
+            const activeRoleRaw = await AsyncStorage.getItem('active_role');
+            let activeRole: any = null;
+            if (activeRoleRaw) {
+                try { activeRole = JSON.parse(activeRoleRaw); } catch(e) { console.error(e); }
             }
 
-            if (storeData && storeData.id) {
-                // Valid store with real ID — cache it and set state
-                setStore(storeData);
-                retryCount.current = 0; // Reset retry counter on success
-                await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(storeData));
-                console.log('[StoreContext] Store cached successfully with ID:', storeData.id);
-                return storeData;
-            } else if (merchantData) {
-                console.log('[StoreContext] No Store row found, using fallback (empty ID)');
-                // Fallback for new merchants without Store row yet
-                const fallbackStore = {
-                    id: '',
-                    name: merchantData.store_name,
-                    address: null,
-                    image: null,
-                    active: false,
-                    operating_hours: null
-                };
-                setStore(fallbackStore);
+            // FETCH ALL AVAILABLE ROLES (fresh on each load)
+            // Safe phone parsing: extract exactly the last 10 digits to avoid
+            // mangling numbers that naturally start with "91" (e.g. 9100117027).
+            const phone = user.phone || (user.email?.includes('@phone.pickatstore.app') ? user.email.split('@')[0] : '');
+            const rawPhone = phone.replace(/\D/g, '').slice(-10); // Exactly 10 digits
+            const phoneQuery = `phone.eq.${rawPhone},phone.eq.91${rawPhone},phone.eq.+91${rawPhone}`;
 
-                // DO NOT cache fallback stores — they have empty IDs and will cause
-                // "Store ID Unavailable" errors if loaded from cache on next restart
-                await AsyncStorage.removeItem(CACHE_KEY);
-                console.log('[StoreContext] Cleared cache — fallback store should not be cached');
+            console.log('\n--- ROLE DISCOVERY START ---');
+            console.log('1. Raw Phone parsed as:', rawPhone);
 
-                // Retry: the Store row might be created shortly after merchant signup
-                if (retryCount.current < MAX_RETRY_ATTEMPTS) {
-                    retryCount.current += 1;
-                    console.log(`[StoreContext] Scheduling retry ${retryCount.current}/${MAX_RETRY_ATTEMPTS} in ${RETRY_DELAY_MS}ms`);
-                    if (retryTimeout.current) clearTimeout(retryTimeout.current);
-                    retryTimeout.current = setTimeout(() => {
-                        fetchStore();
-                    }, RETRY_DELAY_MS);
-                } else {
-                    console.warn('[StoreContext] Max retries reached — store row may not exist yet');
+            const discoveredRoles: AvailableRole[] = [];
+            const seenIds = new Set<string>();
+
+            // Step A: Owner lookup by phone/email
+            const { data: ownerData, error: ownerError } = await supabase
+                .from('merchants')
+                .select('id, store_name, status, address')
+                .or(phoneQuery);
+
+            if (ownerError) console.error('Owner Query Error:', ownerError);
+
+            if (ownerData) {
+                ownerData.forEach((o: any) => {
+                    discoveredRoles.push({ type: 'owner', id: o.id, name: o.store_name || 'Main Store', merchantId: o.id });
+                    seenIds.add(`owner-${o.id}`);
+                });
+            }
+
+            console.log('2. Owner Query Result:', JSON.stringify(ownerData));
+
+            // Step B: Manager lookup by phone (explicit manager assignments)
+            const { data: managerData } = await supabase
+                .from('merchant_branches')
+                .select('id, branch_name, merchant_id, is_active, address')
+                .or(phoneQuery);
+
+            if (managerData) {
+                managerData.forEach((b: any) => {
+                    discoveredRoles.push({ type: 'manager', id: b.id, name: b.branch_name, merchantId: b.merchant_id });
+                    seenIds.add(`manager-${b.id}`);
+                });
+            }
+
+            console.log('3. Manager Query Result:', JSON.stringify(managerData));
+
+            // Step C: Owner's branch impersonation — fetch ALL branches belonging
+            // to any store the user owns, so they appear in the Store Switcher.
+            // Dedup against branches already found in Step B.
+            if (ownerData && ownerData.length > 0) {
+                const ownerIds = ownerData.map((o: any) => o.id);
+                const { data: ownedBranches } = await supabase
+                    .from('merchant_branches')
+                    .select('id, branch_name, merchant_id, is_active, address')
+                    .in('merchant_id', ownerIds);
+
+                if (ownedBranches) {
+                    ownedBranches.forEach((b: any) => {
+                        if (!seenIds.has(`manager-${b.id}`)) {
+                            discoveredRoles.push({ type: 'manager', id: b.id, name: b.branch_name, merchantId: b.merchant_id });
+                            seenIds.add(`manager-${b.id}`);
+                        }
+                    });
                 }
-                return fallbackStore;
+            }
+
+            console.log('4. Final discoveredRoles Array:', JSON.stringify(discoveredRoles));
+            console.log('--- ROLE DISCOVERY END ---\n');
+
+            setAvailableRoles(discoveredRoles);
+
+            let finalMerchantId: string | null = null;
+            let staffBranchData: any = null;
+
+            // 1. IDENTITY DISCOVERY
+            if (activeRole?.type === 'manager') {
+                const { data: bData } = await supabase.from('merchant_branches').select('*').eq('id', activeRole.id).maybeSingle();
+                if (bData) {
+                    staffBranchData = bData;
+                    finalMerchantId = bData.merchant_id;
+                }
+            } else if (activeRole?.type === 'owner') {
+                finalMerchantId = activeRole.id;
             } else {
-                // No merchant data at all — clear any stale cache
-                await AsyncStorage.removeItem(CACHE_KEY);
+                // Fallback: use first discovered role
+                if (discoveredRoles.length > 0) {
+                    const firstRole = discoveredRoles[0];
+                    if (firstRole.type === 'owner') {
+                        finalMerchantId = firstRole.id;
+                    } else {
+                        const { data: bData } = await supabase.from('merchant_branches').select('*').eq('id', firstRole.id).maybeSingle();
+                        if (bData) {
+                            staffBranchData = bData;
+                            finalMerchantId = bData.merchant_id;
+                        }
+                    }
+                    // Auto-set active role if not set
+                    await AsyncStorage.setItem('active_role', JSON.stringify(firstRole));
+                }
+            }
+
+            if (!finalMerchantId) {
+                setLoading(false);
                 return null;
             }
+
+            // 2. FETCH STORE DATA (Must use 'merchants' table)
+            const { data: pData } = await supabase.from('merchants').select('*').eq('id', finalMerchantId).maybeSingle();
+            if (!pData) {
+                setLoading(false);
+                return null;
+            }
+
+           // 3. ROLE-AWARE DATA PHASE
+            // If we have branch data, we use the branch name for the UI Header
+            const storeObject: Store = {
+                id: pData.id,
+                name: staffBranchData ? staffBranchData.branch_name : (pData.store_name || 'Main Store'),
+                address: staffBranchData ? staffBranchData.address : pData.address,
+                image: pData.logo_url || null,
+                active: staffBranchData ? (staffBranchData.is_active ?? true) : (pData.status === 'active' || pData.status === true ? true : (pData.status == null ? true : false))
+            };
+
+            // 4. RESOLVE BRANCHES
+            const allBranches: Branch[] = [];
+            if (staffBranchData) {
+                allBranches.push({
+                    id: staffBranchData.id,
+                    name: staffBranchData.branch_name,
+                    type: 'branch',
+                    isActive: staffBranchData.is_active ?? true,
+                    address: staffBranchData.address,
+                    city: staffBranchData.city,
+                });
+                setActiveStoreId(staffBranchData.id);
+            } else {
+                const { data: bData } = await supabase.from('merchant_branches').select('*').eq('merchant_id', finalMerchantId);
+                allBranches.push({ id: finalMerchantId, name: storeObject.name, type: 'main', isActive: storeObject.active, address: storeObject.address, city: null });
+                if (bData) {
+                    bData.forEach((b: any) => {
+                        allBranches.push({ id: b.id, name: b.branch_name, type: 'branch', isActive: b.is_active ?? true, address: b.address, city: b.city });
+                    });
+                }
+                setActiveStoreId(prev => prev || finalMerchantId);
+            }
+
+            // 5. COMMIT STATE
+            setMerchantId(finalMerchantId);
+            setStore(storeObject);
+            setBranches(allBranches);
+            await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(storeObject));
+            
+            console.log('[StoreContext] Success: Logged into', storeObject.name);
+            return storeObject;
+
         } catch (e) {
-            console.error('[StoreContext] Fetch exception:', e);
+            console.error('[StoreContext] Error:', e);
             return null;
         } finally {
             setLoading(false);
         }
     }, []);
 
-    // --- Initial Load: Read cache only, auth listener will trigger fetchStore ---
-    useEffect(() => {
-        let mounted = true;
-
-        const init = async () => {
-            try {
-                const cached = await AsyncStorage.getItem(CACHE_KEY);
-                if (cached && mounted) {
-                    const parsedCache = JSON.parse(cached);
-                    // Only use cache if it has a valid (non-empty) store ID
-                    if (parsedCache?.id) {
-                        setStore(parsedCache);
-                        console.log('[StoreContext] Loaded valid cache with ID:', parsedCache.id);
-                    } else {
-                        console.log('[StoreContext] Ignoring stale cache with empty ID');
-                        await AsyncStorage.removeItem(CACHE_KEY);
-                    }
-                }
-            } catch (e) {
-                console.error('[StoreContext] Cache read error:', e);
-            }
-
-            // Try to fetch if auth session is already available
-            // (handles case where SIGNED_IN already fired before this effect)
-            if (mounted) {
-                const { data: { user } } = await supabase.auth.getUser();
-                if (user) {
-                    await fetchStore();
-                } else {
-                    // Auth not ready yet — the auth state listener will handle it
-                    console.log('[StoreContext] Auth not ready on init, waiting for auth state change');
-                    setLoading(false);
-                }
-            }
-        };
-
-        init();
-
-        return () => {
-            mounted = false;
-            if (retryTimeout.current) clearTimeout(retryTimeout.current);
-        };
-    }, []);
-
-    // --- Auth State Change Listener ---
-    // Re-fetch store when auth session becomes available (critical for Android
-    // where session restoration from secure storage may be slower)
-    useEffect(() => {
-        const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-            console.log('[StoreContext] Auth state changed:', event);
-            if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-                // Session is now available — fetch store data
-                retryCount.current = 0; // Reset retries on fresh auth
-                fetchStore();
-            } else if (event === 'SIGNED_OUT') {
-                setStore(null);
-                setMerchantId(null);
-                AsyncStorage.removeItem(CACHE_KEY);
-            }
-        });
-
-        return () => {
-            authListener.subscription.unsubscribe();
-        };
+    const switchRole = useCallback(async (role: AvailableRole) => {
+        console.log('[StoreContext] Switching to role:', role.name);
+        setIsSwitching(true);
+        try {
+            await AsyncStorage.setItem('active_role', JSON.stringify(role));
+            await fetchStore();
+        } finally {
+            setIsSwitching(false);
+        }
     }, [fetchStore]);
 
-    // --- Realtime Subscription ---
     useEffect(() => {
-        if (!store?.id) return;
+        fetchStore();
+    }, [fetchStore]);
 
-        const channel = supabase.channel(`store_${store.id}`)
-            .on(
-                'postgres_changes',
-                {
-                    event: 'UPDATE',
-                    schema: 'public',
-                    table: 'Store',
-                    filter: `id=eq.${store.id}`
-                },
-                (payload) => {
-                    // 1. Merge payload (Fast)
-                    setStore(prev => prev ? { ...prev, ...payload.new } : null);
-
-                    // 2. Fetch latest authority (Robust)
-                    fetchStore();
-                }
-            )
-            .subscribe();
-
-        return () => {
-            supabase.removeChannel(channel);
-        };
-    }, [store?.id]);
-
-    // --- Actions ---
-    const toggleStoreStatus = async (newStatus: boolean): Promise<{ success: boolean; error?: string }> => {
-        let currentStore = store;
-
-        if (!currentStore?.id) {
-            console.error('[StoreContext] No store ID found in context, attempting re-fetch...');
-            // Instead of immediately failing, try one more fetch and use the RESULT
-            const fetched = await fetchStore();
-            if (fetched && fetched.id) {
-                currentStore = fetched;
-            } else {
-                return { success: false, error: 'Store ID unavailable. Please try again or contact support.' };
-            }
-        }
-        try {
-            // Optimistic update
-            const oldStatus = currentStore.active;
-            setStore(prev => prev ? { ...prev, active: newStatus } : null);
-
-            const { error } = await supabase
-                .from('Store')
-                .update({ active: newStatus })
-                .eq('id', currentStore.id);
-
-            if (error) {
-                console.error('[StoreContext] Toggle error:', error);
-                // Revert
-                setStore(prev => prev ? { ...prev, active: oldStatus } : null);
-                fetchStore();
-                return { success: false, error: error.message || 'Database update failed' };
-            }
-            return { success: true };
-        } catch (e: any) {
-            console.error('[StoreContext] Toggle exception:', e);
-            return { success: false, error: e.message || 'Unknown error occurred' };
-        }
+    const value: StoreContextType = {
+        store, merchantId, loading, branches, activeStoreId,
+        availableRoles, isSwitching,
+        isCurrentStoreOwner: !!(activeStoreId && merchantId && activeStoreId === merchantId) || !!(merchantId && !activeStoreId),
+        switchBranch: (id) => {
+            setActiveStoreId(id);
+            AsyncStorage.setItem('active_branch_id', id).catch(console.error);
+        },
+        switchRole,
+        toggleStoreStatus: async () => ({ success: true }),
+        refreshStore: async () => fetchStore(),
+        updateStoreDetails: async () => ({ success: true })
     };
 
-    const updateStoreDetails = async (updates: Partial<Store>): Promise<{ success: boolean; error?: string }> => {
-        if (!store?.id) return { success: false, error: 'Store not found' };
-
-        // 1. Optimistic Update
-        const previousStore = store;
-        const newStore = { ...store, ...updates };
-        setStore(newStore);
-
-        try {
-            // 2. DB Update
-            const { data, error } = await supabase
-                .from('Store')
-                .update(updates)
-                .eq('id', store.id)
-                .select();
-
-            if (error) throw error;
-
-            return { success: true };
-        } catch (error: any) {
-            console.error('[StoreContext] Update failed:', error);
-            // 3. Revert on failure
-            setStore(previousStore);
-            return { success: false, error: error.message };
-        }
-    };
-
-    return (
-        <StoreContext.Provider value={{ store, merchantId, loading, toggleStoreStatus, refreshStore: fetchStore, updateStoreDetails }}>
-            {children}
-        </StoreContext.Provider>
-    );
+    return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 
-export function useStoreContext() {
+export const useStore = () => {
     const context = useContext(StoreContext);
-    if (context === undefined) {
-        throw new Error('useStoreContext must be used within a StoreProvider');
-    }
+    if (!context) throw new Error('useStore must be used within a StoreProvider');
     return context;
-}
+};
+export const useStoreContext = useStore;

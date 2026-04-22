@@ -1,14 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
     View, Text, TextInput, TouchableOpacity, StyleSheet,
-    Platform, ActivityIndicator, Alert, Image
+    Platform, ActivityIndicator, Alert, Image, Modal
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { supabase, setSessionFromTokens } from '../../src/lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '../../constants/Colors';
+import { useStore } from '../../src/context/StoreContext';
 
 const getApiUrl = () => {
     return process.env.EXPO_PUBLIC_API_URL;
@@ -34,12 +36,16 @@ type AuthMode = 'phone-input' | 'phone-otp';
 export default function LoginScreen() {
     const [mode, setMode] = useState<AuthMode>('phone-input');
     const [loading, setLoading] = useState(false);
+    const [showRoleModal, setShowRoleModal] = useState(false);
+    const [multiRoles, setMultiRoles] = useState<any[]>([]);
 
     // Phone OTP state
     const [phoneNumber, setPhoneNumber] = useState('');
     const [otpValues, setOtpValues] = useState(['', '', '', '', '', '']);
     const [resendTimer, setResendTimer] = useState(0);
     const otpRefs = useRef<(TextInput | null)[]>([]);
+
+    const { refreshStore } = useStore();
 
     useEffect(() => {
         if (resendTimer > 0) {
@@ -99,34 +105,84 @@ export default function LoginScreen() {
             // Set Supabase Session
             await setSessionFromTokens(data.session.access_token, data.session.refresh_token);
 
-            // Fetch merchant status
-            const { data: merchant, error: merchantError } = await supabase
+            // AGGREGATED ROLE DISCOVERY (Owners + Branch Managers)
+            // Safe phone parsing: extract exactly the last 10 digits
+            let userPhone = data.user?.phone || '';
+            if (!userPhone && data.user?.email?.includes('@phone.pickatstore.app')) {
+                userPhone = data.user.email.split('@')[0];
+            }
+            const rawPhone = userPhone.replace(/\D/g, '').slice(-10);
+            const phoneQuery = `phone.eq.${rawPhone},phone.eq.91${rawPhone},phone.eq.+91${rawPhone}`;
+
+            const availableRoles: Array<any> = [];
+            const seenIds = new Set<string>();
+
+            // Step A: Owner lookup
+            const { data: owners } = await supabase
                 .from('merchants')
-                .select('status, kyc_status')
-                .eq('id', data.user.id)
-                .maybeSingle();
+                .select('id, store_name, status, kyc_status')
+                .or(phoneQuery);
 
-            if (merchantError || !merchant) {
-                Alert.alert('Error', 'No merchant record found for this number.');
+            if (owners && owners.length > 0) {
+                owners.forEach((owner: any) => {
+                    availableRoles.push({ type: 'owner', id: owner.id, name: owner.store_name || data.user.email, status: owner.status, kyc_status: owner.kyc_status, merchantId: owner.id });
+                    seenIds.add(`owner-${owner.id}`);
+                });
+            }
+
+            // Step B: Explicit manager lookup
+            const { data: managedBranches } = await supabase
+                .from('merchant_branches')
+                .select('id, branch_name, merchant_id')
+                .or(phoneQuery);
+
+            if (managedBranches && managedBranches.length > 0) {
+                managedBranches.forEach((b: any) => {
+                    availableRoles.push({ type: 'manager', id: b.id, name: b.branch_name, storeId: b.merchant_id, merchantId: b.merchant_id });
+                    seenIds.add(`manager-${b.id}`);
+                });
+            }
+
+            // Step C: Owner's branch impersonation — show all branches they own
+            if (owners && owners.length > 0) {
+                const ownerIds = owners.map((o: any) => o.id);
+                const { data: ownedBranches } = await supabase
+                    .from('merchant_branches')
+                    .select('id, branch_name, merchant_id')
+                    .in('merchant_id', ownerIds);
+
+                if (ownedBranches && ownedBranches.length > 0) {
+                    ownedBranches.forEach((b: any) => {
+                        if (!seenIds.has(`manager-${b.id}`)) {
+                            availableRoles.push({ type: 'manager', id: b.id, name: b.branch_name, storeId: b.merchant_id, merchantId: b.merchant_id });
+                            seenIds.add(`manager-${b.id}`);
+                        }
+                    });
+                }
+            }
+
+            if (availableRoles.length === 0) {
+                Alert.alert('Access Denied', 'No owner or branch roles found for this account.');
                 await supabase.auth.signOut();
                 return;
             }
 
-            if (merchant.kyc_status === 'rejected') {
-                Alert.alert('Account Rejected', 'Your application was rejected. Please contact support.');
-                await supabase.auth.signOut();
+            if (availableRoles.length === 1) {
+                await AsyncStorage.setItem('active_role', JSON.stringify(availableRoles[0]));
+                if (refreshStore) {
+                    await refreshStore();
+                }
+                // Add the same buffer here to prevent the Auth Guard race condition
+                setTimeout(() => {
+                    router.replace('/');
+                }, 600);
                 return;
-            }
-
-            if (merchant.status === 'active') {
-                router.replace('/(main)/dashboard');
             } else {
-                Alert.alert(
-                    'Account Under Review',
-                    'Your account is pending approval. You will be able to login once an admin approves your request.'
-                );
-                await supabase.auth.signOut();
+                setMultiRoles(availableRoles);
+                setShowRoleModal(true);
             }
+
+            return;
         } catch (error: any) {
             console.error('[Login] Verify OTP Error:', error);
             Alert.alert('Verification Failed', error.message || 'Incorrect OTP or network error. Please try again.');
@@ -146,6 +202,25 @@ export default function LoginScreen() {
         if (e.nativeEvent.key === 'Backspace' && !otpValues[index] && index > 0) {
             otpRefs.current[index - 1]?.focus();
         }
+    };
+
+    const handleSelectRole = async (role: any) => {
+        console.log('\n=== ROLE SELECTION ===');
+        console.log('1. User tapped:', role.name);
+        
+        await AsyncStorage.setItem('active_role', JSON.stringify(role));
+        setShowRoleModal(false);
+        
+        if (refreshStore) {
+            console.log('2. Triggering Context Refresh...');
+            await refreshStore();
+        }
+
+        // Use a slightly longer buffer and the EXPLICIT group route
+        setTimeout(() => {
+            console.log('3. Executing route to /');
+            router.replace('/'); 
+        }, 800);
     };
 
     return (
@@ -260,6 +335,25 @@ export default function LoginScreen() {
                 </View>
 
                 <Text style={styles.footer}>Protected by Pick At Store Secure Gateway</Text>
+
+                {/* Role Selection Modal */}
+                <Modal visible={showRoleModal} transparent={true} animationType="slide">
+                    <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'flex-end' }}>
+                        <View style={{ backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 }}>
+                            <View style={{ width: 40, height: 4, backgroundColor: '#ddd', borderRadius: 2, alignSelf: 'center', marginBottom: 16 }} />
+                            <Text style={{ fontSize: 20, fontWeight: '700', marginBottom: 20 }}>Select Account</Text>
+                            {multiRoles.map((role, index) => (
+                                <TouchableOpacity key={index} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' }} onPress={() => handleSelectRole(role)}>
+                                    <Text style={{ fontSize: 24, marginRight: 16 }}>{role.type === 'owner' ? '👑' : '🏪'}</Text>
+                                    <View>
+                                        <Text style={{ fontSize: 16, fontWeight: '600' }}>{role.name}</Text>
+                                        <Text style={{ fontSize: 14, color: '#666' }}>{role.type === 'owner' ? 'Store Owner' : 'Branch Manager'}</Text>
+                                    </View>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    </View>
+                </Modal>
             </KeyboardAwareScrollView>
         </SafeAreaView>
     );
@@ -444,5 +538,56 @@ const styles = StyleSheet.create({
     logo: {
         width: 120,
         height: 120,
+    },
+    modalContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    },
+    modalContent: {
+        width: '80%',
+        backgroundColor: '#FFFFFF',
+        borderRadius: 16,
+        padding: 24,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    modalTitle: {
+        fontSize: 20,
+        fontWeight: '700',
+        color: '#111827',
+        marginBottom: 8,
+    },
+    modalSubtitle: {
+        fontSize: 14,
+        color: '#6B7280',
+        marginBottom: 16,
+    },
+    roleOption: {
+        paddingVertical: 12,
+        borderBottomWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    roleOptionText: {
+        fontSize: 16,
+        color: '#111827',
+        fontWeight: '600',
+    },
+    closeModalButton: {
+        marginTop: 16,
+        paddingVertical: 12,
+        backgroundColor: Colors.primary,
+        borderRadius: 12,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    closeModalButtonText: {
+        color: '#FFFFFF',
+        fontSize: 16,
+        fontWeight: '600',
     },
 });

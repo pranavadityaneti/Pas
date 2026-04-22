@@ -36,6 +36,7 @@ import { MerchantDetailsSheet } from './MerchantDetailsSheet';
 import { MerchantReportDialog } from './MerchantReportDialog';
 import { useMerchants, Merchant } from '../../../hooks/useMerchants';
 import api from '../../../lib/api';
+import { supabase } from '../../../lib/supabaseClient';
 
 type SortField = 'rating' | 'city' | 'orders_30d' | 'revenue_30d' | null;
 type SortDirection = 'asc' | 'desc';
@@ -134,7 +135,13 @@ export function MerchantDirectory() {
   const handleBulkStatus = async (status: 'active' | 'inactive') => {
     const toastId = toast.loading(`Updating status to ${status}...`);
     try {
-      await Promise.all(selectedMerchants.map(id => updateMerchant(id, { status })));
+      const { error } = await supabase
+        .from('merchants')
+        .update({ status })
+        .in('id', selectedMerchants);
+
+      if (error) throw error;
+
       toast.success(`Selected merchants marked as ${status}`, { id: toastId });
       setSelectedMerchants([]);
       fetchMerchants();
@@ -345,21 +352,11 @@ export function MerchantDirectory() {
                   />
                 </TableHead>
                 <TableHead className="w-[200px]">Store Name</TableHead>
-                <TableHead>Branch</TableHead>
+                <TableHead>Branch Name</TableHead>
                 <TableHead>Owner Name</TableHead>
-                <TableHead>Catalog</TableHead>
+                <TableHead>Phone Number</TableHead>
                 <TableHead>
                   <SortableHeader field="city">City</SortableHeader>
-                </TableHead>
-                <TableHead className="text-center">
-                  <SortableHeader field="rating">Rating</SortableHeader>
-                </TableHead>
-                <TableHead className="text-center">Live Status</TableHead>
-                <TableHead className="text-center">
-                  <SortableHeader field="orders_30d">Orders (30d)</SortableHeader>
-                </TableHead>
-                <TableHead className="text-center">
-                  <SortableHeader field="revenue_30d">Revenue</SortableHeader>
                 </TableHead>
                 <TableHead className="text-center">Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -411,56 +408,12 @@ export function MerchantDirectory() {
                     </TableCell>
                     <TableCell className="text-gray-600 cursor-pointer" onClick={() => setSelectedMerchant(merchant)}>{merchant.branch_name || '-'}</TableCell>
                     <TableCell className="cursor-pointer" onClick={() => setSelectedMerchant(merchant)}>
-                      <div className="flex flex-col">
-                        <span className="text-sm text-gray-900">{merchant.owner_name}</span>
-                        <span className="text-xs text-gray-500">{merchant.phone}</span>
-                      </div>
+                      <span className="text-sm text-gray-900">{merchant.owner_name}</span>
                     </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={merchant.kyc_status === 'pending'} // Already synced logic
-                        className="h-7 text-xs gap-1.5 text-primary hover:text-primary/90 hover:bg-primary/5 border-primary/20"
-                        onClick={() => setInventoryMerchant({ id: merchant.id, store_name: merchant.store_name })}
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        Full View
-                      </Button>
+                    <TableCell className="text-sm text-gray-500 cursor-pointer" onClick={() => setSelectedMerchant(merchant)}>
+                      {merchant.phone}
                     </TableCell>
                     <TableCell className="cursor-pointer" onClick={() => setSelectedMerchant(merchant)}>{merchant.city}</TableCell>
-                    <TableCell className="text-center cursor-pointer" onClick={() => setSelectedMerchant(merchant)}>
-                      <Badge variant="secondary" className="bg-yellow-100 text-yellow-700 hover:bg-yellow-100 border-none gap-1">
-                        {merchant.rating || 'N/A'} <Star className="w-3 h-3 fill-yellow-600 text-yellow-600" />
-                      </Badge>
-                    </TableCell>
-
-                    {/* Live Status Column */}
-                    < TableCell className="text-center cursor-pointer" onClick={() => setSelectedMerchant(merchant)} >
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <div className="flex items-center justify-center gap-2">
-                            <span className={`w-2.5 h-2.5 rounded-full ${merchant.is_online ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
-                            <span className={`text-xs font-medium ${merchant.is_online ? 'text-green-700' : 'text-gray-500'}`}>
-                              {merchant.is_online ? 'Online' : 'Offline'}
-                            </span>
-                          </div>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Last active: {merchant.last_active || 'Unknown'}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TableCell>
-
-                    {/* Orders (30d) Column */}
-                    <TableCell className="text-center cursor-pointer" onClick={() => setSelectedMerchant(merchant)}>
-                      <span className="font-medium text-gray-900">{merchant.orders_30d || 0}</span>
-                    </TableCell>
-
-                    {/* Revenue Column */}
-                    <TableCell className="text-center cursor-pointer" onClick={() => setSelectedMerchant(merchant)}>
-                      <span className="font-semibold text-green-700">{formatCurrency(merchant.revenue_30d || 0)}</span>
-                    </TableCell>
 
                     <TableCell className="text-center">
                       <div className="flex justify-center">
@@ -494,21 +447,6 @@ export function MerchantDirectory() {
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent>Edit Details</TooltipContent>
-                        </Tooltip>
-
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              size="icon"
-                              variant="outline"
-                              disabled={merchant.kyc_status === 'pending'}
-                              className="h-8 w-8 text-gray-700 border-gray-200 hover:bg-gray-50"
-                              onClick={() => setReportMerchant(merchant)}
-                            >
-                              <BarChart3 className="w-3.5 h-3.5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>View Report</TooltipContent>
                         </Tooltip>
                       </div>
                     </TableCell>

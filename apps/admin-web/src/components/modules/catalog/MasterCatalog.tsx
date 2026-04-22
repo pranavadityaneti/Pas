@@ -877,9 +877,11 @@ export function MasterCatalog() {
                       />
                     </TableHead>
                     <TableHead className="w-[80px]">Image</TableHead>
-                    <TableHead className="w-[180px]">Vertical (Tier 1)</TableHead>
-                    <TableHead className="w-[180px]">Category (Tier 2)</TableHead>
-                    <TableHead className="w-[150px]">Global MRP (₹)</TableHead>
+                    <TableHead className="w-[300px]">Product Details</TableHead>
+                    <TableHead className="w-[150px]">Vertical</TableHead>
+                    <TableHead className="w-[100px]">UOM</TableHead>
+                    <TableHead className="w-[150px]">Category</TableHead>
+                    <TableHead className="w-[120px]">Global MRP (₹)</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
                 </TableHeader>

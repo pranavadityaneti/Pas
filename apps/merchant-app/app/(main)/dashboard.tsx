@@ -178,7 +178,11 @@ export default function DashboardScreen() {
                             onPress={() => router.push('/(main)/notifications')}
                         >
                             <Ionicons name="notifications-outline" size={24} color="#374151" />
-                            {unreadCount > 0 && <View style={styles.notificationBadge} />}
+                            {unreadCount > 0 && (
+                                <View style={styles.notificationBadge}>
+                                    <Text style={styles.notificationBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                                </View>
+                            )}
                         </TouchableOpacity>
                     </View>
 
@@ -339,7 +343,8 @@ const styles = StyleSheet.create({
         color: '#6B7280'
     },
     notificationButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-    notificationBadge: { position: 'absolute', top: 10, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444' },
+    notificationBadge: { position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, borderRadius: 8, backgroundColor: '#EF4444', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 3 },
+    notificationBadgeText: { color: '#fff', fontSize: 9, fontWeight: '700' },
     statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 24 },
     statCard: { width: '48%', backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
     statIcon: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
