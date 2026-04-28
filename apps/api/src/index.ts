@@ -16,6 +16,7 @@ import { smsService } from './services/sms.service';
 import { watiService } from './services/wati.service';
 import { apifyService } from './services/apify.service';
 import { sendApplicationReceivedEmail, sendStoreApprovedEmail, sendStoreRejectedEmail } from './services/email.service';
+import staffRouter from './routes/staff';
 
 // --- Configuration ---
 const app = express();
@@ -45,6 +46,9 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
 app.use(helmet());
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '50mb' }));
+
+// --- Staff RBAC Routes ---
+app.use('/api/staff', staffRouter);
 
 // --- Helper Functions ---
 async function getAuthUser(req: express.Request) {
@@ -2727,20 +2731,34 @@ app.post('/auth/send-otp', async (req, res) => {
         const barePhone = phone.replace(/^91/, '');
         
         if (isSignup || isLogin) {
+            // Check if user is an Owner
             const { data: existingMerchants } = await supabaseAdmin
                 .from('merchants')
                 .select('id')
                 .eq('phone', barePhone)
                 .limit(1);
 
-            const existingMerchant = existingMerchants && existingMerchants.length > 0 ? existingMerchants[0] : null;
+            let existingUser = existingMerchants && existingMerchants.length > 0 ? existingMerchants[0] : null;
 
-            if (isSignup && existingMerchant) {
+            // Fallback: Check if user is Staff
+            if (!existingUser) {
+                const { data: staffData } = await supabaseAdmin
+                    .from('store_staff')
+                    .select('id')
+                    .eq('phone', barePhone)
+                    .limit(1);
+                
+                if (staffData && staffData.length > 0) {
+                    existingUser = staffData[0];
+                }
+            }
+
+            if (isSignup && existingUser) {
                 return res.status(409).json({ error: 'This phone number is already registered. Please login instead.' });
             }
 
-            if (isLogin && !existingMerchant) {
-                return res.status(404).json({ error: 'No merchant account found for this number. Please apply as partner first.' });
+            if (isLogin && !existingUser) {
+                return res.status(404).json({ error: 'No merchant or staff account found for this number. Please apply as partner first.' });
             }
         }
 
@@ -2797,9 +2815,76 @@ app.post('/auth/send-otp', async (req, res) => {
  * Validate OTP → create or find Supabase user → return session
  * Body: { phone: "91XXXXXXXXXX", otp: "123456" }
  */
-app.post('/auth/verify-otp', async (req, res) => {
+app.post('/auth/verify-otp', async (req: any, res: any) => {
+    // [INJECT: Verify OTP Reviewer Bypass - Auto-Provisioning Method]
+    const rawInput = req.body.phone || req.body.phoneNumber || '';
+    const incomingPhone = String(rawInput).replace(/\D/g, '');
+    const TEST_OTP = '123456';
+    const REVIEWER_EMAIL = 'reviewer@pickatstore.com';
 
+    if (incomingPhone.endsWith('9959777027') && req.body.otp === TEST_OTP) {
+        console.log('[Reviewer Bypass] Test credentials verified.');
+        try {
+            const staticPassword = process.env.REVIEWER_STATIC_PWD;
+            if (!staticPassword) {
+                console.error('[Reviewer Bypass] Missing REVIEWER_STATIC_PWD env variable.');
+                return res.status(500).json({ error: 'Server configuration error' });
+            }
 
+            const formattedPhone = '+919959777027';
+            const syntheticEmail = '919959777027@phone.pickatstore.app';
+
+            // 1. Resolve user ID directly from DB
+            const authUsers: any[] = await prisma.$queryRaw`SELECT id FROM auth.users WHERE phone = ${formattedPhone} OR phone = '919959777027' OR email = ${syntheticEmail}`;
+            let existingUser = authUsers.length > 0 ? authUsers[0] : null;
+
+            if (existingUser) {
+                console.log(`[Reviewer Bypass] Found existing user ${existingUser.id}. Forcing password update.`);
+                await supabaseAdmin.auth.admin.updateUserById(existingUser.id, { password: staticPassword });
+            } else {
+                console.log('[Reviewer Bypass] User missing. Auto-provisioning reviewer account...');
+                await supabaseAdmin.auth.admin.createUser({
+                    email: syntheticEmail,
+                    password: staticPassword,
+                    email_confirm: true,
+                    phone: formattedPhone,
+                    phone_confirm: true,
+                    user_metadata: { phone: formattedPhone }
+                });
+            }
+
+            // 2. Issue session
+            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+                email: syntheticEmail,
+                password: staticPassword
+            });
+
+            if (signInError || !signInData?.session) {
+                console.error('[Reviewer Bypass] Auth failed:', signInError);
+                return res.status(500).json({ error: 'Failed to mint reviewer session.' });
+            }
+            
+            return res.status(200).json({
+                success: true,
+                session: {
+                    access_token: signInData.session.access_token,
+                    refresh_token: signInData.session.refresh_token,
+                    expires_in: signInData.session.expires_in,
+                    expiresAt: signInData.session.expires_at
+                },
+                user: {
+                    id: signInData.user.id,
+                    phone: formattedPhone,
+                    email: signInData.user.email
+                },
+                isNewUser: !existingUser
+            });
+        }
+        catch (e) {
+            console.error('[Reviewer Bypass] Mint execution error:', e);
+            return res.status(500).json({ error: 'Bypass internal error' });
+        }
+    }
     try {
         console.log(`[Auth] POST /auth/verify-otp hit`);
         const { phone, otp } = req.body;
@@ -3034,8 +3119,7 @@ app.get('/auth/merchant/draft', async (req, res) => {
             },
             subscription: subscription ? {
                 status: 'success',
-                transactionId: subscription.razorpayPaymentId,
-                orderId: subscription.razorpayOrderId,
+                transactionId: subscription.transactionId,
                 amount: subscription.amount
             } : null
         });
@@ -3187,6 +3271,31 @@ app.patch('/auth/merchant/draft', async (req, res) => {
                         data: { id: userId, managerId: userId, name: payload.storeName, cityId: cityRecord.id, address: payload.address, active: false, image: storeImage, updatedAt: new Date() }
                     });
                 }
+
+                // FLAGSHIP ONBOARDING: Ensure primary store implicitly enters branch catalog with legacy matching ID
+                await tx.merchantBranch.upsert({
+                    where: { id: userId },
+                    update: {
+                        branchName: payload.storeName,
+                        address: payload.address,
+                        city: payload.city,
+                        latitude: payload.latitude || null,
+                        longitude: payload.longitude || null,
+                        phone: payload.phone || null
+                    },
+                    create: {
+                        id: userId,
+                        merchantId: userId,
+                        branchName: payload.storeName,
+                        managerName: payload.ownerName || null,
+                        address: payload.address,
+                        city: payload.city,
+                        latitude: payload.latitude || null,
+                        longitude: payload.longitude || null,
+                        phone: payload.phone || null,
+                        isActive: false // Will be activated alongside legacy approval logic
+                    }
+                });
 
                 if (payload.hasBranches && payload.branches) {
                     await tx.merchantBranch.deleteMany({ where: { merchantId: userId } });

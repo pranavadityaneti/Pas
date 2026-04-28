@@ -171,7 +171,10 @@ export default function TransactionalAuthModal({
                 className="flex-1"
             >
                 <Pressable className="flex-1 bg-black/50" onPress={onClose} />
-                <View className="bg-white rounded-t-[32px] px-8 pt-8 pb-10 shadow-xl">
+                <View 
+                    className="bg-white rounded-t-[32px] px-8 pt-8 shadow-xl"
+                    style={{ paddingBottom: 400, marginBottom: -360 }}
+                >
                     {/* Header */}
                     <View className="flex-row items-center justify-between mb-6">
                         <View>
@@ -199,7 +202,7 @@ export default function TransactionalAuthModal({
                                     <Text className="text-base font-bold text-gray-500 mr-2">+91</Text>
                                     <View className="w-px h-6 bg-gray-200 mr-3" />
                                     <TextInput
-                                        className="flex-1 font-bold text-black text-base"
+                                        className="flex-1 font-bold text-black text-base h-full"
                                         placeholder="Phone Number"
                                         placeholderTextColor="#9CA3AF"
                                         keyboardType="phone-pad"
@@ -207,7 +210,8 @@ export default function TransactionalAuthModal({
                                         value={phoneNumber}
                                         onChangeText={setPhoneNumber}
                                         autoFocus
-                                        style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
+                                        textAlignVertical="center"
+                                        style={{ includeFontPadding: false }}
                                     />
                                 </View>
 
@@ -244,20 +248,21 @@ export default function TransactionalAuthModal({
 
                                 <View className="flex-row justify-between mb-6">
                                     {otpValues.map((val, i) => (
-                                        <TextInput
-                                            key={i}
-                                            ref={ref => { otpRefs.current[i] = ref; }}
-                                            className={`w-12 h-14 rounded-xl text-center text-xl font-bold border-2 ${
-                                                val ? 'border-[#B52725] bg-gray-50' : 'border-gray-200 bg-gray-50'
-                                            }`}
-                                            maxLength={1}
-                                            keyboardType="number-pad"
-                                            value={val}
-                                            onChangeText={(text) => handleOtpChange(text, i)}
-                                            onKeyPress={(e) => handleOtpKeyPress(e, i)}
-                                            autoFocus={i === 0}
-                                            style={{ color: '#B52725' }}
-                                        />
+                                            <TextInput
+                                                key={i}
+                                                ref={ref => { otpRefs.current[i] = ref; }}
+                                                className={`w-12 h-14 rounded-xl text-center text-xl font-bold border-2 ${
+                                                    val ? 'border-[#B52725] bg-gray-50' : 'border-gray-200 bg-gray-50'
+                                                }`}
+                                                maxLength={1}
+                                                keyboardType="number-pad"
+                                                value={val}
+                                                onChangeText={(text) => handleOtpChange(text, i)}
+                                                onKeyPress={(e) => handleOtpKeyPress(e, i)}
+                                                autoFocus={i === 0}
+                                                textAlignVertical="center"
+                                                style={{ color: '#B52725' }}
+                                            />
                                     ))}
                                 </View>
 

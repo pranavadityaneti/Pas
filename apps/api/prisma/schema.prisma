@@ -264,6 +264,7 @@ model ProductAuditLog {
 model StoreProduct {
   id             String      @id @default(uuid())
   storeId        String      @db.Uuid
+  branch_id      String?
   productId      String
   price          Float
   stock          Int         @default(0)
@@ -277,7 +278,7 @@ model StoreProduct {
   store          Store       @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   orderItems     OrderItem[]
 
-  @@unique([storeId, productId, variant])
+  @@unique([branch_id, productId, variant])
   @@schema("public")
 }
 
@@ -288,7 +289,7 @@ model Order {
   otp                  String?
   orderNumber          String          @unique(map: "Order_order_number_key") @map("order_number")
   storeId              String          @map("store_id") @db.Uuid
-  branchId             String?         @map("branch_id")
+  branchId             String          @map("branch_id")
   staffId              String?         @map("staff_id")
   totalAmount          Float           @map("total_amount")
   cancelledReason      String?         @map("cancelled_reason")
@@ -310,7 +311,7 @@ model Order {
   guests_count         Int?
   items                OrderItem[]
   store                Store           @relation(fields: [storeId], references: [id], onUpdate: NoAction, map: "fk_orders_store")
-  branch               MerchantBranch? @relation(fields: [branchId], references: [id])
+  branch               MerchantBranch  @relation(fields: [branchId], references: [id])
   user                 User            @relation("CustomerOrders", fields: [userId], references: [id], onUpdate: NoAction, map: "fk_orders_user")
 
   @@index([orderNumber], map: "Order_order_number_idx")
@@ -419,6 +420,8 @@ model MerchantBranch {
   bankName            String?   @map("bank_name")
   bankBeneficiaryName String?   @map("bank_beneficiary_name")
   permissions         Json?     @map("permissions")
+  operating_hours     Json?     @map("operating_hours")
+  prep_time_minutes   Int       @default(15) @map("prep_time_minutes")
   createdAt           DateTime? @default(now()) @map("created_at")
   updatedAt           DateTime? @updatedAt @map("updated_at")
   merchant            Merchant? @relation(fields: [merchantId], references: [id])
@@ -1023,6 +1026,7 @@ model order_requests {
   id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   consumer_user_id String   @db.Uuid
   store_id         String
+  branch_id        String
   store_name       String
   items            Json     @default("[]")
   subtotal         Decimal  @default(0) @db.Decimal

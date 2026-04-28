@@ -211,9 +211,14 @@ export default function AuthScreen() {
     const renderChooseMode = () => (
         <View>
             <View className="items-center mb-2">
-                <View className="w-12 h-12 rounded-2xl bg-black items-center justify-center mb-4">
-                    <Text className="text-white text-xl">✦</Text>
-                </View>
+                <Image
+                    source={require('../../assets/brand/pick_at_store_logo.png')}
+                    style={{ width: 160, height: 65 }}
+                    resizeMode="contain"
+                    className="mb-3"
+                />
+                {/* Brand Yellow Divider */}
+                <View className="w-24 h-[1px] bg-[#F6C344] opacity-50 mb-5" />
                 <Text className="text-2xl font-bold text-[#B52725] mb-1">Get Started</Text>
                 <Text className="text-gray-400 text-center text-sm font-medium leading-relaxed px-4">
                     Order from your favourite local stores,{'\n'}delivered to your doorstep.
@@ -230,13 +235,6 @@ export default function AuthScreen() {
             </TouchableOpacity>
 
 
-            {/* Guest Access */}
-            <TouchableOpacity
-                className="items-center mt-6 mb-2"
-                onPress={() => { haptic(Haptics.ImpactFeedbackStyle.Light); navigation.replace('Main' as any); }}
-            >
-                <Text className="text-gray-400 font-bold text-sm">Continue As Guest</Text>
-            </TouchableOpacity>
         </View>
     );
 
@@ -257,7 +255,7 @@ export default function AuthScreen() {
                 <Text className="text-base font-bold text-gray-500 mr-2">+91</Text>
                 <View className="w-px h-6 bg-gray-200 mr-3" />
                 <TextInput
-                    className="flex-1 font-bold text-black text-base"
+                    className="flex-1 font-bold text-black text-base h-full"
                     placeholder="Phone Number"
                     placeholderTextColor="#9CA3AF"
                     keyboardType="phone-pad"
@@ -265,7 +263,8 @@ export default function AuthScreen() {
                     value={phoneNumber}
                     onChangeText={setPhoneNumber}
                     autoFocus
-                    style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
+                    textAlignVertical="center"
+                    style={{ includeFontPadding: false }}
                 />
             </View>
 
@@ -321,6 +320,7 @@ export default function AuthScreen() {
                         onChangeText={(text) => handleOtpChange(text, i)}
                         onKeyPress={(e) => handleOtpKeyPress(e, i)}
                         autoFocus={i === 0}
+                        textAlignVertical="center"
                         style={{ color: '#B52725' }}
                     />
                 ))}
@@ -376,7 +376,7 @@ export default function AuthScreen() {
         <View className="flex-1 bg-black">
             {/* Absolute Background Elements */}
             <Image
-                source={require('../../assets/images/auth-bg.png')}
+                source={require('../../assets/images/auth-bg-new.jpg')}
                 style={{ position: 'absolute', width: '100%', height: '100%' }}
                 resizeMode="cover"
             />
@@ -388,13 +388,8 @@ export default function AuthScreen() {
                 behavior="padding"
                 className="flex-1"
             >
-                {/* Logo Section - Flex-1 pushes the bottom sheet to the very bottom naturally */}
                 <View className="flex-1 items-center justify-center">
-                    <Image
-                        source={require('../../assets/brand/logo_horizontal.png')}
-                        style={{ width: 220, height: 100, tintColor: 'white' }}
-                        resizeMode="contain"
-                    />
+                    {/* Empty placeholder to push the bottom sheet down */}
                 </View>
 
                 {/* Bottom Sheet Modal - Standard Document Flow */}
@@ -404,13 +399,15 @@ export default function AuthScreen() {
                     }}
                 >
                     <View
-                        className="bg-white rounded-t-[32px] px-8 pt-8 pb-10"
+                        className="bg-white rounded-t-[32px] px-8 pt-8"
                         style={{
                             shadowColor: '#000',
                             shadowOffset: { width: 0, height: -4 },
                             shadowOpacity: 0.08,
                             shadowRadius: 20,
                             elevation: 20,
+                            paddingBottom: 400,
+                            marginBottom: -360,
                         }}
                     >
                         {/* Drag Handle */}
