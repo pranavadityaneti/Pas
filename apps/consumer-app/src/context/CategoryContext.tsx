@@ -27,10 +27,17 @@ export const CategoryProvider = ({ children }: { children: ReactNode }) => {
 
     const fetchVerticals = async () => {
         try {
-            const { data, error } = await supabase
-                .from('Vertical')
-                .select('id, name, color, icon')
-                .order('name', { ascending: true });
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Supabase Timeout (5s)')), 5000)
+            );
+
+            const { data, error } = await Promise.race([
+                supabase
+                    .from('Vertical')
+                    .select('id, name, color, icon')
+                    .order('name', { ascending: true }),
+                timeoutPromise
+            ]) as any;
 
             if (error) throw error;
 

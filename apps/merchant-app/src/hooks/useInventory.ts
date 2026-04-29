@@ -38,11 +38,11 @@ export function useInventory() {
     const [error, setError] = useState<string | null>(null);
 
     // Use the dedicated useStore hook
-    const { storeId, loading: storeLoading } = useStore();
+    const { activeRole, loading: storeLoading } = useStore();
 
     const fetchInventory = useCallback(async () => {
-        console.log('[useInventory] fetchInventory called. StoreId:', storeId);
-        if (!storeId) {
+        console.log('[useInventory] fetchInventory called. RoleId:', activeRole?.id);
+        if (!activeRole?.id) {
             setLoading(false);
             return;
         }
@@ -69,7 +69,7 @@ export function useInventory() {
                         createdByStoreId
                     )
                 `)
-                .eq('storeId', storeId)
+                .eq('branch_id', activeRole.id)
                 .eq('is_deleted', false)
                 .order('updatedAt', { ascending: false })
                 .limit(50);
@@ -90,7 +90,7 @@ export function useInventory() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [storeId]);
+    }, [activeRole?.id]);
 
     // Initial load when storeId is available
     useEffect(() => {
@@ -98,17 +98,17 @@ export function useInventory() {
 
         let subscription: any;
 
-        if (storeId) {
+        if (activeRole?.id) {
             fetchInventory();
 
             // Subscribe to real-time changes for this store's inventory
             subscription = supabase
-                .channel(`inventory-${storeId}`)
+                .channel(`inventory-${activeRole.id}`)
                 .on('postgres_changes', {
                     event: '*',
                     schema: 'public',
                     table: 'StoreProduct',
-                    filter: `storeId=eq.${storeId}`
+                    filter: `branch_id=eq.${activeRole.id}`
                 }, () => {
                     // Refetch to get the latest data including joined Product details
                     fetchInventory();
@@ -121,7 +121,7 @@ export function useInventory() {
         return () => {
             if (subscription) supabase.removeChannel(subscription);
         };
-    }, [storeId, storeLoading, fetchInventory]);
+    }, [activeRole?.id, storeLoading, fetchInventory]);
 
 
     const updateItem = async (id: string, updates: Partial<InventoryItem>) => {
@@ -152,7 +152,7 @@ export function useInventory() {
             if (newStock !== oldStock) {
                 try {
                     const { data: { user } } = await supabase.auth.getUser();
-                    if (!user || !storeId) return;
+                    if (!user || !activeRole?.id) return;
 
                     const productName = previousItem.product?.name || 'Item';
                     
@@ -160,7 +160,7 @@ export function useInventory() {
                         await supabase.from('notifications').insert({
                             id: Math.random().toString(36).substring(2, 15),
                             user_id: user.id,
-                            store_id: storeId,
+                            store_id: activeRole?.id || '',
                             type: 'INVENTORY',
                             title: 'Out of Stock (Manual)',
                             message: `${productName} was manually marked out of stock.`,
@@ -170,7 +170,7 @@ export function useInventory() {
                         await supabase.from('notifications').insert({
                             id: Math.random().toString(36).substring(2, 15),
                             user_id: user.id,
-                            store_id: storeId,
+                            store_id: activeRole?.id || '',
                             type: 'INVENTORY',
                             title: 'Low Stock (Manual)',
                             message: `Manual update: Only ${newStock} left of ${productName}.`,
@@ -226,6 +226,6 @@ export function useInventory() {
         updateItem,
         deleteItem,
         toggleStatus,
-        storeId // Expose storeId for Catalog Picker
+        activeRoleId: activeRole?.id // Expose activeRoleId for Catalog Picker
     };
 }

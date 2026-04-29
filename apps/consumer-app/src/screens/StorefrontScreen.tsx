@@ -193,6 +193,10 @@ export default function StorefrontScreen({ route }: any) {
     };
 
     const handleAddToCart = (product: any) => {
+        if (!restaurant.isOpen) {
+            Alert.alert('Store Offline', 'This store is currently not accepting orders.');
+            return;
+        }
         addItem({
             id: product.id,
             name: product.name,
@@ -203,6 +207,18 @@ export default function StorefrontScreen({ route }: any) {
             isDining: restaurant.isDining,
             uom: product.uom || '1 Pc',
         });
+    };
+
+    const handleIncrement = (id: string, newQty: number) => {
+        if (!restaurant.isOpen) {
+            Alert.alert('Store Offline', 'This store is currently not accepting orders.');
+            return;
+        }
+        updateQuantity(String(id), newQty);
+    };
+
+    const handleDecrement = (id: string, newQty: number) => {
+        updateQuantity(String(id), newQty);
     };
 
     const itemCount = getItemCount();
@@ -296,7 +312,7 @@ export default function StorefrontScreen({ route }: any) {
                     {/* Quick Filters in Sticky Header */}
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} className="px-4 pb-3" style={{ flexGrow: 0, flexShrink: 0 }}>
                         <VegToggle value={vegFilter} onChange={setVegFilter} />
-                        <FilterPill label="Ratings 4.0+" active={ratingHighOnly} onPress={() => setRatingHighOnly(!ratingHighOnly)} icon={Star} colorClass="yellow" />
+                        {/* <FilterPill label="Ratings 4.0+" active={ratingHighOnly} onPress={() => setRatingHighOnly(!ratingHighOnly)} icon={Star} colorClass="yellow" /> */}
                         <FilterPill label="Bestsellers" active={bestSellerOnly} onPress={() => setBestSellerOnly(!bestSellerOnly)} icon={Check} colorClass="red" />
                         <FilterPill label="Offers" active={offersOnly} onPress={() => setOffersOnly(!offersOnly)} icon={Filter} colorClass="red" />
                         <FilterPill label="Under ₹300" active={under300Only} onPress={() => setUnder300Only(!under300Only)} colorClass="blue" />
@@ -338,8 +354,8 @@ export default function StorefrontScreen({ route }: any) {
                                         item={product}
                                         quantity={getItemQuantity(product.id)}
                                         onAdd={handleAddToCart}
-                                        onIncrement={(id, newQty) => updateQuantity(String(id), newQty)}
-                                        onDecrement={(id, newQty) => updateQuantity(String(id), newQty)}
+                                        onIncrement={handleIncrement}
+                                        onDecrement={handleDecrement}
                                     />
                                 </View>
                             ))}
@@ -442,17 +458,21 @@ export default function StorefrontScreen({ route }: any) {
                                             <Star size={16} color="#1F2937" fill="#1F2937" />
                                             <Text className="text-[14px] font-bold text-gray-900 ml-1.5">{restaurant.rating}</Text>
                                         </>
-                                    ) : (
+                                    ) : (((restaurant as any).created_at || (restaurant as any).createdAt) && (new Date().getTime() - new Date((restaurant as any).created_at || (restaurant as any).createdAt).getTime()) < 30 * 24 * 60 * 60 * 1000) ? (
                                         <View className="bg-gray-100 px-2 py-0.5 rounded-md">
                                             <Text className="text-[11px] font-extrabold text-gray-400 uppercase tracking-wider">NEW</Text>
                                         </View>
-                                    )}
+                                    ) : null}
                                 </View>
-                                <View className="w-[1px] h-5 bg-gray-200 mx-2" />
-                                <View className="flex-row items-center px-3 py-2">
-                                    <Clock size={16} color="#6B7280" />
-                                    <Text className="text-[14px] font-medium text-gray-600 ml-1.5">{(restaurant as any).prepTime || '30 mins'}</Text>
-                                </View>
+                                {(restaurant as any).prepTime ? (
+                                    <>
+                                        <View className="w-[1px] h-5 bg-gray-200 mx-2" />
+                                        <View className="flex-row items-center px-3 py-2">
+                                            <Clock size={16} color="#6B7280" />
+                                            <Text className="text-[14px] font-medium text-gray-600 ml-1.5">{(restaurant as any).prepTime}</Text>
+                                        </View>
+                                    </>
+                                ) : null}
                                 <View className="w-[1px] h-5 bg-gray-200 mx-2" />
                                 <View className="flex-row items-center px-3 py-2">
                                     <UtensilsCrossed size={16} color="#6B7280" />
@@ -462,6 +482,16 @@ export default function StorefrontScreen({ route }: any) {
                                 </View>
                             </View>
                         </View>
+
+                        {/* ===== OFFLINE BANNER ===== */}
+                        {!restaurant.isOpen && (
+                            <View className="mx-5 mt-5 bg-red-50 border border-red-200 p-4 rounded-xl items-center">
+                                <Text className="text-red-700 font-extrabold text-[15px] uppercase tracking-wider mb-1">Store Offline</Text>
+                                <Text className="text-red-600 text-[13px] font-medium text-center leading-tight">
+                                    This store is currently closed or not accepting orders. You cannot add items to your cart right now.
+                                </Text>
+                            </View>
+                        )}
 
                         {/* ===== SEARCH & FILTERS ===== */}
                         <View className="px-5" style={{ marginTop: 28 }}>
@@ -486,7 +516,7 @@ export default function StorefrontScreen({ route }: any) {
                                 contentContainerStyle={{ paddingBottom: 14 }}
                             >
                                 <VegToggle value={vegFilter} onChange={setVegFilter} />
-                                <FilterPill label="Ratings 4.0+" active={ratingHighOnly} onPress={() => setRatingHighOnly(!ratingHighOnly)} icon={Star} colorClass="yellow" />
+                                {/* <FilterPill label="Ratings 4.0+" active={ratingHighOnly} onPress={() => setRatingHighOnly(!ratingHighOnly)} icon={Star} colorClass="yellow" /> */}
                                 <FilterPill label="Bestsellers" active={bestSellerOnly} onPress={() => setBestSellerOnly(!bestSellerOnly)} icon={Check} colorClass="red" />
                                 <FilterPill label="Offers" active={offersOnly} onPress={() => setOffersOnly(!offersOnly)} icon={Filter} colorClass="red" />
                                 <FilterPill label="Under ₹300" active={under300Only} onPress={() => setUnder300Only(!under300Only)} colorClass="blue" />

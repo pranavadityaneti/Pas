@@ -1,5 +1,8 @@
-import dotenv from 'dotenv';
-dotenv.config();
+try {
+    require('dotenv').config();
+} catch (e) {
+    // Ignore missing dotenv in production since AWS injects env vars directly
+}
 
 import express from 'express';
 import cors from 'cors';
@@ -1895,6 +1898,7 @@ app.post('/orders', async (req, res) => {
                 orderNumber,
                 userId,
                 storeId,
+                branchId: storeId, // Backwards compatibility for endpoints passing storeId
                 totalAmount,
                 status: 'PENDING',
                 isPaid: false,

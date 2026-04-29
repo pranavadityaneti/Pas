@@ -19,7 +19,7 @@ const DELETE_REASONS = [
 ];
 
 export default function SettingsScreen() {
-    const { storeId, branches, activeStoreId, switchBranch, merchantId, refreshStore, availableRoles, switchRole, isSwitching, store, isCurrentStoreOwner } = useStore();
+    const { storeId, branches, activeStoreId, switchBranch, merchantId, refreshStore, availableRoles, switchRole, isSwitching, store, isCurrentStoreOwner, userRole } = useStore();
     const isFocused = useIsFocused(); // To trigger re-fetch on focus
     const [loading, setLoading] = useState(true);
 
@@ -366,17 +366,27 @@ export default function SettingsScreen() {
                         </TouchableOpacity>
                     </View>
 
-                    {/* Store Dropdown - Always visible & tappable for diagnostics */}
+                    {/* Store Dropdown - Locked for managers */}
                     <TouchableOpacity 
                         style={styles.storeDropdown} 
-                        onPress={() => setIsStoreSwitcherOpen(true)}
-                        activeOpacity={0.7}
+                        onPress={() => {
+                            if (availableRoles.length <= 1) return;
+                            setIsStoreSwitcherOpen(true);
+                        }}
+                        activeOpacity={availableRoles.length <= 1 ? 1 : 0.7}
+                        disabled={availableRoles.length <= 1}
                     >
                         <View style={styles.storeDropdownLeft}>
-                            <Text style={styles.storeDropdownLabel}>CURRENT STORE</Text>
+                            <Text style={styles.storeDropdownLabel}>
+                                {availableRoles.length > 1 ? 'SWITCH CONTEXT' : (userRole === 'manager' ? 'ASSIGNED BRANCH' : 'CURRENT STORE')}
+                            </Text>
                             <Text style={styles.storeDropdownName}>{store?.name || 'My Store'}</Text>
                         </View>
-                        <Ionicons name="chevron-down" size={20} color="#666" />
+                        {availableRoles.length > 1 ? (
+                            <Ionicons name="chevron-down" size={20} color="#666" />
+                        ) : (
+                            <Ionicons name="lock-closed" size={16} color="#9CA3AF" />
+                        )}
                     </TouchableOpacity>
                 </View>
 
@@ -520,11 +530,10 @@ export default function SettingsScreen() {
                         <Text style={styles.bottomSheetTitle}>Switch Store</Text>
                         
                         {availableRoles.map((role) => {
-                            const isActive = (role.type === 'owner' && role.id === merchantId) || 
-                                           (role.type === 'manager' && role.id === activeStoreId);
+                            const isActive = activeRole?.id === role.id && activeRole?.type === role.type;
                             return (
                                 <TouchableOpacity
-                                    key={role.id}
+                                    key={`${role.id}-${role.type}`}
                                     style={[styles.roleOption, isActive && styles.roleOptionActive]}
                                     onPress={() => {
                                         if (!isActive) {

@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, ScrollView, Image, Dimensions, Platform, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import { Colors } from '../../constants/Colors';
+import { useStore } from '../hooks/useStore';
 
 const { height } = Dimensions.get('window');
 
@@ -55,6 +57,8 @@ const getVariantsForCategory = (category?: string) => {
 };
 
 export default function ConfigureProductsModal({ visible, storeId, products, onClose, onSuccess }: ConfigureProductsModalProps) {
+    const { activeRole } = useStore();
+    const insets = useSafeAreaInsets();
     // Config Structure: { [productId]: { [variantLabel]: { price, stock, active } } }
     const [config, setConfig] = useState<Record<string, Record<string, { price: string; stock: string; active: boolean }>>>({});
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -69,7 +73,7 @@ export default function ConfigureProductsModal({ visible, storeId, products, onC
             const { data: existingData } = await supabase
                 .from('StoreProduct')
                 .select('productId, variant, price, stock, active')
-                .eq('storeId', storeId)
+                .eq('branch_id', activeRole?.id || storeId)
                 .in('productId', productIds);
 
             const initialConfig: any = {};
@@ -121,7 +125,12 @@ export default function ConfigureProductsModal({ visible, storeId, products, onC
     };
 
     const handleSave = async () => {
-        if (!storeId) return;
+        const targetBranchId = activeRole?.id;
+        if (!targetBranchId) {
+            console.error('[ConfigureProductsModal] handleSave aborted: targetBranchId is null');
+            Alert.alert("Error", "No active store or branch selected. Please try switching stores.");
+            return;
+        }
 
         // 1. Validation: Price > MRP Check
         let priceError = '';
@@ -155,7 +164,7 @@ export default function ConfigureProductsModal({ visible, storeId, products, onC
             const { data: existingData } = await supabase
                 .from('StoreProduct')
                 .select('id, productId, variant') // Added variant
-                .eq('storeId', storeId)
+                .eq('branch_id', targetBranchId)
                 .in('productId', productIds);
 
             // Map using composite key: productId_variant
@@ -172,7 +181,8 @@ export default function ConfigureProductsModal({ visible, storeId, products, onC
 
                         updates.push({
                             id: existingId || generateUUID(),
-                            storeId,
+                            storeId: targetBranchId,
+                            branch_id: targetBranchId, // Explicitly map to new Postgres architecture
                             productId: p.id,
                             variant: variantLabel, // Save variant
                             price: parseFloat(data.price || '0'),
@@ -187,8 +197,8 @@ export default function ConfigureProductsModal({ visible, storeId, products, onC
 
             if (updates.length > 0) {
                 // 3. Upsert
-                // Modified onConflict to look at storeId,productId,variant due to new constraint
-                const { error } = await supabase.from('StoreProduct').upsert(updates, { onConflict: 'storeId, productId, variant' });
+                // Modified onConflict to look at branch_id,productId,variant due to new constraint
+                const { error } = await supabase.from('StoreProduct').upsert(updates, { onConflict: 'branch_id, productId, variant' });
 
                 if (error) {
                     Alert.alert('Error', error.message);
@@ -308,7 +318,7 @@ export default function ConfigureProductsModal({ visible, storeId, products, onC
                 </KeyboardAwareScrollView>
 
                 {/* Footer */}
-                <View style={styles.footer}>
+                <View style={[styles.footer, { paddingBottom: Math.max(16, insets.bottom + 8) }]}>
                     <TouchableOpacity
                         style={[styles.saveBtn, isSubmitting && styles.saveBtnDisabled]}
                         onPress={handleSave}
@@ -413,7 +423,6 @@ const styles = StyleSheet.create({
         backgroundColor: '#fff',
         borderTopWidth: 1,
         borderTopColor: '#E5E7EB',
-        paddingBottom: Platform.OS === 'ios' ? 32 : 16
     },
     saveBtn: {
         backgroundColor: Colors.primary,

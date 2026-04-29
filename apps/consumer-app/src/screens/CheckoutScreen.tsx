@@ -99,6 +99,7 @@ export default function CheckoutScreen() {
     const [nowTimer, setNowTimer] = useState(Date.now());
     const [storeOtps, setStoreOtps] = useState<Record<string, string>>({});
     const [contactSearchText, setContactSearchText] = useState('');
+    const [alternativesMap, setAlternativesMap] = useState<Record<string, any[]>>({});
 
     // Hooks: Effects
     useEffect(() => {
@@ -162,13 +163,114 @@ export default function CheckoutScreen() {
     useEffect(() => {
         if (items.length === 0) return;
         const uniqueStoreIds = Array.from(new Set(items.map(i => i.storeId)));
-        const locMap: Record<string, any> = {};
-        uniqueStoreIds.forEach(id => {
-            const s = STORES.find(st => st.id === id) || RESTAURANTS.find(r => r.id === id);
-            if (s) locMap[id] = s;
-        });
-        setStoreLocations(locMap);
+        
+        const fetchLocations = async () => {
+            const { data } = await supabase
+                .from('merchant_branches')
+                .select('id, branch_name, address, city, operating_hours')
+                .in('id', uniqueStoreIds);
+                
+            if (data) {
+                const locMap: Record<string, any> = {};
+                data.forEach(b => {
+                    const oh = typeof b.operating_hours === 'object' ? b.operating_hours : {};
+                    locMap[b.id] = {
+                        id: b.id,
+                        name: b.branch_name,
+                        address: b.address + (b.city ? `, ${b.city}` : ''),
+                        openingTime: oh.openTime || '09:00',
+                        closingTime: oh.closeTime || '22:00'
+                    };
+                });
+                setStoreLocations(locMap);
+            }
+        };
+        fetchLocations();
     }, [items]);
+
+    useEffect(() => {
+        const fetchAlternatives = async () => {
+            if (rejectedRequests.length === 0) return;
+            const newMap = { ...alternativesMap };
+            let updated = false;
+
+            for (const req of rejectedRequests) {
+                if (!newMap[req.id]) {
+                    const productIds = req.items.map((i: any) => String(i.id));
+
+                    // 1. Inventory Check: Find branches that actually stock these items
+                    const { data: availableProducts } = await supabase
+                        .from('StoreProduct')
+                        .select('branch_id, stock, active, price, productId')
+                        .eq('active', true)
+                        .gt('stock', 0)
+                        .neq('branch_id', req.store_id)
+                        .in('productId', productIds);
+
+                    if (availableProducts && availableProducts.length > 0) {
+                        const branchMap: Record<string, any[]> = {};
+                        availableProducts.forEach((sp: any) => {
+                            if (sp.branch_id) {
+                                if (!branchMap[sp.branch_id]) branchMap[sp.branch_id] = [];
+                                const originalItem = req.items.find((i: any) => String(i.id) === String(sp.productId));
+                                branchMap[sp.branch_id].push({
+                                    id: sp.productId,
+                                    name: originalItem?.name || 'Product',
+                                    price: sp.price,
+                                    quantity: originalItem?.quantity || 1
+                                });
+                            }
+                        });
+
+                        const candidateBranchIds = Object.keys(branchMap);
+
+                        if (candidateBranchIds.length > 0) {
+                            // 2. Fetch the branch details (Radius bounded by city if possible)
+                            let altQuery = supabase
+                                .from('merchant_branches')
+                                .select('id, branch_name, address, city')
+                                .eq('is_active', true)
+                                .in('id', candidateBranchIds)
+                                .limit(3);
+
+                            // Optional radius bounds by matching the city
+                            const reqCity = storeLocations[req.store_id]?.city;
+                            if (reqCity) {
+                                altQuery = altQuery.eq('city', reqCity);
+                            }
+
+                            const { data: altBranches } = await altQuery;
+
+                            if (altBranches && altBranches.length > 0) {
+                                newMap[req.id] = altBranches.map(alt => {
+                                    const matched = branchMap[alt.id] || [];
+                                    return {
+                                        storeId: alt.id,
+                                        storeName: alt.branch_name,
+                                        distance: 'Nearby', // Mocked radius distance
+                                        matchedItems: matched,
+                                        isPartial: matched.length < req.items.length
+                                    };
+                                }).sort((a, b) => b.matchedItems.length - a.matchedItems.length);
+                                updated = true;
+                            } else {
+                                newMap[req.id] = [];
+                                updated = true;
+                            }
+                        } else {
+                            newMap[req.id] = [];
+                            updated = true;
+                        }
+                    } else {
+                        newMap[req.id] = [];
+                        updated = true;
+                    }
+                }
+            }
+            if (updated) setAlternativesMap(newMap);
+        };
+        fetchAlternatives();
+    }, [rejectedRequests]);
 
     useEffect(() => {
         if (route.params?.selectedCoupon) {
@@ -632,7 +734,7 @@ export default function CheckoutScreen() {
                         <View className="px-5 mb-6">
                             <Text className="text-[13px] font-extrabold text-red-600 uppercase tracking-wider mb-3 px-1">Unavailable</Text>
                             {rejectedRequests.map((req: any) => {
-                                const alternatives = findAlternativeStores(req.store_id, req.items.map((i: any) => i.name));
+                                const alternatives = alternativesMap[req.id] || [];
                                 return (
                                     <View key={req.id} className="bg-white p-5 rounded-2xl mb-3 border border-red-100 shadow-sm">
                                         <View className="flex-row items-center mb-2">
@@ -653,7 +755,9 @@ export default function CheckoutScreen() {
                                                     <View key={alt.storeId} className="flex-row items-center justify-between mb-2 bg-gray-50 p-3 rounded-xl border border-gray-100">
                                                         <View className="flex-1">
                                                             <Text className="font-bold text-gray-900 text-[13px]">{alt.storeName}</Text>
-                                                            <Text className="text-gray-400 text-[11px]">{alt.distance} away</Text>
+                                                            <Text className="text-gray-400 text-[11px]">
+                                                                {alt.distance} away {alt.isPartial ? '• Partial Match' : ''}
+                                                            </Text>
                                                         </View>
                                                         <TouchableOpacity onPress={() => handleSwapStore(req, alt)} className="bg-[#212121] px-4 py-2 rounded-xl">
                                                             <Text className="text-[11px] font-bold text-white">Swap</Text>

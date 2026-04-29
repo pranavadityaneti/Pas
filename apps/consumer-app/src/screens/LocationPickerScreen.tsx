@@ -9,11 +9,13 @@ import * as Location from 'expo-location';
 import { ChevronLeft, MapPin, Target, Plus, Check, Search, X, Trash2, Edit } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 import { useLocation } from '../context/LocationContext';
+import { useAuth } from '../context/AuthContext';
 import Constants from 'expo-constants';
 
 export default function LocationPickerScreen() {
     const navigation = useNavigation();
     const { activeLocation, refreshLocation, selectLocation } = useLocation();
+    const { user } = useAuth();
     const [mapRegion, setMapRegion] = useState({
         latitude: 12.9716, // Default center
         longitude: 77.5946,
@@ -329,16 +331,22 @@ export default function LocationPickerScreen() {
     const fetchAddresses = async () => {
         try {
             setIsLoadingAddresses(true);
-            const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
                 setSavedAddresses([]);
                 return;
             }
 
-            const { data, error } = await supabase
-                .from('consumer_addresses')
-                .select('*')
-                .order('created_at', { ascending: false });
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Supabase Timeout (5s)')), 5000)
+            );
+
+            const { data, error } = await Promise.race([
+                supabase
+                    .from('consumer_addresses')
+                    .select('*')
+                    .order('created_at', { ascending: false }),
+                timeoutPromise
+            ]) as any;
 
             if (error) throw error;
             setSavedAddresses(data || []);
@@ -533,7 +541,7 @@ export default function LocationPickerScreen() {
                         <Search size={18} color="#B52725" />
                         <TextInput
                             className="flex-1 ml-3 font-medium text-black"
-                            style={{ paddingVertical: 0, height: 20, lineHeight: 20, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
+                            style={{ minHeight: 48, paddingHorizontal: 12, textAlignVertical: 'center' }}
                             placeholder="Search area, street, or building..."
                             placeholderTextColor="#9CA3AF"
                             value={searchQuery}
@@ -720,7 +728,7 @@ export default function LocationPickerScreen() {
                                         placeholder="e.g. Gym, Cafe, Parents"
                                         value={customType}
                                         onChangeText={setCustomType}
-                                        style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
+                                        style={{ minHeight: 48, paddingHorizontal: 12, textAlignVertical: 'center' }}
                                     />
                                 </View>
                             )}
@@ -734,7 +742,7 @@ export default function LocationPickerScreen() {
                                         placeholder="House No, Building, Street"
                                         value={addressForm.street}
                                         onChangeText={(t) => setAddressForm({ ...addressForm, street: t })}
-                                        style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
+                                        style={{ minHeight: 48, paddingHorizontal: 12, textAlignVertical: 'center' }}
                                     />
                                 </View>
 
@@ -745,7 +753,7 @@ export default function LocationPickerScreen() {
                                         placeholder="e.g. 1st Floor, Near Park"
                                         value={addressForm.apt}
                                         onChangeText={(t) => setAddressForm({ ...addressForm, apt: t })}
-                                        style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
+                                        style={{ minHeight: 48, paddingHorizontal: 12, textAlignVertical: 'center' }}
                                     />
                                 </View>
 
@@ -756,7 +764,7 @@ export default function LocationPickerScreen() {
                                             className="w-full bg-gray-100 px-4 h-14 rounded-xl border border-gray-200 font-medium text-gray-500"
                                             value={addressForm.city}
                                             editable={false}
-                                            style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
+                                            style={{ minHeight: 48, paddingHorizontal: 12, textAlignVertical: 'center' }}
                                         />
                                     </View>
                                     <View className="flex-1">
@@ -765,7 +773,7 @@ export default function LocationPickerScreen() {
                                             className="w-full bg-gray-100 px-4 h-14 rounded-xl border border-gray-200 font-medium text-gray-500"
                                             value={addressForm.pincode}
                                             editable={false}
-                                            style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
+                                            style={{ minHeight: 48, paddingHorizontal: 12, textAlignVertical: 'center' }}
                                         />
                                     </View>
                                 </View>
@@ -776,7 +784,7 @@ export default function LocationPickerScreen() {
                                         className="w-full bg-gray-100 px-4 h-14 rounded-xl border border-gray-200 font-medium text-gray-500"
                                         value={addressForm.state}
                                         editable={false}
-                                        style={{ paddingVertical: 0, height: 24, lineHeight: 24, textAlignVertical: 'center', includeFontPadding: false, top: 1 }}
+                                        style={{ minHeight: 48, paddingHorizontal: 12, textAlignVertical: 'center' }}
                                     />
                                 </View>
                             </View>

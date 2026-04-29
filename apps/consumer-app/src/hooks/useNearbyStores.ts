@@ -43,7 +43,10 @@ export const useNearbyStores = () => {
 
                 console.log('POSTGIS_RAW_PAYLOAD:', data, rpcError);
 
-                if (rpcError) throw rpcError;
+                if (rpcError) {
+                    console.error("RPC FAILED WITH:", JSON.stringify(rpcError, null, 2));
+                    throw rpcError;
+                }
 
                 if (isMounted) {
                     const ids: string[] = [];
@@ -72,8 +75,16 @@ export const useNearbyStores = () => {
 
         fetchNearby();
 
+        const channel = supabase.channel('nearby-stores-updates')
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'merchant_branches' }, (payload) => {
+                console.log('Realtime branch update received:', payload);
+                if (isMounted) fetchNearby();
+            })
+            .subscribe();
+
         return () => {
             isMounted = false;
+            supabase.removeChannel(channel);
         };
     }, [activeLocation, activeLocation?.latitude, activeLocation?.longitude, isLoadingLocation]);
 

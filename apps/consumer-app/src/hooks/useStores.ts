@@ -18,10 +18,16 @@ export const useStores = () => {
     const fetchStores = useCallback(async () => {
         try {
             setLoading(true);
-            const { data, error: fetchError } = await supabase
-                .from('Store')
-                .select('*, vertical:Vertical(name)')
-                .eq('active', true);
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Supabase Timeout (5s)')), 5000)
+            );
+
+            const { data, error: fetchError } = await Promise.race([
+                supabase
+                    .from('merchant_branches')
+                    .select('id, branch_name, address, merchant_id, latitude, longitude, is_active, operating_hours, prep_time_minutes, merchant:merchants(store_photos, vertical:Vertical(name))'),
+                timeoutPromise
+            ]) as any;
 
             if (fetchError) throw fetchError;
 
@@ -43,6 +49,17 @@ export const useStores = () => {
 
         // Once categories are ready (either from cache or DB), fetch stores
         fetchStores();
+
+        const channel = supabase.channel('store-updates')
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'merchant_branches' }, (payload) => {
+                console.log('Realtime branch update received:', payload);
+                fetchStores();
+            })
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
     }, [verticalsLoading, fetchStores]);
 
     return {

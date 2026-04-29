@@ -25,7 +25,7 @@ const DEFAULT_FILTERS: FilterState = {
 
 export default function CatalogPicker() {
     const router = useRouter();
-    const { storeId, refetch: refetchInventory, loading: inventoryLoading } = useInventory();
+    const { activeRoleId, refetch: refetchInventory, loading: inventoryLoading } = useInventory();
 
     const [products, setProducts] = useState<any[]>([]);
     const [search, setSearch] = useState('');
@@ -54,7 +54,7 @@ export default function CatalogPicker() {
 
     useEffect(() => {
         fetchGlobalCatalog();
-    }, [storeId]);
+    }, [activeRoleId]);
 
     const fetchGlobalCatalog = async () => {
         setLoading(true);
@@ -64,8 +64,8 @@ export default function CatalogPicker() {
                 .from('Product')
                 .select('*');
 
-            if (storeId) {
-                query = query.or(`createdByStoreId.is.null,createdByStoreId.eq.${storeId}`);
+            if (activeRoleId) {
+                query = query.or(`createdByStoreId.is.null,createdByStoreId.eq.${activeRoleId}`);
             } else {
                 query = query.is('createdByStoreId', null);
             }
@@ -119,7 +119,7 @@ export default function CatalogPicker() {
             alert("Please wait, setting up your store...");
             return;
         }
-        if (!storeId) {
+        if (!activeRoleId) {
             alert("No Active Store found! Please try restarting the app or contact support.");
             return;
         }
@@ -181,7 +181,7 @@ export default function CatalogPicker() {
         const isSelected = selectedIds.includes(item.id);
         const isDark = isSelected;
         // Highlight custom products
-        const isCustom = item.createdByStoreId === storeId;
+        const isCustom = item.createdByStoreId === activeRoleId;
 
         return (
             <TouchableOpacity
@@ -350,7 +350,7 @@ export default function CatalogPicker() {
                 visible={showConfigModal}
                 onClose={() => setShowConfigModal(false)}
                 onSuccess={handleSuccess}
-                storeId={storeId!}
+                storeId={activeRoleId!}
                 products={products.filter(p => selectedIds.includes(p.id))}
             />
 
@@ -359,7 +359,7 @@ export default function CatalogPicker() {
                 visible={showCustomModal}
                 onClose={() => setShowCustomModal(false)}
                 onSuccess={handleCustomSuccess}
-                storeId={storeId!}
+                storeId={activeRoleId!}
                 initialName={search}
                 verticalPills={verticalPills}
             />

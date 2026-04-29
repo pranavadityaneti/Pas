@@ -9,7 +9,7 @@ export function useStore() {
     return {
         ...context,
         storeId: context.activeStoreId,
-        storeName: (context.store?.id === context.activeStoreId ? context.store?.name : context.branches.find(b => b.id === context.activeStoreId)?.name) || 'My Store',
+        activeRole: context.activeRole,
         // Maintains existing API shape
         // sendHeartbeat is now auto-managed but can be exposed if needed
         sendHeartbeat: () => { },

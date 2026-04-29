@@ -9,6 +9,7 @@ import { Colors } from '../../../constants/Colors';
 import { supabase } from '../../../src/lib/supabase';
 import { useStore } from '../../../src/hooks/useStore';
 import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
+import { useCreateManager } from '../../../src/hooks/useStaff';
 
 const MOCK_BRANCHES = ['Main Store', 'Downtown Branch', 'Airport Branch'];
 
@@ -23,16 +24,17 @@ interface StaffMember {
 }
 
 export default function StaffScreen() {
-    const { storeId } = useStore();
+    const { activeRole } = useStore();
     const [modalVisible, setModalVisible] = useState(false);
     const [actionLoading, setActionLoading] = useState(false);
+    const { mutateAsync: provisionManager } = useCreateManager();
 
     // Realtime Data Hook
     const { data: rawStaff, loading: tableLoading, setData } = useRealtimeTable({
         tableName: 'store_staff',
-        filter: storeId ? `store_id=eq.${storeId},is_active=eq.true` : undefined,
+        filter: activeRole?.id ? `store_id=eq.${activeRole.id},is_active=eq.true` : undefined,
         orderBy: { column: 'created_at', ascending: false },
-        enabled: !!storeId
+        enabled: !!activeRole?.id
     });
 
     const staff = useMemo(() => {
@@ -53,30 +55,20 @@ export default function StaffScreen() {
 
     // Form State
     const [name, setName] = useState('');
-    const [role, setRole] = useState('');
+    const [role, setRole] = useState('Cashier/Staff');
     const [phone, setPhone] = useState('');
     const [branch, setBranch] = useState(MOCK_BRANCHES[0]);
-    const [activities, setActivities] = useState<string[]>([]);
     const [editingId, setEditingId] = useState<string | null>(null);
 
     // Feature Flag / Logic for Branches
     const hasBranches = false;
 
-    const ACTIVITY_OPTIONS = [
-        'Order Management',
-        'Inventory Management',
-        'Analytics & Reports',
-        'Settings & Profile',
-        'Staff Management'
-    ];
-
     const openAddModal = () => {
         setEditingId(null);
         setName('');
-        setRole('');
+        setRole('Cashier/Staff');
         setPhone('');
         setBranch(MOCK_BRANCHES[0]);
-        setActivities([]);
         setModalVisible(true);
     };
 
@@ -86,17 +78,7 @@ export default function StaffScreen() {
         setRole(member.role);
         setPhone(member.phone);
         setBranch(member.branch || MOCK_BRANCHES[0]);
-        // @ts-ignore: assuming activities exists in member or I need to update fetch
-        setActivities(member.activities || []);
         setModalVisible(true);
-    };
-
-    const toggleActivity = (activity: string) => {
-        if (activities.includes(activity)) {
-            setActivities(activities.filter(a => a !== activity));
-        } else {
-            setActivities([...activities, activity]);
-        }
     };
 
     const handleSave = async () => {
@@ -112,8 +94,8 @@ export default function StaffScreen() {
             return;
         }
 
-        if (!storeId) {
-            Alert.alert('Error', 'Store ID not found. Refreshing your profile...');
+        if (!activeRole?.id) {
+            Alert.alert('Error', 'Store/Branch ID not found. Refreshing your profile...');
             return;
         }
 
@@ -121,11 +103,11 @@ export default function StaffScreen() {
 
         try {
             const payload = {
-                store_id: storeId,
+                store_id: activeRole.id,
                 name,
                 role,
                 phone: sanitizedPhone,
-                activities: activities
+                activities: []
             };
 
             if (editingId) {
@@ -140,7 +122,7 @@ export default function StaffScreen() {
                         name,
                         role,
                         phone,
-                        activities
+                        activities: []
                     })
                     .eq('id', editingId);
 
@@ -172,6 +154,24 @@ export default function StaffScreen() {
                 setData(prev => prev.map(p => p.id === tempId ? newStaff : p));
                 Alert.alert('Success', 'Staff member added successfully');
             }
+
+            // --- RBAC KEYMAKER WIRING ---
+            if (role.toLowerCase().includes('manager')) {
+                try {
+                    await provisionManager({
+                        phone: sanitizedPhone,
+                        name,
+                        storeId: activeRole?.id || ''
+                    });
+                } catch (provisionError: any) {
+                    console.error('Keymaker Provisioning Error:', provisionError);
+                    Alert.alert(
+                        'Staff Saved',
+                        'Staff details saved successfully, but we failed to provision their manager account. They may not be able to log in yet.'
+                    );
+                }
+            }
+            // --- END RBAC WIRING ---
 
             setModalVisible(false);
 
@@ -272,13 +272,28 @@ export default function StaffScreen() {
                     </View>
                     <View style={styles.inputGroup}>
                         <Text style={styles.inputLabel}>Role <Text style={{ color: '#EF4444' }}>*</Text></Text>
-                        <TextInput
-                            style={styles.input}
-                            placeholder="e.g. Store Manager"
-                            placeholderTextColor={Colors.textSecondary}
-                            value={role || ''} // Safety guard
-                            onChangeText={setRole}
-                        />
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                            {['Branch Manager', 'Cashier/Staff'].map((r) => (
+                                <TouchableOpacity
+                                    key={r}
+                                    style={{
+                                        flex: 1,
+                                        padding: 12,
+                                        borderRadius: 12,
+                                        borderWidth: 1,
+                                        borderColor: role === r ? Colors.primary : Colors.border,
+                                        backgroundColor: role === r ? Colors.primary + '10' : Colors.white,
+                                        alignItems: 'center'
+                                    }}
+                                    onPress={() => setRole(r)}
+                                >
+                                    <Text style={{ 
+                                        color: role === r ? Colors.primary : Colors.text,
+                                        fontWeight: role === r ? '600' : '500'
+                                    }}>{r}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
                     </View>
                     <View style={styles.inputGroup}>
                         <Text style={styles.inputLabel}>Phone Number <Text style={{ color: '#EF4444' }}>*</Text></Text>
@@ -310,50 +325,6 @@ export default function StaffScreen() {
                             </ScrollView>
                         </View>
                     )}
-
-                    <View style={styles.inputGroup}>
-                        <Text style={styles.inputLabel}>Allowed Activities</Text>
-                        <Text style={{ fontSize: 12, color: Colors.textSecondary, marginBottom: 8 }}>Select what this staff member can access</Text>
-                        <View style={{ gap: 8 }}>
-                            {ACTIVITY_OPTIONS.map((activity) => {
-                                const isSelected = activities.includes(activity);
-                                return (
-                                    <TouchableOpacity
-                                        key={activity}
-                                        style={{
-                                            flexDirection: 'row',
-                                            alignItems: 'center',
-                                            padding: 12,
-                                            borderRadius: 12,
-                                            backgroundColor: isSelected ? Colors.primary + '10' : Colors.white,
-                                            borderWidth: 1,
-                                            borderColor: isSelected ? Colors.primary : Colors.border
-                                        }}
-                                        onPress={() => toggleActivity(activity)}
-                                    >
-                                        <View style={{
-                                            width: 20,
-                                            height: 20,
-                                            borderRadius: 6,
-                                            borderWidth: 1.5,
-                                            borderColor: isSelected ? Colors.primary : Colors.textSecondary,
-                                            backgroundColor: isSelected ? Colors.primary : 'transparent',
-                                            justifyContent: 'center',
-                                            alignItems: 'center',
-                                            marginRight: 12
-                                        }}>
-                                            {isSelected && <Ionicons name="checkmark" size={14} color="#FFF" />}
-                                        </View>
-                                        <Text style={{
-                                            fontSize: 14,
-                                            fontWeight: isSelected ? '600' : '500',
-                                            color: Colors.text
-                                        }}>{activity}</Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </View>
-                    </View>
 
                     <View style={styles.modalActions}>
                         <TouchableOpacity style={styles.modalCancel} onPress={() => setModalVisible(false)}>

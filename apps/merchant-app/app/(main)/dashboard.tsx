@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
@@ -149,41 +149,36 @@ export default function DashboardScreen() {
                             <Text style={styles.greeting}>{getGreeting()}</Text>
                             <View style={styles.storeHeader}>
                                 <Text style={styles.storeName}>{store?.name || 'Loading...'}</Text>
-                                <TouchableOpacity
-                                    style={[
-                                        styles.statusBadgeButton,
-                                        !store?.active && styles.statusBadgeOffline,
-                                        isLunchBreak && { backgroundColor: '#FEF3C7' }
-                                    ]}
-                                    onPress={handleToggleStatus}
-                                >
-                                    <View style={[
-                                        styles.statusDot,
-                                        !store?.active && styles.statusDotOffline,
-                                        isLunchBreak && { backgroundColor: '#F59E0B' }
-                                    ]} />
-                                    <Text style={[
-                                        styles.statusLabel,
-                                        !store?.active && styles.statusLabelOffline,
-                                        (isLunchBreak || isClosedToday) && { color: '#B45309' }
-                                    ]}>
-                                        {isClosedToday ? 'Closed Today' : (isLunchBreak ? 'Lunch Break' : (store?.active ? 'Online' : 'Offline'))}
-                                    </Text>
-                                    <Ionicons name="chevron-down" size={14} color={store?.active && !isClosedToday && !isLunchBreak ? '#10B981' : '#6B7280'} />
-                                </TouchableOpacity>
                             </View>
                         </View>
-                        <TouchableOpacity
-                            style={styles.notificationButton}
-                            onPress={() => router.push('/(main)/notifications')}
-                        >
-                            <Ionicons name="notifications-outline" size={24} color="#374151" />
-                            {unreadCount > 0 && (
-                                <View style={styles.notificationBadge}>
-                                    <Text style={styles.notificationBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
-                                </View>
-                            )}
-                        </TouchableOpacity>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                <Text style={{
+                                    fontSize: 14,
+                                    fontWeight: '600',
+                                    color: store?.active ? '#10B981' : '#6B7280'
+                                }}>
+                                    {isClosedToday ? 'Closed' : (isLunchBreak ? 'Lunch' : (store?.active ? 'Online' : 'Offline'))}
+                                </Text>
+                                <Switch
+                                    value={!!store?.active}
+                                    onValueChange={handleToggleStatus}
+                                    trackColor={{ false: "#d3d3d3", true: "#4CAF50" }}
+                                    style={{ transform: [{ scale: 1.1 }] }}
+                                />
+                            </View>
+                            <TouchableOpacity
+                                style={styles.notificationButton}
+                                onPress={() => router.push('/(main)/notifications')}
+                            >
+                                <Ionicons name="notifications-outline" size={24} color="#374151" />
+                                {unreadCount > 0 && (
+                                    <View style={styles.notificationBadge}>
+                                        <Text style={styles.notificationBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                                    </View>
+                                )}
+                            </TouchableOpacity>
+                        </View>
                     </View>
 
                     <View style={styles.statsGrid}>

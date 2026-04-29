@@ -62,17 +62,30 @@ export function useOrderRequests(): UseOrderRequestsReturn {
             const expiresAt = new Date(Date.now() + TIMEOUT_MS).toISOString();
             const now = new Date().toISOString();
 
-            const rows = stores.map(store => ({
-                consumer_user_id: user.id,
-                store_id: String(store.storeId),
-                store_name: store.storeName,
-                items: store.items.map(i => ({ id: i.id, name: i.name, quantity: i.quantity, price: i.price })),
-                subtotal: store.total,
-                status: 'PENDING' as const,
-                expires_at: expiresAt,
-                created_at: now,
-                updated_at: now
-            }));
+            // Fetch the parent merchant IDs for the legacy schema constraints
+            const branchIds = stores.map(s => String(s.storeId));
+            const { data: branchData } = await supabase
+                .from('merchant_branches')
+                .select('id, merchant_id')
+                .in('id', branchIds);
+
+            const merchantIdMap = new Map(branchData?.map(b => [b.id, b.merchant_id]));
+
+            const rows = stores.map(store => {
+                const bId = String(store.storeId);
+                return {
+                    consumer_user_id: user.id,
+                    store_id: merchantIdMap.get(bId) || bId,
+                    branch_id: bId,
+                    store_name: store.storeName,
+                    items: store.items.map(i => ({ id: i.id, name: i.name, quantity: i.quantity, price: i.price })),
+                    subtotal: store.total,
+                    status: 'PENDING' as const,
+                    expires_at: expiresAt,
+                    created_at: now,
+                    updated_at: now
+                };
+            });
 
             const { data, error } = await supabase
                 .from('order_requests')

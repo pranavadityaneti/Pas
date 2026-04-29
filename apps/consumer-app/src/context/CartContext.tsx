@@ -19,8 +19,6 @@ interface CartItem {
 
 interface CartContextType {
     items: CartItem[];
-    pickupTimes: Record<string, string>;
-    setPickupTime: (storeId: string, time: string) => void;
     groupedItems: Record<string, CartItem[]>;
     addItem: (item: Omit<CartItem, 'quantity'>) => void;
     removeItem: (id: string) => void;
@@ -35,13 +33,8 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export function CartProvider({ children }: { children: ReactNode }) {
     const [items, setItems] = useState<CartItem[]>([]);
-    const [pickupTimes, setPickupTimes] = useState<Record<string, string>>({});
     const [isInitialized, setIsInitialized] = useState(false);
     const [cartId, setCartId] = useState<string | null>(null);
-
-    const setPickupTime = (storeId: string, time: string) => {
-        setPickupTimes(prev => ({ ...prev, [storeId]: time }));
-    };
 
     const groupedItems = items.reduce((acc, item) => {
         if (!acc[item.storeId]) acc[item.storeId] = [];
@@ -300,7 +293,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     };
 
     return (
-        <CartContext.Provider value={{ items, pickupTimes, setPickupTime, groupedItems, addItem, removeItem, updateQuantity, clearCart, getItemCount, getTotal, getItemQuantity }}>
+        <CartContext.Provider value={{ items, groupedItems, addItem, removeItem, updateQuantity, clearCart, getItemCount, getTotal, getItemQuantity }}>
             {children}
         </CartContext.Provider>
     );

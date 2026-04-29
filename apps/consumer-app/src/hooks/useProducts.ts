@@ -57,7 +57,7 @@ export const useProducts = (storeId: string | null) => {
                         extra_data
                     )
                 `)
-                .eq('storeId', storeId)
+                .eq('branch_id', storeId)
                 .eq('active', true);
 
             if (fetchError) throw fetchError;

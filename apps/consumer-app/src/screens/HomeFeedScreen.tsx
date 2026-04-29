@@ -173,7 +173,7 @@ export default function HomeFeedScreen() {
                 navigation.navigate('Storefront', { storeId: venue.id as any });
             }}
             style={isFullWidth ? {} : { width: width * 0.75 }}
-            className={`rounded-[28px] bg-white border border-gray-100 overflow-hidden shadow-sm ${isFullWidth ? 'mb-5 w-full' : 'mr-4'}`}
+            className={`rounded-[28px] bg-white border border-gray-100 overflow-hidden shadow-sm ${isFullWidth ? 'mb-5 w-full' : 'mr-4'} ${!venue.isOpen ? 'opacity-70' : ''}`}
         >
             <View className="h-[140px] relative">
                 <Image source={{ uri: venue.image }} className="w-full h-full object-cover" />
@@ -181,6 +181,14 @@ export default function HomeFeedScreen() {
                     colors={['transparent', 'rgba(0,0,0,0.6)']}
                     style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
                 />
+
+                {!venue.isOpen && (
+                    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255,255,255,0.3)', alignItems: 'center', justifyContent: 'center' }}>
+                         <View className="bg-black/80 px-3 py-1.5 rounded-full border border-white/20 backdrop-blur-md">
+                             <Text className="text-white text-[12px] font-bold tracking-wider uppercase">Currently Offline</Text>
+                         </View>
+                    </View>
+                )}
 
                 {/* Distance Badge (Top Right) */}
                 <View className="absolute top-3 right-3 bg-white/95 px-2.5 py-1.5 rounded-xl flex-row items-center shadow-sm">

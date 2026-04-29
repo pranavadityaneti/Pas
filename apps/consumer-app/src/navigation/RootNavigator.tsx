@@ -87,21 +87,6 @@ export default function RootNavigator() {
                         <Stack.Screen name="Onboarding" component={OnboardingScreen} />
                     )}
                     <Stack.Screen name="Auth" component={AuthScreen} />
-                    <Stack.Screen name="Main" component={MainTabNavigator} />
-                    <Stack.Screen name="Storefront" component={StorefrontScreen} />
-                    <Stack.Screen name="Checkout" component={CheckoutScreen} />
-                    <Stack.Screen name="DiningCheckout" component={DiningCheckoutScreen} />
-                    <Stack.Screen name="Offers" component={OffersScreen} />
-                    <Stack.Screen name="SpotlightDetail" component={SpotlightDetailScreen} />
-                    <Stack.Screen name="CategoryDetail" component={CategoryDetailScreen} />
-                    <Stack.Screen name="YourOrders" component={YourOrdersScreen} />
-                    <Stack.Screen name="LocationPicker" component={LocationPickerScreen} options={{ presentation: 'fullScreenModal' }} />
-                    <Stack.Screen name="Profile" component={ProfileScreen} />
-                    <Stack.Screen name="Favorites" component={FavoritesScreen} />
-                    <Stack.Screen name="PaymentMethods" component={PaymentMethodsScreen} />
-                    <Stack.Screen name="Support" component={SupportScreen} />
-                    <Stack.Screen name="AddPaymentMethod" component={AddPaymentMethodScreen} />
-                    <Stack.Screen name="SwapScreen" component={SwapScreen} />
                 </>
             ) : (
                 <>

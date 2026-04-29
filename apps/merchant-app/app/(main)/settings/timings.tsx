@@ -17,6 +17,7 @@ export default function TimingsScreen() {
     const [selectedDays, setSelectedDays] = useState<number[]>([0, 1, 2, 3, 4, 5]);
     const [openTime, setOpenTime] = useState(new Date(2022, 0, 1, 9, 0));
     const [closeTime, setCloseTime] = useState(new Date(2022, 0, 1, 21, 0));
+    const [prepTime, setPrepTime] = useState<number>(15);
 
     // Lunch Break
     const [hasLunchBreak, setHasLunchBreak] = useState(false);
@@ -28,6 +29,8 @@ export default function TimingsScreen() {
     const [pickerMode, setPickerMode] = useState<'open' | 'close' | 'lunchStart' | 'lunchEnd'>('open');
 
     useEffect(() => {
+        if (store?.prep_time_minutes) setPrepTime(store.prep_time_minutes);
+
         if (store?.operating_hours && Object.keys(store.operating_hours).length > 0) {
             const oh = store.operating_hours;
 
@@ -79,6 +82,7 @@ export default function TimingsScreen() {
     };
 
     const isDirty = (() => {
+        if (prepTime !== (store?.prep_time_minutes || 15)) return true;
         if (!store?.operating_hours) return true; // If no hours set, it's dirty
         const oh = store.operating_hours;
 
@@ -116,7 +120,10 @@ export default function TimingsScreen() {
 
         try {
             // Use Context for Optimistic Update
-            const { success, error } = await updateStoreDetails({ operating_hours: payload });
+            const { success, error } = await updateStoreDetails({ 
+                operating_hours: payload,
+                prep_time_minutes: prepTime
+            });
 
             if (!success) throw new Error(error);
 
@@ -195,6 +202,28 @@ export default function TimingsScreen() {
                             </View>
                         </View>
                     )}
+
+                    <View style={styles.divider} />
+
+                    <Text style={styles.label}>ORDER PREP TIME</Text>
+                    <Text style={{ fontSize: 13, color: Colors.textSecondary, marginBottom: 12 }}>Time needed to pack an order before pickup</Text>
+                    <View style={{ flexDirection: 'row', gap: 8, marginBottom: 24 }}>
+                        {[15, 30, 45, 60].map((mins) => (
+                            <TouchableOpacity
+                                key={mins}
+                                style={[
+                                    { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, alignItems: 'center', backgroundColor: Colors.white },
+                                    prepTime === mins && { backgroundColor: Colors.primary + '10', borderColor: Colors.primary }
+                                ]}
+                                onPress={() => setPrepTime(mins)}
+                            >
+                                <Text style={[
+                                    { fontWeight: '600', color: Colors.textSecondary },
+                                    prepTime === mins && { color: Colors.primary }
+                                ]}>{mins}m</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
 
                     <View style={styles.divider} />
 

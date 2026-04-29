@@ -174,6 +174,12 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
 
         } catch (error) {
             console.warn("[LocationContext] Smart routing error:", error);
+            setActiveLocation(prev => prev || {
+                type: 'Default Location',
+                address: 'Bangalore, India (Fallback)',
+                latitude: 12.9716,
+                longitude: 77.5946
+            });
         } finally {
             // Clear the failsafe since we resolved naturally
             if (failsafeTimer.current) clearTimeout(failsafeTimer.current);

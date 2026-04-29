@@ -6,27 +6,32 @@ import { StatusBar } from 'expo-status-bar';
 import { StoreProvider } from '../src/context/StoreContext';
 import { NotificationProvider } from '../src/context/NotificationContext';
 import { UserProvider } from '../src/context/UserContext';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { DefaultTheme, ThemeProvider } from '@react-navigation/native';
+
+const queryClient = new QueryClient();
 
 export default function RootLayout() {
     console.log('[RootLayout] Rendering');
     return (
         <GestureHandlerRootView style={{ flex: 1 }}>
             <SafeAreaProvider>
-                <ThemeProvider value={DefaultTheme}>
-                    <UserProvider>
-                        <StoreProvider>
-                            <NotificationProvider>
-                                <StatusBar style="dark" />
-                                <Stack screenOptions={{ headerShown: false }}>
-                                    <Stack.Screen name="(auth)" />
-                                    <Stack.Screen name="(main)" />
-                                </Stack>
-                            </NotificationProvider>
-                        </StoreProvider>
-                    </UserProvider>
-                </ThemeProvider>
+                <QueryClientProvider client={queryClient}>
+                    <ThemeProvider value={DefaultTheme}>
+                        <UserProvider>
+                            <StoreProvider>
+                                <NotificationProvider>
+                                    <StatusBar style="dark" />
+                                    <Stack screenOptions={{ headerShown: false }}>
+                                        <Stack.Screen name="(auth)" />
+                                        <Stack.Screen name="(main)" />
+                                    </Stack>
+                                </NotificationProvider>
+                            </StoreProvider>
+                        </UserProvider>
+                    </ThemeProvider>
+                </QueryClientProvider>
             </SafeAreaProvider>
         </GestureHandlerRootView>
     );

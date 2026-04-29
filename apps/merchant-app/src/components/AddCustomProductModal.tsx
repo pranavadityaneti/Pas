@@ -10,6 +10,7 @@ import { Colors } from '../../constants/Colors';
 import { supabase } from '../lib/supabase';
 import uuid from 'react-native-uuid';
 import { InventoryItem } from '../hooks/useInventory';
+import { useStore } from '../hooks/useStore';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -24,6 +25,7 @@ interface AddCustomProductModalProps {
 }
 
 export default function AddCustomProductModal({ visible, onClose, onSuccess, storeId, initialName, itemToEdit, verticalPills = [] }: AddCustomProductModalProps) {
+    const { activeRole } = useStore();
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const [loading, setLoading] = useState(false);
@@ -262,7 +264,7 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
     const uploadImage = async (uri: string) => {
         try {
             const formData = new FormData();
-            const fileName = `custom-${storeId}-${Date.now()}-${Math.random()}.jpg`;
+            const fileName = `custom-${activeRole?.id || storeId}-${Date.now()}-${Math.random()}.jpg`;
 
             // @ts-ignore
             formData.append('file', {
@@ -310,7 +312,7 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
             }
 
             const { data, error } = await query
-                .or(`createdByStoreId.eq.${storeId},createdByStoreId.is.null`)
+                .or(`createdByStoreId.eq.${activeRole?.id || storeId},createdByStoreId.is.null`)
                 .limit(1)
                 .maybeSingle();
 
@@ -452,7 +454,7 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
                     .insert({
                         id: productId,
                         ...productPayload,
-                        createdByStoreId: storeId,
+                        createdByStoreId: activeRole?.id || storeId,
                     });
                 if (productError) throw productError;
             }
@@ -475,7 +477,8 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
                     .from('StoreProduct')
                     .insert({
                         id: uuid.v4().toString(),
-                        storeId: storeId,
+                        storeId: activeRole?.id || storeId,
+                        branch_id: activeRole?.id || storeId, // Explicit branch map to prevent feed dropout
                         productId: productId,
                         ...storeProductPayload,
                         active: true,

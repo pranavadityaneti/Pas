@@ -2,8 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Animated, Dimensions, Pressable, TextInput, Keyboard, TouchableWithoutFeedback } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
-
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { height } = Dimensions.get('window');
 
@@ -41,6 +40,7 @@ const SIDEBAR_ITEMS = [
 ];
 
 export default function FilterModal({ visible, onClose, onApply, initialFilters, initialTab = 'sort', isGlobalInventory = false, verticalPills = [], products = [] }: FilterModalProps) {
+    const insets = useSafeAreaInsets();
     const [selectedTab, setSelectedTab] = useState(initialTab);
 
     useEffect(() => {
@@ -266,7 +266,7 @@ export default function FilterModal({ visible, onClose, onApply, initialFilters,
                     </View>
 
                     {/* Footer */}
-                    <View style={styles.footer}>
+                    <View style={[styles.footer, { paddingBottom: Math.max(30, insets.bottom + 10) }]}>
                         <TouchableOpacity onPress={handleReset}>
                             <Text style={styles.resetText}>Reset</Text>
                         </TouchableOpacity>
@@ -409,7 +409,6 @@ const styles = StyleSheet.create({
         padding: 20,
         borderTopWidth: 1,
         borderTopColor: '#eee',
-        paddingBottom: 30,
     },
     resetText: {
         color: '#666',

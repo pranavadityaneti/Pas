@@ -67,7 +67,7 @@ export default function FavoritesScreen() {
                 setIsHydrating(true);
                 const { data, error } = await supabase
                     .from('StoreProduct')
-                    .select('*, product:Product(*), store:Store(name)')
+                    .select('*, product:Product(*), store:merchant_branches(branch_name)')
                     .in('id', productFavorites);
 
                 if (error) throw error;
@@ -81,8 +81,8 @@ export default function FavoritesScreen() {
                         image: res.product?.image,
                         uom: res.product?.uom,
                         isVeg: res.product?.isVeg,
-                        storeId: res.storeId,
-                        storeName: res.store?.name,
+                        storeId: res.branch_id,
+                        storeName: res.store?.branch_name,
                         isDining: true // Fallback, could query store for this
                     }));
                     setFavoriteItems(hydrated);

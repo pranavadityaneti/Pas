@@ -6,11 +6,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import uuid from 'react-native-uuid';
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
-import { useUser } from '../../../src/context/UserContext'; // Or useStore if linked strictly to store
+import { useUser } from '../../../src/context/UserContext'; 
+import { useStore } from '../../../src/context/StoreContext';
 import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
 import { supabase } from '../../../src/lib/supabase';
 import { Colors } from '../../../constants/Colors'
 import BottomModal from '../../../src/components/BottomModal';
+import { useCreateManager } from '../../../src/hooks/useStaff';
 
 LogBox.ignoreLogs(['VirtualizedLists should never be nested']);interface Branch {
     id: string;
@@ -36,6 +38,7 @@ const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIza
 export default function BranchesScreen() {
     const router = useRouter();
     const { user } = useUser();
+    const { refreshStore } = useStore();
 
     // Fetch branches from DB
     const { data: branches, loading, error, setData: setBranches } = useRealtimeTable({
@@ -49,6 +52,7 @@ export default function BranchesScreen() {
     const [modalVisible, setModalVisible] = useState(false);
     const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
     const [saving, setSaving] = useState(false);
+    const { mutateAsync: provisionManager } = useCreateManager();
     const placesRef = useRef<GooglePlacesAutocompleteRef | null>(null);
 
     // Form State
@@ -104,6 +108,7 @@ export default function BranchesScreen() {
 
         setSaving(true);
         try {
+            let finalBranchId = editingBranch?.id;
             const payload = {
                 merchant_id: user.id,
                 branch_name: form.name.trim(),
@@ -146,9 +151,27 @@ export default function BranchesScreen() {
 
                 // Instant Add
                 if (newBranch) {
+                    finalBranchId = newBranch.id;
                     setBranches(prev => [newBranch, ...prev]);
                 }
             }
+
+            // --- RBAC KEYMAKER WIRING ---
+            try {
+                const sanitizedPhone = form.phone.trim().replace(/\D/g, '');
+                await provisionManager({
+                    phone: sanitizedPhone,
+                    name: form.manager.trim(),
+                    storeId: finalBranchId || ''
+                });
+            } catch (provisionError: any) {
+                console.error('Keymaker Provisioning Error:', provisionError);
+                Alert.alert(
+                    'Branch Saved',
+                    'The branch details were saved successfully, but we failed to create or update the manager account. Please try again from Staff Management if needed.'
+                );
+            }
+            // --- END RBAC WIRING ---
 
             setModalVisible(false);
             Alert.alert('Success', `Branch ${editingBranch ? 'updated' : 'added'} successfully`);
@@ -176,6 +199,10 @@ export default function BranchesScreen() {
                         // Revert on error
                         setBranches(previousBranches);
                         Alert.alert('Error', error.message);
+                    } else {
+                        // Success: Cascade delete staff and refresh context
+                        await supabase.from('store_staff').delete().eq('store_id', id);
+                        await refreshStore();
                     }
                 }
             }

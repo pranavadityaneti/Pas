@@ -17,81 +17,13 @@ import { STORES, RESTAURANTS } from '../lib/data';
 export default function CartScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const route = useRoute<RouteProp<MainTabParamList, 'Cart'>>();
-    const { items, pickupTimes, setPickupTime, groupedItems, updateQuantity, getItemCount, getTotal, clearCart } = useCart();
+    const { items, groupedItems, updateQuantity, getItemCount, getTotal, clearCart } = useCart();
     const { session: currentSession, isLoading: authLoading, user, isProfileLoading } = useAuth();
     const [authModalVisible, setAuthModalVisible] = useState(false);
     const [isWaitingForAuthSync, setIsWaitingForAuthSync] = useState(false);
     const [coupon, setCoupon] = useState<any>(null);
-    const [activeTimePickerStoreId, setActiveTimePickerStoreId] = useState<string | null>(null);
-    const [selectedDayTab, setSelectedDayTab] = useState<'Today' | 'Tomorrow'>('Today');
 
-    // CRITICAL EXECUTE: 15-Minute Interval Engine
-    const generateTimeSlots = (openTime: string, closeTime: string) => {
-        const slots = [];
-        
-        const now = new Date();
-        // 1. Buffer: Current Time + 15 mins
-        const bufferTime = new Date(now.getTime() + 15 * 60000);
-        
-        // 2. Interval: Round up to next 15-min interval
-        const remainder = bufferTime.getMinutes() % 15;
-        if (remainder !== 0) {
-            bufferTime.setMinutes(bufferTime.getMinutes() + (15 - remainder));
-        }
-        bufferTime.setSeconds(0);
-        bufferTime.setMilliseconds(0);
-        
-        // 3. Horizon: 24 hours from now
-        const horizon = new Date(now.getTime() + 24 * 60 * 60000);
-        
-        const [openH, openM] = openTime.split(':').map(Number);
-        const [closeH, closeM] = closeTime.split(':').map(Number);
-        
-        let currentSlot = new Date(bufferTime.getTime());
-        
-        while (currentSlot <= horizon) {
-            const h = currentSlot.getHours();
-            const m = currentSlot.getMinutes();
-            
-            const currentSlotMinutes = h * 60 + m;
-            const openMinutes = openH * 60 + openM;
-            const closeMinutes = closeH * 60 + closeM;
-            
-            // 4. Store Hours
-            let isValid = false;
-            if (closeMinutes > openMinutes) {
-                isValid = currentSlotMinutes >= openMinutes && currentSlotMinutes < closeMinutes;
-            } else {
-                // Overnight hours
-                isValid = currentSlotMinutes >= openMinutes || currentSlotMinutes < closeMinutes;
-            }
-            
-            if (isValid) {
-                // Format String
-                const isTomorrow = currentSlot.getDate() !== now.getDate();
-                const prefix = isTomorrow ? "Tomorrow" : "Today";
-                
-                const displayH = h % 12 === 0 ? 12 : h % 12;
-                const displayM = m.toString().padStart(2, '0');
-                const ampm = h >= 12 ? 'PM' : 'AM';
-                
-                slots.push(`${prefix}, ${displayH}:${displayM} ${ampm}`);
-                
-                // Advance by 15 mins
-                currentSlot = new Date(currentSlot.getTime() + 15 * 60000);
-            } else {
-                // Jump logic
-                if (currentSlotMinutes < openMinutes) {
-                    currentSlot.setHours(openH, openM, 0, 0);
-                } else {
-                    currentSlot.setDate(currentSlot.getDate() + 1);
-                    currentSlot.setHours(openH, openM, 0, 0);
-                }
-            }
-        }
-        
-        return slots;
-    };
+
 
     // Receive coupon from OffersScreen
     useEffect(() => {
@@ -171,8 +103,7 @@ export default function CartScreen() {
         }
     };
 
-    const isMissingPickupTime = Object.keys(groupedItems).some(storeId => !pickupTimes[storeId]);
-    const isCheckoutDisabled = isWaitingForAuthSync || isMissingPickupTime;
+    const isCheckoutDisabled = isWaitingForAuthSync;
 
     if (items.length === 0) {
         return (
@@ -263,25 +194,6 @@ export default function CartScreen() {
                                     </View>
                                 ))}
 
-                                {/* Time Slot UI */}
-                                <View className="mt-4 pt-4 border-t border-gray-100 flex-row items-center justify-between">
-                                    <View className="flex-row items-center">
-                                        <Clock size={16} color="#6B7280" />
-                                        <Text className="text-[14px] font-semibold text-gray-700 ml-2">Pickup Time</Text>
-                                    </View>
-                                    <TouchableOpacity 
-                                        delayPressIn={0}
-                                        onPress={() => {
-                                            Haptics.selectionAsync();
-                                            setActiveTimePickerStoreId(storeId);
-                                        }}
-                                        className={`px-4 py-2 rounded-xl flex-row items-center ${pickupTimes[storeId] ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}
-                                    >
-                                        <Text className={`font-bold text-[13px] ${pickupTimes[storeId] ? 'text-green-700' : 'text-red-600'}`}>
-                                            {pickupTimes[storeId] || 'Requires Selection'}
-                                        </Text>
-                                    </TouchableOpacity>
-                                </View>
                             </View>
                         )
                     })}
@@ -352,10 +264,6 @@ export default function CartScreen() {
                             <ActivityIndicator color="white" size="small" className="mr-3" />
                             <Text className="text-white text-[17px] font-bold">Synchronizing...</Text>
                         </View>
-                    ) : isMissingPickupTime ? (
-                        <View className="flex-row items-center justify-center w-full">
-                            <Text className="text-white text-[17px] font-bold">Select All Pickup Times</Text>
-                        </View>
                     ) : (
                         <>
                             <Text className="text-white text-[17px] font-bold">Proceed to Pay</Text>
@@ -378,91 +286,6 @@ export default function CartScreen() {
                     subtitle="Login or sign up to complete your purchase."
                 />
             </View>
-            {/* Time Picker Modal */}
-            <Modal
-                animationType="slide"
-                transparent={true}
-                visible={!!activeTimePickerStoreId}
-                onRequestClose={() => setActiveTimePickerStoreId(null)}
-            >
-                <View className="flex-1 justify-end bg-black/50">
-                    <View className="bg-white rounded-t-[24px] overflow-hidden" style={{ maxHeight: '60%' }}>
-                        <View className="p-5 flex-row justify-between items-center border-b border-gray-100">
-                            <Text className="text-[18px] font-bold text-gray-900">Select Pickup Time</Text>
-                            <TouchableOpacity onPress={() => setActiveTimePickerStoreId(null)}>
-                                <Text className="text-red-500 font-bold text-[16px]">Close</Text>
-                            </TouchableOpacity>
-                        </View>
-                        
-                        {/* Day Tabs */}
-                        <View className="flex-row mx-4 mt-4 mb-2 bg-gray-100 rounded-[12px] p-1">
-                            <TouchableOpacity 
-                                onPress={() => { Haptics.selectionAsync(); setSelectedDayTab('Today'); }}
-                                className={`flex-1 py-2 items-center justify-center rounded-[10px] ${selectedDayTab === 'Today' ? 'bg-white shadow-[0_1px_3px_rgba(0,0,0,0.1)]' : ''}`}
-                            >
-                                <Text className={`font-bold ${selectedDayTab === 'Today' ? 'text-gray-900' : 'text-gray-500'}`}>Today</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity 
-                                onPress={() => { Haptics.selectionAsync(); setSelectedDayTab('Tomorrow'); }}
-                                className={`flex-1 py-2 items-center justify-center rounded-[10px] ${selectedDayTab === 'Tomorrow' ? 'bg-white shadow-[0_1px_3px_rgba(0,0,0,0.1)]' : ''}`}
-                            >
-                                <Text className={`font-bold ${selectedDayTab === 'Tomorrow' ? 'text-gray-900' : 'text-gray-500'}`}>Tomorrow</Text>
-                            </TouchableOpacity>
-                        </View>
-
-                        <ScrollView style={{ minHeight: 250, maxHeight: 400, width: '100%' }} contentContainerStyle={{ flexGrow: 1, paddingBottom: 30, paddingTop: 10, paddingHorizontal: 16 }} showsVerticalScrollIndicator={false}>
-                            {(() => {
-                                if (!activeTimePickerStoreId) return null;
-                                
-                                // Attempt local lookup (fallback for older mock data)
-                                const storeMeta = STORES.find(s => String(s.id) === String(activeTimePickerStoreId)) || RESTAURANTS.find(r => String(r.id) === String(activeTimePickerStoreId));
-                                
-                                // CRITICAL HOTFIX: Never return null! Default to 08:00-22:00 if store meta isn't found
-                                const safeOpen = (storeMeta as any)?.opening_time || (storeMeta as any)?.openingTime || "08:00";
-                                const safeClose = (storeMeta as any)?.closing_time || (storeMeta as any)?.closingTime || "22:00";
-                                
-                                const timeSlots = generateTimeSlots(safeOpen, safeClose);
-                                
-                                // CRITICAL EXECUTE: The Isolation Override
-                                const displaySlots = timeSlots && timeSlots.length > 0 ? timeSlots : ["Test Slot 1", "Test Slot 2", "Test Slot 3"];
-
-                                // Filter slots by active tab
-                                const todaySlots = displaySlots.filter(t => t.startsWith("Today")).map(t => t.replace("Today, ", ""));
-                                const tomorrowSlots = displaySlots.filter(t => t.startsWith("Tomorrow")).map(t => t.replace("Tomorrow, ", ""));
-                                
-                                const activeSlots = selectedDayTab === 'Today' ? todaySlots : tomorrowSlots;
-
-                                return (
-                                    <View className="flex-row flex-wrap justify-between w-full">
-                                        {activeSlots.length === 0 && (
-                                            <Text className="text-gray-500 text-center w-full mt-5 text-[15px]">No available time slots for {selectedDayTab.toLowerCase()}.</Text>
-                                        )}
-                                        {activeSlots.map((time, idx) => {
-                                            const fullTimeStr = `${selectedDayTab}, ${time}`;
-                                            const isSelected = pickupTimes[activeTimePickerStoreId] === fullTimeStr;
-                                            return (
-                                                <TouchableOpacity 
-                                                    key={idx}
-                                                    onPress={() => {
-                                                        Haptics.selectionAsync();
-                                                        setPickupTime(activeTimePickerStoreId, fullTimeStr);
-                                                        setActiveTimePickerStoreId(null);
-                                                    }}
-                                                    delayPressIn={0}
-                                                    activeOpacity={0.7}
-                                                    className={`w-[48%] py-3 mb-3 rounded-[12px] flex-row items-center justify-center border ${isSelected ? 'border-[#B52725] bg-red-50' : 'border-gray-200 bg-gray-50'}`}
-                                                >
-                                                    <Text className={`font-bold text-[15px] text-center ${isSelected ? 'text-[#B52725]' : 'text-gray-800'}`}>{time}</Text>
-                                                </TouchableOpacity>
-                                            )
-                                        })}
-                                    </View>
-                                )
-                            })()}
-                        </ScrollView>
-                    </View>
-                </View>
-            </Modal>
         </SafeAreaView>
     );
 }
