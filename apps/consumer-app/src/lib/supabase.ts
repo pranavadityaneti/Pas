@@ -1,6 +1,5 @@
 // @lock — Do NOT overwrite. Approved config as of Mar 12, 2026.
 // Supabase Client: Initialization with AsyncStorage adapter.
-import 'react-native-url-polyfill/auto';
 import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 

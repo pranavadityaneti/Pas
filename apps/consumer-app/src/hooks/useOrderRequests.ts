@@ -87,6 +87,7 @@ export function useOrderRequests(): UseOrderRequestsReturn {
                 };
             });
 
+            console.log("PAYLOAD_AUDIT:", JSON.stringify(rows, null, 2));
             const { data, error } = await supabase
                 .from('order_requests')
                 .insert(rows)

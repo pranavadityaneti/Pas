@@ -8,7 +8,7 @@ import { Alert } from 'react-native';
  * useProductFavorites Hook
  * Manages user's favorite products with optimistic UI updates and Auth guards.
  */
-export const useProductFavorites = () => {
+export const useProductFavorites = (onAuthRequired?: () => void) => {
     const { user } = useAuth();
     const [productFavorites, setProductFavorites] = useState<string[]>([]);
     const [loading, setLoading] = useState(true);
@@ -47,12 +47,16 @@ export const useProductFavorites = () => {
     const toggleProductFavorite = async (storeProductId: string) => {
         // --- Auth Guard (Anti-Prop Drilling) ---
         if (!user) {
-            // Context does not provide a global modal trigger at this time
-            Alert.alert(
-                "Login Required",
-                "Please log in to save favorite items.",
-                [{ text: "OK" }]
-            );
+            if (onAuthRequired) {
+                onAuthRequired();
+            } else {
+                // Context does not provide a global modal trigger at this time
+                Alert.alert(
+                    "Login Required",
+                    "Please log in to save favorite items.",
+                    [{ text: "OK" }]
+                );
+            }
             return;
         }
 

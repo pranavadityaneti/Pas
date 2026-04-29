@@ -56,8 +56,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // 2. Exponential Backoff Sync Loop
         while (attempt < MAX_RETRIES) {
             try {
+                console.log('[AuthContext] Fetching profile...');
                 const timeoutPromise = new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('Supabase DB Timeout')), 5000)
+                    setTimeout(() => reject(new Error('Supabase DB Timeout')), 8000)
                 );
 
                 const { data, error } = await Promise.race([

@@ -91,7 +91,7 @@ export default function HomeScreen() {
                 </View>
 
 
-                {/* Featured Card (Hero Slider) */}
+                {/* Featured Card (Hero Slider) — Static, non-interactive */}
                 <View className="px-6 mb-8">
                     <View className="relative w-full h-[220px] rounded-[30px] overflow-hidden shadow-sm bg-white border border-gray-100">
                         <Image
@@ -100,15 +100,6 @@ export default function HomeScreen() {
                         />
                         <View className="absolute top-6 left-6 px-3 py-1.5 bg-black/30 rounded-xl border border-white/20">
                             <Text className="text-[10px] font-bold text-white uppercase tracking-wider">Featured</Text>
-                        </View>
-                        <View className="absolute bottom-6 right-6">
-                            <TouchableOpacity
-                                className="px-5 py-2.5 bg-white rounded-xl shadow-lg flex-row items-center"
-                                onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
-                            >
-                                <Text className="text-xs font-bold text-black mr-2">Order Now</Text>
-                                <ChevronRight size={14} color="#000" />
-                            </TouchableOpacity>
                         </View>
                     </View>
                 </View>

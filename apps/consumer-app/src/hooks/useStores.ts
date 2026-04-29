@@ -19,7 +19,7 @@ export const useStores = () => {
         try {
             setLoading(true);
             const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Supabase Timeout (5s)')), 5000)
+                setTimeout(() => reject(new Error('Supabase Timeout (8s)')), 8000)
             );
 
             const { data, error: fetchError } = await Promise.race([

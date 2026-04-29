@@ -38,7 +38,7 @@ export const useNearbyStores = () => {
                 const { data, error: rpcError } = await supabase.rpc('get_nearby_stores', {
                     user_lat: activeLocation.latitude,
                     user_lon: activeLocation.longitude,
-                    radius_meters: 500000
+                    radius_meters: 10000
                 });
 
                 console.log('POSTGIS_RAW_PAYLOAD:', data, rpcError);

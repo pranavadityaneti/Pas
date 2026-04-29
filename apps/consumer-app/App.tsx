@@ -1,3 +1,4 @@
+import 'react-native-url-polyfill/auto';
 import React from 'react';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

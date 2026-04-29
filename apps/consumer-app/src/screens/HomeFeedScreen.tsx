@@ -5,7 +5,7 @@ import { View, Text, ScrollView, Image, TouchableOpacity, TextInput, Dimensions,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Search, User, ChevronRight, Star, Clock, ArrowRight, MapPinOff, WifiOff } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { STORE_CATEGORIES, PICKUP_SPOTLIGHTS } from '../lib/data';
+import { PICKUP_SPOTLIGHTS } from '../lib/data';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
@@ -19,27 +19,12 @@ import GlobalHeader from '../components/GlobalHeader';
 import { useCategories } from '../context/CategoryContext';
 import { useStores } from '../hooks/useStores';
 import { useNearbyStores } from '../hooks/useNearbyStores';
+import { useGlobalSearch } from '../hooks/useGlobalSearch';
 import { ActivityIndicator } from 'react-native';
 
 const { width } = Dimensions.get('window');
 
-const CATEGORIES = [
-    { name: "Grocery & Kirana", image: "https://images.unsplash.com/photo-1542838132-92c53300491e?w=200&h=200&fit=crop" },
-    { name: "Fresh items", image: "https://images.unsplash.com/photo-1610832958506-aa56368176cf?w=200&h=200&fit=crop" },
-    { name: "Restaurants & Cafes", image: "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=200&h=200&fit=crop" },
-    { name: "Bakeries & Desserts", image: "https://images.unsplash.com/photo-1550617931-e17a7b70dce2?w=200&h=200&fit=crop" },
-    { name: "Sports and fitness", image: "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=200&h=200&fit=crop" },
-    { name: "Pharmacy & Wellness", image: "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=200&h=200&fit=crop" },
-    { name: "Electronics & Accessories", image: "https://images.unsplash.com/photo-1498049794561-7780e7231661?w=200&h=200&fit=crop" },
-    { name: "Fashion & Apparel", image: "https://images.unsplash.com/photo-1445205170230-053b830c6046?w=200&h=200&fit=crop" },
-    { name: "Home & Lifestyle", image: "https://images.unsplash.com/photo-1583847268964-b28dc8f51f92?w=200&h=200&fit=crop" },
-    { name: "Beauty & Personal Care", image: "https://images.unsplash.com/photo-1596462502278-27bfdc4033c8?w=200&h=200&fit=crop" },
-    { name: "Pet Care & Supplies", image: "https://images.unsplash.com/photo-1583337130417-3346a1be7dee?w=200&h=200&fit=crop" },
-    { name: "Stationery, Gifting & Toys", image: "https://images.unsplash.com/photo-1456735190827-d1262f71b8a3?w=200&h=200&fit=crop" },
-    { name: "Electricals, Paints & Automotive", image: "https://images.unsplash.com/photo-1513828583688-c52646db42da?w=200&h=200&fit=crop" },
-    { name: "Hardware and plumbing", image: "https://images.unsplash.com/photo-1581141849291-1110b9c1d30a?w=200&h=200&fit=crop" },
-    { name: "Pooja and festive needs", image: "https://images.unsplash.com/photo-1513410191585-79cee3e047fb?w=200&h=200&fit=crop" },
-];
+// Replaced CATEGORIES array with dynamic vertical data from context
 
 type FilterType = 'nearest' | 'food' | 'grocery' | 'bakery';
 
@@ -49,10 +34,18 @@ export default function HomeFeedScreen() {
     const { activeLocation, isLoadingLocation, permissionDenied, refreshLocation } = useLocation();
     const [searchText, setSearchText] = useState('');
     const [activeFilter, setActiveFilter] = useState<FilterType | null>('nearest');
-    const { stores, loading, refresh: refreshStores } = useStores();
+    const { stores, loading, error: storesError, refresh: refreshStores } = useStores();
     const { nearbyStoreIds, distanceMap } = useNearbyStores();
     const { items, getTotal } = useCart();
     const { verticals } = useCategories();
+
+    // --- Global Search (Postgres RPC) ---
+    const { results: searchResults, isLoading: isSearchLoading } = useGlobalSearch(
+        searchText,
+        activeLocation?.latitude,
+        activeLocation?.longitude,
+        'retail'
+    );
 
 
     const getCategoryUI = (name: string) => {
@@ -87,31 +80,54 @@ export default function HomeFeedScreen() {
 
     // --- Venues Data Logic ---
     const allVenues = useMemo(() => {
+        // If search is active, use Postgres RPC results instead of local filtering
+        if (searchText.trim()) {
+            return searchResults.map(s => ({
+                id: s.branch_id,
+                name: s.branch_name,
+                address: s.address || 'Address not available',
+                image: s.store_photos?.[0]
+                    ? `https://llhxkonraqaxtradyycj.supabase.co/storage/v1/object/public/store-photos/${s.store_photos[0]}`
+                    : 'https://images.unsplash.com/photo-1542838132-92c53300491?w=400',
+                rating: null,
+                rawDist: s.distance_meters,
+                distance: s.distance_meters >= 1000
+                    ? `${(s.distance_meters / 1000).toFixed(1)} km`
+                    : `${Math.round(s.distance_meters)} m`,
+                category: s.vertical_name || 'Uncategorized',
+                isDining: false,
+                isRestaurant: false,
+                isOpen: s.is_active,
+                cuisine: s.vertical_name || '',
+                products: s.matched_products || [],
+                prepTime: s.prep_time_minutes ? `${s.prep_time_minutes} mins` : '30 mins',
+                merchantId: s.merchant_id,
+                operating_hours: s.operating_hours,
+                // Search metadata
+                _matchedProducts: s.matched_products || [],
+                _storeNameMatch: s.store_name_match,
+            }));
+        }
+
+        // Default: local filtering from useStores + useNearbyStores
         let list = stores.map(s => ({ 
             ...s, 
             isRestaurant: s.isDining, 
             rawDist: distanceMap[s.id] || 999999 
         }));
 
+        // CRITICAL: Only show stores within the 10km PostGIS radius
+        list = list.filter(v => distanceMap[v.id] !== undefined);
+
         // Apply filters
         if (activeFilter === 'nearest') {
             list.sort((a, b) => a.rawDist - b.rawDist);
         } else if (activeFilter === 'grocery') {
-            list = list.filter(v => (v as any).category === 'grocery');
+            list = list.filter(v => (v as any).category === 'Grocery & Kirana');
         } else if (activeFilter === 'food') {
             list = list.filter(v => v.isRestaurant);
         } else if (activeFilter === 'bakery') {
-            list = list.filter(v => (v as any).category === 'bakery');
-        }
-
-        // Apply search mapping
-        if (searchText) {
-            const query = searchText.toLowerCase();
-            list = list.filter(v =>
-                v.name.toLowerCase().includes(query) ||
-                ((v as any).cuisine && (v as any).cuisine.toLowerCase().includes(query)) ||
-                ((v as any).category && (v as any).category.toLowerCase().includes(query))
-            );
+            list = list.filter(v => (v as any).category === 'Bakeries & Desserts');
         }
 
         // Fallback sort by distance if not explicitly sorting by something else
@@ -120,7 +136,7 @@ export default function HomeFeedScreen() {
         }
 
         return list;
-    }, [activeFilter, searchText]);
+    }, [activeFilter, searchText, stores, distanceMap, searchResults]);
 
     // (Quick Grab & Go removed — replaced by store-level curated sections)
 
@@ -283,6 +299,8 @@ export default function HomeFeedScreen() {
             ) : (
                 <ScrollView className="flex-1 bg-[#F8F9FA]" contentContainerStyle={{ paddingBottom: 120, paddingTop: 10 }} showsVerticalScrollIndicator={false}>
 
+                {!searchText.trim() && (
+                <>
                 {/* Banner Carousel */}
                 <View className="mb-6 mt-2">
                     <ScrollView 
@@ -335,9 +353,9 @@ export default function HomeFeedScreen() {
                     </View>
 
                     <View className="flex-row flex-wrap justify-between">
-                        {CATEGORIES.map((category, idx) => (
+                        {verticals.map((category) => (
                             <TouchableOpacity
-                                key={`cat-${idx}`}
+                                key={category.id}
                                 activeOpacity={0.7}
                                 onPress={() => {
                                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -346,10 +364,14 @@ export default function HomeFeedScreen() {
                                 style={{ width: (width - 40) / 5 }}
                                 className="items-center mb-6"
                             >
-                                <View className="w-14 h-14 rounded-full bg-gray-100 shadow-sm border border-gray-100 overflow-hidden mb-2">
+                                <View 
+                                    className="w-14 h-14 rounded-full shadow-sm overflow-hidden mb-2 items-center justify-center"
+                                    style={{ backgroundColor: category.theme_color || '#F3F4F6' }}
+                                >
                                     <Image
-                                        source={{ uri: category.image }}
+                                        source={{ uri: category.icon || 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=200&h=200&fit=crop' }}
                                         className="w-full h-full"
+                                        style={{ width: 56, height: 56, borderRadius: 28 }}
                                         resizeMode="cover"
                                     />
                                 </View>
@@ -363,6 +385,8 @@ export default function HomeFeedScreen() {
                         ))}
                     </View>
                 </View>
+                </>
+                )}
 
                 {/* Flowing Feed */}
                 <View className="px-5 pb-8">
@@ -370,20 +394,28 @@ export default function HomeFeedScreen() {
                         <Text className="text-[20px] font-extrabold text-gray-900 tracking-tight mb-5 px-1 mt-4">
                             Search Results
                         </Text>
-                    ) : null}
+                    ) : (
+                        <Text className="text-xl font-bold text-gray-900 mb-4 ml-1">Nearby Stores</Text>
+                    )}
 
                     {allVenues.length > 0 ? (
                         allVenues.map((venue) => (
                             <StandardVenueCard key={venue.id} venue={venue} isFullWidth />
                         ))
-                    ) : isLoadingLocation ? (
+                    ) : (isLoadingLocation || isSearchLoading) ? (
                         <View className="py-20 items-center justify-center">
                             <ActivityIndicator size="large" color="#B52725" />
                             <Text className="text-gray-400 text-[13px] font-bold mt-4 uppercase tracking-widest">
-                                Locating nearby stores...
+                                {searchText.trim() ? 'Searching nearby stores...' : 'Locating nearby stores...'}
                             </Text>
                         </View>
-                    ) : (
+                    ) : searchText.trim() ? (
+                        <View className="py-12 items-center justify-center">
+                            <Search size={48} color="#D1D5DB" strokeWidth={1.5} />
+                            <Text className="text-gray-900 text-[16px] font-bold mt-4">No results for "{searchText}"</Text>
+                            <Text className="text-gray-400 text-[13px] font-medium mt-1 text-center px-10">Try a different search term or check nearby stores.</Text>
+                        </View>
+                    ) : storesError ? (
                         <View className="py-12 items-center justify-center">
                             <WifiOff size={48} color="#D1D5DB" strokeWidth={1.5} />
                             <Text className="text-gray-900 text-[16px] font-bold mt-4">Could not reach the server</Text>
@@ -398,6 +430,12 @@ export default function HomeFeedScreen() {
                             >
                                 <Text className="text-white font-bold text-[13px]">Retry</Text>
                             </TouchableOpacity>
+                        </View>
+                    ) : (
+                        <View className="py-12 items-center justify-center">
+                            <MapPinOff size={48} color="#D1D5DB" strokeWidth={1.5} />
+                            <Text className="text-gray-900 text-[16px] font-bold mt-4">No stores nearby</Text>
+                            <Text className="text-gray-400 text-[13px] font-medium mt-1 text-center px-10">We're onboarding stores in your area. Check back soon!</Text>
                         </View>
                     )}
                 </View>

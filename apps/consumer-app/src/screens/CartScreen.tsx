@@ -34,7 +34,8 @@ export default function CartScreen() {
     }, [route.params]);
     const subtotal = getTotal();
     const itemCount = getItemCount();
-    const gst = Math.round(subtotal * 0.05);
+    const isRestaurantOrder = items.some(item => RESTAURANTS.some(r => String(r.id) === String(item.storeId)));
+    const gst = isRestaurantOrder ? Math.round(subtotal * 0.05) : 0;
 
     useEffect(() => {
         // Evaluate coupon minimum requirements
@@ -198,31 +199,7 @@ export default function CartScreen() {
                         )
                     })}
 
-                    {/* Apply Coupon Card */}
-                    {coupon ? (
-                        <View className="bg-green-50 rounded-[20px] p-5 mb-4 border border-green-100 shadow-sm flex-row items-center justify-between mt-2">
-                            <View className="flex-row items-center">
-                                <View className="bg-green-600 rounded-full w-6 h-6 items-center justify-center mr-3">
-                                    <CheckCircle size={14} color="white" />
-                                </View>
-                                <View>
-                                    <Text className="text-[14px] font-bold text-green-700 uppercase">{coupon.code}</Text>
-                                    <Text className="text-[11px] font-semibold text-green-600">Saved ₹{coupon.discount}!</Text>
-                                </View>
-                            </View>
-                            <TouchableOpacity onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setCoupon(null); }}>
-                                <Text className="text-[12px] font-bold text-red-500 uppercase tracking-widest">Remove</Text>
-                            </TouchableOpacity>
-                        </View>
-                    ) : (
-                        <TouchableOpacity onPress={() => navigation.navigate('Offers' as any, { subtotal })} className="bg-white rounded-[20px] p-5 mb-4 border border-gray-100 shadow-sm flex-row items-center justify-between mt-2">
-                            <View className="flex-row items-center">
-                                <Ticket size={22} color="#111827" strokeWidth={2} />
-                                <Text className="ml-3 text-[16px] font-bold text-gray-900">Apply Coupon</Text>
-                            </View>
-                            <ChevronRight size={20} color="#9CA3AF" />
-                        </TouchableOpacity>
-                    )}
+                    {/* Apply Coupon Card Removed */}
 
                     {/* Bill Details */}
                     <View className="bg-white rounded-[20px] p-5 mb-8 border border-gray-100 shadow-sm mt-3">
@@ -231,10 +208,12 @@ export default function CartScreen() {
                             <Text className="text-[14px] font-medium text-gray-500">Item Total</Text>
                             <Text className="text-[14px] font-medium text-gray-900">₹{subtotal}</Text>
                         </View>
-                        <View className="flex-row justify-between items-center mb-3">
-                            <Text className="text-[14px] font-medium text-gray-500">Taxes & Platform Fee</Text>
-                            <Text className="text-[14px] font-medium text-gray-900">₹{gst}</Text>
-                        </View>
+                        {gst > 0 && (
+                            <View className="flex-row justify-between items-center mb-3">
+                                <Text className="text-[14px] font-medium text-gray-500">Taxes & Platform Fee</Text>
+                                <Text className="text-[14px] font-medium text-gray-900">₹{gst}</Text>
+                            </View>
+                        )}
                         {discount > 0 && (
                             <View className="flex-row justify-between items-center mb-3">
                                 <Text className="text-[14px] font-bold text-green-600">Item Discount</Text>

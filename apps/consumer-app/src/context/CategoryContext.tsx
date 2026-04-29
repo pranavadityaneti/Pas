@@ -7,6 +7,8 @@ export interface Vertical {
     name: string;
     color?: string;
     icon?: string;
+    banner_url?: string;
+    theme_color?: string;
 }
 
 interface CategoryContextType {
@@ -28,13 +30,13 @@ export const CategoryProvider = ({ children }: { children: ReactNode }) => {
     const fetchVerticals = async () => {
         try {
             const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Supabase Timeout (5s)')), 5000)
+                setTimeout(() => reject(new Error('Supabase Timeout (15s)')), 15000)
             );
 
             const { data, error } = await Promise.race([
                 supabase
                     .from('Vertical')
-                    .select('id, name, color, icon')
+                    .select('id, name, color, icon, banner_url, theme_color')
                     .order('name', { ascending: true }),
                 timeoutPromise
             ]) as any;

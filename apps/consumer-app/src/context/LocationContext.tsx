@@ -3,6 +3,7 @@
 // STAGGERED HANDSHAKE: Consumes user from AuthContext, never calls supabase.auth.getUser().
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 
@@ -24,6 +25,7 @@ interface LocationContextType {
 const LocationContext = createContext<LocationContextType | undefined>(undefined);
 
 const FAILSAFE_TIMEOUT_MS = 8000; // Force-unblock spinners after 8 seconds
+const LAST_LOCATION_KEY = 'pas_last_active_location'; // AsyncStorage key for manual selection persistence
 
 // Math utility to calculate straight-line distance between two GPS coordinates
 function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -51,22 +53,30 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
     const lastRefreshTime = useRef<number>(0);
     const isRefreshing = useRef<boolean>(false);
     const failsafeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const prevUserRef = useRef<any>(null); // Track user transitions for hydration bridge
 
-    const selectLocation = (location: DeliveryLocation) => {
+    const selectLocation = async (location: DeliveryLocation) => {
         setIsManualSelection(true);
         setActiveLocation(location);
+        // Persist the manual selection to AsyncStorage so it survives app restarts
+        try {
+            await AsyncStorage.setItem(LAST_LOCATION_KEY, JSON.stringify(location));
+            console.log('[LocationContext] Persisted manual selection:', location.type);
+        } catch (e) {
+            console.warn('[LocationContext] Failed to persist manual selection:', e);
+        }
     };
 
-    const refreshLocation = async (passedUser?: any) => {
+    const refreshLocation = async (passedUser?: any, forceRefresh: boolean = false) => {
         if (isManualSelection) {
             console.log("[LocationContext] Skipping auto-refresh due to manual selection");
             setIsLoadingLocation(false);
             return;
         }
 
-        // --- Rate Limit Guard ---
+        // --- Rate Limit Guard (bypassed on auth hydration) ---
         const now = Date.now();
-        if (isRefreshing.current || (now - lastRefreshTime.current < 3000)) {
+        if (!forceRefresh && (isRefreshing.current || (now - lastRefreshTime.current < 3000))) {
             console.log("[LocationContext] Debouncing location refresh");
             return;
         }
@@ -102,13 +112,46 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
             const currentLat = locationConfig.coords.latitude;
             const currentLon = locationConfig.coords.longitude;
 
-            // 3. If logged in, check saved addresses for proximity
+            // --- PRIORITY 1: Restore last manual selection from AsyncStorage ---
+            try {
+                const cached = await AsyncStorage.getItem(LAST_LOCATION_KEY);
+                if (cached) {
+                    const lastLocation: DeliveryLocation = JSON.parse(cached);
+                    // Validate it has coordinates (not a stale/corrupt entry)
+                    if (lastLocation.latitude && lastLocation.longitude) {
+                        // Only restore if user is still within 5km of that saved location
+                        // (prevents snapping to "Home" when user is in a different city)
+                        const distToLast = getDistanceFromLatLonInKm(
+                            currentLat, currentLon,
+                            lastLocation.latitude, lastLocation.longitude
+                        );
+                        if (distToLast <= 5) {
+                            console.log(`[LocationContext] PRIORITY 1: Restoring persisted selection "${lastLocation.type}" (${distToLast.toFixed(1)}km away)`);
+                            setActiveLocation(lastLocation);
+                            return; // finally block will clean up
+                        } else {
+                            console.log(`[LocationContext] Persisted "${lastLocation.type}" is ${distToLast.toFixed(1)}km away — too far, clearing`);
+                            await AsyncStorage.removeItem(LAST_LOCATION_KEY);
+                        }
+                    }
+                }
+            } catch (cacheErr) {
+                console.warn('[LocationContext] Failed to read persisted location:', cacheErr);
+            }
+
+            // --- PRIORITY 2: Auto-snap to saved address within 2km ---
             if (resolvedUser) {
                 try {
-                    const { data: addresses, error } = await supabase
-                        .from('consumer_addresses')
-                        .select('*')
-                        .eq('user_id', resolvedUser.id);
+                    const addressTimeout = new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error('Address lookup timeout (8s)')), 8000)
+                    );
+                    const { data: addresses, error } = await Promise.race([
+                        supabase
+                            .from('consumer_addresses')
+                            .select('*')
+                            .eq('user_id', resolvedUser.id),
+                        addressTimeout
+                    ]) as any;
 
                     if (!error && addresses && addresses.length > 0) {
                         let closestAddress = null;
@@ -124,7 +167,8 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
                             }
                         }
 
-                        if (closestAddress && minDistance <= 5) {
+                        if (closestAddress && minDistance <= 2) {
+                            console.log(`[LocationContext] PRIORITY 2: Auto-snapping to "${closestAddress.type}" (${minDistance.toFixed(2)}km away)`);
                             setActiveLocation({
                                 type: closestAddress.type,
                                 address: closestAddress.address,
@@ -188,18 +232,36 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
         }
     };
 
-    // --- Mount-Time Proactive Refresh ---
-    // Fires on mount and re-fires when AuthContext provides the user object.
+    // --- Hydration Bridge ---
+    // Detects when user transitions from null → populated (AsyncStorage session restored)
+    // and force-refreshes to re-run the address query with a valid RLS session.
     useEffect(() => {
-        refreshLocation(user || null);
+        const wasNull = prevUserRef.current === null || prevUserRef.current === undefined;
+        const isNowPopulated = !!user;
+
+        if (wasNull && isNowPopulated) {
+            console.log('[LocationContext] Auth hydration detected (null → user). Force re-snapping...');
+            refreshLocation(user, true); // bypass rate limiter
+        } else if (!isNowPopulated && !wasNull) {
+            // User logged out
+            refreshLocation(null);
+        } else if (!prevUserRef.current && !user) {
+            // Initial mount with no user — get GPS anyway
+            refreshLocation(null);
+        }
+
+        prevUserRef.current = user;
     }, [user]);
 
     // Auto-listen for explicit session changes (login/logout only)
     useEffect(() => {
         const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-            if (_event === 'SIGNED_IN' || _event === 'SIGNED_OUT') {
+            if (_event === 'SIGNED_IN') {
                 setIsManualSelection(false);
-                refreshLocation(session?.user || null);
+                refreshLocation(session?.user || null, true); // force bypass
+            } else if (_event === 'SIGNED_OUT') {
+                setIsManualSelection(false);
+                refreshLocation(null);
             }
         });
 

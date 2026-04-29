@@ -8,7 +8,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
     ArrowLeft, Star, Clock, UtensilsCrossed, Search, Heart,
-    Minus, Plus, ChevronRight, UserCircle, Filter, Check
+    Minus, Plus, ChevronRight, UserCircle, Filter, Check, MapPin
 } from 'lucide-react-native';
 import { RESTAURANTS, STORES } from '../lib/data';
 import { useNavigation } from '@react-navigation/native';
@@ -311,7 +311,7 @@ export default function StorefrontScreen({ route }: any) {
 
                     {/* Quick Filters in Sticky Header */}
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} className="px-4 pb-3" style={{ flexGrow: 0, flexShrink: 0 }}>
-                        <VegToggle value={vegFilter} onChange={setVegFilter} />
+                        {restaurant.isDining && <VegToggle value={vegFilter} onChange={setVegFilter} />}
                         {/* <FilterPill label="Ratings 4.0+" active={ratingHighOnly} onPress={() => setRatingHighOnly(!ratingHighOnly)} icon={Star} colorClass="yellow" /> */}
                         <FilterPill label="Bestsellers" active={bestSellerOnly} onPress={() => setBestSellerOnly(!bestSellerOnly)} icon={Check} colorClass="red" />
                         <FilterPill label="Offers" active={offersOnly} onPress={() => setOffersOnly(!offersOnly)} icon={Filter} colorClass="red" />
@@ -356,6 +356,7 @@ export default function StorefrontScreen({ route }: any) {
                                         onAdd={handleAddToCart}
                                         onIncrement={handleIncrement}
                                         onDecrement={handleDecrement}
+                                        onAuthRequired={() => setAuthModalVisible(true)}
                                     />
                                 </View>
                             ))}
@@ -451,7 +452,7 @@ export default function StorefrontScreen({ route }: any) {
                             <Text className="text-[22px] font-bold text-gray-900 text-center">{restaurant.name}</Text>
                             <Text className="text-[13px] text-gray-500 font-medium text-center" style={{ marginTop: 6 }}>{restaurant.address}</Text>
 
-                            <View className="flex-row items-center" style={{ marginTop: 16 }}>
+                            <View className="flex-row items-center justify-center" style={{ marginTop: 16 }}>
                                 <View className="flex-row items-center px-3 py-2">
                                     {restaurant.rating ? (
                                         <>
@@ -464,21 +465,22 @@ export default function StorefrontScreen({ route }: any) {
                                         </View>
                                     ) : null}
                                 </View>
-                                {(restaurant as any).prepTime ? (
+                                {(restaurant as any).distance ? (
                                     <>
                                         <View className="w-[1px] h-5 bg-gray-200 mx-2" />
                                         <View className="flex-row items-center px-3 py-2">
-                                            <Clock size={16} color="#6B7280" />
-                                            <Text className="text-[14px] font-medium text-gray-600 ml-1.5">{(restaurant as any).prepTime}</Text>
+                                            <MapPin size={16} color="#6B7280" />
+                                            <Text className="text-[14px] font-medium text-gray-600 ml-1.5">{(restaurant as any).distance}</Text>
                                         </View>
                                     </>
                                 ) : null}
                                 <View className="w-[1px] h-5 bg-gray-200 mx-2" />
                                 <View className="flex-row items-center px-3 py-2">
-                                    <UtensilsCrossed size={16} color="#6B7280" />
-                                    <Text className="text-[14px] font-medium text-gray-600 ml-1.5">
-                                        {restaurant.isDining ? 'Dine-in' : 'Pickup'}
-                                    </Text>
+                                    {restaurant.isOpen ? (
+                                        <Text className="text-[14px] font-bold text-green-600">Open Now</Text>
+                                    ) : (
+                                        <Text className="text-[14px] font-bold text-red-600">Closed</Text>
+                                    )}
                                 </View>
                             </View>
                         </View>
@@ -515,7 +517,7 @@ export default function StorefrontScreen({ route }: any) {
                                 style={{ marginHorizontal: -20, paddingHorizontal: 20, flexGrow: 0, flexShrink: 0 }}
                                 contentContainerStyle={{ paddingBottom: 14 }}
                             >
-                                <VegToggle value={vegFilter} onChange={setVegFilter} />
+                                {restaurant.isDining && <VegToggle value={vegFilter} onChange={setVegFilter} />}
                                 {/* <FilterPill label="Ratings 4.0+" active={ratingHighOnly} onPress={() => setRatingHighOnly(!ratingHighOnly)} icon={Star} colorClass="yellow" /> */}
                                 <FilterPill label="Bestsellers" active={bestSellerOnly} onPress={() => setBestSellerOnly(!bestSellerOnly)} icon={Check} colorClass="red" />
                                 <FilterPill label="Offers" active={offersOnly} onPress={() => setOffersOnly(!offersOnly)} icon={Filter} colorClass="red" />

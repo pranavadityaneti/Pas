@@ -227,7 +227,6 @@ export function CartProvider({ children }: { children: ReactNode }) {
                             style: "destructive",
                             onPress: () => {
                                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                                setPickupTimes({});
                                 setItems([{ ...item, id: String(item.id), storeId: String(item.storeId), quantity: 1 }]);
                             }
                         }
@@ -254,13 +253,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
             
             if (itemToRemove) {
                 const storeItemsLeft = newItems.filter(i => String(i.storeId) === String(itemToRemove.storeId));
-                if (storeItemsLeft.length === 0) {
-                    setPickupTimes(times => {
-                        const newTimes = { ...times };
-                        delete newTimes[itemToRemove.storeId];
-                        return newTimes;
-                    });
-                }
+                // Previous setPickupTimes cleanup removed
             }
             return newItems;
         });
@@ -276,7 +269,6 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
     const clearCart = () => {
         setItems([]);
-        setPickupTimes({});
         // Explicitly clear from Supabase if we have a cartId
         if (cartId) {
             syncCartToSupabase(cartId, []);

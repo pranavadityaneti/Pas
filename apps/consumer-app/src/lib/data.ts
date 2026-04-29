@@ -67,19 +67,7 @@ export const SUB_CATEGORIES: Record<string, string[]> = {
   'Beauty & Personal Care': ["Skincare", "Makeup", "Haircare", "Bath & Body", "Fragrances"]
 };
 
-export const STORE_CATEGORIES = [
-  { id: '1', name: 'Grocery & Kirana', subLabel: 'Daily Essentials', icon: 'basket', color: 'bg-green-100', text: 'text-green-600' },
-  { id: '3', name: 'Fruits & Vegetables', subLabel: 'Fresh & Organic', icon: 'leaf', color: 'bg-orange-100', text: 'text-orange-600' },
-  { id: '2', name: 'Restaurants & Cafes', subLabel: 'Order Hot Food', icon: 'restaurant', color: 'bg-red-100', text: 'text-red-600' },
-  { id: '4', name: 'Bakeries & Desserts', subLabel: 'Cakes & Treats', icon: 'ice-cream', color: 'bg-pink-100', text: 'text-pink-600' },
-  { id: '5', name: 'Meat & Seafood', subLabel: 'Fresh & Frozen', icon: 'fish', color: 'bg-blue-100', text: 'text-blue-600' },
-  { id: '6', name: 'Pharmacy & Wellness', subLabel: 'Meds & Hygiene', icon: 'medical', color: 'bg-teal-100', text: 'text-teal-600' },
-  { id: '7', name: 'Electronics & Accessories', subLabel: 'Tech & Gadgets', icon: 'watch', color: 'bg-indigo-100', text: 'text-indigo-600' },
-  { id: '8', name: 'Fashion & Apparel', subLabel: 'Trendy Styles', icon: 'shirt', color: 'bg-purple-100', text: 'text-purple-600' },
-  { id: '9', name: 'Home & Lifestyle', subLabel: 'Decor & Living', icon: 'home', color: 'bg-yellow-100', text: 'text-yellow-600' },
-  { id: '10', name: 'Beauty & Personal Care', subLabel: 'Skin & Beauty', icon: 'color-palette', color: 'bg-rose-100', text: 'text-rose-600' },
-  { id: '11', name: 'Pet Care & Supplies', subLabel: 'Furry Friend Needs', icon: 'paw', color: 'bg-stone-100', text: 'text-stone-600' },
-];
+// STORE_CATEGORIES has been moved to the database (Vertical table)
 
 export const PICKUP_SPOTLIGHTS = [
   {
@@ -225,7 +213,8 @@ export const RESTAURANTS = Array.from({ length: 25 }, (_, i) => {
 });
 
 export const STORES = Array.from({ length: 45 }, (_, i) => {
-  const cat = STORE_CATEGORIES[i % STORE_CATEGORIES.length];
+  const RAW_CATEGORIES = [{ id: 'grocery', name: 'Grocery & Kirana' }, { id: 'pharmacy', name: 'Pharmacy' }, { id: 'bakery', name: 'Bakery' }, { id: 'meat', name: 'Meat' }, { id: 'cafe', name: 'Cafe' }, { id: 'electronics', name: 'Electronics' }, { id: 'fashion', name: 'Fashion' }, { id: 'home', name: 'Home' }, { id: 'pet', name: 'Pet' }, { id: 'beauty', name: 'Beauty' }];
+  const cat = RAW_CATEGORIES[i % RAW_CATEGORIES.length];
   const names = {
     cafe: ["Daily Brew", "The Oven", "Bean & Leaf", "Crust 'n Muffin", "Sunrise Cafe"],
     grocery: ["Green Leaf Mart", "Fresh Choice", "Daily Needs", "Family Supermarket", "Nature's Basket"],

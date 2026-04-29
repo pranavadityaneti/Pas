@@ -337,7 +337,7 @@ export default function LocationPickerScreen() {
             }
 
             const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Supabase Timeout (5s)')), 5000)
+                setTimeout(() => reject(new Error('Supabase Timeout (15s)')), 15000)
             );
 
             const { data, error } = await Promise.race([

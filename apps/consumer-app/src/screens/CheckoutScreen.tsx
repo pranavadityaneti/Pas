@@ -34,27 +34,35 @@ const AVAILABLE_COUPONS = [
 const generateTimeSlots = (store: any, day: 'Today' | 'Tomorrow') => {
     if (!store?.openingTime || !store?.closingTime) return TIME_OPTIONS;
 
-    const [openHour, openMin] = store.openingTime.split(':').map(Number);
-    const [closeHour, closeMin] = store.closingTime.split(':').map(Number);
+    const prepTimeMinutes = store.prep_time || store.prepTime || 15;
+    const now = new Date();
+    const earliestPickupTime = new Date(now.getTime() + prepTimeMinutes * 60000);
 
-    let startHour = openHour;
+    const [openHour] = store.openingTime.split(':').map(Number);
+    const [closeHour] = store.closingTime.split(':').map(Number);
+
     const slots = [];
 
-    if (day === 'Today') {
-        const now = new Date();
-        const currentHour = now.getHours() + (now.getMinutes() > 30 ? 1 : 0);
-        if (currentHour >= closeHour) return [];
-        startHour = Math.max(openHour, currentHour);
-    }
-
-    for (let h = startHour; h < closeHour; h++) {
+    for (let h = openHour; h < closeHour; h++) {
         const formatTime = (hour: number) => {
             const period = hour >= 12 ? 'PM' : 'AM';
             const h12 = hour % 12 || 12;
             return `${h12.toString().padStart(2, '0')}:00 ${period}`;
         };
+
+        if (day === 'Today') {
+            const slotEndTime = new Date(now);
+            slotEndTime.setHours(h + 1, 0, 0, 0);
+            
+            // If the slot ends before our earliest possible pickup time, drop it
+            if (slotEndTime < earliestPickupTime) {
+                continue;
+            }
+        }
+
         slots.push(`${day}, ${formatTime(h)} - ${formatTime(h + 1)}`);
     }
+
     return slots;
 };
 
@@ -165,25 +173,55 @@ export default function CheckoutScreen() {
         const uniqueStoreIds = Array.from(new Set(items.map(i => i.storeId)));
         
         const fetchLocations = async () => {
-            const { data } = await supabase
-                .from('merchant_branches')
-                .select('id, branch_name, address, city, operating_hours')
-                .in('id', uniqueStoreIds);
-                
-            if (data) {
-                const locMap: Record<string, any> = {};
-                data.forEach(b => {
-                    const oh = typeof b.operating_hours === 'object' ? b.operating_hours : {};
-                    locMap[b.id] = {
-                        id: b.id,
-                        name: b.branch_name,
-                        address: b.address + (b.city ? `, ${b.city}` : ''),
-                        openingTime: oh.openTime || '09:00',
-                        closingTime: oh.closeTime || '22:00'
-                    };
-                });
-                setStoreLocations(locMap);
+            const locMap: Record<string, any> = {};
+            const dbQueryIds: string[] = [];
+
+            // Pre-sort IDs: UUIDs go to DB, simple strings go straight to Mock fallback
+            uniqueStoreIds.forEach(id => {
+                if (id.length < 10) { // Simple heuristic: '1', '2' are not UUIDs
+                    const mockStore = STORES.find(s => String(s.id) === String(id)) || RESTAURANTS.find(r => String(r.id) === String(id));
+                    if (mockStore) {
+                        locMap[id] = {
+                            id: mockStore.id,
+                            name: mockStore.name,
+                            address: mockStore.address || 'Address unavailable',
+                            openingTime: '09:00',
+                            closingTime: '22:00'
+                        };
+                    }
+                } else {
+                    dbQueryIds.push(id);
+                }
+            });
+
+            // Only query Supabase if we have valid UUIDs
+            if (dbQueryIds.length > 0) {
+                try {
+                    const { data, error } = await supabase
+                        .from('merchant_branches')
+                        .select('id, branch_name, address, city, operating_hours, merchants(Vertical(name))')
+                        .in('id', dbQueryIds);
+                    
+                    if (data) {
+                        data.forEach((b: any) => {
+                            const oh = typeof b.operating_hours === 'object' && b.operating_hours ? b.operating_hours : {};
+                            const verticalName = b.merchants?.Vertical?.name || '';
+                            locMap[b.id] = {
+                                id: b.id,
+                                name: b.branch_name,
+                                address: b.address + (b.city ? `, ${b.city}` : ''),
+                                openingTime: oh.openTime || '09:00',
+                                closingTime: oh.closeTime || '22:00',
+                                type: verticalName
+                            };
+                        });
+                    }
+                } catch (err) {
+                    console.error("Supabase fetch failed:", err);
+                }
             }
+
+            setStoreLocations(locMap);
         };
         fetchLocations();
     }, [items]);
@@ -314,7 +352,13 @@ export default function CheckoutScreen() {
     // Derived Logic (Non-hook)
     const storeNamesList = groupedStores.map(g => g.storeName).join(', ');
     const subtotal = getTotal();
-    const gst = Math.round(subtotal * 0.05);
+    const gst = Math.round(groupedStores.reduce((sum, group) => {
+        // Check both branch and parent IDs to find the vertical type
+        const storeInfo = storeLocations[group.branch_id] || storeLocations[group.storeId] || {};
+        const type = storeInfo.type?.toLowerCase() || '';
+        const isFnB = ['restaurant', 'bakery', 'cafe'].some(t => type.includes(t));
+        return sum + (isFnB ? (group.total * 0.05) : 0);
+    }, 0));
     const discount = couponApplied ? couponDiscount : 0;
     const total = Math.max(0, subtotal + gst - discount);
 
@@ -442,6 +486,7 @@ export default function CheckoutScreen() {
                             customer_name: pickupMode === 'myself' ? (user.user_metadata?.full_name || user.email?.split('@')[0]) : pickupName,
                             customer_phone: pickupMode === 'myself' ? (user.phone || '') : pickupPhone,
                             store_id: req.store_id,
+                            branch_id: req.branch_id, // <-- NEW: Fixes the fatal constraint error
                             store_name: req.store_name,
                             amount: groupFinalTotal,
                             total_amount: groupFinalTotal,
@@ -451,7 +496,7 @@ export default function CheckoutScreen() {
                             items_count: req.items.length,
                             status: 'PENDING',
                             special_instructions: specialInstructions,
-                            arrival_time: selectedTime[storeIdStr] || 'Not selected',
+                            arrival_time: selectedTime[req.branch_id] || selectedTime[req.store_id] || 'ASAP', // <-- NEW: Fixes the missing time bug
                             guests_count: null,
                             created_at: now,
                             updated_at: now
@@ -553,6 +598,7 @@ export default function CheckoutScreen() {
                                 <View className="flex-row items-center justify-between">
                                     <View className="flex-1 pr-4">
                                         <Text className="text-[14px] font-bold text-gray-900 mb-1" numberOfLines={1}>{req.store_name}</Text>
+                                        <Text className="text-[12px] text-gray-500 font-medium mb-0.5">Req ID: #REQ-{req.id.substring(0,4).toUpperCase()}</Text>
                                         <Text className="text-[12px] text-gray-500" numberOfLines={1}>{req.items.length} items • ₹{req.subtotal}</Text>
                                     </View>
                                     <View>
@@ -589,7 +635,12 @@ export default function CheckoutScreen() {
 
     if (step === 'results') {
         const resultSubtotal = acceptedRequests.reduce((sum: number, req: any) => sum + req.subtotal, 0);
-        const resultGst = Math.round(resultSubtotal * 0.05);
+        const resultGst = Math.round(acceptedRequests.reduce((sum: number, req: any) => {
+            const storeInfo = storeLocations[req.branch_id] || storeLocations[req.store_id] || {};
+            const type = storeInfo.type?.toLowerCase() || '';
+            const isFnB = ['restaurant', 'bakery', 'cafe'].some(t => type.includes(t));
+            return sum + (isFnB ? (req.subtotal * 0.05) : 0);
+        }, 0));
         const resultTotal = Math.max(0, resultSubtotal + resultGst - (couponApplied ? couponDiscount : 0));
 
         // Pending swap requests — show as "in progress"
@@ -708,10 +759,10 @@ export default function CheckoutScreen() {
                                                 <CheckCircle size={18} color="#16A34A" />
                                             </View>
                                             <View className="flex-1">
-                                                <Text className="font-extrabold text-gray-900 text-[16px]">{req.store_name}</Text>
-                                                {selectedTime[storeIdNum] && (
-                                                    <Text className="text-[11px] text-gray-400 font-medium mt-0.5">{selectedTime[storeIdNum]}</Text>
-                                                )}
+                                                <Text className="font-extrabold text-gray-900 text-[16px] mb-1">{req.store_name}</Text>
+                                                <Text className="text-[12px] text-gray-600 font-medium mb-0.5">Order ID: #REQ-{req.id.substring(0,4).toUpperCase()}</Text>
+                                                <Text className="text-[12px] text-gray-600 font-medium mb-0.5">Pickup Time: {selectedTime[req.branch_id] || selectedTime[req.store_id] || selectedTime[String(storeIdNum)] || 'ASAP'}</Text>
+                                                <Text className="text-[12px] text-gray-600 font-medium">Location: {storeLocations[req.branch_id]?.address || storeLocations[req.store_id]?.address || 'Store Location'}</Text>
                                             </View>
                                             <Text className="text-[15px] font-bold text-gray-900">₹{req.subtotal}</Text>
                                         </View>
@@ -798,7 +849,9 @@ export default function CheckoutScreen() {
                         <View className="mx-5 mb-6 bg-gray-50 rounded-2xl p-5 border border-gray-100">
                             <Text className="text-[12px] font-extrabold text-gray-400 uppercase tracking-wider mb-3">Payment Summary</Text>
                             <View className="flex-row justify-between mb-2"><Text className="text-[13px] text-gray-500 font-medium">Subtotal</Text><Text className="text-[13px] text-gray-900 font-bold">₹{resultSubtotal}</Text></View>
-                            <View className="flex-row justify-between mb-2"><Text className="text-[13px] text-gray-500 font-medium">GST (5%)</Text><Text className="text-[13px] text-gray-900 font-bold">₹{resultGst}</Text></View>
+                            {resultGst > 0 && (
+                                <View className="flex-row justify-between mb-2"><Text className="text-[13px] text-gray-500 font-medium">GST (5%)</Text><Text className="text-[13px] text-gray-900 font-bold">₹{resultGst}</Text></View>
+                            )}
                             {couponApplied && <View className="flex-row justify-between mb-2"><Text className="text-[13px] text-green-600 font-bold">Discount</Text><Text className="text-[13px] text-green-600 font-bold">-₹{couponDiscount}</Text></View>}
                             <View className="border-t border-gray-200 my-2" />
                             <View className="flex-row justify-between"><Text className="text-[15px] text-gray-900 font-extrabold">Total</Text><Text className="text-[18px] text-gray-900 font-extrabold">₹{resultTotal}</Text></View>
@@ -915,8 +968,7 @@ export default function CheckoutScreen() {
                     return (
                         <View key={group.storeId} className="mx-5 mb-4 bg-white rounded-[20px] border border-gray-100 p-5 shadow-sm">
                             <View className="flex-row items-center mb-4">
-                                <View className="w-6 h-6 bg-[#B52725] rounded-full items-center justify-center mr-3"><Text className="text-white text-[12px] font-bold">{idx + 1}</Text></View>
-                                <Text className="text-[17px] font-extrabold text-[#111827] leading-tight flex-1">Stop {idx + 1}: {group.storeName}</Text>
+                                <Text className="text-[17px] font-extrabold text-[#111827] leading-tight flex-1">{group.storeName}</Text>
                             </View>
                             <View className="flex-row items-start mb-4 bg-gray-50 rounded-xl p-3.5 border border-gray-100">
                                 <MapPin size={18} color="#B52725" className="mt-0.5" />
@@ -987,7 +1039,9 @@ export default function CheckoutScreen() {
                 <View className="px-5 mt-4 mb-3"><Text className="text-[12px] font-extrabold text-[#B52725] uppercase tracking-wider">Bill Details</Text></View>
                 <View className="mx-5 mb-20 bg-white rounded-2xl border border-gray-100 p-5">
                     <View className="flex-row justify-between mb-2.5"><Text className="text-[13px] text-gray-500 font-semibold">Item Total</Text><Text className="text-[13px] text-gray-900 font-bold">₹{subtotal}</Text></View>
-                    <View className="flex-row justify-between mb-2.5"><Text className="text-[13px] text-gray-500 font-semibold">GST and Restaurant Charges</Text><Text className="text-[13px] text-gray-900 font-bold">₹{gst}</Text></View>
+                    {gst > 0 && (
+                        <View className="flex-row justify-between mb-2.5"><Text className="text-[13px] text-gray-500 font-semibold">Taxes & Platform Fee</Text><Text className="text-[13px] text-gray-900 font-bold">₹{gst}</Text></View>
+                    )}
                     {couponApplied && <View className="flex-row justify-between mb-2.5"><Text className="text-[13px] text-green-600 font-bold">Offer Discount</Text><Text className="text-[13px] text-green-600 font-bold">−₹{discount}</Text></View>}
                     <View className="border-t border-gray-100 my-3" />
                     <View className="flex-row justify-between items-center"><Text className="text-[15px] text-gray-900 font-bold">To Pay</Text><Text className="text-[18px] text-gray-900 font-bold">₹{total}</Text></View>

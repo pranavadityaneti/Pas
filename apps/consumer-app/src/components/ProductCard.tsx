@@ -29,6 +29,7 @@ interface ProductCardProps {
     onDecrement: (id: string, quantity: number) => void;
     onPress?: () => void;
     fullWidth?: boolean;
+    onAuthRequired?: () => void;
 }
 
 export default function ProductCard({
@@ -38,11 +39,12 @@ export default function ProductCard({
     onIncrement,
     onDecrement,
     onPress,
-    fullWidth = false
+    fullWidth = false,
+    onAuthRequired
 }: ProductCardProps) {
     const cardWidthStyle = fullWidth ? { width: '100%' } : { width: CARD_WIDTH };
 
-    const { productFavorites, toggleProductFavorite } = useProductFavorites();
+    const { productFavorites, toggleProductFavorite } = useProductFavorites(onAuthRequired);
     const isFavorited = productFavorites.includes(String(item.id));
 
     return (

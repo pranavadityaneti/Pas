@@ -15,6 +15,7 @@ import { useLocation } from '../context/LocationContext';
 import CartSummaryBar from '../components/CartSummaryBar';
 import BookingModal from '../components/BookingModal';
 import { useStores } from '../hooks/useStores';
+import { useGlobalSearch } from '../hooks/useGlobalSearch';
 import { ActivityIndicator } from 'react-native';
 
 const { width } = Dimensions.get('window');
@@ -79,12 +80,20 @@ export default function DiningScreen() {
     const { getItemCount, getTotal } = useCart();
     const [searchText, setSearchText] = useState('');
     const [selectedCuisine, setSelectedCuisine] = useState('All');
-    const { diningStores, loading } = useStores();
-    const { isLoadingLocation, refreshLocation } = useLocation();
+    const { diningStores, loading, error: storesError } = useStores();
+    const { activeLocation, isLoadingLocation, refreshLocation } = useLocation();
     const [bookingVisible, setBookingVisible] = useState(false);
     const [bookingRestaurant, setBookingRestaurant] = useState<any>(null);
     const [vegFilter, setVegFilter] = useState<'all' | 'veg'>('all');
     const [vegModalVisible, setVegModalVisible] = useState(false);
+
+    // --- Global Search (Postgres RPC) ---
+    const { results: searchResults, isLoading: isSearchLoading } = useGlobalSearch(
+        searchText,
+        activeLocation?.latitude,
+        activeLocation?.longitude,
+        'dining'
+    );
 
     const openBooking = (restaurant: any) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -96,23 +105,45 @@ export default function DiningScreen() {
 
     // --- Filtered & Categorized Restaurants ---
     const filteredRestaurants = useMemo(() => {
+        // If search is active, use Postgres RPC results instead of local filtering
+        if (searchText.trim()) {
+            return searchResults.map(s => ({
+                id: s.branch_id,
+                name: s.branch_name,
+                address: s.address || 'Address not available',
+                image: s.store_photos?.[0]
+                    ? `https://llhxkonraqaxtradyycj.supabase.co/storage/v1/object/public/store-photos/${s.store_photos[0]}`
+                    : 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=400',
+                rating: null,
+                distance: s.distance_meters >= 1000
+                    ? `${(s.distance_meters / 1000).toFixed(1)} km`
+                    : `${Math.round(s.distance_meters)} m`,
+                category: s.vertical_name || 'Restaurants & Cafes',
+                isDining: true,
+                isRestaurant: true,
+                isOpen: s.is_active,
+                cuisine: s.vertical_name || 'Multi-Cuisine',
+                type: 'Casual Dining',
+                products: s.matched_products || [],
+                prepTime: s.prep_time_minutes ? `${s.prep_time_minutes} mins` : '30 mins',
+                merchantId: s.merchant_id,
+                operating_hours: s.operating_hours,
+                isVeg: false,
+            }));
+        }
+
+        // Default: local filtering from useStores
         let list = [...diningStores];
-        if (selectedCuisine !== 'All') {
-            list = list.filter(r => r.cuisine === selectedCuisine);
-        }
-        if (vegFilter === 'veg') {
-            list = list.filter(r => (r as any).isVeg);
-        }
-        if (searchText) {
-            const query = searchText.toLowerCase();
-            list = list.filter(r =>
-                r.name.toLowerCase().includes(query) ||
-                r.cuisine.toLowerCase().includes(query) ||
-                r.products.some(p => p.name.toLowerCase().includes(query))
-            );
-        }
+        // TODO: Re-enable when merchant_branches adds cuisine column
+        // if (selectedCuisine !== 'All') {
+        //     list = list.filter(r => r.cuisine === selectedCuisine);
+        // }
+        // TODO: Re-enable when merchant_branches adds is_veg column
+        // if (vegFilter === 'veg') {
+        //     list = list.filter(r => (r as any).isVeg);
+        // }
         return list;
-    }, [selectedCuisine, vegFilter, searchText]);
+    }, [selectedCuisine, vegFilter, searchText, diningStores, searchResults]);
 
     const topRated = useMemo(() =>
         [...filteredRestaurants].sort((a, b) => {
@@ -330,6 +361,8 @@ export default function DiningScreen() {
 
             <ScrollView className="flex-1 bg-[#F8F9FA]" contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
 
+                {!searchText.trim() && (
+                <>
                 {/* Cuisine Filter Pills */}
                 <View className="mt-5 px-5 mb-6">
                     <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -360,13 +393,9 @@ export default function DiningScreen() {
                         {DINING_SPOTLIGHTS.map((spot) => (
                             <TouchableOpacity
                                 key={spot.id}
-                                onPress={() => {
-                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                                    navigation.navigate('SpotlightDetail', { spotlightId: String(spot.id) });
-                                }}
                                 className="mr-4 rounded-[20px] overflow-hidden"
                                 style={{ width: width * 0.44, height: 240 }}
-                                activeOpacity={0.9}
+                                activeOpacity={1}
                             >
                                 <Image source={{ uri: spot.image }} className="absolute w-full h-full" />
                                 <LinearGradient
@@ -387,9 +416,13 @@ export default function DiningScreen() {
                         ))}
                     </ScrollView>
                 </View>
+                </>
+                )}
 
 
 
+                {!searchText.trim() && (
+                <>
                 {/* ===== TOP RATED ===== */}
                 {topRated.length > 0 && (
                     <View className="mb-8">
@@ -429,22 +462,32 @@ export default function DiningScreen() {
                         </ScrollView>
                     </View>
                 )}
+                </>
+                )}
 
-                {/* ===== ALL RESTAURANTS ===== */}
+                {/* ===== ALL RESTAURANTS / SEARCH RESULTS ===== */}
                 <View className="mb-8">
-                    <SectionHeader icon={UtensilsCrossed} title="All Restaurants" />
+                    <SectionHeader icon={UtensilsCrossed} title={searchText.trim() ? 'Search Results' : 'All Restaurants'} />
                     <View className="px-5">
                         {filteredRestaurants.length > 0 ? (
                             <>
                                 <Text className="text-[12px] font-medium text-gray-400 mt-[-10px] mb-5">{filteredRestaurants.length} places found</Text>
                                 {filteredRestaurants.map((r) => <FullCard key={`all-${r.id}`} restaurant={r} />)}
                             </>
-                        ) : isLoadingLocation ? (
+                        ) : (isLoadingLocation || isSearchLoading) ? (
                             <View className="items-center justify-center py-20 bg-white rounded-3xl border border-dashed border-gray-100">
                                 <ActivityIndicator size="large" color="#B52725" />
-                                <Text className="text-gray-400 text-sm mt-4 font-bold uppercase tracking-widest">Searching for restaurants...</Text>
+                                <Text className="text-gray-400 text-sm mt-4 font-bold uppercase tracking-widest">
+                                    {searchText.trim() ? 'Searching nearby restaurants...' : 'Searching for restaurants...'}
+                                </Text>
                             </View>
-                        ) : (
+                        ) : searchText.trim() ? (
+                            <View className="items-center justify-center py-20 bg-white rounded-3xl border border-dashed border-gray-200">
+                                <Search size={48} color="#D1D5DB" strokeWidth={1.5} />
+                                <Text className="text-gray-900 font-bold text-lg mt-4">No results for "{searchText}"</Text>
+                                <Text className="text-gray-400 text-sm mt-1 text-center px-6">Try a different dish or restaurant name.</Text>
+                            </View>
+                        ) : storesError ? (
                             <View className="items-center justify-center py-20 bg-white rounded-3xl border border-dashed border-gray-200">
                                 <WifiOff size={48} color="#D1D5DB" strokeWidth={1.5} />
                                 <Text className="text-gray-900 font-bold text-lg mt-4">Could not reach the server</Text>
@@ -458,6 +501,12 @@ export default function DiningScreen() {
                                 >
                                     <Text className="text-white font-bold text-[13px]">Retry</Text>
                                 </TouchableOpacity>
+                            </View>
+                        ) : (
+                            <View className="items-center justify-center py-20 bg-white rounded-3xl border border-dashed border-gray-200">
+                                <UtensilsCrossed size={48} color="#D1D5DB" strokeWidth={1.5} />
+                                <Text className="text-gray-900 font-bold text-lg mt-4">No dining restaurants near you yet</Text>
+                                <Text className="text-gray-400 text-sm mt-1 text-center px-6">We're onboarding restaurants in your area. Check back soon!</Text>
                             </View>
                         )}
                     </View>
