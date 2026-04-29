@@ -15,7 +15,8 @@
         "googleMapsApiKey": "AIzaSyAQAg7zpYvmd2BJGCGmf1opDLDC4KXbKUg"
       },
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocationWhenInUseUsageDescription": "Pick at Store requires access to your location to discover nearby grocery stores, bakeries, and calculate accurate delivery ETAs for your orders."
       }
     },
     "android": {
