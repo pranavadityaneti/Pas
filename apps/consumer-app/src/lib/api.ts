@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 import { navigationRef } from '../navigation/navigationRef';
 import { Alert } from 'react-native';
@@ -75,6 +76,13 @@ export const purgeAuthSession = async () => {
             await withTimeout(SecureStore.deleteItemAsync('last_known_profile'));
         } catch (e: any) {
             console.warn('[Auth] Cache deletion bypassed due to lock:', e.message);
+        }
+
+        // Purge Location Cache — prevents stale address from persisting after logout
+        try {
+            await AsyncStorage.removeItem('pas_last_active_location');
+        } catch (e: any) {
+            console.warn('[Auth] Location cache purge failed:', e.message);
         }
         
         // Force Supabase SignOut (local)

@@ -255,12 +255,19 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
 
     // Auto-listen for explicit session changes (login/logout only)
     useEffect(() => {
-        const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+        const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
             if (_event === 'SIGNED_IN') {
                 setIsManualSelection(false);
                 refreshLocation(session?.user || null, true); // force bypass
             } else if (_event === 'SIGNED_OUT') {
                 setIsManualSelection(false);
+                setActiveLocation(null);
+                // Clear persisted location cache to prevent stale address leak
+                try {
+                    await AsyncStorage.removeItem(LAST_LOCATION_KEY);
+                } catch (e) {
+                    console.warn('[LocationContext] Failed to clear location cache on logout:', e);
+                }
                 refreshLocation(null);
             }
         });
