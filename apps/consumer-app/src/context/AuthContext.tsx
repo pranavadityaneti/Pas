@@ -137,14 +137,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // 2. Listen for Auth State Changes
         const { data: authListener } = supabase.auth.onAuthStateChange(
-            async (event, newSession) => {
+            (event, newSession) => { // <-- Removed async here
                 console.log(`[AuthContext] State change detected: ${event}`);
                 setSession(newSession);
                 const newUser = newSession?.user ?? null;
                 setUser(newUser);
 
                 if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && newUser) {
-                    await fetchProfile(newUser.id);
+                    // Push to the next tick to prevent Auth Storage Deadlocks
+                    setTimeout(() => {
+                        fetchProfile(newUser.id).catch(err => 
+                            console.error('[AuthContext] Background profile sync failed:', err)
+                        );
+                    }, 0);
                 } else if (event === 'SIGNED_OUT') {
                     setProfile(null);
                     setIsProfileLoading(false);
