@@ -72,27 +72,15 @@ export const SUB_CATEGORIES: Record<string, string[]> = {
 export const PICKUP_SPOTLIGHTS = [
   {
     id: "1",
-    title: 'Free Delivery',
-    subtitle: 'On your first 3 orders',
-    badge: 'New User',
-    badgeColor: '#B52725',
-    image: 'https://images.unsplash.com/photo-1562178101-02e243762ffa?auto=format&fit=crop&w=800&q=80',
+    image: require('../../assets/images/banners/banner1.png'),
   },
   {
     id: "2",
-    title: 'Premium Groceries',
-    subtitle: 'Fresh from local farms',
-    badge: 'Fresh',
-    badgeColor: '#15803D',
-    image: 'https://images.unsplash.com/photo-1748268263747-225c52414f81?auto=format&fit=crop&w=800&q=80',
+    image: require('../../assets/images/banners/banner2.png'),
   },
   {
     id: "3",
-    title: 'Instant Pharmacy',
-    subtitle: 'Medicines in 30 mins',
-    badge: 'Health',
-    badgeColor: '#0F766E',
-    image: 'https://images.unsplash.com/photo-1578960281840-cb36759fb109?auto=format&fit=crop&w=800&q=80',
+    image: require('../../assets/images/banners/banner3.png'),
   },
 ];
 

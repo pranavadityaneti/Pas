@@ -322,25 +322,7 @@ export default function HomeFeedScreen() {
                                 style={{ width: width * 0.85, height: 180 }}
                                 activeOpacity={0.9}
                             >
-                                <Image source={{ uri: spot.image }} className="absolute w-full h-full" />
-                                <LinearGradient
-                                    colors={['transparent', 'rgba(0,0,0,0.7)']}
-                                    style={{ position: 'absolute', left: 0, right: 0, bottom: 0, top: 0, padding: 20, justifyContent: 'flex-end' }}
-                                >
-                                    {/* Badge */}
-                                    <View 
-                                        className="rounded-lg px-2.5 py-1 self-start absolute top-4 left-4"
-                                        style={{ backgroundColor: spot.badgeColor }}
-                                    >
-                                        <Text className="text-[10px] font-bold text-white uppercase tracking-wider">{spot.badge}</Text>
-                                    </View>
-                                    
-                                    {/* Title & Subtitle */}
-                                    <View>
-                                        <Text className="text-xl font-extrabold text-white leading-tight">{spot.title}</Text>
-                                        <Text className="text-[13px] font-semibold mt-1" style={{ color: 'rgba(255,255,255,0.9)' }}>{spot.subtitle}</Text>
-                                    </View>
-                                </LinearGradient>
+                                <Image source={spot.image} className="w-full h-full" resizeMode="cover" />
                             </TouchableOpacity>
                         ))}
                     </ScrollView>
