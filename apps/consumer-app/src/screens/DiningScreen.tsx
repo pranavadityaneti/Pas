@@ -24,51 +24,23 @@ const { width } = Dimensions.get('window');
 export const DINING_SPOTLIGHTS = [
     {
         id: 1,
-        title: 'Weekend Special',
-        subtitle: '20% OFF on all bookings',
-        badge: 'Limited Offer',
-        badgeColor: '#B52725',
-        image: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=800&q=80',
+        image: require('../../assets/images/banners/dining1.png'),
     },
     {
         id: 2,
-        title: 'Premium Tables',
-        subtitle: 'Book your exclusive experience',
-        badge: 'VIP',
-        badgeColor: '#EAB308',
-        image: 'https://images.unsplash.com/photo-1559339352-11d035aa65de?auto=format&fit=crop&w=800&q=80',
+        image: require('../../assets/images/banners/dining2.png'),
     },
     {
         id: 3,
-        title: 'Pre-Order Meals',
-        subtitle: 'Skip the wait, order ahead',
-        badge: 'Pre-Order',
-        badgeColor: '#B52725',
-        image: 'https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=800&q=80',
+        image: require('../../assets/images/banners/dining3.jpg'),
     },
     {
         id: 4,
-        title: "Chef's Table",
-        subtitle: 'Curated 5-course experiences',
-        badge: 'Exclusive',
-        badgeColor: '#EAB308',
-        image: 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?auto=format&fit=crop&w=800&q=80',
+        image: require('../../assets/images/banners/dining4.jpg'),
     },
     {
         id: 5,
-        title: 'Group Dining',
-        subtitle: 'Perfect for parties & celebrations',
-        badge: 'Group',
-        badgeColor: '#B52725',
-        image: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=800&q=80',
-    },
-    {
-        id: 6,
-        title: 'Late Night Bites',
-        subtitle: 'Open past midnight',
-        badge: 'Night Owl',
-        badgeColor: '#B52725',
-        image: 'https://images.unsplash.com/photo-1590846406792-0adc7f938f1d?auto=format&fit=crop&w=800&q=80',
+        image: require('../../assets/images/banners/dining5.jpg'),
     },
 ];
 
@@ -393,25 +365,11 @@ export default function DiningScreen() {
                         {DINING_SPOTLIGHTS.map((spot) => (
                             <TouchableOpacity
                                 key={spot.id}
-                                className="mr-4 rounded-[20px] overflow-hidden"
+                                className="mr-4 rounded-[20px] overflow-hidden border border-black/5"
                                 style={{ width: width * 0.44, height: 240 }}
                                 activeOpacity={1}
                             >
-                                <Image source={{ uri: spot.image }} className="absolute w-full h-full" />
-                                <LinearGradient
-                                    colors={['transparent', 'rgba(0,0,0,0.8)']}
-                                    style={{ position: 'absolute', left: 0, right: 0, bottom: 0, top: 0, padding: 14, justifyContent: 'space-between' }}
-                                >
-                                    {/* Badge */}
-                                    <View className="bg-white/90 rounded-full px-3 py-1.5 self-start">
-                                        <Text className="text-[10px] font-bold text-gray-800">{spot.badge}</Text>
-                                    </View>
-                                    {/* Title & Subtitle */}
-                                    <View>
-                                        <Text className="text-lg font-bold text-white leading-tight">{spot.title}</Text>
-                                        <Text className="text-[11px] font-medium mt-1" style={{ color: 'rgba(255,255,255,0.9)' }}>{spot.subtitle}</Text>
-                                    </View>
-                                </LinearGradient>
+                                <Image source={spot.image} className="w-full h-full" resizeMode="cover" />
                             </TouchableOpacity>
                         ))}
                     </ScrollView>
