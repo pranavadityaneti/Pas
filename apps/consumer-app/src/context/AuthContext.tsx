@@ -115,6 +115,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     };
 
+    // Hook 1: Pure Auth State Management
     useEffect(() => {
         // 1. Initial Session Probe
         const initializeAuth = async () => {
@@ -122,14 +123,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 const { data: { session: initialSession } } = await supabase.auth.getSession();
                 setSession(initialSession);
                 setUser(initialSession?.user ?? null);
-                
-                if (initialSession?.user) {
-                    await fetchProfile(initialSession.user.id);
-                }
             } catch (error) {
                 console.error('[AuthContext] Error initializing session:', error);
-            } finally {
-                setIsLoading(false);
             }
         };
 
@@ -138,23 +133,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // 2. Listen for Auth State Changes
         const { data: authListener } = supabase.auth.onAuthStateChange(
             (event, newSession) => {
-                // Wrap the ENTIRE callback in a setTimeout to completely free the Auth module's internal locks
                 setTimeout(() => {
                     console.log(`[AuthContext] State change detected: ${event}`);
                     setSession(newSession);
-                    const newUser = newSession?.user ?? null;
-                    setUser(newUser);
+                    setUser(newSession?.user ?? null);
 
-                    if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && newUser) {
-                        fetchProfile(newUser.id).catch(err => 
-                            console.error('[AuthContext] Background profile sync failed:', err)
-                        );
-                    } else if (event === 'SIGNED_OUT') {
+                    if (event === 'SIGNED_OUT') {
                         setProfile(null);
-                        setIsProfileLoading(false);
-                        setIsLoading(false); 
                     }
-                    
                     setIsLoading(false);
                 }, 0);
             }
@@ -164,6 +150,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             authListener.subscription.unsubscribe();
         };
     }, []);
+
+    // Hook 2: Profile Sync based on User State
+    useEffect(() => {
+        if (user?.id) {
+            fetchProfile(user.id).catch(err => 
+                console.error('[AuthContext] Background profile sync failed:', err)
+            );
+        } else {
+            setIsProfileLoading(false);
+            setIsLoading(false);
+        }
+    }, [user?.id]);
 
     const signOut = async () => {
         if (user?.id) {
