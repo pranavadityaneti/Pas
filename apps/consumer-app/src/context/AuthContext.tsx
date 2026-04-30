@@ -58,7 +58,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             try {
                 console.log('[AuthContext] Fetching profile...');
                 const timeoutPromise = new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('Supabase DB Timeout')), 8000)
+                    setTimeout(() => reject(new Error('Supabase DB Timeout')), attempt === 0 ? 15000 : 8000)
                 );
 
                 const { data, error } = await Promise.race([
