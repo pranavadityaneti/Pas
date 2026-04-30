@@ -35,7 +35,7 @@ export default function HomeFeedScreen() {
     const [searchText, setSearchText] = useState('');
     const [activeFilter, setActiveFilter] = useState<FilterType | null>('nearest');
     const { stores, loading, error: storesError, refresh: refreshStores } = useStores();
-    const { nearbyStoreIds, distanceMap } = useNearbyStores();
+    const { nearbyStoreIds, distanceMap, loading: nearbyLoading } = useNearbyStores();
     const { items, getTotal } = useCart();
     const { verticals } = useCategories();
 
@@ -166,7 +166,7 @@ export default function HomeFeedScreen() {
         return `${meters} m`;
     };
 
-    if (loading) {
+    if (loading && stores.length === 0) {
         return (
             <SafeAreaView className="flex-1 bg-white items-center justify-center">
                 <ActivityIndicator size="large" color="#B52725" />
@@ -402,11 +402,11 @@ export default function HomeFeedScreen() {
                         allVenues.map((venue) => (
                             <StandardVenueCard key={venue.id} venue={venue} isFullWidth />
                         ))
-                    ) : (isLoadingLocation || isSearchLoading) ? (
+                    ) : (isLoadingLocation || nearbyLoading || isSearchLoading) ? (
                         <View className="py-20 items-center justify-center">
                             <ActivityIndicator size="large" color="#B52725" />
                             <Text className="text-gray-400 text-[13px] font-bold mt-4 uppercase tracking-widest">
-                                {searchText.trim() ? 'Searching nearby stores...' : 'Locating nearby stores...'}
+                                {searchText.trim() ? 'Searching nearby stores...' : nearbyLoading ? 'Loading nearby stores...' : 'Locating nearby stores...'}
                             </Text>
                         </View>
                     ) : searchText.trim() ? (

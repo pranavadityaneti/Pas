@@ -13,17 +13,16 @@ export const useNearbyStores = () => {
         let isMounted = true;
 
         const fetchNearby = async () => {
-            if (!activeLocation || !activeLocation.latitude || !activeLocation.longitude) return;
-            
-            // Wait for GPS to finish polling
+            // Guard 1: GPS still resolving — stay in loading state, don't fire RPC
             if (isLoadingLocation) return;
-            
-            // If GPS completely fails, return empty array
+
+            // Guard 2: Location resolved but no coordinates (denied/failed)
+            // → terminate loading with empty results
             if (!activeLocation?.latitude || !activeLocation?.longitude) {
                 if (isMounted) {
-                     setNearbyStoreIds([]);
-                     setDistanceMap({});
-                     setLoading(false);
+                    setNearbyStoreIds([]);
+                    setDistanceMap({});
+                    setLoading(false);
                 }
                 return;
             }
