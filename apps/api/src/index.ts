@@ -1,8 +1,5 @@
-try {
-    require('dotenv').config();
-} catch (e) {
-    // Ignore missing dotenv in production since AWS injects env vars directly
-}
+import dotenv from 'dotenv';
+dotenv.config();
 
 import express from 'express';
 import cors from 'cors';
@@ -1898,7 +1895,6 @@ app.post('/orders', async (req, res) => {
                 orderNumber,
                 userId,
                 storeId,
-                branchId: storeId, // Backwards compatibility for endpoints passing storeId
                 totalAmount,
                 status: 'PENDING',
                 isPaid: false,
@@ -2239,10 +2235,10 @@ const startAutoRejectTimer = () => {
             
             // Fix: Bulk update PENDING orders that have timed out
             // Executes in a single network trip and connection
-            const result = await prisma.order.updateMany({
+            const result = await prisma.order_requests.updateMany({
                 where: {
                     status: 'PENDING',
-                    createdAt: { lt: twoMinsAgo }
+                    created_at: { lt: twoMinsAgo }
                 },
                 data: { status: 'CANCELLED' }
             });
@@ -2735,34 +2731,20 @@ app.post('/auth/send-otp', async (req, res) => {
         const barePhone = phone.replace(/^91/, '');
         
         if (isSignup || isLogin) {
-            // Check if user is an Owner
             const { data: existingMerchants } = await supabaseAdmin
                 .from('merchants')
                 .select('id')
                 .eq('phone', barePhone)
                 .limit(1);
 
-            let existingUser = existingMerchants && existingMerchants.length > 0 ? existingMerchants[0] : null;
+            const existingMerchant = existingMerchants && existingMerchants.length > 0 ? existingMerchants[0] : null;
 
-            // Fallback: Check if user is Staff
-            if (!existingUser) {
-                const { data: staffData } = await supabaseAdmin
-                    .from('store_staff')
-                    .select('id')
-                    .eq('phone', barePhone)
-                    .limit(1);
-                
-                if (staffData && staffData.length > 0) {
-                    existingUser = staffData[0];
-                }
-            }
-
-            if (isSignup && existingUser) {
+            if (isSignup && existingMerchant) {
                 return res.status(409).json({ error: 'This phone number is already registered. Please login instead.' });
             }
 
-            if (isLogin && !existingUser) {
-                return res.status(404).json({ error: 'No merchant or staff account found for this number. Please apply as partner first.' });
+            if (isLogin && !existingMerchant) {
+                return res.status(404).json({ error: 'No merchant account found for this number. Please apply as partner first.' });
             }
         }
 
@@ -2819,76 +2801,9 @@ app.post('/auth/send-otp', async (req, res) => {
  * Validate OTP → create or find Supabase user → return session
  * Body: { phone: "91XXXXXXXXXX", otp: "123456" }
  */
-app.post('/auth/verify-otp', async (req: any, res: any) => {
-    // [INJECT: Verify OTP Reviewer Bypass - Auto-Provisioning Method]
-    const rawInput = req.body.phone || req.body.phoneNumber || '';
-    const incomingPhone = String(rawInput).replace(/\D/g, '');
-    const TEST_OTP = '123456';
-    const REVIEWER_EMAIL = 'reviewer@pickatstore.com';
+app.post('/auth/verify-otp', async (req, res) => {
 
-    if (incomingPhone.endsWith('9959777027') && req.body.otp === TEST_OTP) {
-        console.log('[Reviewer Bypass] Test credentials verified.');
-        try {
-            const staticPassword = process.env.REVIEWER_STATIC_PWD;
-            if (!staticPassword) {
-                console.error('[Reviewer Bypass] Missing REVIEWER_STATIC_PWD env variable.');
-                return res.status(500).json({ error: 'Server configuration error' });
-            }
 
-            const formattedPhone = '+919959777027';
-            const syntheticEmail = '919959777027@phone.pickatstore.app';
-
-            // 1. Resolve user ID directly from DB
-            const authUsers: any[] = await prisma.$queryRaw`SELECT id FROM auth.users WHERE phone = ${formattedPhone} OR phone = '919959777027' OR email = ${syntheticEmail}`;
-            let existingUser = authUsers.length > 0 ? authUsers[0] : null;
-
-            if (existingUser) {
-                console.log(`[Reviewer Bypass] Found existing user ${existingUser.id}. Forcing password update.`);
-                await supabaseAdmin.auth.admin.updateUserById(existingUser.id, { password: staticPassword });
-            } else {
-                console.log('[Reviewer Bypass] User missing. Auto-provisioning reviewer account...');
-                await supabaseAdmin.auth.admin.createUser({
-                    email: syntheticEmail,
-                    password: staticPassword,
-                    email_confirm: true,
-                    phone: formattedPhone,
-                    phone_confirm: true,
-                    user_metadata: { phone: formattedPhone }
-                });
-            }
-
-            // 2. Issue session
-            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-                email: syntheticEmail,
-                password: staticPassword
-            });
-
-            if (signInError || !signInData?.session) {
-                console.error('[Reviewer Bypass] Auth failed:', signInError);
-                return res.status(500).json({ error: 'Failed to mint reviewer session.' });
-            }
-            
-            return res.status(200).json({
-                success: true,
-                session: {
-                    access_token: signInData.session.access_token,
-                    refresh_token: signInData.session.refresh_token,
-                    expires_in: signInData.session.expires_in,
-                    expiresAt: signInData.session.expires_at
-                },
-                user: {
-                    id: signInData.user.id,
-                    phone: formattedPhone,
-                    email: signInData.user.email
-                },
-                isNewUser: !existingUser
-            });
-        }
-        catch (e) {
-            console.error('[Reviewer Bypass] Mint execution error:', e);
-            return res.status(500).json({ error: 'Bypass internal error' });
-        }
-    }
     try {
         console.log(`[Auth] POST /auth/verify-otp hit`);
         const { phone, otp } = req.body;
@@ -3084,6 +2999,96 @@ app.post('/auth/verify-otp', async (req: any, res: any) => {
     }
 });
 
+// =====================================================================
+// DELETE /auth/delete-account
+// Apple Guideline 5.1.1(v): Users must be able to delete their account.
+// Anonymizes order data (keeps financial records for merchant reconciliation)
+// then deletes profile, addresses, and the Supabase auth record.
+// =====================================================================
+app.delete('/auth/delete-account', async (req, res) => {
+    try {
+        // 1. Authenticate the user via JWT
+        const user = await getAuthUser(req);
+        const userId = user.id;
+
+        console.log(`[Account Deletion] Initiated for user: ${userId}`);
+
+        // 2. Anonymize orders — keep financial data, strip PII
+        const { error: orderError } = await supabaseAdmin
+            .from('orders')
+            .update({
+                user_id: null,
+                delivery_address: null,
+                customer_phone: null,
+                customer_name: '[Deleted User]',
+            })
+            .eq('user_id', userId);
+
+        if (orderError) {
+            console.warn(`[Account Deletion] Order anonymization warning:`, orderError.message);
+            // Non-fatal: continue with deletion even if no orders exist
+        }
+
+        // 3. Delete consumer addresses
+        const { error: addressError } = await supabaseAdmin
+            .from('consumer_addresses')
+            .delete()
+            .eq('user_id', userId);
+
+        if (addressError) {
+            console.warn(`[Account Deletion] Address cleanup warning:`, addressError.message);
+        }
+
+        // 4. Delete profile
+        const { error: profileError } = await supabaseAdmin
+            .from('profiles')
+            .delete()
+            .eq('id', userId);
+
+        if (profileError) {
+            console.warn(`[Account Deletion] Profile cleanup warning:`, profileError.message);
+        }
+
+        // 5. Delete favorites
+        const { error: favError } = await supabaseAdmin
+            .from('product_favorites')
+            .delete()
+            .eq('user_id', userId);
+
+        if (favError) {
+            console.warn(`[Account Deletion] Favorites cleanup warning:`, favError.message);
+        }
+
+        // 6. Delete Prisma user record (if exists)
+        try {
+            await prisma.user.delete({ where: { id: userId } });
+        } catch (prismaErr: any) {
+            // P2025 = Record not found — safe to ignore
+            if (prismaErr.code !== 'P2025') {
+                console.warn(`[Account Deletion] Prisma user cleanup warning:`, prismaErr.message);
+            }
+        }
+
+        // 7. Delete Supabase Auth record (FINAL — point of no return)
+        const { error: authDeleteError } = await supabaseAdmin.auth.admin.deleteUser(userId);
+
+        if (authDeleteError) {
+            console.error(`[Account Deletion] CRITICAL: Auth deletion failed for ${userId}:`, authDeleteError);
+            return res.status(500).json({ error: 'Failed to delete authentication record. Please contact support.' });
+        }
+
+        console.log(`[Account Deletion] Successfully deleted user: ${userId}`);
+        res.json({ success: true, message: 'Account deleted successfully.' });
+
+    } catch (error: any) {
+        console.error('[Account Deletion] Error:', error.message);
+        if (error.message === 'Missing or invalid token' || error.message === 'Unauthorized') {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+        res.status(500).json({ error: 'Account deletion failed. Please try again.' });
+    }
+});
+
 /**
  * GET /auth/merchant/draft
  * Fetches the current remote state for a merchant, used for pre-flight idempotency checks.
@@ -3123,7 +3128,8 @@ app.get('/auth/merchant/draft', async (req, res) => {
             },
             subscription: subscription ? {
                 status: 'success',
-                transactionId: subscription.transactionId,
+                transactionId: subscription.razorpayPaymentId,
+                orderId: subscription.razorpayOrderId,
                 amount: subscription.amount
             } : null
         });
@@ -3275,31 +3281,6 @@ app.patch('/auth/merchant/draft', async (req, res) => {
                         data: { id: userId, managerId: userId, name: payload.storeName, cityId: cityRecord.id, address: payload.address, active: false, image: storeImage, updatedAt: new Date() }
                     });
                 }
-
-                // FLAGSHIP ONBOARDING: Ensure primary store implicitly enters branch catalog with legacy matching ID
-                await tx.merchantBranch.upsert({
-                    where: { id: userId },
-                    update: {
-                        branchName: payload.storeName,
-                        address: payload.address,
-                        city: payload.city,
-                        latitude: payload.latitude || null,
-                        longitude: payload.longitude || null,
-                        phone: payload.phone || null
-                    },
-                    create: {
-                        id: userId,
-                        merchantId: userId,
-                        branchName: payload.storeName,
-                        managerName: payload.ownerName || null,
-                        address: payload.address,
-                        city: payload.city,
-                        latitude: payload.latitude || null,
-                        longitude: payload.longitude || null,
-                        phone: payload.phone || null,
-                        isActive: false // Will be activated alongside legacy approval logic
-                    }
-                });
 
                 if (payload.hasBranches && payload.branches) {
                     await tx.merchantBranch.deleteMany({ where: { merchantId: userId } });

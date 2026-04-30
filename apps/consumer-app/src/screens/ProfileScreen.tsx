@@ -37,7 +37,8 @@ import {
     MessageCircle,
     Pencil,
     Phone,
-    Heart
+    Heart,
+    Trash2
 } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 import { useNavigation } from '@react-navigation/native';
@@ -323,8 +324,57 @@ export default function ProfileScreen() {
                     text: "Logout",
                     style: "destructive",
                     onPress: async () => {
-                        // Global purge: clears SecureStore, cancels session, and redirects to Auth
+                        // Global purge: clears SecureStore, cancels session, and redirects to Main
                         await purgeAuthSession();
+                    }
+                }
+            ]
+        );
+    };
+
+    const handleDeleteAccount = async () => {
+        triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
+        Alert.alert(
+            "Delete Account",
+            "Are you sure? This will permanently delete your account and all associated data. This action cannot be undone.",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: () => {
+                        // Second confirmation
+                        Alert.alert(
+                            "Final Confirmation",
+                            "This is your last chance. All your data, order history, and saved addresses will be permanently removed.",
+                            [
+                                { text: "Cancel", style: "cancel" },
+                                {
+                                    text: "Delete My Account",
+                                    style: "destructive",
+                                    onPress: async () => {
+                                        try {
+                                            setLoading(true);
+                                            const response = await apiClient.fetch('/auth/delete-account', {
+                                                method: 'DELETE',
+                                            });
+
+                                            if (!response.ok) {
+                                                const data = await response.json();
+                                                throw new Error(data.error || 'Failed to delete account');
+                                            }
+
+                                            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                                            await purgeAuthSession();
+                                        } catch (error: any) {
+                                            setLoading(false);
+                                            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                                            Alert.alert("Error", error.message || "Failed to delete account. Please try again.");
+                                        }
+                                    }
+                                }
+                            ]
+                        );
                     }
                 }
             ]
@@ -377,6 +427,34 @@ export default function ProfileScreen() {
             </View>
         </View>
     );
+
+    // --- Guest Guard: Show login prompt if no session ---
+    if (!session) {
+        return (
+            <SafeAreaView edges={['top']} className="flex-1 bg-gray-50">
+                <View className="flex-row items-center justify-between px-6 py-4">
+                    <TouchableOpacity onPress={() => navigation.goBack()} className="p-2 -ml-2">
+                        <ChevronLeft size={20} color="#000" />
+                    </TouchableOpacity>
+                    <Text className="text-xl font-bold text-[#111827] absolute left-0 right-0 text-center -z-10">Profile</Text>
+                    <View className="w-10" />
+                </View>
+                <View className="flex-1 items-center justify-center px-8">
+                    <User size={64} color="#D1D5DB" />
+                    <Text className="text-2xl font-bold text-[#111827] mt-6 mb-2">Welcome to Pick at Store</Text>
+                    <Text className="text-gray-400 text-center text-sm font-medium leading-relaxed mb-8">
+                        Log in to access your profile, saved addresses, order history, and favorites.
+                    </Text>
+                    <TouchableOpacity
+                        onPress={() => navigation.navigate('Auth')}
+                        className="bg-[#B52725] h-14 rounded-2xl items-center justify-center w-full shadow-md"
+                    >
+                        <Text className="text-white font-bold text-lg">Log In or Sign Up</Text>
+                    </TouchableOpacity>
+                </View>
+            </SafeAreaView>
+        );
+    }
 
     if (loading || isProfileLoading) {
         return (
@@ -513,8 +591,14 @@ export default function ProfileScreen() {
                         icon={LogOut}
                         label="Logout"
                         isDestructive={true}
-                        isLast={true}
                         onPress={handleLogout}
+                    />
+                    <MenuItem
+                        icon={Trash2}
+                        label="Delete Account"
+                        isDestructive={true}
+                        isLast={true}
+                        onPress={handleDeleteAccount}
                     />
                 </SectionCard>
 

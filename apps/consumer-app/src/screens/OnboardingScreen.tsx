@@ -45,7 +45,7 @@ export default function OnboardingScreen() {
     const handleGetStarted = async () => {
         // Tag that onboarding is complete
         await SecureStore.setItemAsync('has_seen_onboarding', 'true');
-        navigation.replace('Auth');
+        navigation.replace('Main');
     };
 
     return (

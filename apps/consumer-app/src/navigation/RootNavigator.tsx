@@ -1,10 +1,9 @@
-// @lock — Do NOT overwrite. Approved layout as of Mar 12, 2026.
-// Root Navigator: Auth-aware stack navigator with session-based routing.
+// Root Navigator: Guest-friendly stack — Main feed always accessible.
+// Apple Guideline 5.1.1(v): Auth is deferred to transactional moments only.
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as SecureStore from 'expo-secure-store';
-import { supabase } from '../lib/supabase';
 
 import MainTabNavigator from './MainTabNavigator';
 import StorefrontScreen from '../screens/StorefrontScreen';
@@ -79,44 +78,46 @@ export default function RootNavigator() {
         );
     }
 
+    // Determine initial route: Onboarding (first launch) → ProfileSetup (new user) → Main (default)
+    const getInitialRoute = (): keyof RootStackParamList => {
+        if (!hasSeenOnboarding) return 'Onboarding';
+        if (session && pendingProfileSetup) return 'ProfileSetup';
+        return 'Main';
+    };
+
     return (
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
-            {!session ? (
-                <>
-                    {!hasSeenOnboarding && (
-                        <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-                    )}
-                    <Stack.Screen name="Auth" component={AuthScreen} />
-                </>
-            ) : (
-                <>
-                    {pendingProfileSetup ? (
-                        <>
-                            <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
-                            <Stack.Screen name="Main" component={MainTabNavigator} />
-                        </>
-                    ) : (
-                        <>
-                            <Stack.Screen name="Main" component={MainTabNavigator} />
-                            <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
-                        </>
-                    )}
-                    <Stack.Screen name="Storefront" component={StorefrontScreen} />
-                    <Stack.Screen name="Checkout" component={CheckoutScreen} />
-                    <Stack.Screen name="DiningCheckout" component={DiningCheckoutScreen} />
-                    <Stack.Screen name="Offers" component={OffersScreen} />
-                    <Stack.Screen name="SpotlightDetail" component={SpotlightDetailScreen} />
-                    <Stack.Screen name="CategoryDetail" component={CategoryDetailScreen} />
-                    <Stack.Screen name="YourOrders" component={YourOrdersScreen} />
-                    <Stack.Screen name="LocationPicker" component={LocationPickerScreen} options={{ presentation: 'fullScreenModal' }} />
-                    <Stack.Screen name="Profile" component={ProfileScreen} />
-                    <Stack.Screen name="Favorites" component={FavoritesScreen} />
-                    <Stack.Screen name="Support" component={SupportScreen} />
-                    <Stack.Screen name="PaymentMethods" component={PaymentMethodsScreen} />
-                    <Stack.Screen name="AddPaymentMethod" component={AddPaymentMethodScreen} />
-                    <Stack.Screen name="SwapScreen" component={SwapScreen} />
-                </>
-            )}
+        <Stack.Navigator
+            initialRouteName={getInitialRoute()}
+            screenOptions={{ headerShown: false }}
+        >
+            {/* Onboarding — shown only on first launch */}
+            <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+
+            {/* Main feed — ALWAYS accessible, even as guest */}
+            <Stack.Screen name="Main" component={MainTabNavigator} />
+
+            {/* Auth — navigable screen, NOT a gate */}
+            <Stack.Screen name="Auth" component={AuthScreen} options={{ presentation: 'modal' }} />
+
+            {/* Browsable screens — no session required */}
+            <Stack.Screen name="Storefront" component={StorefrontScreen} />
+            <Stack.Screen name="CategoryDetail" component={CategoryDetailScreen} />
+            <Stack.Screen name="SpotlightDetail" component={SpotlightDetailScreen} />
+            <Stack.Screen name="LocationPicker" component={LocationPickerScreen} options={{ presentation: 'fullScreenModal' }} />
+
+            {/* Auth-gated screens — individual screens handle auth checks */}
+            <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
+            <Stack.Screen name="Profile" component={ProfileScreen} />
+            <Stack.Screen name="Checkout" component={CheckoutScreen} />
+            <Stack.Screen name="DiningCheckout" component={DiningCheckoutScreen} />
+            <Stack.Screen name="Offers" component={OffersScreen} />
+            <Stack.Screen name="YourOrders" component={YourOrdersScreen} />
+            <Stack.Screen name="Favorites" component={FavoritesScreen} />
+            <Stack.Screen name="Support" component={SupportScreen} />
+            <Stack.Screen name="PaymentMethods" component={PaymentMethodsScreen} />
+            <Stack.Screen name="AddPaymentMethod" component={AddPaymentMethodScreen} />
+            <Stack.Screen name="SwapScreen" component={SwapScreen} />
+            <Stack.Screen name="Cart" component={CartScreen} />
         </Stack.Navigator>
     );
 }

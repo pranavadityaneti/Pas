@@ -168,8 +168,12 @@ export default function AuthScreen() {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             console.log(`Finished handleVerifyOtp`);
 
-            // RootNavigator will handle the routing via the session listener
-            // If existing user, RootNavigator will auto-route to Main via session change
+            // Navigate explicitly since RootNavigator no longer auto-gates
+            if (data.isNewUser) {
+                navigation.replace('ProfileSetup');
+            } else {
+                navigation.replace('Main');
+            }
         } catch (error: any) {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             Alert.alert('Verification Failed', error.message || 'Incorrect OTP. Please try again.');
@@ -234,6 +238,22 @@ export default function AuthScreen() {
                 <Text className="text-white font-bold text-[15px] ml-3">Continue with Phone</Text>
             </TouchableOpacity>
 
+            {/* Continue as Guest — Apple 5.1.1(v) compliance */}
+            <TouchableOpacity
+                onPress={() => {
+                    haptic(Haptics.ImpactFeedbackStyle.Light);
+                    if (navigation.canGoBack()) {
+                        navigation.goBack();
+                    } else {
+                        navigation.replace('Main');
+                    }
+                }}
+                className="mt-4 h-12 items-center justify-center"
+            >
+                <Text className="text-gray-400 font-semibold text-[14px]">
+                    Continue as Guest
+                </Text>
+            </TouchableOpacity>
 
         </View>
     );

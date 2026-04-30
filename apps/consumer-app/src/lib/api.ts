@@ -80,11 +80,11 @@ export const purgeAuthSession = async () => {
         // Force Supabase SignOut (local)
         await supabase.auth.signOut({ scope: 'local' });
 
-        // Force UI Redirect
+        // Force UI Redirect — land on Main feed (not Auth) since Auth is no longer the root
         if (navigationRef.isReady()) {
             navigationRef.reset({
                 index: 0,
-                routes: [{ name: 'Auth' }],
+                routes: [{ name: 'Main' }],
             });
         }
         
