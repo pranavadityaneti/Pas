@@ -1,5 +1,5 @@
 // @lock — Do NOT overwrite. Approved global auth & network timeout logic as of April 1, 2026.
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -23,6 +23,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [isLoading, setIsLoading] = useState(true);
     const [isProfileLoading, setIsProfileLoading] = useState(false);
 
+    // FIX 3: Circuit breaker to prevent state updates on unmounted components
+    const isMounted = useRef(true);
+    useEffect(() => {
+        return () => {
+            isMounted.current = false;
+        };
+    }, []);
+
     // --- Core Sync Logic ---
     // Decoupled from Location or other providers to prevent Cold Start hangs.
 
@@ -39,6 +47,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
             const cachedProfile = await AsyncStorage.getItem(`@profile_${userId}`);
             if (cachedProfile) {
+                if (!isMounted.current) return;
                 setProfile(JSON.parse(cachedProfile));
                 setIsProfileLoading(false); // Unblock UI immediately
                 isCached = true;
@@ -80,6 +89,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
 
                 // Update state and rewrite cache
+                if (!isMounted.current) return;
                 setProfile(data);
                 if (data) {
                     await AsyncStorage.setItem(`@profile_${userId}`, JSON.stringify(data));
@@ -96,6 +106,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 if (attempt >= MAX_RETRIES) {
                     console.error('[AuthContext] PostgREST Sync Failed fully after max retries:', error);
                     // If we never loaded a cache, fall back gracefully
+                    if (!isMounted.current) return;
                     if (!isCached) setProfile(null); 
                     setIsProfileLoading(false);
                     setIsLoading(false); // Unblock main navigation loading even on failure
@@ -121,10 +132,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const initializeAuth = async () => {
             try {
                 const { data: { session: initialSession } } = await supabase.auth.getSession();
+                if (!isMounted.current) return;
+                
                 setSession(initialSession);
                 setUser(initialSession?.user ?? null);
             } catch (error) {
                 console.error('[AuthContext] Error initializing session:', error);
+            } finally {
+                // FIX 2: Prevent infinite loading if offline/failed
+                if (isMounted.current) setIsLoading(false); 
             }
         };
 
@@ -134,13 +150,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const { data: authListener } = supabase.auth.onAuthStateChange(
             (event, newSession) => {
                 setTimeout(() => {
+                    if (!isMounted.current) return;
+
                     console.log(`[AuthContext] State change detected: ${event}`);
+
+                    // FIX 1: Close the render gap BEFORE updating the user state
+                    if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && newSession?.user) {
+                        setIsProfileLoading(true); 
+                    }
+
                     setSession(newSession);
                     setUser(newSession?.user ?? null);
 
                     if (event === 'SIGNED_OUT') {
                         setProfile(null);
+                        setIsProfileLoading(false);
                     }
+                    
                     setIsLoading(false);
                 }, 0);
             }
@@ -154,12 +180,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Hook 2: Profile Sync based on User State
     useEffect(() => {
         if (user?.id) {
-            fetchProfile(user.id).catch(err => 
-                console.error('[AuthContext] Background profile sync failed:', err)
-            );
+            fetchProfile(user.id).catch(err => {
+                if (isMounted.current) console.error('[AuthContext] Background profile sync failed:', err);
+            });
         } else {
-            setIsProfileLoading(false);
-            setIsLoading(false);
+            if (isMounted.current) {
+                setIsProfileLoading(false);
+                setIsLoading(false);
+            }
         }
     }, [user?.id]);
 
