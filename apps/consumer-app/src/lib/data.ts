@@ -72,15 +72,23 @@ export const SUB_CATEGORIES: Record<string, string[]> = {
 export const PICKUP_SPOTLIGHTS = [
   {
     id: "1",
-    image: require('../../assets/images/banners/banner1.png'),
+    image: require('../../assets/images/banners/pickup_new1.jpg'),
   },
   {
     id: "2",
-    image: require('../../assets/images/banners/banner2.png'),
+    image: require('../../assets/images/banners/pickup_new2.png'),
   },
   {
     id: "3",
-    image: require('../../assets/images/banners/banner3.png'),
+    image: require('../../assets/images/banners/pickup_new3.png'),
+  },
+  {
+    id: "4",
+    image: require('../../assets/images/banners/pickup_new4.png'),
+  },
+  {
+    id: "5",
+    image: require('../../assets/images/banners/pickup_new5.png'),
   },
 ];
 
