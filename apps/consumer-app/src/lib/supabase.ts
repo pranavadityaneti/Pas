@@ -24,13 +24,13 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 
 // Tell Supabase Auth to continuously refresh the session automatically only
 // while the app is in the foreground. (Per official Supabase React Native guide.)
-AppState.addEventListener('change', (state) => {
-    if (state === 'active') {
-        supabase.auth.startAutoRefresh();
-    } else {
-        supabase.auth.stopAutoRefresh();
-    }
-});
+// AppState.addEventListener('change', (state) => {
+//     if (state === 'active') {
+//         supabase.auth.startAutoRefresh();
+//     } else {
+//         supabase.auth.stopAutoRefresh();
+//     }
+// });
 
 /**
  * Manually establish a Supabase session using server-provided tokens after
@@ -60,7 +60,7 @@ export async function setSessionFromTokens(accessToken: string, refreshToken: st
     // Log token expiry up-front so it's visible even if the call below hangs.
     try {
         const payload = JSON.parse(
-            Buffer
+            typeof Buffer !== 'undefined'
                 ? Buffer.from(accessToken.split('.')[1], 'base64').toString('utf8')
                 : atob(accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))
         );
@@ -68,11 +68,12 @@ export async function setSessionFromTokens(accessToken: string, refreshToken: st
         console.log('[supabase] backend access_token expires in', payload.exp - now, 'seconds');
     } catch {}
 
-    console.time('[supabase] refreshSession');
+    const startTime = Date.now();
+    console.log('[supabase] calling refreshSession...');
     const { data, error } = await supabase.auth.refreshSession({
         refresh_token: refreshToken,
     });
-    console.timeEnd('[supabase] refreshSession');
+    console.log('[supabase] refreshSession finished in', Date.now() - startTime, 'ms');
 
     if (error) {
         console.error('[supabase] refreshSession failed:', error);

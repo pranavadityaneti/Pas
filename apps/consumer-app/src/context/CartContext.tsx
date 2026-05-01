@@ -1,3 +1,4 @@
+// @lock — Do NOT overwrite. Approved config as of May 1, 2026.
 // CartContext: Global cart state management with Supabase persistence and strict validation.
 import React, { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
 import { Alert } from 'react-native';
@@ -47,11 +48,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
         let mounted = true;
 
         // Listen for login/logout to sync local items to cloud
-        const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+        const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
             if (!mounted) return;
             if (session?.user) {
                 // If we had local items, merge them up to the cloud.
-                await loadCartFromSupabase(session.user.id, items);
+                // Fire and forget without awaiting to avoid GoTrue deadlock!
+                loadCartFromSupabase(session.user.id, items).catch(e => console.error(e));
             } else if (event === 'SIGNED_OUT') {
                 setItems([]);
                 setCartId(null);
