@@ -61,6 +61,8 @@ model Vertical {
   updatedAt       DateTime        @default(now())
   color           String?
   icon            String?
+  banner_url      String?
+  theme_color     String?
   Product         Product[]
   stores          Store[]
   tier2Categories Tier2Category[]
@@ -91,61 +93,85 @@ model Tier2Category {
 }
 
 model User {
-  id                      String         @id @default(uuid()) @db.Uuid
-  email                   String         @unique
+  id                      String   @id @default(uuid()) @db.Uuid
+  email                   String   @unique
   passwordHash            String?
-  role                    Role           @default(CONSUMER)
+  role                    Role     @default(CONSUMER)
   name                    String?
   phone                   String?
-  createdAt               DateTime       @default(now())
-  updatedAt               DateTime       @updatedAt
-  notificationPreferences Json?          @map("notification_preferences")
-  managedStore            Store?         @relation("StoreManager")
-  notifications           Notification[]
-  orders                  Order[]        @relation("CustomerOrders")
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  notificationPreferences Json?    @map("notification_preferences")
+  managedStore            Store?   @relation("StoreManager")
+  orders                  Order[]  @relation("CustomerOrders")
 
   @@schema("public")
 }
 
 model Notification {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id") @db.Uuid
-  type      String
-  title     String
-  message   String
-  isRead    Boolean  @default(false) @map("is_read")
-  link      String?
-  metadata  Json?
-  createdAt DateTime @default(now()) @map("created_at")
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id") @db.Uuid
+  type        String
+  title       String
+  message     String
+  isRead      Boolean  @default(false) @map("is_read")
+  link        String?
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  storeId     String?  @map("store_id") @db.Uuid
+  referenceId String?  @map("reference_id")
 
   @@index([userId])
+  @@index([storeId], map: "idx_notifications_store_id")
+  @@index([userId, storeId])
   @@map("notifications")
   @@schema("public")
 }
 
+model MerchantPushToken {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  expoPushToken String   @map("expo_push_token")
+  deviceId      String?  @map("device_id")
+  platform      String?
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([userId, expoPushToken])
+  @@index([userId])
+  @@map("merchant_push_tokens")
+  @@schema("public")
+}
+
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
 model Store {
-  id             String         @id @default(uuid()) @db.Uuid
+  id             String    @id @default(uuid()) @db.Uuid
   name           String
   cityId         String
   address        String?
   image          String?
+  // At signup, Store and its first MerchantBranch are both created with id ==
+  // owner's auth UUID. managerId on Store == owner UUID; the main branch has no
+  // explicit manager field, the owner implicitly manages it. Additional branches
+  // created later have their own id and may have an explicit manager.
+  // Notification routing (NotificationService.resolveRecipientUserId) walks
+  // Store -> managerId, then falls back to MerchantBranch.merchantId for non-main
+  // branches.
+  managerId      String?   @unique @db.Uuid
+  active         Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  merchantId     String?   @map("merchant_id")
+  operatingDays  String[]  @map("operating_days")
+  operatingHours Json?     @map("operating_hours")
+  verticalId     String?   @map("vertical_id") @db.Uuid
   latitude       Float?
   longitude      Float?
-  managerId      String?        @unique @db.Uuid
-  active         Boolean        @default(false)
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  merchantId     String?        @map("merchant_id")
-  operatingDays  String[]       @map("operating_days")
-  operatingHours Json?          @map("operating_hours")
-  verticalId     String?        @map("vertical_id") @db.Uuid
-  city           City           @relation(fields: [cityId], references: [id])
-  manager        User?          @relation("StoreManager", fields: [managerId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  vertical       Vertical?      @relation(fields: [verticalId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  products       StoreProduct[]
+  city           City      @relation(fields: [cityId], references: [id])
+  manager        User?     @relation("StoreManager", fields: [managerId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  vertical       Vertical? @relation(fields: [verticalId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   orders         Order[]
-  staff          StoreStaff[]
 
   @@index([merchantId])
   @@index([verticalId])
@@ -163,7 +189,7 @@ model StoreStaff {
   isActive   Boolean  @default(true) @map("is_active")
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  store      Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  user_id    String?  @db.Uuid
 
   @@map("store_staff")
   @@schema("public")
@@ -262,57 +288,57 @@ model ProductAuditLog {
 }
 
 model StoreProduct {
-  id             String      @id @default(uuid())
-  storeId        String      @db.Uuid
-  branch_id      String?
-  productId      String
-  price          Float
-  stock          Int         @default(0)
-  active         Boolean     @default(true)
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
-  variant        String      @default("Standard")
-  is_best_seller Boolean     @default(false)
-  is_deleted     Boolean     @default(false)
-  product        Product     @relation(fields: [productId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  store          Store       @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  orderItems     OrderItem[]
+  id                String          @id @default(uuid())
+  storeId           String          @db.Uuid
+  productId         String
+  price             Float
+  stock             Int             @default(0)
+  active            Boolean         @default(true)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  variant           String          @default("Standard")
+  is_best_seller    Boolean         @default(false)
+  is_deleted        Boolean         @default(false)
+  branch_id         String?
+  product           Product         @relation(fields: [productId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  merchant_branches MerchantBranch? @relation(fields: [branch_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_storeproduct_branch")
+  orderItems        OrderItem[]
 
-  @@unique([branch_id, productId, variant])
+  @@unique([branch_id, productId, variant], map: "storeproduct_branch_product_variant_key")
   @@schema("public")
 }
 
 model Order {
-  id                   String          @id(map: "Order_pkey") @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  status               OrderStatus     @default(PENDING)
-  isPaid               Boolean         @default(false) @map("ispaid")
+  id                   String         @id(map: "Order_pkey") @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status               OrderStatus    @default(PENDING)
+  isPaid               Boolean        @default(false) @map("ispaid")
   otp                  String?
-  orderNumber          String          @unique(map: "Order_order_number_key") @map("order_number")
-  storeId              String          @map("store_id") @db.Uuid
-  branchId             String          @map("branch_id")
-  staffId              String?         @map("staff_id")
-  totalAmount          Float           @map("total_amount")
-  cancelledReason      String?         @map("cancelled_reason")
-  metadata             Json?           @map("metadata")
-  userId               String          @map("user_id") @db.Uuid
-  createdAt            DateTime        @default(now()) @map("created_at")
-  updatedAt            DateTime        @updatedAt @map("updated_at")
-  returnReason         String?         @map("return_reason")
-  returnImages         String[]        @map("return_images")
+  orderNumber          String         @unique(map: "Order_order_number_key") @map("order_number")
+  storeId              String         @map("store_id") @db.Uuid
+  staffId              String?        @map("staff_id")
+  totalAmount          Float          @map("total_amount")
+  cancelledReason      String?        @map("cancelled_reason")
+  metadata             Json?          @map("metadata")
+  userId               String         @map("user_id") @db.Uuid
+  createdAt            DateTime       @default(now()) @map("created_at")
+  updatedAt            DateTime       @updatedAt @map("updated_at")
+  returnReason         String?        @map("return_reason")
+  returnImages         String[]       @map("return_images")
   customer_name        String?
   customer_phone       String?
   store_name           String?
-  amount               Decimal?        @default(0) @db.Decimal(10, 2)
-  order_type           String?         @default("pickup")
+  amount               Decimal?       @default(0) @db.Decimal(10, 2)
+  order_type           String?        @default("pickup")
   otp_code             String?
-  items_count          Int?            @default(0)
+  items_count          Int?           @default(0)
   special_instructions String?
   arrival_time         String?
   guests_count         Int?
+  branchId             String         @map("branch_id")
   items                OrderItem[]
-  store                Store           @relation(fields: [storeId], references: [id], onUpdate: NoAction, map: "fk_orders_store")
-  branch               MerchantBranch  @relation(fields: [branchId], references: [id])
-  user                 User            @relation("CustomerOrders", fields: [userId], references: [id], onUpdate: NoAction, map: "fk_orders_user")
+  store                Store          @relation(fields: [storeId], references: [id], onUpdate: NoAction, map: "fk_orders_store")
+  user                 User           @relation("CustomerOrders", fields: [userId], references: [id], onUpdate: NoAction, map: "fk_orders_user")
+  branch               MerchantBranch @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
   @@index([orderNumber], map: "Order_order_number_idx")
   @@index([storeId], map: "Order_store_id_idx")
@@ -404,27 +430,28 @@ model Merchant {
 }
 
 model MerchantBranch {
-  id                  String    @id @default(uuid())
-  merchantId          String?   @map("merchant_id")
-  branchName          String    @map("branch_name")
-  managerName         String?   @map("manager_name")
+  id                  String         @id @default(uuid())
+  merchantId          String?        @map("merchant_id")
+  branchName          String         @map("branch_name")
+  managerName         String?        @map("manager_name")
   phone               String?
   email               String?
   address             String?
   city                String?
   latitude            Float?
   longitude           Float?
-  isActive            Boolean?  @map("is_active")
-  bankAccountNumber   String?   @map("bank_account_number")
-  ifscCode            String?   @map("ifsc_code")
-  bankName            String?   @map("bank_name")
-  bankBeneficiaryName String?   @map("bank_beneficiary_name")
-  permissions         Json?     @map("permissions")
-  operating_hours     Json?     @map("operating_hours")
-  prep_time_minutes   Int       @default(15) @map("prep_time_minutes")
-  createdAt           DateTime? @default(now()) @map("created_at")
-  updatedAt           DateTime? @updatedAt @map("updated_at")
-  merchant            Merchant? @relation(fields: [merchantId], references: [id])
+  isActive            Boolean?       @map("is_active")
+  createdAt           DateTime?      @default(now()) @map("created_at")
+  updatedAt           DateTime?      @updatedAt @map("updated_at")
+  bankAccountNumber   String?        @map("bank_account_number")
+  bankBeneficiaryName String?        @map("bank_beneficiary_name")
+  bankName            String?        @map("bank_name")
+  ifscCode            String?        @map("ifsc_code")
+  permissions         Json?          @map("permissions")
+  operating_hours     Json?          @map("operating_hours")
+  prep_time_minutes   Int            @default(15) @map("prep_time_minutes")
+  StoreProduct        StoreProduct[]
+  merchant            Merchant?      @relation(fields: [merchantId], references: [id])
   orders              Order[]
 
   @@unique([merchantId, branchName])
@@ -1026,7 +1053,6 @@ model order_requests {
   id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   consumer_user_id String   @db.Uuid
   store_id         String
-  branch_id        String
   store_name       String
   items            Json     @default("[]")
   subtotal         Decimal  @default(0) @db.Decimal
@@ -1035,9 +1061,21 @@ model order_requests {
   expires_at       DateTime @db.Timestamptz(6)
   created_at       DateTime @default(now()) @db.Timestamptz(6)
   updated_at       DateTime @default(now()) @db.Timestamptz(6)
+  branch_id        String
 
   @@index([consumer_user_id, created_at(sort: Desc)], map: "idx_order_requests_consumer")
   @@index([store_id, status], map: "idx_order_requests_store_status")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model spatial_ref_sys {
+  srid      Int     @id
+  auth_name String? @db.VarChar(256)
+  auth_srid Int?
+  srtext    String? @db.VarChar(2048)
+  proj4text String? @db.VarChar(2048)
+
   @@schema("public")
 }
 

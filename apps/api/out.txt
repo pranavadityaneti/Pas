@@ -1,0 +1,92 @@
+[DRY RUN] Starting Flagship Branch Backfill Analysis...
+Found 7 active merchants missing their Flagship Branch.
+
+--- TARGET RESCUE JSON ---
+[
+  {
+    "id": "57f2aa5a-1210-42b6-ab3d-57ab6c396769",
+    "merchantId": "57f2aa5a-1210-42b6-ab3d-57ab6c396769",
+    "branchName": "Freshly Foods ",
+    "managerName": "Aditya",
+    "address": "Kamalapuri colony, Banjara Hills, Hyderabad ",
+    "city": "Hyderabad",
+    "latitude": 17.4336627,
+    "longitude": 78.4318512,
+    "phone": "9100117027",
+    "isActive": true
+  },
+  {
+    "id": "e49016c2-1065-486c-ae5a-8d3dbfce872a",
+    "merchantId": "e49016c2-1065-486c-ae5a-8d3dbfce872a",
+    "branchName": "Varsha bangles ",
+    "managerName": "Mochi cafe and bistro",
+    "address": "Plot no 19 varsha bangles ",
+    "city": "Hyderabad",
+    "latitude": 17.4646979,
+    "longitude": 78.3665881,
+    "phone": "9182369196",
+    "isActive": true
+  },
+  {
+    "id": "3d593522-2ee6-45c9-b542-41ddd8e04d3b",
+    "merchantId": "3d593522-2ee6-45c9-b542-41ddd8e04d3b",
+    "branchName": "Ak colths ",
+    "managerName": "anand kumar",
+    "address": "Pick At Store kondapur ",
+    "city": "Hyderabad",
+    "latitude": 17.4648265,
+    "longitude": 78.366048,
+    "phone": "9676991599",
+    "isActive": true
+  },
+  {
+    "id": "7672b251-33fa-4db2-8b2d-8335f094e8e2",
+    "merchantId": "7672b251-33fa-4db2-8b2d-8335f094e8e2",
+    "branchName": "Teja stationary ",
+    "managerName": "Teja Vempaty",
+    "address": "SVC Treewalk, Kondapur ",
+    "city": "Hyderabad",
+    "latitude": 17.385,
+    "longitude": 78.4867,
+    "phone": "8142412685",
+    "isActive": true
+  },
+  {
+    "id": "9143278d-444e-4ee9-b836-f31d5de62e41",
+    "merchantId": "9143278d-444e-4ee9-b836-f31d5de62e41",
+    "branchName": "Freshly ",
+    "managerName": "Pranav ",
+    "address": "Navodaya Colony, Kamalapuri colony, Banjara Hills, Hyderabad ",
+    "city": "Hyderabad",
+    "latitude": 17.4336981,
+    "longitude": 78.4318078,
+    "phone": "9441107224",
+    "isActive": true
+  },
+  {
+    "id": "d98d4454-56cf-432c-8a78-2757cd2a9d0d",
+    "merchantId": "d98d4454-56cf-432c-8a78-2757cd2a9d0d",
+    "branchName": "Leo pets accessories ",
+    "managerName": "Ajay Karthik ",
+    "address": "Near police battalion main gate Kondapur 500084",
+    "city": "Hyderabad",
+    "latitude": 17.4647191,
+    "longitude": 78.3666163,
+    "phone": "8247285729",
+    "isActive": true
+  },
+  {
+    "id": "c210042f-ded1-4c43-bba1-4563c34483b0",
+    "merchantId": "c210042f-ded1-4c43-bba1-4563c34483b0",
+    "branchName": "Security Test Store",
+    "managerName": "Jane Doe",
+    "address": null,
+    "city": "d83b00aa-7142-4c6f-9e2c-b9a50ef2135d",
+    "latitude": null,
+    "longitude": null,
+    "phone": "9797979797",
+    "isActive": true
+  }
+]
+--------------------------
+DRY RUN COMPLETE. NO ROWS INSERTED.

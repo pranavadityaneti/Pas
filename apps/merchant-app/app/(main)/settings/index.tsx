@@ -8,6 +8,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { supabase } from '../../../src/lib/supabase';
 import { Colors } from '../../../constants/Colors';
 import { useStore } from '../../../src/hooks/useStore';
+import { deregisterPushToken } from '../../../src/hooks/usePushNotifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const DELETE_REASONS = [
@@ -19,26 +20,14 @@ const DELETE_REASONS = [
 ];
 
 export default function SettingsScreen() {
-    const { storeId, branches, activeStoreId, switchBranch, merchantId, refreshStore, availableRoles, switchRole, isSwitching, store, isCurrentStoreOwner, userRole } = useStore();
+    const { store, merchantId, branches, activeStoreId, activeContext, availableContexts, permissions, switchBranch, switchContext, refreshStore, isSwitching } = useStore();
     const isFocused = useIsFocused(); // To trigger re-fetch on focus
     const [loading, setLoading] = useState(true);
 
-    // Compute active role type based on current context
-    const activeRole = useMemo(() => {
-        // Check if activeStoreId matches a manager role
-        const managerRole = availableRoles.find(r => r.type === 'manager' && r.id === activeStoreId);
-        if (managerRole) return managerRole;
-        
-        // Check if we have an owner role matching merchantId
-        const ownerRole = availableRoles.find(r => r.type === 'owner' && r.id === merchantId);
-        if (ownerRole) return ownerRole;
-        
-        // Default to first available role
-        return availableRoles[0] || null;
-    }, [availableRoles, activeStoreId, merchantId]);
-
-    // Only owners can delete their account (robust check)
-    const isOwnerRole = (activeStoreId && merchantId && activeStoreId === merchantId) || activeRole?.type === 'owner';
+    const totalDestinations = availableContexts.reduce(
+        (sum, ctx) => sum + ctx.branches.length, 0
+    );
+    const pickerEnabled = totalDestinations > 1;
 
     // Store Switcher Modal
     const [isStoreSwitcherOpen, setIsStoreSwitcherOpen] = useState(false);
@@ -55,8 +44,6 @@ export default function SettingsScreen() {
         storeName: ''
     });
 
-    const hasBranches = branches && branches.length > 1;
-    const isOwner = activeStoreId === merchantId || activeStoreId === null;
     const [isCreateBranchModalOpen, setIsCreateBranchModalOpen] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [branchForm, setBranchForm] = useState({
@@ -70,7 +57,7 @@ export default function SettingsScreen() {
         if (isFocused) {
             fetchSettingsData();
         }
-    }, [isFocused, storeId]);
+    }, [isFocused]);
 
     const fetchSettingsData = async () => {
         try {
@@ -86,11 +73,11 @@ export default function SettingsScreen() {
 
             // 2. Fetch Store Data
             let storeName = 'My Store';
-            if (storeId) {
+            if (merchantId) {
                 const { data: storeData } = await supabase
                     .from('Store')
                     .select('name')
-                    .eq('id', storeId)
+                    .eq('id', merchantId)
                     .single();
                 if (storeData) storeName = storeData.name;
             }
@@ -118,6 +105,8 @@ export default function SettingsScreen() {
                 text: 'Log Out',
                 style: 'destructive',
                 onPress: async () => {
+                    // Deregister push token BEFORE destroying the auth session
+                    await deregisterPushToken();
                     await supabase.auth.signOut();
                     router.replace('/(auth)/login');
                 },
@@ -126,42 +115,7 @@ export default function SettingsScreen() {
     };
 
     const handleSwitchBranch = () => {
-        const branchNames = branches.map(b => b.name);
-        const addOption = isOwner ? ['+ Add New Branch'] : [];
-
-        if (Platform.OS === 'ios') {
-            const options = [...branchNames, ...addOption, 'Cancel'];
-            const cancelIndex = options.length - 1;
-            const addIndex = isOwner ? branchNames.length : -1;
-
-            ActionSheetIOS.showActionSheetWithOptions(
-                {
-                    options,
-                    cancelButtonIndex: cancelIndex,
-                    title: 'Switch Branch',
-                },
-                (buttonIndex) => {
-                    if (buttonIndex === addIndex) {
-                        setIsCreateBranchModalOpen(true);
-                    } else if (buttonIndex < branches.length) {
-                        switchBranch(branches[buttonIndex].id);
-                    }
-                }
-            );
-        } else {
-            const alertOptions: any[] = [
-                ...branches.map(b => ({
-                    text: b.name,
-                    onPress: () => switchBranch(b.id),
-                })),
-                ...(isOwner ? [{
-                    text: '+ Add New Branch',
-                    onPress: () => setIsCreateBranchModalOpen(true),
-                }] : []),
-                { text: 'Cancel', style: 'cancel' as const },
-            ];
-            Alert.alert('Switch Branch', 'Select a branch to manage', alertOptions);
-        }
+        // Obsolete function, removing its logic.
     };
 
     const handleCreateBranch = async () => {
@@ -230,7 +184,8 @@ export default function SettingsScreen() {
                 Alert.alert('Error', 'Unable to open email client. Please email support@pickatstore.com directly.');
             }
             
-            // Clear local data and sign out
+            // Clear push token and local data, then sign out
+            await deregisterPushToken();
             await AsyncStorage.clear();
             await supabase.auth.signOut();
             
@@ -256,7 +211,7 @@ export default function SettingsScreen() {
             subtitle: 'Track payments & reconciliation',
             route: '/(main)/settings/earnings',
             iconType: 'MaterialCommunityIcons',
-            ownerOnly: false,
+            permissionKey: 'earnings_reports.view',
         },
         {
             icon: 'refresh',
@@ -264,7 +219,7 @@ export default function SettingsScreen() {
             subtitle: 'Manage requests & approvals',
             route: '/(main)/settings/returns',
             iconType: 'MaterialCommunityIcons',
-            ownerOnly: false,
+            permissionKey: 'returns.view',
         },
         {
             icon: 'clock-outline',
@@ -272,7 +227,7 @@ export default function SettingsScreen() {
             subtitle: 'Manage opening & closing hours',
             route: '/(main)/settings/timings',
             iconType: 'MaterialCommunityIcons',
-            ownerOnly: false,
+            permissionKey: 'store_timings.view',
         },
         {
             icon: 'account-group-outline',
@@ -280,7 +235,7 @@ export default function SettingsScreen() {
             subtitle: 'Add or remove employees',
             route: '/(main)/settings/staff',
             iconType: 'MaterialCommunityIcons',
-            ownerOnly: true,
+            permissionKey: 'staff_management',
         },
         {
             icon: 'store-cog-outline',
@@ -288,7 +243,7 @@ export default function SettingsScreen() {
             subtitle: 'Edit name, address & info',
             route: '/(main)/settings/store-details',
             iconType: 'MaterialCommunityIcons',
-            ownerOnly: true,
+            permissionKey: 'store_details',
         },
         {
             icon: 'source-branch',
@@ -296,7 +251,7 @@ export default function SettingsScreen() {
             subtitle: 'Add or manage store branches',
             route: '/(main)/settings/branches',
             iconType: 'MaterialCommunityIcons',
-            ownerOnly: true,
+            permissionKey: 'branch_management',
         },
         {
             icon: 'card-account-details-outline',
@@ -304,7 +259,7 @@ export default function SettingsScreen() {
             subtitle: 'Manage payment accounts',
             route: '/(main)/settings/payouts',
             iconType: 'MaterialCommunityIcons',
-            ownerOnly: true,
+            permissionKey: 'store_details',
         },
         {
             icon: 'shield-check-outline',
@@ -312,7 +267,7 @@ export default function SettingsScreen() {
             subtitle: 'PAN, Aadhaar & GST details',
             route: '/(main)/settings/compliance',
             iconType: 'MaterialCommunityIcons',
-            ownerOnly: true,
+            permissionKey: 'store_details',
         },
         {
             icon: 'bell-outline',
@@ -320,7 +275,7 @@ export default function SettingsScreen() {
             subtitle: 'Alert tones & preferences',
             route: '/(main)/settings/notifications',
             iconType: 'MaterialCommunityIcons',
-            ownerOnly: false,
+            permissionKey: 'notifications.view',
         },
         {
             icon: 'help-circle-outline',
@@ -328,7 +283,7 @@ export default function SettingsScreen() {
             subtitle: 'FAQs, chat, and contact',
             route: '/(main)/settings/support',
             iconType: 'MaterialCommunityIcons',
-            ownerOnly: false,
+            permissionKey: null,
         },
         {
             icon: 'file-document-outline',
@@ -336,11 +291,21 @@ export default function SettingsScreen() {
             subtitle: 'Terms, privacy & app info',
             route: '/(main)/settings/legal',
             iconType: 'MaterialCommunityIcons',
-            ownerOnly: false,
+            permissionKey: null,
         },
     ];
 
-    const menuItems = allMenuItems.filter(item => !item.ownerOnly || isCurrentStoreOwner);
+    const checkPermission = (key: string | null) => {
+        if (!key) return true;
+        const keys = key.split('.');
+        let val: any = permissions;
+        for (const k of keys) {
+            val = val?.[k];
+        }
+        return val === true;
+    };
+
+    const menuItems = allMenuItems.filter(item => checkPermission(item.permissionKey));
 
     return (
         <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -366,23 +331,27 @@ export default function SettingsScreen() {
                         </TouchableOpacity>
                     </View>
 
-                    {/* Store Dropdown - Locked for managers */}
+                    {/* Store Dropdown */}
                     <TouchableOpacity 
                         style={styles.storeDropdown} 
                         onPress={() => {
-                            if (availableRoles.length <= 1) return;
+                            if (!pickerEnabled) return;
                             setIsStoreSwitcherOpen(true);
                         }}
-                        activeOpacity={availableRoles.length <= 1 ? 1 : 0.7}
-                        disabled={availableRoles.length <= 1}
+                        activeOpacity={!pickerEnabled ? 1 : 0.7}
+                        disabled={!pickerEnabled}
                     >
                         <View style={styles.storeDropdownLeft}>
                             <Text style={styles.storeDropdownLabel}>
-                                {availableRoles.length > 1 ? 'SWITCH CONTEXT' : (userRole === 'manager' ? 'ASSIGNED BRANCH' : 'CURRENT STORE')}
+                                CURRENT VIEW
                             </Text>
-                            <Text style={styles.storeDropdownName}>{store?.name || 'My Store'}</Text>
+                            <Text style={styles.storeDropdownName}>
+                                {activeContext?.role === 'owner' && activeStoreId !== activeContext?.merchantId 
+                                    ? branches.find(b => b.id === activeStoreId)?.name 
+                                    : (store?.name || 'My Store')}
+                            </Text>
                         </View>
-                        {availableRoles.length > 1 ? (
+                        {pickerEnabled ? (
                             <Ionicons name="chevron-down" size={20} color="#666" />
                         ) : (
                             <Ionicons name="lock-closed" size={16} color="#9CA3AF" />
@@ -416,8 +385,8 @@ export default function SettingsScreen() {
                     <Text style={styles.signOutText}>Log Out</Text>
                 </TouchableOpacity>
 
-                {/* Danger Zone - Only visible for store owners */}
-                {isCurrentStoreOwner && (
+                {/* Danger Zone - Only visible for users with permission */}
+                {permissions.delete_account && (
                     <View style={styles.dangerZone}>
                         <Text style={styles.dangerZoneTitle}>Danger Zone</Text>
                         <TouchableOpacity 
@@ -529,38 +498,54 @@ export default function SettingsScreen() {
                         <View style={styles.bottomSheetHandle} />
                         <Text style={styles.bottomSheetTitle}>Switch Store</Text>
                         
-                        {availableRoles.map((role) => {
-                            const isActive = activeRole?.id === role.id && activeRole?.type === role.type;
-                            return (
-                                <TouchableOpacity
-                                    key={`${role.id}-${role.type}`}
-                                    style={[styles.roleOption, isActive && styles.roleOptionActive]}
-                                    onPress={() => {
-                                        if (!isActive) {
-                                            switchRole(role);
-                                            setIsStoreSwitcherOpen(false);
-                                        }
-                                    }}
-                                    disabled={isSwitching}
-                                >
-                                    <Text style={styles.roleOptionIcon}>
-                                        {role.type === 'owner' ? '👑' : '🏪'}
-                                    </Text>
-                                    <View style={styles.roleOptionInfo}>
-                                        <Text style={styles.roleOptionName}>{role.name}</Text>
-                                        <Text style={styles.roleOptionType}>
-                                            {role.type === 'owner' ? 'Store Owner' : 'Branch Manager'}
+                        <ScrollView style={{ maxHeight: 400 }}>
+                            {availableContexts.map((context) => (
+                                <View key={context.merchantId} style={{ marginBottom: 16 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                                            {context.merchantName} · {context.role === 'owner' ? 'Owner' : 'Branch Manager'}
                                         </Text>
                                     </View>
-                                    {isActive && (
-                                        <Ionicons name="checkmark-circle" size={24} color="#10B981" />
-                                    )}
-                                </TouchableOpacity>
-                            );
-                        })}
+                                    {context.branches.map((branch) => {
+                                        const isActive = context.merchantId === activeContext?.merchantId && branch.branchId === activeStoreId;
+                                        return (
+                                            <TouchableOpacity
+                                                key={branch.branchId}
+                                                style={[styles.roleOption, isActive && styles.roleOptionActive]}
+                                                onPress={() => {
+                                                    if (!isActive) {
+                                                        if (context.merchantId === activeContext?.merchantId) {
+                                                            switchBranch(branch.branchId);
+                                                        } else {
+                                                            // We must pass the saved branch ID along with the context.
+                                                            // For now switchContext only takes context, we let the default logic in fetchStore handle it.
+                                                            // Let's set the saved branch ID manually before switching context so it lands on the right branch!
+                                                            AsyncStorage.setItem('active_branch_id', branch.branchId).then(() => {
+                                                                switchContext(context);
+                                                            });
+                                                        }
+                                                        setIsStoreSwitcherOpen(false);
+                                                    }
+                                                }}
+                                                disabled={isSwitching}
+                                            >
+                                                {isActive ? (
+                                                    <Ionicons name="checkmark" size={20} color="#10B981" style={{ marginRight: 12 }} />
+                                                ) : (
+                                                    <View style={{ width: 32 }} /> // Indent placeholder for checkmark
+                                                )}
+                                                <View style={styles.roleOptionInfo}>
+                                                    <Text style={[styles.roleOptionName, isActive && { color: '#10B981' }]}>{branch.branchName}</Text>
+                                                </View>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </View>
+                            ))}
+                        </ScrollView>
 
-                        {/* Add New Branch - Only for Owners */}
-                        {availableRoles.some(r => r.type === 'owner') && (
+                        {/* Add New Branch - Only for permitted users */}
+                        {permissions.add_branch && (
                             <TouchableOpacity 
                                 style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#F3F4F6', marginTop: 8 }}
                                 onPress={() => {

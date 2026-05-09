@@ -19,7 +19,6 @@ export interface TransformedStore {
   products: any[];
   cuisine: string;
   type: string;
-  type: string;
   merchantId?: string;
   isOpen: boolean;
   operating_hours?: any;

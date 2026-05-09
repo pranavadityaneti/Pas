@@ -2,11 +2,15 @@ import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/Colors';
+import { usePushNotifications } from '../../src/hooks/usePushNotifications';
 
 export default function MainLayout() {
     const insets = useSafeAreaInsets();
     const bottomPadding = Math.max(insets.bottom, 12);
     const tabBarHeight = 70 + insets.bottom;
+
+    // Register push token after successful auth (runs once on mount)
+    usePushNotifications();
 
     return (
         <Tabs

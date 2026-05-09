@@ -1,0 +1,516 @@
+Retrieving logs...
+============= i-0d70e7a2d56f2a735 ==============
+----------------------------------------
+/var/log/web.stdout.log
+----------------------------------------
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]: node:internal/modules/cjs/loader:1459
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]:  throw err;
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]:  ^
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]: Error: Cannot find module 'dotenv'
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]: Require stack:
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]: - /var/app/current/dist/index.js
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]:    at Module._resolveFilename (node:internal/modules/cjs/loader:1456:15)
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]:    at defaultResolveImpl (node:internal/modules/cjs/loader:1066:19)
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]:    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1071:22)
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]:    at Module._load (node:internal/modules/cjs/loader:1242:25)
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]:    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]:    at Module.require (node:internal/modules/cjs/loader:1556:12)
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]:    at require (node:internal/modules/helpers:152:16)
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]:    at Object.<anonymous> (/var/app/current/dist/index.js:39:34)
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]:    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]:    at Module._extensions..js (node:internal/modules/cjs/loader:1943:10) {
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]:  code: 'MODULE_NOT_FOUND',
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]:  requireStack: [ '/var/app/current/dist/index.js' ]
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]: }
+Apr 29 02:01:47 ip-172-31-13-171 web[784923]: Node.js v24.14.1
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]: node:internal/modules/cjs/loader:1459
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]:  throw err;
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]:  ^
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]: Error: Cannot find module 'dotenv'
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]: Require stack:
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]: - /var/app/current/dist/index.js
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]:    at Module._resolveFilename (node:internal/modules/cjs/loader:1456:15)
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]:    at defaultResolveImpl (node:internal/modules/cjs/loader:1066:19)
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]:    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1071:22)
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]:    at Module._load (node:internal/modules/cjs/loader:1242:25)
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]:    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]:    at Module.require (node:internal/modules/cjs/loader:1556:12)
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]:    at require (node:internal/modules/helpers:152:16)
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]:    at Object.<anonymous> (/var/app/current/dist/index.js:39:34)
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]:    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]:    at Module._extensions..js (node:internal/modules/cjs/loader:1943:10) {
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]:  code: 'MODULE_NOT_FOUND',
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]:  requireStack: [ '/var/app/current/dist/index.js' ]
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]: }
+Apr 29 02:01:48 ip-172-31-13-171 web[784934]: Node.js v24.14.1
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]: node:internal/modules/cjs/loader:1459
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]:  throw err;
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]:  ^
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]: Error: Cannot find module 'dotenv'
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]: Require stack:
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]: - /var/app/current/dist/index.js
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]:    at Module._resolveFilename (node:internal/modules/cjs/loader:1456:15)
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]:    at defaultResolveImpl (node:internal/modules/cjs/loader:1066:19)
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]:    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1071:22)
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]:    at Module._load (node:internal/modules/cjs/loader:1242:25)
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]:    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]:    at Module.require (node:internal/modules/cjs/loader:1556:12)
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]:    at require (node:internal/modules/helpers:152:16)
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]:    at Object.<anonymous> (/var/app/current/dist/index.js:39:34)
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]:    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]:    at Module._extensions..js (node:internal/modules/cjs/loader:1943:10) {
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]:  code: 'MODULE_NOT_FOUND',
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]:  requireStack: [ '/var/app/current/dist/index.js' ]
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]: }
+Apr 29 02:01:48 ip-172-31-13-171 web[784945]: Node.js v24.14.1
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]: node:internal/modules/cjs/loader:1459
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]:  throw err;
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]:  ^
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]: Error: Cannot find module 'dotenv'
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]: Require stack:
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]: - /var/app/current/dist/index.js
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]:    at Module._resolveFilename (node:internal/modules/cjs/loader:1456:15)
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]:    at defaultResolveImpl (node:internal/modules/cjs/loader:1066:19)
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]:    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1071:22)
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]:    at Module._load (node:internal/modules/cjs/loader:1242:25)
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]:    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]:    at Module.require (node:internal/modules/cjs/loader:1556:12)
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]:    at require (node:internal/modules/helpers:152:16)
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]:    at Object.<anonymous> (/var/app/current/dist/index.js:39:34)
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]:    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]:    at Module._extensions..js (node:internal/modules/cjs/loader:1943:10) {
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]:  code: 'MODULE_NOT_FOUND',
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]:  requireStack: [ '/var/app/current/dist/index.js' ]
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]: }
+Apr 29 02:01:49 ip-172-31-13-171 web[784956]: Node.js v24.14.1
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]: node:internal/modules/cjs/loader:1459
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]:  throw err;
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]:  ^
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]: Error: Cannot find module 'dotenv'
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]: Require stack:
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]: - /var/app/current/dist/index.js
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]:    at Module._resolveFilename (node:internal/modules/cjs/loader:1456:15)
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]:    at defaultResolveImpl (node:internal/modules/cjs/loader:1066:19)
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]:    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1071:22)
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]:    at Module._load (node:internal/modules/cjs/loader:1242:25)
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]:    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]:    at Module.require (node:internal/modules/cjs/loader:1556:12)
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]:    at require (node:internal/modules/helpers:152:16)
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]:    at Object.<anonymous> (/var/app/current/dist/index.js:39:34)
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]:    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]:    at Module._extensions..js (node:internal/modules/cjs/loader:1943:10) {
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]:  code: 'MODULE_NOT_FOUND',
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]:  requireStack: [ '/var/app/current/dist/index.js' ]
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]: }
+Apr 29 02:01:49 ip-172-31-13-171 web[784967]: Node.js v24.14.1
+
+
+----------------------------------------
+/var/log/eb-engine.log
+----------------------------------------
+2026/04/29 02:01:42.121439 [INFO] Executing instruction: stop X-Ray
+2026/04/29 02:01:42.121442 [INFO] stop X-Ray ...
+2026/04/29 02:01:42.121454 [INFO] Running command: systemctl show -p PartOf xray.service
+2026/04/29 02:01:42.135448 [WARN] stopProcess Warning: process xray is not registered 
+2026/04/29 02:01:42.135477 [INFO] Running command: systemctl stop xray.service
+2026/04/29 02:01:42.149656 [INFO] Executing instruction: stop proxy
+2026/04/29 02:01:42.149689 [INFO] Running command: systemctl show -p PartOf httpd.service
+2026/04/29 02:01:42.163096 [WARN] deregisterProcess Warning: process httpd is not registered, skipping...
+
+2026/04/29 02:01:42.163132 [INFO] Running command: systemctl show -p PartOf nginx.service
+2026/04/29 02:01:42.174841 [INFO] Running command: systemctl is-active nginx.service
+2026/04/29 02:01:42.182788 [INFO] Running command: systemctl show -p PartOf nginx.service
+2026/04/29 02:01:42.191830 [INFO] Running command: systemctl stop nginx.service
+2026/04/29 02:01:42.376750 [INFO] Running command: systemctl disable nginx.service
+2026/04/29 02:01:42.668338 [INFO] Running command: systemctl daemon-reload
+2026/04/29 02:01:42.945394 [INFO] Running command: systemctl reset-failed
+2026/04/29 02:01:42.953584 [INFO] Executing instruction: FlipApplication
+2026/04/29 02:01:42.953607 [INFO] Fetching environment variables...
+2026/04/29 02:01:42.953869 [INFO] Purge old process...
+2026/04/29 02:01:42.953884 [INFO] Running command: systemctl stop eb-app.target
+2026/04/29 02:01:42.962043 [INFO] Running command: systemctl show -p ConsistsOf eb-app.target | cut -d= -f2
+2026/04/29 02:01:42.972597 [INFO] web.service
+
+2026/04/29 02:01:42.972631 [INFO] deregistering process: web
+2026/04/29 02:01:42.972642 [INFO] Running command: systemctl show -p PartOf web.service
+2026/04/29 02:01:42.983558 [INFO] Running command: systemctl is-active web.service
+2026/04/29 02:01:42.991444 [INFO] Running command: systemctl disable web.service
+2026/04/29 02:01:43.242669 [INFO] Removed "/etc/systemd/system/multi-user.target.wants/web.service".
+
+2026/04/29 02:01:43.242757 [INFO] Running command: systemctl daemon-reload
+2026/04/29 02:01:43.461652 [INFO] Running command: systemctl reset-failed
+2026/04/29 02:01:43.470233 [INFO] Running command: systemctl is-active web.service
+2026/04/29 02:01:43.477670 [INFO] Process web has been fully terminated
+2026/04/29 02:01:43.477692 [INFO] All processes have been fully terminated
+2026/04/29 02:01:43.477696 [INFO] Removing /var/app/current/ if it exists
+2026/04/29 02:01:43.783531 [INFO] Renaming /var/app/staging/ to /var/app/current/
+2026/04/29 02:01:43.783658 [INFO] Register application processes...
+2026/04/29 02:01:43.783692 [INFO] Registering the proc: web
+
+2026/04/29 02:01:43.783711 [INFO] Running command: systemctl show -p PartOf web.service
+2026/04/29 02:01:43.817218 [INFO] Running command: systemctl daemon-reload
+2026/04/29 02:01:44.062153 [INFO] Running command: systemctl reset-failed
+2026/04/29 02:01:44.070015 [INFO] Running command: systemctl is-enabled eb-app.target
+2026/04/29 02:01:44.078163 [INFO] Running command: systemctl enable eb-app.target
+2026/04/29 02:01:44.360526 [INFO] Running command: systemctl start eb-app.target
+2026/04/29 02:01:44.369743 [INFO] Running command: systemctl enable web.service
+2026/04/29 02:01:44.590566 [INFO] Created symlink /etc/systemd/system/multi-user.target.wants/web.service → /etc/systemd/system/web.service.
+
+2026/04/29 02:01:44.590597 [INFO] Running command: systemctl show -p PartOf web.service
+2026/04/29 02:01:44.601731 [INFO] Running command: systemctl is-active web.service
+2026/04/29 02:01:44.609271 [INFO] Running command: systemctl start web.service
+2026/04/29 02:01:46.684047 [INFO] Executing instruction: start X-Ray
+2026/04/29 02:01:46.684056 [INFO] X-Ray is not enabled.
+2026/04/29 02:01:46.684059 [INFO] Executing instruction: start proxy with new configuration
+2026/04/29 02:01:46.684078 [INFO] Running command: /usr/sbin/nginx -t -c /var/proxy/staging/nginx/nginx.conf
+2026/04/29 02:01:46.702073 [INFO] nginx: [warn] could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+nginx: the configuration file /var/proxy/staging/nginx/nginx.conf syntax is ok
+nginx: configuration file /var/proxy/staging/nginx/nginx.conf test is successful
+
+2026/04/29 02:01:46.702316 [INFO] Running command: cp -rp /var/proxy/staging/nginx/* /etc/nginx
+2026/04/29 02:01:46.705256 [INFO] Running command: systemctl show -p PartOf nginx.service
+2026/04/29 02:01:46.730922 [INFO] Running command: systemctl daemon-reload
+2026/04/29 02:01:47.008846 [INFO] Running command: systemctl reset-failed
+2026/04/29 02:01:47.071551 [INFO] Running command: systemctl show -p PartOf nginx.service
+2026/04/29 02:01:47.088085 [INFO] Running command: systemctl is-active nginx.service
+2026/04/29 02:01:47.101958 [INFO] Running command: systemctl start nginx.service
+2026/04/29 02:01:47.221118 [INFO] Executing instruction: configureSqsd
+2026/04/29 02:01:47.221137 [INFO] This is a web server environment instance, skip configure sqsd daemon ...
+2026/04/29 02:01:47.221142 [INFO] Executing instruction: startSqsd
+2026/04/29 02:01:47.221145 [INFO] This is a web server environment instance, skip start sqsd daemon ...
+2026/04/29 02:01:47.221149 [INFO] Executing instruction: Track pids in healthd
+2026/04/29 02:01:47.221152 [INFO] This is an enhanced health env...
+2026/04/29 02:01:47.221165 [INFO] Running command: systemctl show -p ConsistsOf aws-eb.target | cut -d= -f2
+2026/04/29 02:01:47.238103 [INFO] cfn-hup.service nginx.service healthd.service
+
+2026/04/29 02:01:47.238138 [INFO] Running command: systemctl show -p ConsistsOf eb-app.target | cut -d= -f2
+2026/04/29 02:01:47.252946 [INFO] web.service
+
+2026/04/29 02:01:47.253243 [INFO] Executing instruction: RunAppDeployPostDeployHooks
+2026/04/29 02:01:47.253259 [INFO] No hooks found in .platform/hooks/postdeploy/, skipping
+2026/04/29 02:01:47.253265 [INFO] Executing cleanup logic
+2026/04/29 02:01:47.253363 [INFO] CommandService Response: {"status":"SUCCESS","api_version":"1.0","results":[{"status":"SUCCESS","msg":"Engine execution has succeeded.","returncode":0,"events":[{"msg":"Instance deployment: The deployment used the default Node.js version for your platform version instead of the Node.js version included in your 'package.json'.","timestamp":1777428098838,"severity":"WARN"},{"msg":"Instance deployment completed successfully.","timestamp":1777428107253,"severity":"INFO"}]}]}
+
+2026/04/29 02:01:47.277783 [INFO] Platform Engine finished execution on command: app-deploy
+
+2026/04/29 02:06:21.581052 [INFO] Starting...
+2026/04/29 02:06:21.581102 [INFO] Starting EBPlatform-PlatformEngine
+2026/04/29 02:06:21.581144 [INFO] reading event message file
+2026/04/29 02:06:21.581510 [INFO] Engine received EB command cfn-hup-exec
+
+2026/04/29 02:06:21.646176 [INFO] Running command: /opt/aws/bin/cfn-get-metadata -s arn:aws:cloudformation:ap-south-1:854408056396:stack/awseb-e-wk9muqt2pc-stack/553bdf10-2b93-11f1-8ebf-027269123837 -r AWSEBAutoScalingGroup --region ap-south-1
+2026/04/29 02:06:21.941799 [INFO] Running command: /opt/aws/bin/cfn-get-metadata -s arn:aws:cloudformation:ap-south-1:854408056396:stack/awseb-e-wk9muqt2pc-stack/553bdf10-2b93-11f1-8ebf-027269123837 -r AWSEBBeanstalkMetadata --region ap-south-1
+2026/04/29 02:06:22.233810 [INFO] checking whether command tail-log is applicable to this instance...
+2026/04/29 02:06:22.233822 [INFO] this command is applicable to the instance, thus instance should execute command
+2026/04/29 02:06:22.233827 [INFO] Engine command: (tail-log)
+
+2026/04/29 02:06:22.233875 [INFO] Executing instruction: GetTailLogs
+2026/04/29 02:06:22.233879 [INFO] Tail Logs...
+2026/04/29 02:06:22.234259 [INFO] Running command: tail -n 100 /var/log/web.stdout.log
+2026/04/29 02:06:22.236401 [INFO] Running command: tail -n 100 /var/log/eb-engine.log
+
+
+----------------------------------------
+/var/log/eb-hooks.log
+----------------------------------------
+
+✔ Generated Prisma Client (v5.22.0) to ./node_modules/@prisma/client in 614ms
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: Want to react to database changes in your app as they happen? Discover how with Pulse: https://pris.ly/tip-1-pulse
+
+
+added 269 packages, changed 45 packages, and audited 315 packages in 12s
+
+33 packages are looking for funding
+  run `npm fund` for details
+
+12 vulnerabilities (8 moderate, 4 high)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues possible (including breaking changes), run:
+  npm audit fix --force
+
+Some issues need review, and may require choosing
+a different dependency.
+
+Run `npm audit` for details.
+[Pre-deploy] Building TypeScript...
+src/index.ts(1894,13): error TS2322: Type '{ orderNumber: string; userId: any; storeId: any; totalAmount: any; status: "PENDING"; isPaid: false; items: { create: any; }; }' is not assignable to type '(Without<OrderCreateInput, OrderUncheckedCreateInput> & OrderUncheckedCreateInput) | (Without<...> & OrderCreateInput)'.
+  Type '{ orderNumber: string; userId: any; storeId: any; totalAmount: any; status: "PENDING"; isPaid: false; items: { create: any; }; }' is not assignable to type 'Without<OrderUncheckedCreateInput, OrderCreateInput> & OrderCreateInput'.
+    Type '{ orderNumber: string; userId: any; storeId: any; totalAmount: any; status: "PENDING"; isPaid: false; items: { create: any; }; }' is missing the following properties from type 'OrderCreateInput': store, branch, user
+
+2026/04/29 01:54:59.523581 [INFO] npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+npm warn deprecated rimraf@2.7.1: Rimraf versions prior to v4 are no longer supported
+npm warn deprecated lodash.isequal@4.5.0: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated fstream@1.0.12: This package is no longer supported.
+npm notice
+npm notice New minor version of npm available! 11.11.0 -> 11.13.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.13.0
+npm notice To update run: npm install -g npm@11.13.0
+npm notice
+
+2026/04/29 01:58:27.346602 [INFO] Running command: .platform/hooks/predeploy/01_build.sh
+2026/04/29 01:58:41.993632 [INFO] [Pre-deploy] Installing dependencies...
+
+> pas-api@1.0.0 postinstall
+> prisma generate
+
+Prisma schema loaded from prisma/schema.prisma
+
+✔ Generated Prisma Client (v5.22.0) to ./node_modules/@prisma/client in 571ms
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: Want to turn off tips and other hints? https://pris.ly/tip-4-nohints
+
+
+added 219 packages, removed 10 packages, changed 35 packages, and audited 255 packages in 11s
+
+27 packages are looking for funding
+  run `npm fund` for details
+
+11 vulnerabilities (8 moderate, 3 high)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues possible (including breaking changes), run:
+  npm audit fix --force
+
+Some issues need review, and may require choosing
+a different dependency.
+
+Run `npm audit` for details.
+[Pre-deploy] Generating Prisma client...
+Prisma schema loaded from prisma/schema.prisma
+
+✔ Generated Prisma Client (v5.22.0) to ./node_modules/@prisma/client in 571ms
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: Want to turn off tips and other hints? https://pris.ly/tip-4-nohints
+
+[Pre-deploy] Build complete!
+
+2026/04/29 01:58:41.994243 [INFO] npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+npm warn deprecated rimraf@2.7.1: Rimraf versions prior to v4 are no longer supported
+npm warn deprecated lodash.isequal@4.5.0: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated fstream@1.0.12: This package is no longer supported.
+┌─────────────────────────────────────────────────────────┐
+│  Update available 5.22.0 -> 7.8.0                       │
+│                                                         │
+│  This is a major update - please follow the guide at    │
+│  https://pris.ly/d/major-version-upgrade                │
+│                                                         │
+│  Run the following to update                            │
+│    npm i --save-dev prisma@latest                       │
+│    npm i @prisma/client@latest                          │
+└─────────────────────────────────────────────────────────┘
+
+
+
+----------------------------------------
+/var/log/nginx/access.log
+----------------------------------------
+172.31.2.122 - - [29/Apr/2026:01:55:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:55:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:55:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:55:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:55:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:55:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:55:51 +0000] "GET /SDK/webLanguage HTTP/1.1" 404 56 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.85 Safari/537.36 Edg/90.0.818.46" "5.61.209.107"
+172.31.2.122 - - [29/Apr/2026:01:55:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:55:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:56:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:56:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:56:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:56:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:56:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:56:43 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:56:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:56:58 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:57:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:57:13 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:57:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:57:28 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:57:40 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:57:43 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:57:55 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:57:58 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:58:10 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:58:13 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:58:25 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:58:28 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:58:40 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:58:55 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:58:58 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:59:10 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:59:13 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:59:25 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:59:28 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:59:40 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:59:43 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:59:55 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:59:58 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:00:10 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:00:13 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:00:25 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:00:28 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:00:40 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:00:43 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:00:55 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:00:58 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:01:10 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:01:13 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:01:13 +0000] "GET / HTTP/1.1" 502 552 "-" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0" "152.32.207.234"
+172.31.2.122 - - [29/Apr/2026:02:01:25 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:01:28 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:01:32 +0000] "GET /favicon.ico HTTP/1.1" 502 552 "-" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0" "152.32.207.234"
+172.31.2.122 - - [29/Apr/2026:02:01:33 +0000] "GET /robots.txt HTTP/1.1" 502 552 "-" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0" "152.32.207.234"
+172.31.2.122 - - [29/Apr/2026:02:01:34 +0000] "GET /sitemap.xml HTTP/1.1" 502 552 "-" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0" "152.32.207.234"
+172.31.2.122 - - [29/Apr/2026:02:01:40 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:01:55 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:01:58 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:02:10 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:02:13 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:02:25 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:02:26 +0000] "GET / HTTP/1.1" 502 150 "-" "Mozilla/5.0" "204.76.203.206"
+172.31.43.3 - - [29/Apr/2026:02:02:28 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:02:40 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:02:43 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:02:55 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:02:58 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:03:07 +0000] "GET /SDK/webLanguage HTTP/1.1" 502 552 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.85 Safari/537.36 Edg/90.0.818.46" "5.61.209.107"
+172.31.2.122 - - [29/Apr/2026:02:03:10 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:03:13 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:03:25 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:03:28 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:03:40 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:03:43 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:03:55 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:03:58 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:04:10 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:04:13 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:04:20 +0000] "GET / HTTP/1.1" 502 150 "-" "Hello from Palo Alto Networks, find out more about our scans in https://docs-cortex.paloaltonetworks.com/r/1/Cortex-Xpanse/Scanning-activity" "35.203.211.29"
+172.31.2.122 - - [29/Apr/2026:02:04:25 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:04:28 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:04:39 +0000] "GET / HTTP/1.1" 502 150 "-" "Mozilla/5.0" "204.76.203.206"
+172.31.2.122 - - [29/Apr/2026:02:04:40 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:04:43 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:04:55 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:04:58 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:05:02 +0000] "POST /auth/send-otp HTTP/1.1" 502 150 "-" "PASPartner/8 CFNetwork/3860.500.112 Darwin/25.4.0" "157.50.145.145"
+172.31.2.122 - - [29/Apr/2026:02:05:10 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:05:12 +0000] "POST /auth/verify-otp HTTP/1.1" 502 150 "-" "Expo/54.0.6 CFNetwork/3860.300.31 Darwin/25.3.0" "157.50.145.145"
+172.31.43.3 - - [29/Apr/2026:02:05:13 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:05:25 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:05:28 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:05:40 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:05:42 +0000] "GET / HTTP/1.1" 502 150 "-" "Mozilla/5.0 zgrab/0.x" "20.80.72.203"
+172.31.43.3 - - [29/Apr/2026:02:05:43 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:05:55 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:05:58 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:02:06:10 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:02:06:13 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+
+
+----------------------------------------
+/var/log/nginx/error.log
+----------------------------------------
+2026/04/12 10:02:06 [warn] 2208#2208: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/12 10:02:06 [warn] 2242#2242: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/12 10:02:06 [warn] 2243#2243: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/21 01:29:19 [error] 2245#2245: *214256 client intended to send too large body: 10485761 bytes, client: 172.31.9.150, server: , request: "POST / HTTP/1.1", host: "3.6.169.16"
+2026/04/29 01:54:41 [warn] 783164#783164: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 01:54:41 [notice] 783164#783164: signal process started
+2026/04/29 01:54:41 [warn] 2244#2244: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 01:58:27 [warn] 783702#783702: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 01:58:27 [notice] 783702#783702: signal process started
+2026/04/29 01:58:27 [warn] 2244#2244: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 01:58:47 [warn] 784083#784083: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 01:58:47 [warn] 784116#784116: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 01:58:47 [warn] 784118#784118: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 01:58:55 [error] 784120#784120: *1 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 01:58:58 [error] 784121#784121: *3 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 01:59:10 [error] 784120#784120: *5 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 01:59:13 [error] 784120#784120: *7 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 01:59:25 [error] 784120#784120: *9 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 01:59:28 [error] 784120#784120: *11 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 01:59:40 [error] 784120#784120: *13 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 01:59:43 [error] 784120#784120: *15 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 01:59:55 [error] 784120#784120: *17 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 01:59:58 [error] 784120#784120: *19 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:00:10 [error] 784120#784120: *21 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:00:13 [error] 784120#784120: *23 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:00:25 [error] 784120#784120: *25 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:00:28 [error] 784120#784120: *27 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:00:40 [error] 784120#784120: *29 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:00:43 [error] 784120#784120: *31 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:00:55 [error] 784120#784120: *33 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:00:58 [error] 784120#784120: *35 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:01:10 [error] 784121#784121: *37 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:01:13 [error] 784121#784121: *39 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:01:13 [error] 784121#784121: *41 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET / HTTP/1.1", upstream: "http://127.0.0.1:8080/", host: "13.234.162.226"
+2026/04/29 02:01:25 [error] 784121#784121: *43 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:01:28 [error] 784121#784121: *45 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:01:32 [error] 784121#784121: *47 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /favicon.ico HTTP/1.1", upstream: "http://127.0.0.1:8080/favicon.ico", host: "13.234.162.226"
+2026/04/29 02:01:33 [error] 784121#784121: *41 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /robots.txt HTTP/1.1", upstream: "http://127.0.0.1:8080/robots.txt", host: "13.234.162.226"
+2026/04/29 02:01:34 [error] 784121#784121: *41 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /sitemap.xml HTTP/1.1", upstream: "http://127.0.0.1:8080/sitemap.xml", host: "13.234.162.226"
+2026/04/29 02:01:40 [error] 784121#784121: *51 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:01:42 [warn] 784602#784602: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 02:01:42 [notice] 784602#784602: signal process started
+2026/04/29 02:01:42 [warn] 784119#784119: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 02:01:46 [warn] 784861#784861: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 02:01:47 [warn] 784903#784903: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 02:01:47 [warn] 784905#784905: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 02:01:55 [error] 784907#784907: *1 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:01:58 [error] 784908#784908: *3 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:02:10 [error] 784907#784907: *5 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:02:13 [error] 784907#784907: *7 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:02:25 [error] 784907#784907: *9 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:02:26 [error] 784907#784907: *11 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET / HTTP/1.1", upstream: "http://127.0.0.1:8080/", host: "13.234.162.226"
+2026/04/29 02:02:28 [error] 784907#784907: *13 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:02:40 [error] 784907#784907: *15 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:02:43 [error] 784907#784907: *17 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:02:55 [error] 784907#784907: *19 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:02:58 [error] 784907#784907: *21 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:03:07 [error] 784907#784907: *23 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /SDK/webLanguage HTTP/1.1", upstream: "http://127.0.0.1:8080/SDK/webLanguage", host: "13.206.164.72"
+2026/04/29 02:03:10 [error] 784907#784907: *25 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:03:13 [error] 784907#784907: *27 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:03:25 [error] 784907#784907: *29 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:03:28 [error] 784907#784907: *31 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:03:40 [error] 784907#784907: *33 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:03:43 [error] 784907#784907: *35 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:03:55 [error] 784908#784908: *37 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:03:58 [error] 784908#784908: *39 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:04:10 [error] 784908#784908: *41 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:04:13 [error] 784908#784908: *43 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:04:20 [error] 784908#784908: *45 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET / HTTP/1.1", upstream: "http://127.0.0.1:8080/", host: "13.234.162.226"
+2026/04/29 02:04:25 [error] 784908#784908: *47 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:04:28 [error] 784908#784908: *49 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:04:39 [error] 784908#784908: *51 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET / HTTP/1.1", upstream: "http://127.0.0.1:8080/", host: "13.206.164.72"
+2026/04/29 02:04:40 [error] 784908#784908: *53 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:04:43 [error] 784908#784908: *55 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:04:55 [error] 784908#784908: *57 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:04:58 [error] 784908#784908: *59 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:05:02 [error] 784908#784908: *51 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "POST /auth/send-otp HTTP/1.1", upstream: "http://127.0.0.1:8080/auth/send-otp", host: "api.pickatstore.io"
+2026/04/29 02:05:10 [error] 784908#784908: *62 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:05:12 [error] 784908#784908: *51 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "POST /auth/verify-otp HTTP/1.1", upstream: "http://127.0.0.1:8080/auth/verify-otp", host: "api.pickatstore.io"
+2026/04/29 02:05:13 [error] 784908#784908: *65 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:05:25 [error] 784908#784908: *67 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:05:28 [error] 784908#784908: *69 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:05:40 [error] 784907#784907: *71 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:05:42 [error] 784908#784908: *51 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET / HTTP/1.1", upstream: "http://127.0.0.1:8080/", host: "13.206.164.72"
+2026/04/29 02:05:43 [error] 784907#784907: *74 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:05:55 [error] 784907#784907: *76 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:05:58 [error] 784907#784907: *78 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:06:10 [error] 784907#784907: *80 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 02:06:13 [error] 784907#784907: *82 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+
+

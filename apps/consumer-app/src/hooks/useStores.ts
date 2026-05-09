@@ -32,7 +32,7 @@ export const useStores = () => {
             if (fetchError) throw fetchError;
 
             if (data) {
-                const transformed = data.map(row => transformStoreData(row));
+                const transformed = data.map((row: any) => transformStoreData(row));
                 setStores(transformed);
             }
         } catch (err: any) {

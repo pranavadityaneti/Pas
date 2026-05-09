@@ -3,7 +3,8 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Activity
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
-import { useOrders, Order, OrderStatus } from '../../src/hooks/useOrders';
+import { useOrders, Order, OrderStatus, DateRange } from '../../src/hooks/useOrders';
+import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { useFocusEffect } from 'expo-router';
 import { useStore } from '../../src/hooks/useStore';
 import OTPVerificationModal from '../../src/components/OTPVerificationModal';
@@ -25,11 +26,31 @@ const STATUS_MAP: Record<string, OrderStatus[]> = {
     pending: ['PENDING'],
     processing: ['CONFIRMED', 'PREPARING'],
     ready: ['READY'],
-    history: ['COMPLETED', 'CANCELLED', 'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REFUNDED']
+    history: ['COMPLETED', 'CANCELLED', 'REJECTED', 'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REFUNDED']
+};
+
+type HistoryFilter = 'All' | 'Completed' | 'Rejected' | 'Cancelled' | 'Refunded';
+const HISTORY_FILTERS: HistoryFilter[] = ['All', 'Completed', 'Rejected', 'Cancelled', 'Refunded'];
+const HISTORY_FILTER_STATUS_MAP: Record<HistoryFilter, OrderStatus[] | null> = {
+    'All': null,
+    'Completed': ['COMPLETED'],
+    'Rejected': ['REJECTED'],
+    'Cancelled': ['CANCELLED'],
+    'Refunded': ['REFUNDED']
 };
 
 export default function OrdersScreen() {
-    const { orders, loading, refreshing, refetch, updateOrderStatus, verifyOTP } = useOrders();
+    // Date range state — default to last 7 days
+    const getDefaultRange = (): DateRange => {
+        const end = new Date();
+        const start = new Date();
+        start.setDate(start.getDate() - 7);
+        start.setHours(0, 0, 0, 0);
+        return { startDate: start.toISOString(), endDate: end.toISOString() };
+    };
+    const [dateRange, setDateRange] = useState<DateRange>(getDefaultRange);
+
+    const { orders, loading, refreshing, refetch, updateOrderStatus, verifyOTP, refundOrder } = useOrders(dateRange);
     const { store, activeStoreId, branches, merchantId } = useStore();
     
     const activeBranch = branches.find(b => b.id === activeStoreId);
@@ -37,8 +58,13 @@ export default function OrdersScreen() {
     const [activeTab, setActiveTab] = useState('pending');
     const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
     const [search, setSearch] = useState('');
-    const [dateFilter, setDateFilter] = useState<'today' | 'week' | 'month' | 'all'>('all');
+    const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('All');
+    const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
     const [now, setNow] = useState(Date.now());
+
+    // Calendar picker state
+    const [calendarVisible, setCalendarVisible] = useState(false);
+    const [calendarPickingField, setCalendarPickingField] = useState<'start' | 'end'>('start');
 
     // Update 'now' every second to drive the countdown timers
     useEffect(() => {
@@ -87,24 +113,23 @@ export default function OrdersScreen() {
             (search === '' || o.displayId.toLowerCase().includes(search.toLowerCase()))
         );
 
-        // Apply date filter (only for History tab)
-        if (activeTab === 'history' && dateFilter !== 'all') {
-            const now = new Date();
-            const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-            const startOfWeek = startOfToday - (now.getDay() * 24 * 60 * 60 * 1000);
-            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-
-            filtered = filtered.filter(o => {
-                const orderTime = new Date(o.createdAt).getTime();
-                if (dateFilter === 'today') return orderTime >= startOfToday;
-                if (dateFilter === 'week') return orderTime >= startOfWeek;
-                if (dateFilter === 'month') return orderTime >= startOfMonth;
-                return true;
-            });
+        // Apply history sub-filter
+        if (activeTab === 'history' && historyFilter !== 'All') {
+            const subStatuses = HISTORY_FILTER_STATUS_MAP[historyFilter];
+            if (subStatuses) {
+                filtered = filtered.filter(o => subStatuses.includes(o.status));
+            }
         }
 
+        // Apply sort
+        filtered = [...filtered].sort((a, b) => {
+            const tA = new Date(a.createdAt).getTime();
+            const tB = new Date(b.createdAt).getTime();
+            return sortOrder === 'desc' ? tB - tA : tA - tB;
+        });
+
         return filtered;
-    }, [orders, activeTab, search, dateFilter]);
+    }, [orders, activeTab, search, historyFilter, sortOrder]);
 
     const handleUpdateStatus = async (orderId: string, nextStatus: OrderStatus, displayId: string) => {
         // Intercept rejection to show reason modal
@@ -119,7 +144,8 @@ export default function OrdersScreen() {
 
         const res = await updateOrderStatus(orderId, nextStatus);
         if (res.success) {
-            showToast(`Order #${displayId} moved to ${nextStatus.charAt(0) + nextStatus.slice(1).toLowerCase()}`);
+            const statusLabel = nextStatus === 'CONFIRMED' ? 'Processing' : nextStatus.charAt(0) + nextStatus.slice(1).toLowerCase();
+            showToast(`Order #${displayId} moved to ${statusLabel}`);
         } else {
             alert('Failed to update order status');
         }
@@ -130,8 +156,18 @@ export default function OrdersScreen() {
 
         const res = await updateOrderStatus(rejectionOrder.id, 'CANCELLED', reason);
         if (res.success) {
+            // Auto-refund if the order was already paid (skip for order_requests)
+            if (rejectionOrder.isPaid && !rejectionOrder.id.startsWith('req_')) {
+                const refundRes = await refundOrder(rejectionOrder.id, undefined, reason);
+                if (refundRes.success) {
+                    showToast(`Order #${rejectionOrder.displayId} Rejected & Refunded`);
+                } else {
+                    showToast(`Order Rejected. Refund failed — process manually.`);
+                }
+            } else {
+                showToast(`Order #${rejectionOrder.displayId} Rejected: ${reason}`);
+            }
             setShowRejectionModal(false);
-            showToast(`Order #${rejectionOrder.displayId} Rejected: ${reason}`);
             setRejectionOrder(null);
         } else {
             alert('Failed to reject order');
@@ -177,7 +213,7 @@ export default function OrdersScreen() {
 
         const subTotal = item.items.reduce((acc, oi) => acc + (oi.price * oi.quantity), 0);
         const tax = item.items.reduce((acc, oi) => {
-            const rate = oi.storeProduct.product.gstRate || 0;
+            const rate = oi.storeProduct?.product?.gstRate ?? 0;
             return acc + (oi.price * oi.quantity * (rate / 100));
         }, 0);
 
@@ -198,6 +234,11 @@ export default function OrdersScreen() {
                             <Text style={styles.paidBadgeText}>PAID - START PACKING</Text>
                         </View>
                     )}
+                    {!item.isPaid && isProcessing && (
+                        <View style={[styles.paidBadge, { backgroundColor: '#F59E0B' }]}>
+                            <Text style={styles.paidBadgeText}>AWAITING PAYMENT</Text>
+                        </View>
+                    )}
                     {item.status === 'COMPLETED' && (
                         <View style={[styles.paidBadge, { backgroundColor: '#10B981' }]}>
                             <Text style={styles.paidBadgeText}>COMPLETED</Text>
@@ -206,6 +247,11 @@ export default function OrdersScreen() {
                     {item.status === 'CANCELLED' && (
                         <View style={[styles.approvalBadge, { backgroundColor: '#EF4444' }]}>
                             <Text style={styles.approvalText}>CANCELLED</Text>
+                        </View>
+                    )}
+                    {item.status === 'REJECTED' && (
+                        <View style={[styles.approvalBadge, { backgroundColor: '#6B7280' }]}>
+                            <Text style={styles.approvalText}>REJECTED</Text>
                         </View>
                     )}
                     {item.status === 'RETURN_REQUESTED' && (
@@ -239,6 +285,8 @@ export default function OrdersScreen() {
                     </View>
                 )}
 
+
+
                 <View style={styles.itemsSection}>
                     <View style={styles.sectionHeader}>
                         <Ionicons name="cube-outline" size={18} color="#6B7280" />
@@ -249,18 +297,18 @@ export default function OrdersScreen() {
                             <View style={styles.itemMainInfo}>
                                 <View style={styles.itemDot} />
                                 <Text style={styles.itemText} numberOfLines={1}>
-                                    <Text style={styles.itemQty}>{oi.quantity}x</Text> {oi.storeProduct.product.name}
+                                    <Text style={styles.itemQty}>{oi.quantity}x</Text> {oi.storeProduct?.product?.name || 'Unknown Product'}
                                 </Text>
                             </View>
 
                             <View style={styles.itemSideInfo}>
-                                {oi.storeProduct.stock < 5 ? (
+                                {oi.storeProduct?.stock !== undefined && oi.storeProduct.stock < 5 ? (
                                     <View style={styles.lowStockBadge}>
                                         <Text style={styles.lowStockText}>⚠️ Low</Text>
                                     </View>
                                 ) : (
                                     <View style={styles.stockBadge}>
-                                        <Text style={styles.stockText}>Stock: {oi.storeProduct.stock}</Text>
+                                        <Text style={styles.stockText}>Stock: {oi.storeProduct?.stock ?? 'N/A'}</Text>
                                     </View>
                                 )}
                                 <Text style={styles.itemPrice}>₹{oi.price * oi.quantity}</Text>
@@ -311,19 +359,25 @@ export default function OrdersScreen() {
 
                     {isProcessing && (
                         <>
-                            <TouchableOpacity style={styles.kotBtn} onPress={() => {
-                                showToast(`Printing KOT for Order #${item.displayId}...`);
-                                // In a real app, this would trigger a Bluetooth print job
-                            }}>
-                                <Ionicons name="print-outline" size={20} color="#111827" />
-                                <Text style={styles.kotBtnText}>Print KOT</Text>
+                            <TouchableOpacity style={styles.rejectBtn} onPress={() => handleUpdateStatus(item.id, 'CANCELLED', item.displayId)}>
+                                <Text style={styles.rejectBtnText}>Reject</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity
-                                style={styles.readyBtn}
-                                onPress={() => handleUpdateStatus(item.id, 'READY', item.displayId)}
-                            >
-                                <Text style={styles.readyBtnText}>Mark Ready</Text>
-                            </TouchableOpacity>
+                            {item.isPaid ? (
+                                <>
+
+                                    <TouchableOpacity
+                                        style={styles.readyBtn}
+                                        onPress={() => handleUpdateStatus(item.id, 'READY', item.displayId)}
+                                    >
+                                        <Text style={styles.readyBtnText}>Mark Ready</Text>
+                                    </TouchableOpacity>
+                                </>
+                            ) : (
+                                <View style={styles.awaitingPaymentBtn}>
+                                    <Ionicons name="hourglass-outline" size={18} color="#92400E" />
+                                    <Text style={styles.awaitingPaymentText}>Awaiting Payment</Text>
+                                </View>
+                            )}
                         </>
                     )}
 
@@ -363,6 +417,8 @@ export default function OrdersScreen() {
                     </View>
                 </View>
 
+
+
                 <View style={styles.searchBox}>
                     <Ionicons name="search-outline" size={20} color="#9CA3AF" />
                     <TextInput
@@ -386,20 +442,47 @@ export default function OrdersScreen() {
                     ))}
                 </View>
 
-                {/* Date Filter - Only show for History tab */}
+                {/* History Filters — Only show for History tab */}
                 {activeTab === 'history' && (
-                    <View style={styles.dateFilterContainer}>
-                        <View style={styles.dateFilterButtons}>
-                            {[{ label: 'All', value: 'all' }, { label: 'Today', value: 'today' }, { label: 'Week', value: 'week' }, { label: 'Month', value: 'month' }].map(filter => (
+                    <View style={styles.historyControlsContainer}>
+                        {/* Date Range Row */}
+                        <View style={styles.dateRangeRow}>
+                            <TouchableOpacity 
+                                style={styles.dateRangeBtn} 
+                                onPress={() => { setCalendarPickingField('start'); setCalendarVisible(true); }}
+                            >
+                                <Ionicons name="calendar-outline" size={16} color="#6B7280" />
+                                <Text style={styles.dateRangeBtnText}>{new Date(dateRange.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</Text>
+                            </TouchableOpacity>
+                            <Text style={styles.dateRangeSeparator}>→</Text>
+                            <TouchableOpacity 
+                                style={styles.dateRangeBtn} 
+                                onPress={() => { setCalendarPickingField('end'); setCalendarVisible(true); }}
+                            >
+                                <Ionicons name="calendar-outline" size={16} color="#6B7280" />
+                                <Text style={styles.dateRangeBtnText}>{new Date(dateRange.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                style={styles.sortToggleBtn} 
+                                onPress={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
+                            >
+                                <Ionicons name={sortOrder === 'desc' ? 'arrow-down' : 'arrow-up'} size={18} color="#111827" />
+                                <Text style={styles.sortToggleText}>{sortOrder === 'desc' ? 'Newest' : 'Oldest'}</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Status Pill Filters */}
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.historyPillRow}>
+                            {HISTORY_FILTERS.map(f => (
                                 <TouchableOpacity
-                                    key={filter.value}
-                                    style={[styles.dateFilterBtn, dateFilter === filter.value && styles.dateFilterBtnActive]}
-                                    onPress={() => setDateFilter(filter.value as any)}
+                                    key={f}
+                                    style={[styles.historyPill, historyFilter === f && styles.historyPillActive]}
+                                    onPress={() => setHistoryFilter(f)}
                                 >
-                                    <Text style={[styles.dateFilterBtnText, dateFilter === filter.value && styles.dateFilterBtnTextActive]}>{filter.label}</Text>
+                                    <Text style={[styles.historyPillText, historyFilter === f && styles.historyPillTextActive]}>{f}</Text>
                                 </TouchableOpacity>
                             ))}
-                        </View>
+                        </ScrollView>
                     </View>
                 )}
 
@@ -444,6 +527,25 @@ export default function OrdersScreen() {
                     onClose={() => setShowRejectionModal(false)}
                     onConfirm={handleConfirmRejection}
                     orderId={rejectionOrder?.displayId || ''}
+                />
+
+                <DateTimePickerModal
+                    isVisible={calendarVisible}
+                    mode="date"
+                    onConfirm={(date) => {
+                        setCalendarVisible(false);
+                        if (calendarPickingField === 'start') {
+                            const d = new Date(date);
+                            d.setHours(0, 0, 0, 0);
+                            setDateRange(prev => ({ ...prev, startDate: d.toISOString() }));
+                        } else {
+                            const d = new Date(date);
+                            d.setHours(23, 59, 59, 999);
+                            setDateRange(prev => ({ ...prev, endDate: d.toISOString() }));
+                        }
+                    }}
+                    onCancel={() => setCalendarVisible(false)}
+                    maximumDate={new Date()}
                 />
             </View>
         </SafeAreaView>
@@ -598,17 +700,6 @@ const styles = StyleSheet.create({
         alignItems: 'center'
     },
     acceptBtnText: { fontSize: 16, fontWeight: 'bold', color: '#FFFFFF' },
-
-    kotBtn: {
-        flex: 1,
-        height: 56,
-        borderRadius: 16,
-        backgroundColor: '#F3F4F6',
-        flexDirection: 'row',
-        gap: 8,
-        justifyContent: 'center',
-        alignItems: 'center'
-    },
     reasonContainer: {
         backgroundColor: '#FEF2F2',
         padding: 12,
@@ -645,7 +736,6 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: '#E5E7EB'
     },
-    kotBtnText: { fontSize: 16, fontWeight: 'bold', color: '#111827' },
     readyBtn: {
         flex: 2,
         height: 56,
@@ -655,6 +745,19 @@ const styles = StyleSheet.create({
         alignItems: 'center'
     },
     readyBtnText: { fontSize: 16, fontWeight: 'bold', color: '#FFFFFF' },
+    awaitingPaymentBtn: {
+        flex: 2,
+        height: 56,
+        borderRadius: 16,
+        backgroundColor: '#FEF3C7',
+        flexDirection: 'row',
+        gap: 8,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#FDE68A'
+    },
+    awaitingPaymentText: { fontSize: 14, fontWeight: '700', color: '#92400E' },
 
     otpBtn: {
         flex: 1,
@@ -691,6 +794,19 @@ const styles = StyleSheet.create({
     dateFilterBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
     dateFilterBtnText: { fontSize: 14, fontWeight: '600', color: '#6B7280' },
     dateFilterBtnTextActive: { color: '#FFFFFF' },
+
+    historyControlsContainer: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4, backgroundColor: '#F9FAFB' },
+    dateRangeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+    dateRangeBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FFFFFF', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB' },
+    dateRangeBtnText: { fontSize: 14, fontWeight: '600', color: '#374151' },
+    dateRangeSeparator: { fontSize: 16, color: '#9CA3AF', fontWeight: '600' },
+    sortToggleBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FFFFFF', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB' },
+    sortToggleText: { fontSize: 13, fontWeight: '600', color: '#111827' },
+    historyPillRow: { flexDirection: 'row', gap: 8, paddingBottom: 8 },
+    historyPill: { paddingVertical: 8, paddingHorizontal: 16, backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 1, borderColor: '#E5E7EB' },
+    historyPillActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+    historyPillText: { fontSize: 13, fontWeight: '600', color: '#6B7280' },
+    historyPillTextActive: { color: '#FFFFFF' },
 
     emptyContainer: { alignItems: 'center', justifyContent: 'center', marginTop: 60, padding: 40 },
     emptyTitle: { fontSize: 20, fontWeight: 'bold', color: '#374151', marginTop: 20 },

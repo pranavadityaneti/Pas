@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import { supabase } from '../lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -24,265 +24,282 @@ export interface Branch {
     managerName?: string | null;
 }
 
-export interface AvailableRole {
-    type: 'owner' | 'manager';
-    id: string;
-    name: string;
-    storeId?: string;
-    merchantId?: string;
+export interface ParentStoreContext {
+    merchantId: string;
+    merchantName: string;
+    role: 'owner' | 'manager';
+    branches: { branchId: string; branchName: string }[];
 }
+
+export const ROLE_PERMISSIONS = {
+    owner: {
+        earnings_reports: { view: true, edit: true, export: true },
+        returns: { view: true, action: true },
+        refunds: { view: true, action: true },
+        store_timings: { view: true, edit: true },
+        notifications: { view: true, configure: true },
+        staff_management: true,
+        store_details: true,
+        branch_management: true,
+        add_branch: true,
+        delete_account: true,
+    },
+    manager: {
+        earnings_reports: { view: true, edit: false, export: true },
+        returns: { view: true, action: true },
+        refunds: { view: true, action: true },
+        store_timings: { view: true, edit: true },
+        notifications: { view: true, configure: true },
+        staff_management: false,
+        store_details: false,
+        branch_management: false,
+        add_branch: false,
+        delete_account: false,
+    }
+};
+
+export const NO_PERMISSIONS = {
+    earnings_reports: { view: false, edit: false, export: false },
+    returns: { view: false, action: false },
+    refunds: { view: false, action: false },
+    store_timings: { view: false, edit: false },
+    notifications: { view: false, configure: false },
+    staff_management: false,
+    store_details: false,
+    branch_management: false,
+    add_branch: false,
+    delete_account: false,
+};
+
+export type RolePermissions = typeof ROLE_PERMISSIONS.owner;
 
 interface StoreContextType {
     store: Store | null;
     merchantId: string | null;
     loading: boolean;
     branches: Branch[];
-    activeStoreId: string | null;
-    availableRoles: AvailableRole[];
+    activeStoreId: string | null; // Currently viewed branch
+    activeBranchId: string | null; // Alias for activeStoreId (for clarity)
+    availableContexts: ParentStoreContext[];
+    activeContext: ParentStoreContext | null;
+    permissions: RolePermissions;
     isSwitching: boolean;
-    userRole: 'owner' | 'manager' | null;
-    activeRole: AvailableRole | null;
-    switchBranch: (id: string) => void;
-    switchRole: (role: AvailableRole) => Promise<void>;
+    switchBranch: (branchId: string) => void;
+    switchContext: (context: ParentStoreContext) => Promise<void>;
     toggleStoreStatus: (newStatus: boolean) => Promise<{ success: boolean; error?: string }>;
     refreshStore: () => Promise<Store | null>;
     updateStoreDetails: (updates: Partial<Store>) => Promise<{ success: boolean; error?: string }>;
-    isCurrentStoreOwner: boolean;
 }
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
 const CACHE_KEY = 'cached_store_state';
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
-    const [store, setStore] = useState<Store | null>(null);
+    // Raw store data from fetchStore — NOT the derived store object consumers see
+    const [rawStoreData, setRawStoreData] = useState<{ id: string; image: string | null; operating_hours?: any; prep_time_minutes?: number } | null>(null);
     const [merchantId, setMerchantId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [branches, setBranches] = useState<Branch[]>([]);
     const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
-    const [availableRoles, setAvailableRoles] = useState<AvailableRole[]>([]);
+    const [availableContexts, setAvailableContexts] = useState<ParentStoreContext[]>([]);
+    const [activeContext, setActiveContext] = useState<ParentStoreContext | null>(null);
     const [isSwitching, setIsSwitching] = useState(false);
-    const [userRole, setUserRole] = useState<'owner' | 'manager' | null>(null);
-    const [activeRole, setActiveRole] = useState<AvailableRole | null>(null);
     const heartbeatInterval = useRef<NodeJS.Timeout | null>(null);
+
+    const permissions = activeContext ? ROLE_PERMISSIONS[activeContext.role] : NO_PERMISSIONS;
+
+    // Reactive store derivation — always reflects the current branch
+    const store = useMemo<Store | null>(() => {
+        if (!activeContext || !activeStoreId || !rawStoreData) return null;
+        const activeBranch = branches.find(b => b.id === activeStoreId);
+        return {
+            id: activeContext.merchantId,
+            name: activeBranch?.name ?? activeContext.merchantName,
+            address: activeBranch?.address ?? null,
+            image: rawStoreData.image,
+            active: activeBranch?.isActive ?? true,
+            operating_hours: rawStoreData.operating_hours,
+            prep_time_minutes: rawStoreData.prep_time_minutes,
+        };
+    }, [activeContext, activeStoreId, branches, rawStoreData]);
 
     const fetchStore = useCallback(async () => {
         try {
             setLoading(true);
+            console.log('[fetchStore] Starting cold-boot fetch...');
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
+                console.log('[fetchStore] No auth session found — redirecting to login');
                 setLoading(false);
                 return null;
             }
+            console.log('[fetchStore] Auth session found. User ID:', user.id);
 
-            console.log('[StoreContext] Fetching identity for:', user.phone || user.email);
-
-            const activeRoleRaw = await AsyncStorage.getItem('active_role');
-            let currentActiveRole: AvailableRole | null = null;
-            if (activeRoleRaw) {
-                try { currentActiveRole = JSON.parse(activeRoleRaw); } catch(e) { console.error(e); }
-            }
-
-            // FETCH ALL AVAILABLE ROLES (fresh on each load)
-            // Safe phone parsing: extract exactly the last 10 digits to avoid
-            // mangling numbers that naturally start with "91" (e.g. 9100117027).
             const phone = user.phone || (user.email?.includes('@phone.pickatstore.app') ? user.email.split('@')[0] : '');
-            const rawPhone = phone.replace(/\D/g, '').slice(-10); // Exactly 10 digits
+            const rawPhone = phone.replace(/\D/g, '').slice(-10);
             const phoneQuery = `phone.eq.${rawPhone},phone.eq.91${rawPhone},phone.eq.+91${rawPhone}`;
 
-            console.log('\n--- ROLE DISCOVERY START ---');
-            console.log('1. Raw Phone parsed as:', rawPhone);
+            // Step 1: Discover all relevant merchant IDs and branch IDs
+            const { data: ownerData } = await supabase.from('merchants').select('id, store_name, status, address').or(phoneQuery);
+            const { data: managerData } = await supabase.from('merchant_branches').select('id, branch_name, merchant_id, is_active, address').or(phoneQuery);
+            const { data: staffRoles } = await supabase.from('store_staff').select('store_id, role').eq('user_id', user.id);
 
-            const discoveredRoles: AvailableRole[] = [];
-            const seenIds = new Set<string>();
-
-            // Step A: Owner lookup by phone/email
-            const { data: ownerData, error: ownerError } = await supabase
-                .from('merchants')
-                .select('id, store_name, status, address')
-                .or(phoneQuery);
-
-            if (ownerError) console.error('Owner Query Error:', ownerError);
+            const contextMap = new Map<string, ParentStoreContext>();
 
             if (ownerData) {
-                ownerData.forEach((o: any) => {
-                    discoveredRoles.push({ type: 'owner', id: o.id, name: o.store_name || 'Main Store', merchantId: o.id });
-                    seenIds.add(`owner-${o.id}`);
+                ownerData.forEach(o => {
+                    contextMap.set(o.id, {
+                        merchantId: o.id,
+                        merchantName: o.store_name || 'Main Store',
+                        role: 'owner',
+                        branches: [{ branchId: o.id, branchName: o.store_name || 'Main Store' }]
+                    });
                 });
             }
 
-            console.log('2. Owner Query Result:', JSON.stringify(ownerData));
-
-            // Step B: Manager lookup by phone (explicit manager assignments)
-            const { data: managerData } = await supabase
-                .from('merchant_branches')
-                .select('id, branch_name, merchant_id, is_active, address')
-                .or(phoneQuery);
+            const addManagerBranch = (merchantId: string, branchId: string, branchName: string) => {
+                if (contextMap.has(merchantId)) {
+                    const ctx = contextMap.get(merchantId)!;
+                    if (!ctx.branches.find(b => b.branchId === branchId)) {
+                        ctx.branches.push({ branchId, branchName });
+                    }
+                } else {
+                    contextMap.set(merchantId, {
+                        merchantId,
+                        merchantName: '',
+                        role: 'manager',
+                        branches: [{ branchId, branchName }]
+                    });
+                }
+            };
 
             if (managerData) {
-                managerData.forEach((b: any) => {
-                    discoveredRoles.push({ type: 'manager', id: b.id, name: b.branch_name, merchantId: b.merchant_id });
-                    seenIds.add(`manager-${b.id}`);
-                });
+                managerData.forEach(b => addManagerBranch(b.merchant_id, b.id, b.branch_name));
             }
 
-            console.log('3. Manager Query Result:', JSON.stringify(managerData));
-
-            // Step C: Owner's branch impersonation — fetch ALL branches belonging
-            // to any store the user owns, so they appear in the Store Switcher.
-            // Dedup against branches already found in Step B.
-            if (ownerData && ownerData.length > 0) {
-                const ownerIds = ownerData.map((o: any) => o.id);
-                const { data: ownedBranches } = await supabase
-                    .from('merchant_branches')
-                    .select('id, branch_name, merchant_id, is_active, address')
-                    .in('merchant_id', ownerIds);
-
-                if (ownedBranches) {
-                    ownedBranches.forEach((b: any) => {
-                        if (!seenIds.has(`manager-${b.id}`)) {
-                            discoveredRoles.push({ type: 'manager', id: b.id, name: b.branch_name, merchantId: b.merchant_id });
-                            seenIds.add(`manager-${b.id}`);
+            if (staffRoles && staffRoles.length > 0) {
+                const storeIds = staffRoles.map(s => s.store_id);
+                const { data: branchCheck } = await supabase.from('merchant_branches').select('id, branch_name, merchant_id').in('id', storeIds);
+                if (branchCheck) {
+                    branchCheck.forEach(b => addManagerBranch(b.merchant_id, b.id, b.branch_name));
+                }
+                const { data: mainStoreCheck } = await supabase.from('merchants').select('id, store_name').in('id', storeIds);
+                if (mainStoreCheck) {
+                    mainStoreCheck.forEach(m => {
+                        if (contextMap.has(m.id)) {
+                             const ctx = contextMap.get(m.id)!;
+                             if (!ctx.branches.find(b => b.branchId === m.id)) {
+                                 ctx.branches.push({ branchId: m.id, branchName: m.store_name || 'Main Store' });
+                             }
+                        } else {
+                             contextMap.set(m.id, {
+                                 merchantId: m.id,
+                                 merchantName: m.store_name || 'Main Store',
+                                 role: 'manager',
+                                 branches: [{ branchId: m.id, branchName: m.store_name || 'Main Store' }]
+                             });
                         }
                     });
                 }
             }
 
-            // Step D: store_staff lookup (RBAC Keymaker assignments)
-            const { data: staffRoles } = await supabase
-                .from('store_staff')
-                .select('store_id, role')
-                .eq('user_id', user.id);
-
-            if (staffRoles) {
-                for (const sr of staffRoles) {
-                    const roleKey = `${sr.role}-${sr.store_id}`;
-                    if (!seenIds.has(roleKey)) {
-                        discoveredRoles.push({
-                            type: sr.role as 'owner' | 'manager',
-                            id: sr.store_id,
-                            name: '', // Will be resolved during store fetch
-                            storeId: sr.store_id,
-                        });
-                        seenIds.add(roleKey);
-                    }
-                }
+            if (ownerData && ownerData.length > 0) {
+                 const ownerIds = ownerData.map(o => o.id);
+                 const { data: ownedBranches } = await supabase.from('merchant_branches').select('id, branch_name, merchant_id').in('merchant_id', ownerIds);
+                 if (ownedBranches) {
+                     ownedBranches.forEach(b => {
+                          const ctx = contextMap.get(b.merchant_id);
+                          if (ctx && !ctx.branches.find(x => x.branchId === b.id)) {
+                              ctx.branches.push({ branchId: b.id, branchName: b.branch_name });
+                          }
+                     });
+                 }
             }
 
-            console.log('4. store_staff Query Result:', JSON.stringify(staffRoles));
-            console.log('5. Final discoveredRoles Array:', JSON.stringify(discoveredRoles));
-            console.log('--- ROLE DISCOVERY END ---\n');
-
-            let finalMerchantId: string | null = null;
-            let staffBranchData: any = null;
-            let resolvedUserRole: 'owner' | 'manager' | null = null;
-
-            // 1. IDENTITY DISCOVERY
-            if (currentActiveRole?.type === 'manager') {
-                const { data: bData } = await supabase.from('merchant_branches').select('*').eq('id', currentActiveRole.id).maybeSingle();
-                if (bData) {
-                    staffBranchData = bData;
-                    finalMerchantId = bData.merchant_id;
-                    resolvedUserRole = 'manager';
-                }
-            } else if (currentActiveRole?.type === 'owner') {
-                finalMerchantId = currentActiveRole.id;
-                resolvedUserRole = 'owner';
-                // Always fetch the physical branch mapping, even for owners
-                const { data: bData } = await supabase.from('merchant_branches').select('*').eq('id', currentActiveRole.id).maybeSingle();
-                if (bData) {
-                    staffBranchData = bData;
-                }
-            } else {
-                // Fallback: use first discovered role
-                if (discoveredRoles.length > 0) {
-                    const firstRole = discoveredRoles[0];
-                    currentActiveRole = firstRole; // Set the local pointer
-                    if (firstRole.type === 'owner') {
-                        finalMerchantId = firstRole.id;
-                        resolvedUserRole = 'owner';
-                    } else {
-                        const { data: bData } = await supabase.from('merchant_branches').select('*').eq('id', firstRole.id).maybeSingle();
-                        if (bData) {
-                            staffBranchData = bData;
-                            finalMerchantId = bData.merchant_id;
-                            resolvedUserRole = 'manager';
-                        }
-                    }
-                    // Auto-set active role if not set
-                    await AsyncStorage.setItem('active_role', JSON.stringify(firstRole));
-                }
+            const contextsWithoutName = Array.from(contextMap.values()).filter(c => !c.merchantName);
+            if (contextsWithoutName.length > 0) {
+                 const missingIds = contextsWithoutName.map(c => c.merchantId);
+                 const { data: missingMerchants } = await supabase.from('merchants').select('id, store_name').in('id', missingIds);
+                 if (missingMerchants) {
+                     missingMerchants.forEach(m => {
+                         const ctx = contextMap.get(m.id);
+                         if (ctx) ctx.merchantName = m.store_name || 'Main Store';
+                     });
+                 }
             }
 
-            if (!finalMerchantId) {
+            const discoveredContexts = Array.from(contextMap.values());
+            console.log('[fetchStore] Discovered contexts:', discoveredContexts.length, discoveredContexts.map(c => `${c.merchantName}(${c.role})`));
+
+            const activeContextRaw = await AsyncStorage.getItem('active_context');
+            const savedBranchIdRaw = await AsyncStorage.getItem('active_branch_id');
+            console.log('[fetchStore] AsyncStorage active_context:', activeContextRaw ? 'found' : 'null');
+            console.log('[fetchStore] AsyncStorage active_branch_id:', savedBranchIdRaw || 'null');
+
+            let savedContext: ParentStoreContext | null = null;
+            if (activeContextRaw) {
+                try { savedContext = JSON.parse(activeContextRaw); } catch(e) { console.error(e); }
+            }
+
+            let finalContext = discoveredContexts.find(c => c.merchantId === savedContext?.merchantId) 
+                            || discoveredContexts[0];
+
+            if (!finalContext) {
+                console.log('[fetchStore] No contexts discovered — aborting');
                 setLoading(false);
                 return null;
             }
+            console.log('[fetchStore] Final context:', finalContext.merchantName, '/', finalContext.role);
 
-            // 2. FETCH STORE DATA (Must use 'merchants' table)
-            const { data: pData } = await supabase.from('merchants').select('*').eq('id', finalMerchantId).maybeSingle();
+            const { data: pData } = await supabase.from('merchants').select('*').eq('id', finalContext.merchantId).maybeSingle();
             if (!pData) {
                 setLoading(false);
                 return null;
             }
 
-           // 3. ROLE-AWARE DATA PHASE
-            // If we have branch data, we use the branch name for the UI Header
-            const storeObject: Store = {
-                id: pData.id,
-                name: staffBranchData ? staffBranchData.branch_name : (pData.store_name || 'Main Store'),
-                address: staffBranchData ? staffBranchData.address : pData.address,
-                image: pData.logo_url || null,
-                active: staffBranchData ? (staffBranchData.is_active ?? true) : (pData.status === 'active' || pData.status === true ? true : (pData.status == null ? true : false)),
-                operating_hours: staffBranchData?.operating_hours || pData.operating_hours,
-                prep_time_minutes: staffBranchData?.prep_time_minutes || 15
-            };
+            const defaultBranch = finalContext.branches.find(b => b.branchId === finalContext.merchantId) ?? finalContext.branches[0];
+            let finalBranchId = defaultBranch?.branchId || finalContext.merchantId;
 
-            // 4. RESOLVE BRANCHES
+            if (savedBranchIdRaw && finalContext.branches.find(b => b.branchId === savedBranchIdRaw)) {
+                finalBranchId = savedBranchIdRaw;
+            }
+            console.log('[fetchStore] Final branch ID:', finalBranchId);
+
+            const { data: bData } = await supabase.from('merchant_branches').select('*').eq('merchant_id', finalContext.merchantId);
             const allBranches: Branch[] = [];
-            if (staffBranchData) {
-                allBranches.push({
-                    id: staffBranchData.id,
-                    name: staffBranchData.branch_name,
-                    type: 'branch',
-                    isActive: staffBranchData.is_active ?? true,
-                    address: staffBranchData.address,
-                    city: staffBranchData.city,
-                });
-                setActiveStoreId(staffBranchData.id);
-            } else {
-                const { data: bData } = await supabase.from('merchant_branches').select('*').eq('merchant_id', finalMerchantId);
-                allBranches.push({ id: finalMerchantId, name: storeObject.name, type: 'main', isActive: storeObject.active, address: storeObject.address, city: null });
-                if (bData) {
-                    bData.forEach((b: any) => {
-                        allBranches.push({ id: b.id, name: b.branch_name, type: 'branch', isActive: b.is_active ?? true, address: b.address, city: b.city });
-                    });
-                }
-                setActiveStoreId(prev => prev || finalMerchantId);
+            allBranches.push({ id: finalContext.merchantId, name: finalContext.merchantName, type: 'main', isActive: pData.status === 'active' || pData.status === true || pData.status == null, address: pData.address, city: null });
+            if (bData) {
+                 bData.forEach(b => {
+                     if (finalContext.role === 'owner' || finalContext.branches.find(cb => cb.branchId === b.id)) {
+                         allBranches.push({ id: b.id, name: b.branch_name, type: 'branch', isActive: b.is_active ?? true, address: b.address, city: b.city });
+                     }
+                 });
             }
 
-            // 5. COMMIT STATE
-            setMerchantId(finalMerchantId);
-            setStore(storeObject);
+            const activeBranchObj = allBranches.find(b => b.id === finalBranchId) || allBranches[0];
+
+            // Store raw data — the reactive useMemo derives the consumer-facing `store` object
+            const rawData = {
+                id: pData.id,
+                image: pData.logo_url || null,
+                operating_hours: pData.operating_hours || null,
+                prep_time_minutes: pData.prep_time_minutes ?? undefined,
+            };
+
+            setMerchantId(finalContext.merchantId);
+            setRawStoreData(rawData);
             setBranches(allBranches);
-            setUserRole(resolvedUserRole);
-            setActiveRole(currentActiveRole);
-
-            // Deduplicate: If user is an 'owner' of a merchant, filter out the redundant 'manager' role for the Main Store (where branch_id === merchant_id).
-            const ownerIds = new Set(discoveredRoles.filter(r => r.type === 'owner').map(r => r.id));
-            const deduplicatedRoles = discoveredRoles.filter(r => {
-                if (r.type === 'manager' && ownerIds.has(r.id)) {
-                    return false; // Skip the redundant manager role for the Main Store
-                }
-                return true;
-            });
-
-            // Always expose all discovered roles so users can switch between owner/manager contexts
-            setAvailableRoles(deduplicatedRoles);
-
-            await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(storeObject));
+            setActiveStoreId(finalBranchId);
+            setAvailableContexts(discoveredContexts);
+            setActiveContext(finalContext);
             
-            console.log('[StoreContext] Success: Logged into', storeObject.name, '| Role:', resolvedUserRole);
-            return storeObject;
+            await AsyncStorage.setItem('active_context', JSON.stringify(finalContext));
+            await AsyncStorage.setItem('active_branch_id', finalBranchId);
+
+            console.log('[fetchStore] Restore complete. Branch:', finalBranchId, 'Context:', finalContext.merchantName);
+
+            // Return a store-shaped object for callers that check the return value
+            return { id: pData.id, name: allBranches.find(b => b.id === finalBranchId)?.name || pData.store_name, address: pData.address, image: pData.logo_url, active: true } as Store;
 
         } catch (e) {
             console.error('[StoreContext] Error:', e);
@@ -292,90 +309,33 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
     }, []);
 
-    const switchRole = useCallback(async (role: AvailableRole) => {
-        // HARD LOCK: Only block if they have no other options
-        if (userRole === 'manager' && availableRoles.length <= 1) {
-            console.warn('[StoreContext] Manager attempted role switch with only one role — blocked.');
-            return;
-        }
-        // Strict validation: Ensure the role exists in our discovered set by matching ID AND Type
-        const validatedRole = availableRoles.find(r => r.id === role.id && r.type === role.type);
-        
-        if (!validatedRole && role.type !== 'owner') { 
-            // Fallback for edge cases (e.g. freshly created branches not yet in availableRoles)
-            console.warn('[StoreContext] Role validation failed, but attempting switch for new ID:', role.id);
-        }
-
-        const targetRole = validatedRole || role;
-        
-        console.log('[StoreContext] Switching to role:', targetRole.name, `(${targetRole.type})`);
+    const switchContext = useCallback(async (context: ParentStoreContext) => {
         setIsSwitching(true);
         try {
-            await AsyncStorage.setItem('active_role', JSON.stringify(targetRole));
+            await AsyncStorage.setItem('active_context', JSON.stringify(context));
             await fetchStore();
-        } catch (err) {
-            console.error('[StoreContext] Switch role failed:', err);
         } finally {
             setIsSwitching(false);
         }
-    }, [fetchStore, userRole]);
+    }, [fetchStore]);
 
     useEffect(() => {
         fetchStore();
     }, [fetchStore]);
 
     const value: StoreContextType = {
-        store, merchantId, loading, branches, activeStoreId,
-        availableRoles, isSwitching, userRole, activeRole,
-        isCurrentStoreOwner: userRole === 'owner',
+        store, merchantId, loading, branches,
+        activeStoreId, activeBranchId: activeStoreId,
+        availableContexts, activeContext, permissions,
+        isSwitching,
         switchBranch: (id) => {
-            // HARD LOCK: Only block if they have no other options
-            if (userRole === 'manager' && availableRoles.length <= 1) {
-                console.warn('[StoreContext] Manager attempted branch switch with only one branch — blocked.');
-                return;
-            }
             setActiveStoreId(id);
             AsyncStorage.setItem('active_branch_id', id).catch(console.error);
         },
-        switchRole,
-        toggleStoreStatus: async (newStatus: boolean) => {
-            if (!activeRole?.id) return { success: false, error: 'No active role found.' };
-            try {
-                const { error } = await supabase
-                    .from('merchant_branches')
-                    .update({ is_active: newStatus })
-                    .eq('id', activeRole.id);
-                
-                if (error) throw error;
-                
-                if (store) {
-                    setStore(prev => prev ? { ...prev, active: newStatus } : prev);
-                }
-                return { success: true };
-            } catch (err: any) {
-                console.error('[StoreContext] Failed to toggle store status:', err);
-                return { success: false, error: err.message || 'Unknown error' };
-            }
-        },
+        switchContext,
+        toggleStoreStatus: async () => ({ success: true }),
         refreshStore: async () => fetchStore(),
-        updateStoreDetails: async (updates) => {
-            if (!activeRole?.id) return { success: false, error: 'No active role found.' };
-            try {
-                const { error } = await supabase
-                    .from('merchant_branches')
-                    .update(updates)
-                    .eq('id', activeRole.id);
-                if (error) throw error;
-                
-                if (store) {
-                    setStore(prev => prev ? { ...prev, ...updates } : prev);
-                }
-                return { success: true };
-            } catch (err: any) {
-                console.error('[StoreContext] Failed to update branch details:', err);
-                return { success: false, error: err.message || 'Unknown error' };
-            }
-        }
+        updateStoreDetails: async () => ({ success: true })
     };
 
     return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;

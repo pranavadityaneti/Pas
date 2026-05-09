@@ -7,6 +7,7 @@ export interface OrderRequest {
     id: string;
     consumer_user_id: string;
     store_id: string;
+    branch_id: string;
     store_name: string;
     items: { id?: number; name: string; quantity: number; price: number }[];
     subtotal: number;
@@ -59,9 +60,6 @@ export function useOrderRequests(): UseOrderRequestsReturn {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) throw new Error('User not authenticated');
 
-            const expiresAt = new Date(Date.now() + TIMEOUT_MS).toISOString();
-            const now = new Date().toISOString();
-
             // Fetch the parent merchant IDs for the legacy schema constraints
             const branchIds = stores.map(s => String(s.storeId));
             const { data: branchData } = await supabase
@@ -74,28 +72,45 @@ export function useOrderRequests(): UseOrderRequestsReturn {
             const rows = stores.map(store => {
                 const bId = String(store.storeId);
                 return {
+                    // Note: expires_at, created_at, and updated_at are handled server-side
                     consumer_user_id: user.id,
                     store_id: merchantIdMap.get(bId) || bId,
                     branch_id: bId,
                     store_name: store.storeName,
                     items: store.items.map(i => ({ id: i.id, name: i.name, quantity: i.quantity, price: i.price })),
                     subtotal: store.total,
-                    status: 'PENDING' as const,
-                    expires_at: expiresAt,
-                    created_at: now,
-                    updated_at: now
+                    status: 'PENDING' as const
                 };
             });
 
-            console.log("PAYLOAD_AUDIT:", JSON.stringify(rows, null, 2));
-            const { data, error } = await supabase
-                .from('order_requests')
-                .insert(rows)
-                .select();
+            if (__DEV__) {
+                console.log("PAYLOAD_AUDIT:", JSON.stringify(rows, null, 2));
+            }
 
-            if (error) throw error;
+            // Use the new API endpoint instead of direct Supabase insert
+            const apiUrl = process.env.EXPO_PUBLIC_API_URL;
+            if (!apiUrl) throw new Error('API URL is not defined');
 
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session?.access_token) throw new Error('No valid session token');
+
+            const response = await fetch(`${apiUrl}/order-requests`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${session.access_token}`
+                },
+                body: JSON.stringify({ requests: rows })
+            });
+
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`API error: ${errText}`);
+            }
+
+            const data = await response.json();
             const insertedRequests = (data || []) as OrderRequest[];
+
             setRequests(prev => {
                 if (replaceRequestId) {
                     return [...prev.filter(r => r.id !== replaceRequestId), ...insertedRequests];

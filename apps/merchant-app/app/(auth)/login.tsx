@@ -105,8 +105,7 @@ export default function LoginScreen() {
             // Set Supabase Session
             await setSessionFromTokens(data.session.access_token, data.session.refresh_token);
 
-            // AGGREGATED ROLE DISCOVERY (Owners + Branch Managers)
-            // Safe phone parsing: extract exactly the last 10 digits
+            // AGGREGATED ROLE DISCOVERY
             let userPhone = data.user?.phone || '';
             if (!userPhone && data.user?.email?.includes('@phone.pickatstore.app')) {
                 userPhone = data.user.email.split('@')[0];
@@ -114,71 +113,113 @@ export default function LoginScreen() {
             const rawPhone = userPhone.replace(/\D/g, '').slice(-10);
             const phoneQuery = `phone.eq.${rawPhone},phone.eq.91${rawPhone},phone.eq.+91${rawPhone}`;
 
-            const availableRoles: Array<any> = [];
-            const seenIds = new Set<string>();
+            const { data: ownerData } = await supabase.from('merchants').select('id, store_name, status, address').or(phoneQuery);
+            const { data: managerData } = await supabase.from('merchant_branches').select('id, branch_name, merchant_id, is_active, address').or(phoneQuery);
+            const { data: staffRoles } = await supabase.from('store_staff').select('store_id, role').eq('user_id', data.user.id);
 
-            // Step A: Owner lookup
-            const { data: owners } = await supabase
-                .from('merchants')
-                .select('id, store_name, status, kyc_status')
-                .or(phoneQuery);
+            const contextMap = new Map<string, any>();
 
-            if (owners && owners.length > 0) {
-                owners.forEach((owner: any) => {
-                    availableRoles.push({ type: 'owner', id: owner.id, name: owner.store_name || data.user.email, status: owner.status, kyc_status: owner.kyc_status, merchantId: owner.id });
-                    seenIds.add(`owner-${owner.id}`);
+            if (ownerData) {
+                ownerData.forEach((o: any) => {
+                    contextMap.set(o.id, {
+                        merchantId: o.id,
+                        merchantName: o.store_name || 'Main Store',
+                        role: 'owner',
+                        branches: [{ branchId: o.id, branchName: o.store_name || 'Main Store' }]
+                    });
                 });
             }
 
-            // Step B: Explicit manager lookup
-            const { data: managedBranches } = await supabase
-                .from('merchant_branches')
-                .select('id, branch_name, merchant_id')
-                .or(phoneQuery);
+            const addManagerBranch = (merchantId: string, branchId: string, branchName: string) => {
+                if (contextMap.has(merchantId)) {
+                    const ctx = contextMap.get(merchantId)!;
+                    if (!ctx.branches.find((b: any) => b.branchId === branchId)) {
+                        ctx.branches.push({ branchId, branchName });
+                    }
+                } else {
+                    contextMap.set(merchantId, {
+                        merchantId,
+                        merchantName: '',
+                        role: 'manager',
+                        branches: [{ branchId, branchName }]
+                    });
+                }
+            };
 
-            if (managedBranches && managedBranches.length > 0) {
-                managedBranches.forEach((b: any) => {
-                    availableRoles.push({ type: 'manager', id: b.id, name: b.branch_name, storeId: b.merchant_id, merchantId: b.merchant_id });
-                    seenIds.add(`manager-${b.id}`);
-                });
+            if (managerData) {
+                managerData.forEach((b: any) => addManagerBranch(b.merchant_id, b.id, b.branch_name));
             }
 
-            // Step C: Owner's branch impersonation — show all branches they own
-            if (owners && owners.length > 0) {
-                const ownerIds = owners.map((o: any) => o.id);
-                const { data: ownedBranches } = await supabase
-                    .from('merchant_branches')
-                    .select('id, branch_name, merchant_id')
-                    .in('merchant_id', ownerIds);
-
-                if (ownedBranches && ownedBranches.length > 0) {
-                    ownedBranches.forEach((b: any) => {
-                        if (!seenIds.has(`manager-${b.id}`)) {
-                            availableRoles.push({ type: 'manager', id: b.id, name: b.branch_name, storeId: b.merchant_id, merchantId: b.merchant_id });
-                            seenIds.add(`manager-${b.id}`);
+            if (staffRoles && staffRoles.length > 0) {
+                const storeIds = staffRoles.map((s: any) => s.store_id);
+                const { data: branchCheck } = await supabase.from('merchant_branches').select('id, branch_name, merchant_id').in('id', storeIds);
+                if (branchCheck) {
+                    branchCheck.forEach((b: any) => addManagerBranch(b.merchant_id, b.id, b.branch_name));
+                }
+                const { data: mainStoreCheck } = await supabase.from('merchants').select('id, store_name').in('id', storeIds);
+                if (mainStoreCheck) {
+                    mainStoreCheck.forEach((m: any) => {
+                        if (contextMap.has(m.id)) {
+                             const ctx = contextMap.get(m.id)!;
+                             if (!ctx.branches.find((b: any) => b.branchId === m.id)) {
+                                 ctx.branches.push({ branchId: m.id, branchName: m.store_name || 'Main Store' });
+                             }
+                        } else {
+                             contextMap.set(m.id, {
+                                 merchantId: m.id,
+                                 merchantName: m.store_name || 'Main Store',
+                                 role: 'manager',
+                                 branches: [{ branchId: m.id, branchName: m.store_name || 'Main Store' }]
+                             });
                         }
                     });
                 }
             }
 
-            if (availableRoles.length === 0) {
+            if (ownerData && ownerData.length > 0) {
+                 const ownerIds = ownerData.map((o: any) => o.id);
+                 const { data: ownedBranches } = await supabase.from('merchant_branches').select('id, branch_name, merchant_id').in('merchant_id', ownerIds);
+                 if (ownedBranches) {
+                     ownedBranches.forEach((b: any) => {
+                          const ctx = contextMap.get(b.merchant_id);
+                          if (ctx && !ctx.branches.find((x: any) => x.branchId === b.id)) {
+                              ctx.branches.push({ branchId: b.id, branchName: b.branch_name });
+                          }
+                     });
+                 }
+            }
+
+            const contextsWithoutName = Array.from(contextMap.values()).filter(c => !c.merchantName);
+            if (contextsWithoutName.length > 0) {
+                 const missingIds = contextsWithoutName.map(c => c.merchantId);
+                 const { data: missingMerchants } = await supabase.from('merchants').select('id, store_name').in('id', missingIds);
+                 if (missingMerchants) {
+                     missingMerchants.forEach((m: any) => {
+                         const ctx = contextMap.get(m.id);
+                         if (ctx) ctx.merchantName = m.store_name || 'Main Store';
+                     });
+                 }
+            }
+
+            const discoveredContexts = Array.from(contextMap.values());
+
+            if (discoveredContexts.length === 0) {
                 Alert.alert('Access Denied', 'No owner or branch roles found for this account.');
                 await supabase.auth.signOut();
                 return;
             }
 
-            if (availableRoles.length === 1) {
-                await AsyncStorage.setItem('active_role', JSON.stringify(availableRoles[0]));
+            if (discoveredContexts.length === 1) {
+                await AsyncStorage.setItem('active_context', JSON.stringify(discoveredContexts[0]));
                 if (refreshStore) {
                     await refreshStore();
                 }
-                // Add the same buffer here to prevent the Auth Guard race condition
                 setTimeout(() => {
                     router.replace('/');
                 }, 600);
                 return;
             } else {
-                setMultiRoles(availableRoles);
+                setMultiRoles(discoveredContexts);
                 setShowRoleModal(true);
             }
 
@@ -204,11 +245,11 @@ export default function LoginScreen() {
         }
     };
 
-    const handleSelectRole = async (role: any) => {
-        console.log('\n=== ROLE SELECTION ===');
-        console.log('1. User tapped:', role.name);
+    const handleSelectContext = async (context: any) => {
+        console.log('\n=== CONTEXT SELECTION ===');
+        console.log('1. User tapped:', context.merchantName);
         
-        await AsyncStorage.setItem('active_role', JSON.stringify(role));
+        await AsyncStorage.setItem('active_context', JSON.stringify(context));
         setShowRoleModal(false);
         
         if (refreshStore) {
@@ -216,7 +257,6 @@ export default function LoginScreen() {
             await refreshStore();
         }
 
-        // Use a slightly longer buffer and the EXPLICIT group route
         setTimeout(() => {
             console.log('3. Executing route to /');
             router.replace('/'); 
@@ -336,18 +376,21 @@ export default function LoginScreen() {
 
                 <Text style={styles.footer}>Protected by Pick At Store Secure Gateway</Text>
 
-                {/* Role Selection Modal */}
+                {/* Context Selection Modal */}
                 <Modal visible={showRoleModal} transparent={true} animationType="slide">
                     <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'flex-end' }}>
                         <View style={{ backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 }}>
                             <View style={{ width: 40, height: 4, backgroundColor: '#ddd', borderRadius: 2, alignSelf: 'center', marginBottom: 16 }} />
                             <Text style={{ fontSize: 20, fontWeight: '700', marginBottom: 20 }}>Select Account</Text>
-                            {multiRoles.map((role, index) => (
-                                <TouchableOpacity key={index} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' }} onPress={() => handleSelectRole(role)}>
-                                    <Text style={{ fontSize: 24, marginRight: 16 }}>{role.type === 'owner' ? '👑' : '🏪'}</Text>
+                            {multiRoles.map((context, index) => (
+                                <TouchableOpacity key={index} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' }} onPress={() => handleSelectContext(context)}>
+                                    <Text style={{ fontSize: 24, marginRight: 16 }}>{context.role === 'owner' ? '👑' : '🏪'}</Text>
                                     <View>
-                                        <Text style={{ fontSize: 16, fontWeight: '600' }}>{role.name}</Text>
-                                        <Text style={{ fontSize: 14, color: '#666' }}>{role.type === 'owner' ? 'Store Owner' : 'Branch Manager'}</Text>
+                                        <Text style={{ fontSize: 16, fontWeight: '600' }}>{context.merchantName}</Text>
+                                        <Text style={{ fontSize: 14, color: '#666' }}>
+                                            {context.role === 'owner' ? 'Store Owner' : 'Branch Manager'} 
+                                            {context.branches.length > 0 && ` • ${context.branches.length} Location${context.branches.length > 1 ? 's' : ''}`}
+                                        </Text>
                                     </View>
                                 </TouchableOpacity>
                             ))}

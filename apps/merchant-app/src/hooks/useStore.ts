@@ -1,17 +1,20 @@
-import { useStoreContext, Store, Branch, AvailableRole } from '../context/StoreContext';
+import { useStoreContext, Store, Branch } from '../context/StoreContext';
 
-// Re-export Store, Branch, and AvailableRole types
-export type { Store, Branch, AvailableRole };
+// Re-export Store and Branch types
+export type { Store, Branch };
 
 // Minimal wrapper to maintain backward compatibility
 export function useStore() {
     const context = useStoreContext();
     return {
         ...context,
-        storeId: context.activeStoreId,
-        activeRole: context.activeRole,
-        // Maintains existing API shape
-        // sendHeartbeat is now auto-managed but can be exposed if needed
+        // Explicit alias: branchId = the currently active branch UUID
+        branchId: context.activeStoreId,
+        // Backward compatibility shim for components still pulling activeRole
+        activeRole: context.activeContext ? {
+            id: context.activeStoreId,
+            type: context.activeContext.role,
+        } : null,
         sendHeartbeat: () => { },
     };
 }

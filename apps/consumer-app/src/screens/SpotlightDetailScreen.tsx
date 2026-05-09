@@ -147,13 +147,13 @@ export default function SpotlightDetailScreen() {
                         style={{ top: 60, right: 20, backgroundColor: config.accentColor }}
                     >
                         <AccentIcon size={12} color="#FFFFFF" />
-                        <Text className="text-[11px] font-bold text-white ml-1.5">{spotlight.badge}</Text>
+                        <Text className="text-[11px] font-bold text-white ml-1.5">{(spotlight as any).badge}</Text>
                     </View>
 
                     {/* Hero Text */}
                     <View className="absolute bottom-0 left-0 right-0 px-6 pb-6">
-                        <Text className="text-white text-3xl font-bold leading-tight">{spotlight.title}</Text>
-                        <Text className="text-white/80 text-[14px] font-medium mt-2 leading-5">{spotlight.subtitle}</Text>
+                        <Text className="text-white text-3xl font-bold leading-tight">{(spotlight as any).title}</Text>
+                        <Text className="text-white/80 text-[14px] font-medium mt-2 leading-5">{(spotlight as any).subtitle}</Text>
                     </View>
                 </View>
 

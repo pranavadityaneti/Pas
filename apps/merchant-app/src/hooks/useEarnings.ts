@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useStore } from './useStore';
 
 export function useEarnings() {
-    const { storeId } = useStore();
+    const { merchantId } = useStore();
     const [stats, setStats] = useState({
         today: 0,
         todayOrders: 0,
@@ -16,7 +16,7 @@ export function useEarnings() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        if (!storeId) return;
+        if (!merchantId) return;
 
         async function fetchStats() {
             setLoading(true);
@@ -25,7 +25,7 @@ export function useEarnings() {
                 const { data, error } = await supabase
                     .from('orders')
                     .select('total_amount, created_at, status')
-                    .eq('store_id', storeId);
+                    .eq('store_id', merchantId);
 
                 if (error) throw error;
 
@@ -77,12 +77,12 @@ export function useEarnings() {
         fetchStats();
 
         // Subscribe to real-time changes
-        const channel = supabase.channel(`earnings-${storeId}`)
+        const channel = supabase.channel(`earnings-${merchantId}`)
             .on('postgres_changes', {
                 event: '*',
                 schema: 'public',
                 table: 'orders',
-                filter: `store_id=eq.${storeId}`
+                filter: `store_id=eq.${merchantId}`
             }, () => {
                 fetchStats();
             })
@@ -91,7 +91,7 @@ export function useEarnings() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [storeId]);
+    }, [merchantId]);
 
     return { stats, loading };
 }

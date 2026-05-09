@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Vibration } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { playSound } from '../lib/audio';
+import { showToast } from '../components/NotificationToast';
 import { useStore } from './useStore';
 
 export interface Notification {
@@ -80,37 +81,49 @@ export function useNotifications(user: any) {
                     filter: `user_id=eq.${user.id},store_id=eq.${activeStoreId}`
                 }, (payload) => {
                     const newNotif = payload.new as Notification;
+                    const notifType = (newNotif.type || '').toUpperCase();
 
-                    // Logic to check preferences
+                    // --- Preference-Gated Alerting ---
                     const prefs = prefsRef.current;
+
+                    // Determine if this notification type should trigger audio/vibration
+                    let shouldAlert = true; // Default: alert for all types
+
                     if (prefs) {
-                        const isCancelled = newNotif.title.toLowerCase().includes('cancel') || newNotif.message.toLowerCase().includes('cancel');
-                        const isNewOrder = newNotif.title.toLowerCase().includes('order') && !isCancelled;
-
-                        let shouldAlert = false;
-                        if (isNewOrder && prefs.newOrder) shouldAlert = true;
-                        if (isCancelled && prefs.orderCancelled) shouldAlert = true;
-
-                        // Fallback for other types if strictly not disabled? 
-                        // For now, only alert if matches these specifically or if it's a general alert?
-                        // Let's assume general system alerts also respect 'sound' global toggle at least.
-                        if (!isNewOrder && !isCancelled) shouldAlert = true;
+                        // Gate specific types behind their toggles
+                        if (notifType === 'NEW_ORDER' && prefs.newOrder === false) {
+                            shouldAlert = false;
+                        }
+                        if (notifType === 'CANCELLED' && prefs.orderCancelled === false) {
+                            shouldAlert = false;
+                        }
+                        // All other types (LOW_STOCK, READY, COMPLETED, etc.) always alert
+                        // unless the global sound toggle is off
 
                         if (shouldAlert) {
-                            if (prefs.sound) {
+                            // Sound: use merchant's selected tone, never hardcoded
+                            if (prefs.sound !== false) {
                                 playSound(prefs.soundType || 'Amber');
                             }
-                            if (prefs.vibration) {
+                            // Vibration: only if explicitly enabled
+                            if (prefs.vibration === true) {
                                 Vibration.vibrate();
                             }
                         }
                     } else {
-                        // Default behavior if no prefs found (e.g. first load)
-                        Vibration.vibrate();
+                        // No preferences saved yet — use safe defaults
                         playSound('Amber');
+                        Vibration.vibrate();
                     }
 
-                    // Optimistic update or refetch
+                    // --- Visual Toast Alert (always shown regardless of sound prefs) ---
+                    showToast({
+                        title: newNotif.title,
+                        body: newNotif.message,
+                        type: notifType,
+                    });
+
+                    // Refresh the notification list
                     fetchNotifications();
                 })
                 .subscribe();

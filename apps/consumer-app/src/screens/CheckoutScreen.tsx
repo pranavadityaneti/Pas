@@ -443,7 +443,7 @@ export default function CheckoutScreen() {
         setShowPayment(false);
 
         try {
-            // Verify Signature
+            // Step 1: Verify Razorpay Signature
             const apiUrl = process.env.EXPO_PUBLIC_API_URL;
             const verifyRes = await fetch(`${apiUrl}/payments/verify`, {
                 method: 'POST',
@@ -461,77 +461,79 @@ export default function CheckoutScreen() {
                 return;
             }
 
+            // Step 2: Create orders via Backend API (NOT direct Supabase)
             const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-                const baseOrderNumber = `PAS-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${user.id.slice(0, 4).toUpperCase()}`;
-                const actualSubtotal = acceptedRequests.reduce((sum: number, r: any) => sum + r.subtotal, 0);
+            if (!user) throw new Error('User not authenticated');
 
-                for (let i = 0; i < acceptedRequests.length; i++) {
-                    const req = acceptedRequests[i];
-                    const orderNumber = `${baseOrderNumber}-${Math.floor(100 + Math.random() * 900)}`;
-                    const share = req.subtotal / (actualSubtotal || 1);
-                    const groupGst = Math.round(finalGstToPay * share);
-                    const groupDiscount = Math.round(discount * share);
-                    const groupFinalTotal = Math.max(0, req.subtotal + groupGst - groupDiscount);
+            const actualSubtotal = acceptedRequests.reduce((sum: number, r: any) => sum + r.subtotal, 0);
+            const createdOrders: any[] = [];
 
-                    const storeIdStr = String(req.store_id);
-                    const storeOtp = storeOtps[storeIdStr] || Math.floor(1000 + Math.random() * 9000).toString();
-                    const now = new Date().toISOString();
+            for (let i = 0; i < acceptedRequests.length; i++) {
+                const req = acceptedRequests[i];
+                const share = req.subtotal / (actualSubtotal || 1);
+                const groupGst = Math.round(finalGstToPay * share);
+                const groupDiscount = Math.round(discount * share);
+                const groupFinalTotal = Math.max(0, req.subtotal + groupGst - groupDiscount);
 
-                    const { data: orderData, error: orderError } = await supabase
-                        .from('orders')
-                        .insert({
-                            user_id: user.id,
-                            order_number: orderNumber,
-                            customer_name: pickupMode === 'myself' ? (user.user_metadata?.full_name || user.email?.split('@')[0]) : pickupName,
-                            customer_phone: pickupMode === 'myself' ? (user.phone || '') : pickupPhone,
-                            store_id: req.store_id,
-                            branch_id: req.branch_id, // <-- NEW: Fixes the fatal constraint error
-                            store_name: req.store_name,
-                            amount: groupFinalTotal,
-                            total_amount: groupFinalTotal,
-                            order_type: 'pickup',
-                            otp_code: storeOtp,
-                            otp: storeOtp,
-                            items_count: req.items.length,
-                            status: 'PENDING',
-                            special_instructions: specialInstructions,
-                            arrival_time: selectedTime[req.branch_id] || selectedTime[req.store_id] || 'ASAP', // <-- NEW: Fixes the missing time bug
-                            guests_count: null,
-                            created_at: now,
-                            updated_at: now
-                        })
-                        .select()
-                        .single();
+                const storeIdStr = String(req.store_id);
+                const storeOtp = storeOtps[storeIdStr] || Math.floor(1000 + Math.random() * 9000).toString();
 
-                    if (orderError) throw orderError;
+                // Route through Backend API — triggers notifications, stock, and socket broadcasts
+                const orderRes = await fetch(`${apiUrl}/orders`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        userId: user.id,
+                        storeId: req.store_id,
+                        branchId: req.branch_id,
+                        totalAmount: groupFinalTotal,
+                        paid: true,
+                        paymentId: id,
+                        orderRequestId: req.id,
+                        customerName: pickupMode === 'myself'
+                            ? (user.user_metadata?.full_name || user.email?.split('@')[0] || 'Guest')
+                            : pickupName,
+                        customerPhone: pickupMode === 'myself'
+                            ? (user.phone || '')
+                            : pickupPhone,
+                        storeName: req.store_name,
+                        specialInstructions: specialInstructions,
+                        arrivalTime: selectedTime[req.branch_id] || selectedTime[req.store_id] || 'ASAP',
+                        otp: storeOtp,
+                        items: req.items.map((item: any) => ({
+                            name: item.name,
+                            quantity: item.quantity,
+                            price: item.price,
+                            storeProductId: item.id || item.storeProductId || null
+                        }))
+                    })
+                });
 
-                    const orderItems = req.items.map((item: any) => ({
-                        order_id: orderData.id,
-                        product_name: item.name,
-                        quantity: item.quantity,
-                        price: item.price
-                    }));
-
-                    const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
-                    if (itemsError) throw itemsError;
+                if (!orderRes.ok) {
+                    const errBody = await orderRes.json().catch(() => ({}));
+                    console.error(`[CheckoutScreen] API order creation failed for ${req.store_name}:`, errBody);
+                    throw new Error(errBody.error || 'Failed to create order on server');
                 }
 
-                // Save OTPs into confirmedOrders BEFORE clearing cart (clearCart wipes storeOtps via useEffect)
-                setConfirmedOrders(acceptedRequests.map((r: any) => {
-                    const sid = String(r.store_id);
-                    return {
-                        storeId: sid,
-                        storeName: r.store_name,
-                        items: r.items,
-                        total: r.subtotal,
-                        otp: storeOtps[sid] || Math.floor(1000 + Math.random() * 9000).toString()
-                    };
-                }));
-                clearCart();
+                const orderData = await orderRes.json();
+                console.log(`[CheckoutScreen] ✅ Order created via API: ${orderData.orderNumber}`);
+                createdOrders.push({ ...orderData, localOtp: storeOtp });
             }
+
+            // Step 3: Save OTPs into confirmedOrders BEFORE clearing cart
+            setConfirmedOrders(acceptedRequests.map((r: any) => {
+                const sid = String(r.store_id);
+                return {
+                    storeId: sid,
+                    storeName: r.store_name,
+                    items: r.items,
+                    total: r.subtotal,
+                    otp: storeOtps[sid] || Math.floor(1000 + Math.random() * 9000).toString()
+                };
+            }));
+            clearCart();
         } catch (error) {
-            console.error('Failed to persist order to Supabase:', error);
+            console.error('[CheckoutScreen] Failed to create order via API:', error);
             setStep('error');
             return;
         }

@@ -1,0 +1,444 @@
+Retrieving logs...
+============= i-0d70e7a2d56f2a735 ==============
+----------------------------------------
+/var/log/nginx/error.log
+----------------------------------------
+2026/04/12 10:02:06 [warn] 2208#2208: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/12 10:02:06 [warn] 2242#2242: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/12 10:02:06 [warn] 2243#2243: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/21 01:29:19 [error] 2245#2245: *214256 client intended to send too large body: 10485761 bytes, client: 172.31.9.150, server: , request: "POST / HTTP/1.1", host: "3.6.169.16"
+2026/04/29 01:54:41 [warn] 783164#783164: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 01:54:41 [notice] 783164#783164: signal process started
+2026/04/29 01:54:41 [warn] 2244#2244: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 01:58:27 [warn] 783702#783702: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 01:58:27 [notice] 783702#783702: signal process started
+2026/04/29 01:58:27 [warn] 2244#2244: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 01:58:47 [warn] 784083#784083: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 01:58:47 [warn] 784116#784116: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 01:58:47 [warn] 784118#784118: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 01:58:55 [error] 784120#784120: *1 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 01:58:58 [error] 784121#784121: *3 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 01:59:10 [error] 784120#784120: *5 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.2.122, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+2026/04/29 01:59:13 [error] 784120#784120: *7 connect() failed (111: Connection refused) while connecting to upstream, client: 172.31.43.3, server: , request: "GET /health HTTP/1.1", upstream: "http://127.0.0.1:8080/health", host: "172.31.13.171"
+
+
+----------------------------------------
+/var/log/web.stdout.log
+----------------------------------------
+Apr 29 01:58:46 ip-172-31-13-171 web[784062]:    at Object.<anonymous> (/var/app/current/dist/services/email.service.js:7:16)
+Apr 29 01:58:46 ip-172-31-13-171 web[784062]:    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+Apr 29 01:58:46 ip-172-31-13-171 web[784062]:    at Module._extensions..js (node:internal/modules/cjs/loader:1943:10)
+Apr 29 01:58:46 ip-172-31-13-171 web[784062]:    at Module.load (node:internal/modules/cjs/loader:1533:32)
+Apr 29 01:58:46 ip-172-31-13-171 web[784062]:    at Module._load (node:internal/modules/cjs/loader:1335:12)
+Apr 29 01:58:46 ip-172-31-13-171 web[784062]:    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+Apr 29 01:58:46 ip-172-31-13-171 web[784062]:    at Module.require (node:internal/modules/cjs/loader:1556:12)
+Apr 29 01:58:46 ip-172-31-13-171 web[784062]:    at require (node:internal/modules/helpers:152:16)
+Apr 29 01:58:46 ip-172-31-13-171 web[784062]:    at Object.<anonymous> (/var/app/current/dist/index.js:55:25)
+Apr 29 01:58:46 ip-172-31-13-171 web[784062]: Node.js v24.14.1
+Apr 29 01:58:47 ip-172-31-13-171 web[784073]: /var/app/current/node_modules/resend/dist/index.cjs:949
+Apr 29 01:58:47 ip-172-31-13-171 web[784073]: #011#011#011if (!this.key) throw new Error("Missing API key. Pass it to the constructor `new Resend(\"re_123\")`");
+Apr 29 01:58:47 ip-172-31-13-171 web[784073]: #011#011#011               ^
+Apr 29 01:58:47 ip-172-31-13-171 web[784073]: Error: Missing API key. Pass it to the constructor `new Resend("re_123")`
+Apr 29 01:58:47 ip-172-31-13-171 web[784073]:    at new Resend (/var/app/current/node_modules/resend/dist/index.cjs:949:25)
+Apr 29 01:58:47 ip-172-31-13-171 web[784073]:    at Object.<anonymous> (/var/app/current/dist/services/email.service.js:7:16)
+Apr 29 01:58:47 ip-172-31-13-171 web[784073]:    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+Apr 29 01:58:47 ip-172-31-13-171 web[784073]:    at Module._extensions..js (node:internal/modules/cjs/loader:1943:10)
+Apr 29 01:58:47 ip-172-31-13-171 web[784073]:    at Module.load (node:internal/modules/cjs/loader:1533:32)
+Apr 29 01:58:47 ip-172-31-13-171 web[784073]:    at Module._load (node:internal/modules/cjs/loader:1335:12)
+Apr 29 01:58:47 ip-172-31-13-171 web[784073]:    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+Apr 29 01:58:47 ip-172-31-13-171 web[784073]:    at Module.require (node:internal/modules/cjs/loader:1556:12)
+Apr 29 01:58:47 ip-172-31-13-171 web[784073]:    at require (node:internal/modules/helpers:152:16)
+Apr 29 01:58:47 ip-172-31-13-171 web[784073]:    at Object.<anonymous> (/var/app/current/dist/index.js:55:25)
+Apr 29 01:58:47 ip-172-31-13-171 web[784073]: Node.js v24.14.1
+Apr 29 01:58:48 ip-172-31-13-171 web[784131]: /var/app/current/node_modules/resend/dist/index.cjs:949
+Apr 29 01:58:48 ip-172-31-13-171 web[784131]: #011#011#011if (!this.key) throw new Error("Missing API key. Pass it to the constructor `new Resend(\"re_123\")`");
+Apr 29 01:58:48 ip-172-31-13-171 web[784131]: #011#011#011               ^
+Apr 29 01:58:48 ip-172-31-13-171 web[784131]: Error: Missing API key. Pass it to the constructor `new Resend("re_123")`
+Apr 29 01:58:48 ip-172-31-13-171 web[784131]:    at new Resend (/var/app/current/node_modules/resend/dist/index.cjs:949:25)
+Apr 29 01:58:48 ip-172-31-13-171 web[784131]:    at Object.<anonymous> (/var/app/current/dist/services/email.service.js:7:16)
+Apr 29 01:58:48 ip-172-31-13-171 web[784131]:    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+Apr 29 01:58:48 ip-172-31-13-171 web[784131]:    at Module._extensions..js (node:internal/modules/cjs/loader:1943:10)
+Apr 29 01:58:48 ip-172-31-13-171 web[784131]:    at Module.load (node:internal/modules/cjs/loader:1533:32)
+Apr 29 01:58:48 ip-172-31-13-171 web[784131]:    at Module._load (node:internal/modules/cjs/loader:1335:12)
+Apr 29 01:58:48 ip-172-31-13-171 web[784131]:    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+Apr 29 01:58:48 ip-172-31-13-171 web[784131]:    at Module.require (node:internal/modules/cjs/loader:1556:12)
+Apr 29 01:58:48 ip-172-31-13-171 web[784131]:    at require (node:internal/modules/helpers:152:16)
+Apr 29 01:58:48 ip-172-31-13-171 web[784131]:    at Object.<anonymous> (/var/app/current/dist/index.js:55:25)
+Apr 29 01:58:48 ip-172-31-13-171 web[784131]: Node.js v24.14.1
+Apr 29 01:58:49 ip-172-31-13-171 web[784142]: /var/app/current/node_modules/resend/dist/index.cjs:949
+Apr 29 01:58:49 ip-172-31-13-171 web[784142]: #011#011#011if (!this.key) throw new Error("Missing API key. Pass it to the constructor `new Resend(\"re_123\")`");
+Apr 29 01:58:49 ip-172-31-13-171 web[784142]: #011#011#011               ^
+Apr 29 01:58:49 ip-172-31-13-171 web[784142]: Error: Missing API key. Pass it to the constructor `new Resend("re_123")`
+Apr 29 01:58:49 ip-172-31-13-171 web[784142]:    at new Resend (/var/app/current/node_modules/resend/dist/index.cjs:949:25)
+Apr 29 01:58:49 ip-172-31-13-171 web[784142]:    at Object.<anonymous> (/var/app/current/dist/services/email.service.js:7:16)
+Apr 29 01:58:49 ip-172-31-13-171 web[784142]:    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+Apr 29 01:58:49 ip-172-31-13-171 web[784142]:    at Module._extensions..js (node:internal/modules/cjs/loader:1943:10)
+Apr 29 01:58:49 ip-172-31-13-171 web[784142]:    at Module.load (node:internal/modules/cjs/loader:1533:32)
+Apr 29 01:58:49 ip-172-31-13-171 web[784142]:    at Module._load (node:internal/modules/cjs/loader:1335:12)
+Apr 29 01:58:49 ip-172-31-13-171 web[784142]:    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+Apr 29 01:58:49 ip-172-31-13-171 web[784142]:    at Module.require (node:internal/modules/cjs/loader:1556:12)
+Apr 29 01:58:49 ip-172-31-13-171 web[784142]:    at require (node:internal/modules/helpers:152:16)
+Apr 29 01:58:49 ip-172-31-13-171 web[784142]:    at Object.<anonymous> (/var/app/current/dist/index.js:55:25)
+Apr 29 01:58:49 ip-172-31-13-171 web[784142]: Node.js v24.14.1
+Apr 29 01:58:50 ip-172-31-13-171 web[784153]: /var/app/current/node_modules/resend/dist/index.cjs:949
+Apr 29 01:58:50 ip-172-31-13-171 web[784153]: #011#011#011if (!this.key) throw new Error("Missing API key. Pass it to the constructor `new Resend(\"re_123\")`");
+Apr 29 01:58:50 ip-172-31-13-171 web[784153]: #011#011#011               ^
+Apr 29 01:58:50 ip-172-31-13-171 web[784153]: Error: Missing API key. Pass it to the constructor `new Resend("re_123")`
+Apr 29 01:58:50 ip-172-31-13-171 web[784153]:    at new Resend (/var/app/current/node_modules/resend/dist/index.cjs:949:25)
+Apr 29 01:58:50 ip-172-31-13-171 web[784153]:    at Object.<anonymous> (/var/app/current/dist/services/email.service.js:7:16)
+Apr 29 01:58:50 ip-172-31-13-171 web[784153]:    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+Apr 29 01:58:50 ip-172-31-13-171 web[784153]:    at Module._extensions..js (node:internal/modules/cjs/loader:1943:10)
+Apr 29 01:58:50 ip-172-31-13-171 web[784153]:    at Module.load (node:internal/modules/cjs/loader:1533:32)
+Apr 29 01:58:50 ip-172-31-13-171 web[784153]:    at Module._load (node:internal/modules/cjs/loader:1335:12)
+Apr 29 01:58:50 ip-172-31-13-171 web[784153]:    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+Apr 29 01:58:50 ip-172-31-13-171 web[784153]:    at Module.require (node:internal/modules/cjs/loader:1556:12)
+Apr 29 01:58:50 ip-172-31-13-171 web[784153]:    at require (node:internal/modules/helpers:152:16)
+Apr 29 01:58:50 ip-172-31-13-171 web[784153]:    at Object.<anonymous> (/var/app/current/dist/index.js:55:25)
+Apr 29 01:58:50 ip-172-31-13-171 web[784153]: Node.js v24.14.1
+Apr 29 01:58:51 ip-172-31-13-171 web[784164]: /var/app/current/node_modules/resend/dist/index.cjs:949
+Apr 29 01:58:51 ip-172-31-13-171 web[784164]: #011#011#011if (!this.key) throw new Error("Missing API key. Pass it to the constructor `new Resend(\"re_123\")`");
+Apr 29 01:58:51 ip-172-31-13-171 web[784164]: #011#011#011               ^
+Apr 29 01:58:51 ip-172-31-13-171 web[784164]: Error: Missing API key. Pass it to the constructor `new Resend("re_123")`
+Apr 29 01:58:51 ip-172-31-13-171 web[784164]:    at new Resend (/var/app/current/node_modules/resend/dist/index.cjs:949:25)
+Apr 29 01:58:51 ip-172-31-13-171 web[784164]:    at Object.<anonymous> (/var/app/current/dist/services/email.service.js:7:16)
+Apr 29 01:58:51 ip-172-31-13-171 web[784164]:    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+Apr 29 01:58:51 ip-172-31-13-171 web[784164]:    at Module._extensions..js (node:internal/modules/cjs/loader:1943:10)
+Apr 29 01:58:51 ip-172-31-13-171 web[784164]:    at Module.load (node:internal/modules/cjs/loader:1533:32)
+Apr 29 01:58:51 ip-172-31-13-171 web[784164]:    at Module._load (node:internal/modules/cjs/loader:1335:12)
+Apr 29 01:58:51 ip-172-31-13-171 web[784164]:    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+Apr 29 01:58:51 ip-172-31-13-171 web[784164]:    at Module.require (node:internal/modules/cjs/loader:1556:12)
+Apr 29 01:58:51 ip-172-31-13-171 web[784164]:    at require (node:internal/modules/helpers:152:16)
+Apr 29 01:58:51 ip-172-31-13-171 web[784164]:    at Object.<anonymous> (/var/app/current/dist/index.js:55:25)
+Apr 29 01:58:51 ip-172-31-13-171 web[784164]: Node.js v24.14.1
+Apr 29 01:58:52 ip-172-31-13-171 web[784175]: /var/app/current/node_modules/resend/dist/index.cjs:949
+Apr 29 01:58:52 ip-172-31-13-171 web[784175]: #011#011#011if (!this.key) throw new Error("Missing API key. Pass it to the constructor `new Resend(\"re_123\")`");
+Apr 29 01:58:52 ip-172-31-13-171 web[784175]: #011#011#011               ^
+Apr 29 01:58:52 ip-172-31-13-171 web[784175]: Error: Missing API key. Pass it to the constructor `new Resend("re_123")`
+Apr 29 01:58:52 ip-172-31-13-171 web[784175]:    at new Resend (/var/app/current/node_modules/resend/dist/index.cjs:949:25)
+Apr 29 01:58:52 ip-172-31-13-171 web[784175]:    at Object.<anonymous> (/var/app/current/dist/services/email.service.js:7:16)
+Apr 29 01:58:52 ip-172-31-13-171 web[784175]:    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+Apr 29 01:58:52 ip-172-31-13-171 web[784175]:    at Module._extensions..js (node:internal/modules/cjs/loader:1943:10)
+Apr 29 01:58:52 ip-172-31-13-171 web[784175]:    at Module.load (node:internal/modules/cjs/loader:1533:32)
+Apr 29 01:58:52 ip-172-31-13-171 web[784175]:    at Module._load (node:internal/modules/cjs/loader:1335:12)
+Apr 29 01:58:52 ip-172-31-13-171 web[784175]:    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+Apr 29 01:58:52 ip-172-31-13-171 web[784175]:    at Module.require (node:internal/modules/cjs/loader:1556:12)
+Apr 29 01:58:52 ip-172-31-13-171 web[784175]:    at require (node:internal/modules/helpers:152:16)
+Apr 29 01:58:52 ip-172-31-13-171 web[784175]:    at Object.<anonymous> (/var/app/current/dist/index.js:55:25)
+Apr 29 01:58:52 ip-172-31-13-171 web[784175]: Node.js v24.14.1
+
+
+----------------------------------------
+/var/log/eb-engine.log
+----------------------------------------
+
+2026/04/29 01:58:42.145577 [INFO] Running command: systemctl show -p PartOf nginx.service
+2026/04/29 01:58:42.162093 [INFO] Running command: systemctl is-active nginx.service
+2026/04/29 01:58:42.170144 [INFO] Running command: systemctl show -p PartOf nginx.service
+2026/04/29 01:58:42.179154 [INFO] Running command: systemctl stop nginx.service
+2026/04/29 01:58:42.386533 [INFO] Running command: systemctl disable nginx.service
+2026/04/29 01:58:42.858554 [INFO] Running command: systemctl daemon-reload
+2026/04/29 01:58:43.105406 [INFO] Running command: systemctl reset-failed
+2026/04/29 01:58:43.113515 [INFO] Executing instruction: FlipApplication
+2026/04/29 01:58:43.113537 [INFO] Fetching environment variables...
+2026/04/29 01:58:43.117930 [INFO] Purge old process...
+2026/04/29 01:58:43.117953 [INFO] Running command: systemctl stop eb-app.target
+2026/04/29 01:58:43.128241 [INFO] Running command: systemctl show -p ConsistsOf eb-app.target | cut -d= -f2
+2026/04/29 01:58:43.141490 [INFO] web.service
+
+2026/04/29 01:58:43.141510 [INFO] deregistering process: web
+2026/04/29 01:58:43.141520 [INFO] Running command: systemctl show -p PartOf web.service
+2026/04/29 01:58:43.225146 [INFO] Running command: systemctl is-active web.service
+2026/04/29 01:58:43.234196 [INFO] Running command: systemctl disable web.service
+2026/04/29 01:58:43.450209 [INFO] Removed "/etc/systemd/system/multi-user.target.wants/web.service".
+
+2026/04/29 01:58:43.450301 [INFO] Running command: systemctl daemon-reload
+2026/04/29 01:58:43.694613 [INFO] Running command: systemctl reset-failed
+2026/04/29 01:58:43.703129 [INFO] Running command: systemctl is-active web.service
+2026/04/29 01:58:43.710309 [INFO] Process web has been fully terminated
+2026/04/29 01:58:43.710323 [INFO] All processes have been fully terminated
+2026/04/29 01:58:43.710376 [INFO] Removing /var/app/current/ if it exists
+2026/04/29 01:58:44.142282 [INFO] Renaming /var/app/staging/ to /var/app/current/
+2026/04/29 01:58:44.142338 [INFO] Register application processes...
+2026/04/29 01:58:44.142344 [INFO] Registering the proc: web
+
+2026/04/29 01:58:44.142354 [INFO] Running command: systemctl show -p PartOf web.service
+2026/04/29 01:58:44.176081 [INFO] Running command: systemctl daemon-reload
+2026/04/29 01:58:44.431339 [INFO] Running command: systemctl reset-failed
+2026/04/29 01:58:44.439712 [INFO] Running command: systemctl is-enabled eb-app.target
+2026/04/29 01:58:44.447325 [INFO] Running command: systemctl enable eb-app.target
+2026/04/29 01:58:44.720867 [INFO] Running command: systemctl start eb-app.target
+2026/04/29 01:58:44.729636 [INFO] Running command: systemctl enable web.service
+2026/04/29 01:58:44.980150 [INFO] Created symlink /etc/systemd/system/multi-user.target.wants/web.service → /etc/systemd/system/web.service.
+
+2026/04/29 01:58:44.980184 [INFO] Running command: systemctl show -p PartOf web.service
+2026/04/29 01:58:44.991889 [INFO] Running command: systemctl is-active web.service
+2026/04/29 01:58:44.999691 [INFO] Running command: systemctl start web.service
+2026/04/29 01:58:47.070525 [INFO] Executing instruction: start X-Ray
+2026/04/29 01:58:47.070535 [INFO] X-Ray is not enabled.
+2026/04/29 01:58:47.070538 [INFO] Executing instruction: start proxy with new configuration
+2026/04/29 01:58:47.070626 [INFO] Running command: /usr/sbin/nginx -t -c /var/proxy/staging/nginx/nginx.conf
+2026/04/29 01:58:47.109970 [INFO] nginx: [warn] could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+nginx: the configuration file /var/proxy/staging/nginx/nginx.conf syntax is ok
+nginx: configuration file /var/proxy/staging/nginx/nginx.conf test is successful
+
+2026/04/29 01:58:47.110401 [INFO] Running command: cp -rp /var/proxy/staging/nginx/* /etc/nginx
+2026/04/29 01:58:47.118842 [INFO] Running command: systemctl show -p PartOf nginx.service
+2026/04/29 01:58:47.143781 [INFO] Running command: systemctl daemon-reload
+2026/04/29 01:58:47.522423 [INFO] Running command: systemctl reset-failed
+2026/04/29 01:58:47.534434 [INFO] Running command: systemctl show -p PartOf nginx.service
+2026/04/29 01:58:47.554942 [INFO] Running command: systemctl is-active nginx.service
+2026/04/29 01:58:47.569121 [INFO] Running command: systemctl start nginx.service
+2026/04/29 01:58:47.780131 [INFO] Executing instruction: configureSqsd
+2026/04/29 01:58:47.780150 [INFO] This is a web server environment instance, skip configure sqsd daemon ...
+2026/04/29 01:58:47.780155 [INFO] Executing instruction: startSqsd
+2026/04/29 01:58:47.780158 [INFO] This is a web server environment instance, skip start sqsd daemon ...
+2026/04/29 01:58:47.780161 [INFO] Executing instruction: Track pids in healthd
+2026/04/29 01:58:47.780165 [INFO] This is an enhanced health env...
+2026/04/29 01:58:47.780178 [INFO] Running command: systemctl show -p ConsistsOf aws-eb.target | cut -d= -f2
+2026/04/29 01:58:47.791447 [INFO] healthd.service cfn-hup.service nginx.service
+
+2026/04/29 01:58:47.791481 [INFO] Running command: systemctl show -p ConsistsOf eb-app.target | cut -d= -f2
+2026/04/29 01:58:47.801589 [INFO] web.service
+
+2026/04/29 01:58:47.802171 [WARN] failed to read file /var/pids/web.pid with error: open /var/pids/web.pid: no such file or directory
+2026/04/29 01:58:48.802315 [WARN] failed to read file /var/pids/web.pid with error: open /var/pids/web.pid: no such file or directory
+2026/04/29 01:58:50.802496 [WARN] failed to read file /var/pids/web.pid with error: open /var/pids/web.pid: no such file or directory
+2026/04/29 01:58:53.802717 [WARN] failed to read file /var/pids/web.pid with error: open /var/pids/web.pid: no such file or directory
+2026/04/29 01:58:57.802927 [WARN] failed to read file /var/pids/web.pid with error: open /var/pids/web.pid: no such file or directory
+2026/04/29 01:59:02.804053 [WARN] failed to read file /var/pids/web.pid with error: open /var/pids/web.pid: no such file or directory
+2026/04/29 01:59:02.804105 [ERROR] update processes [web healthd cfn-hup nginx] pid symlinks failed with error failed to read file /var/pids/web.pid after 6 attempts
+2026/04/29 01:59:02.804123 [ERROR] An error occurred during execution of command [app-deploy] - [Track pids in healthd]. Stop running the command. Error: update processes [web healthd cfn-hup nginx] pid symlinks failed with error failed to read file /var/pids/web.pid after 6 attempts 
+
+2026/04/29 01:59:02.804127 [INFO] Executing cleanup logic
+2026/04/29 01:59:02.806044 [INFO] CommandService Response: {"status":"FAILURE","api_version":"1.0","results":[{"status":"FAILURE","msg":"Engine execution has encountered an error.","returncode":1,"events":[{"msg":"Instance deployment: The deployment used the default Node.js version for your platform version instead of the Node.js version included in your 'package.json'.","timestamp":1777427903726,"severity":"WARN"},{"msg":"Instance deployment failed. For details, see 'eb-engine.log'.","timestamp":1777427942804,"severity":"ERROR"}]}]}
+
+2026/04/29 01:59:02.855747 [INFO] Platform Engine finished execution on command: app-deploy
+
+2026/04/29 01:59:21.592926 [INFO] Starting...
+2026/04/29 01:59:21.592975 [INFO] Starting EBPlatform-PlatformEngine
+2026/04/29 01:59:21.593045 [INFO] reading event message file
+2026/04/29 01:59:21.597978 [INFO] Engine received EB command cfn-hup-exec
+
+2026/04/29 01:59:21.776232 [INFO] Running command: /opt/aws/bin/cfn-get-metadata -s arn:aws:cloudformation:ap-south-1:854408056396:stack/awseb-e-wk9muqt2pc-stack/553bdf10-2b93-11f1-8ebf-027269123837 -r AWSEBAutoScalingGroup --region ap-south-1
+2026/04/29 01:59:22.461808 [INFO] Running command: /opt/aws/bin/cfn-get-metadata -s arn:aws:cloudformation:ap-south-1:854408056396:stack/awseb-e-wk9muqt2pc-stack/553bdf10-2b93-11f1-8ebf-027269123837 -r AWSEBBeanstalkMetadata --region ap-south-1
+2026/04/29 01:59:22.763092 [INFO] checking whether command tail-log is applicable to this instance...
+2026/04/29 01:59:22.763107 [INFO] this command is applicable to the instance, thus instance should execute command
+2026/04/29 01:59:22.763111 [INFO] Engine command: (tail-log)
+
+2026/04/29 01:59:22.764603 [INFO] Executing instruction: GetTailLogs
+2026/04/29 01:59:22.764608 [INFO] Tail Logs...
+2026/04/29 01:59:22.766623 [INFO] Running command: tail -n 100 /var/log/nginx/error.log
+2026/04/29 01:59:22.770967 [INFO] Running command: tail -n 100 /var/log/web.stdout.log
+2026/04/29 01:59:22.773370 [INFO] Running command: tail -n 100 /var/log/eb-engine.log
+
+
+----------------------------------------
+/var/log/eb-hooks.log
+----------------------------------------
+
+✔ Generated Prisma Client (v5.22.0) to ./node_modules/@prisma/client in 614ms
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: Want to react to database changes in your app as they happen? Discover how with Pulse: https://pris.ly/tip-1-pulse
+
+
+added 269 packages, changed 45 packages, and audited 315 packages in 12s
+
+33 packages are looking for funding
+  run `npm fund` for details
+
+12 vulnerabilities (8 moderate, 4 high)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues possible (including breaking changes), run:
+  npm audit fix --force
+
+Some issues need review, and may require choosing
+a different dependency.
+
+Run `npm audit` for details.
+[Pre-deploy] Building TypeScript...
+src/index.ts(1894,13): error TS2322: Type '{ orderNumber: string; userId: any; storeId: any; totalAmount: any; status: "PENDING"; isPaid: false; items: { create: any; }; }' is not assignable to type '(Without<OrderCreateInput, OrderUncheckedCreateInput> & OrderUncheckedCreateInput) | (Without<...> & OrderCreateInput)'.
+  Type '{ orderNumber: string; userId: any; storeId: any; totalAmount: any; status: "PENDING"; isPaid: false; items: { create: any; }; }' is not assignable to type 'Without<OrderUncheckedCreateInput, OrderCreateInput> & OrderCreateInput'.
+    Type '{ orderNumber: string; userId: any; storeId: any; totalAmount: any; status: "PENDING"; isPaid: false; items: { create: any; }; }' is missing the following properties from type 'OrderCreateInput': store, branch, user
+
+2026/04/29 01:54:59.523581 [INFO] npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+npm warn deprecated rimraf@2.7.1: Rimraf versions prior to v4 are no longer supported
+npm warn deprecated lodash.isequal@4.5.0: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated fstream@1.0.12: This package is no longer supported.
+npm notice
+npm notice New minor version of npm available! 11.11.0 -> 11.13.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.13.0
+npm notice To update run: npm install -g npm@11.13.0
+npm notice
+
+2026/04/29 01:58:27.346602 [INFO] Running command: .platform/hooks/predeploy/01_build.sh
+2026/04/29 01:58:41.993632 [INFO] [Pre-deploy] Installing dependencies...
+
+> pas-api@1.0.0 postinstall
+> prisma generate
+
+Prisma schema loaded from prisma/schema.prisma
+
+✔ Generated Prisma Client (v5.22.0) to ./node_modules/@prisma/client in 571ms
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: Want to turn off tips and other hints? https://pris.ly/tip-4-nohints
+
+
+added 219 packages, removed 10 packages, changed 35 packages, and audited 255 packages in 11s
+
+27 packages are looking for funding
+  run `npm fund` for details
+
+11 vulnerabilities (8 moderate, 3 high)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues possible (including breaking changes), run:
+  npm audit fix --force
+
+Some issues need review, and may require choosing
+a different dependency.
+
+Run `npm audit` for details.
+[Pre-deploy] Generating Prisma client...
+Prisma schema loaded from prisma/schema.prisma
+
+✔ Generated Prisma Client (v5.22.0) to ./node_modules/@prisma/client in 571ms
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: Want to turn off tips and other hints? https://pris.ly/tip-4-nohints
+
+[Pre-deploy] Build complete!
+
+2026/04/29 01:58:41.994243 [INFO] npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+npm warn deprecated rimraf@2.7.1: Rimraf versions prior to v4 are no longer supported
+npm warn deprecated lodash.isequal@4.5.0: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated fstream@1.0.12: This package is no longer supported.
+┌─────────────────────────────────────────────────────────┐
+│  Update available 5.22.0 -> 7.8.0                       │
+│                                                         │
+│  This is a major update - please follow the guide at    │
+│  https://pris.ly/d/major-version-upgrade                │
+│                                                         │
+│  Run the following to update                            │
+│    npm i --save-dev prisma@latest                       │
+│    npm i @prisma/client@latest                          │
+└─────────────────────────────────────────────────────────┘
+
+
+
+----------------------------------------
+/var/log/nginx/access.log
+----------------------------------------
+172.31.43.3 - - [29/Apr/2026:01:47:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:47:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:47:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:47:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:47:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:48:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:48:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:48:20 +0000] "POST /HNAP1/ HTTP/1.1" 400 0 "-" "-" "45.230.66.111"
+172.31.2.122 - - [29/Apr/2026:01:48:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:48:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:48:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:48:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:48:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:48:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:49:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:49:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:49:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:49:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:49:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:49:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:49:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:49:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:50:03 +0000] "GET / HTTP/1.1" 200 31 "-" "Mozilla/5.0" "204.76.203.206"
+172.31.2.122 - - [29/Apr/2026:01:50:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:50:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:50:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:50:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:50:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:50:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:50:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:50:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:51:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:51:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:51:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:51:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:51:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:51:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:51:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:51:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:52:05 +0000] "POST /auth/send-otp HTTP/1.1" 200 56 "-" "Expo/54.0.6 CFNetwork/3860.300.31 Darwin/25.3.0" "157.50.145.145"
+172.31.43.3 - - [29/Apr/2026:01:52:09 +0000] "POST /auth/verify-otp HTTP/1.1" 500 45 "-" "Expo/54.0.6 CFNetwork/3860.300.31 Darwin/25.3.0" "157.50.145.145"
+172.31.2.122 - - [29/Apr/2026:01:52:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:52:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:52:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:52:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:52:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:52:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:52:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:52:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:53:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:53:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:53:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:53:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:53:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:53:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:53:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:53:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:54:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:54:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:54:23 +0000] "GET / HTTP/1.1" 200 31 "-" "Mozilla/5.0" "204.76.203.206"
+172.31.2.122 - - [29/Apr/2026:01:54:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:54:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:54:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:54:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:54:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:54:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:55:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:55:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:55:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:55:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:55:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:55:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:55:51 +0000] "GET /SDK/webLanguage HTTP/1.1" 404 56 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.85 Safari/537.36 Edg/90.0.818.46" "5.61.209.107"
+172.31.2.122 - - [29/Apr/2026:01:55:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:55:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:56:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:56:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:56:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:56:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:56:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:56:43 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:56:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:56:58 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:57:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:57:13 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:57:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:57:28 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:57:40 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:57:43 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:57:55 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:57:58 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:58:10 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:58:13 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:58:25 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:58:28 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:58:40 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:58:55 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:58:58 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:59:10 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:59:13 +0000] "GET /health HTTP/1.1" 502 150 "-" "ELB-HealthChecker/2.0" "-"
+
+

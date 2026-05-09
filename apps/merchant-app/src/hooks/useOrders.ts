@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useStore } from './useStore';
 import Constants from 'expo-constants';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
-export type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED' | 'RETURN_REQUESTED' | 'RETURN_APPROVED' | 'RETURN_REJECTED' | 'REFUNDED';
+export type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED' | 'REJECTED' | 'RETURN_REQUESTED' | 'RETURN_APPROVED' | 'RETURN_REJECTED' | 'REFUNDED';
 
 export interface OrderItem {
     id: string;
@@ -27,8 +27,10 @@ export interface Order {
     status: OrderStatus;
     totalAmount: number;
     isPaid: boolean;
+    otp?: string;
     createdAt: string;
     user: {
+        id?: string;
         name: string;
         phone: string;
     };
@@ -40,12 +42,49 @@ export interface Order {
 
 // Removed Mock Data
 
-export function useOrders() {
-    const { storeId, merchantId, activeStoreId } = useStore();
+export interface DateRange {
+    startDate: string; // ISO string
+    endDate: string;   // ISO string
+}
+
+function getDefaultDateRange(): DateRange {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(start.getDate() - 7);
+    start.setHours(0, 0, 0, 0);
+    return {
+        startDate: start.toISOString(),
+        endDate: end.toISOString()
+    };
+}
+
+export function useOrders(dateRange?: DateRange) {
+    const { merchantId, activeStoreId } = useStore();
 
     const [orders, setOrders] = useState<Order[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const fetchIdRef = useRef(0);
+
+    // Ensure date range is always a valid, stable ISO string pair
+    const safeStartDate = useMemo(() => {
+        try {
+            const d = dateRange?.startDate ? new Date(dateRange.startDate) : null;
+            if (d && !isNaN(d.getTime())) return d.toISOString();
+        } catch {}
+        const fallback = new Date();
+        fallback.setDate(fallback.getDate() - 7);
+        fallback.setHours(0, 0, 0, 0);
+        return fallback.toISOString();
+    }, [dateRange?.startDate]);
+
+    const safeEndDate = useMemo(() => {
+        try {
+            const d = dateRange?.endDate ? new Date(dateRange.endDate) : null;
+            if (d && !isNaN(d.getTime())) return d.toISOString();
+        } catch {}
+        return new Date().toISOString();
+    }, [dateRange?.endDate]);
 
     const formatId = (id: string) => {
         const hash = id.split('-')[0];
@@ -54,7 +93,9 @@ export function useOrders() {
     };
 
     const fetchOrders = useCallback(async (isRefresh = false) => {
-        if (!storeId) {
+        const currentFetchId = ++fetchIdRef.current;
+        console.log("MERCHANT_QUERY_ID:", merchantId, "ACTIVE_BRANCH:", activeStoreId);
+        if (!merchantId) {
             setOrders([]);
             setLoading(false);
             setRefreshing(false);
@@ -77,14 +118,16 @@ export function useOrders() {
                         )
                     )
                 `)
-                .eq('store_id', storeId)
+                .eq('store_id', merchantId)
+                .gte('created_at', safeStartDate)
+                .lte('created_at', safeEndDate)
                 .order('created_at', { ascending: false });
 
             // Branch routing: scope orders to the active workspace
             if (activeStoreId && merchantId) {
                 if (activeStoreId === merchantId) {
-                    // Main store selected — show orders without a branch
-                    query = query.is('branch_id', null);
+                    // Main store selected — show orders without a branch OR where branch_id equals the main store's ID
+                    query = query.or(`branch_id.is.null,branch_id.eq.${merchantId}`);
                 } else {
                     // Specific branch selected
                     query = query.eq('branch_id', activeStoreId);
@@ -117,8 +160,9 @@ export function useOrders() {
                 status: o.status,
                 totalAmount: o.total_amount,
                 isPaid: o.ispaid,
+                otp: o.otp || o.otp_code,
                 createdAt: o.created_at,
-                user: profilesMap[o.user_id] || { name: 'Guest', phone: 'N/A' },
+                user: { id: o.user_id, name: profilesMap[o.user_id]?.name || 'Guest', phone: 'N/A' },
                 items: (o.items || []).map((item: any) => ({
                     id: item.id,
                     quantity: item.quantity,
@@ -127,11 +171,68 @@ export function useOrders() {
                 })),
                 cancelledReason: o.cancelled_reason, // Map cancelled_reason
                 returnReason: o.return_reason, // Map return_reason
-                returnImages: o.return_images || [] // Map return_images
+                returnImages: o.return_images || [], // Map return_images
+                orderRequestId: o.metadata?.orderRequestId // Extract orderRequestId
             }));
 
-            setOrders(realOrders);
+            // 1. Fetch pending/accepted requests — scoped to merchant + active branch
+            let reqQuery = supabase
+                .from('order_requests')
+                .select('*')
+                .eq('store_id', merchantId)
+                .in('status', ['PENDING', 'ACCEPTED', 'REJECTED'])
+                .gte('created_at', safeStartDate)
+                .lte('created_at', safeEndDate);
 
+            // Branch routing: mirror the orders query logic
+            if (activeStoreId === merchantId) {
+                // Main store view — include requests with branch_id = merchantId or null
+                reqQuery = reqQuery.or(`branch_id.is.null,branch_id.eq.${merchantId}`);
+            } else {
+                // Specific branch view
+                reqQuery = reqQuery.eq('branch_id', activeStoreId);
+            }
+
+            const { data: requestData } = await reqQuery;
+
+            // 2. Map to mimic real Orders, but flag the ID
+            const statusMap = (s: string): OrderStatus => {
+                if (s === 'ACCEPTED') return 'CONFIRMED';
+                if (s === 'REJECTED') return 'REJECTED';
+                return 'PENDING';
+            };
+            let mappedRequests = (requestData || []).map((r: any) => ({
+                id: `req_${r.id}`, // Flagged ID
+                displayId: `REQ-${r.id.substring(0,4).toUpperCase()}`,
+                status: statusMap(r.status),
+                totalAmount: r.subtotal,
+                isPaid: false,
+                createdAt: r.created_at,
+                user: { id: r.consumer_user_id, name: r.status === 'REJECTED' ? 'Rejected Request' : 'Awaiting Payment', phone: 'N/A' },
+                items: r.items.map((item: any) => ({
+                    id: String(item.id || Math.random()),
+                    quantity: item.quantity,
+                    price: item.price,
+                    storeProduct: { stock: 99, product: { name: item.name, image: '', gstRate: 0 } }
+                })),
+                cancelledReason: r.rejection_reason || undefined,
+                returnReason: undefined,
+                returnImages: []
+            }));
+
+            // Deduplication logic: Aggressively filter out order_requests if a real paid Order exists 
+            // for the same user that was created recently (assuming it's the fulfillment of the request).
+            mappedRequests = mappedRequests.filter((req: any) => {
+                const rawReqId = req.id.replace('req_', '');
+                const hasRealOrder = realOrders.some((ro: any) => 
+                    ro.orderRequestId === rawReqId
+                );
+                return !hasRealOrder;
+            });
+
+            if (currentFetchId === fetchIdRef.current) {
+                setOrders([...mappedRequests, ...realOrders]);
+            }
         } catch (error) {
             console.error('Error fetching orders:', error);
             setOrders([]);
@@ -139,35 +240,34 @@ export function useOrders() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [storeId, activeStoreId]);
+    }, [merchantId, activeStoreId, safeStartDate, safeEndDate]);
 
     useEffect(() => {
         fetchOrders();
 
-        if (storeId) {
+        if (merchantId && activeStoreId) {
             // Keep realtime subscription broad (store-level) to avoid
             // Supabase filter quirks with is.null on branch_id
-            const channel = supabase.channel(`orders-${storeId}-${activeStoreId || 'main'}`)
+            const channel = supabase.channel(`orders-${merchantId}-${activeStoreId}`)
                 .on('postgres_changes', {
                     event: '*',
                     schema: 'public',
                     table: 'orders',
-                    filter: `store_id=eq.${storeId}`
+                    filter: `store_id=eq.${merchantId}`
                 }, (payload) => {
-                    const incoming = payload.new as any;
-                    const incomingBranchId = incoming?.branch_id || null;
-
-                    // Manually filter: only process if the payload matches the active workspace
-                    let isRelevant = true;
-                    if (activeStoreId && merchantId) {
-                        if (activeStoreId === merchantId) {
-                            // Main store view — only care about orders with no branch
-                            isRelevant = incomingBranchId === null;
-                        } else {
-                            // Branch view — only care about orders for this branch
-                            isRelevant = incomingBranchId === activeStoreId;
-                        }
+                    if (payload.eventType === 'DELETE') {
+                        console.log('Real-time order update (unconditional):', payload.eventType);
+                        fetchOrders();
+                        return;
                     }
+
+                    console.log('[Realtime]', payload.eventType, payload.table);
+
+                    const incoming = (payload.new ?? payload.old) as any;
+                    const incomingBranchId = incoming?.branch_id;
+
+                    // Branch view — only care about orders for the active branch
+                    const isRelevant = incomingBranchId === activeStoreId;
 
                     if (isRelevant) {
                         console.log('Real-time order update (relevant):', payload.eventType);
@@ -178,13 +278,53 @@ export function useOrders() {
                 })
                 .subscribe();
 
+            // Secondary subscription for order_requests
+            const reqChannel = supabase.channel(`requests-${merchantId}-${activeStoreId}`)
+                .on('postgres_changes', {
+                    event: '*',
+                    schema: 'public',
+                    table: 'order_requests',
+                    filter: `branch_id=eq.${activeStoreId}`
+                }, (payload) => {
+                    if (payload.eventType === 'DELETE') {
+                        console.log('Real-time order request update (unconditional):', payload.eventType);
+                        fetchOrders();
+                        return;
+                    }
+
+                    // With server-side filtering on branch_id, all received events are relevant.
+                    console.log('Real-time order request (relevant):', payload.eventType);
+                    fetchOrders();
+                })
+                .subscribe();
+
             return () => {
                 supabase.removeChannel(channel);
+                supabase.removeChannel(reqChannel);
             };
         }
-    }, [storeId, activeStoreId, merchantId, fetchOrders]);
+    }, [merchantId, activeStoreId, fetchOrders]);
 
     const updateOrderStatus = async (orderId: string, status: OrderStatus, cancellationReason?: string) => {
+        // INTERCEPT: If this is an order_request, bypass the backend and update Supabase directly
+        if (orderId.startsWith('req_')) {
+            const rawId = orderId.replace('req_', '');
+            
+            // Map the merchant status intent to the request status
+            const newReqStatus = (status === 'CONFIRMED' || status === 'PREPARING') ? 'ACCEPTED' : 'REJECTED';
+            
+            const { error } = await supabase
+                .from('order_requests')
+                .update({ status: newReqStatus, rejection_reason: cancellationReason })
+                .eq('id', rawId);
+                
+            if (error) return { success: false, error };
+            
+            // Optimistically remove the request from the UI. 
+            // The real paid order will arrive via real-time websockets later.
+            setOrders(prev => prev.filter(o => o.id !== orderId));
+            return { success: true };
+        }
 
         try {
             const response = await fetch(`${API_URL}/orders/${orderId}/status`, {

@@ -34,7 +34,7 @@ const DEFAULT_FILTERS: FilterState = {
 
 export default function InventoryScreen() {
     const router = useRouter();
-    const { inventory, loading, refreshing, error, refetch, updateItem, deleteItem, toggleStatus, storeId } = useInventory();
+    const { inventory, loading, refreshing, error, refetch, updateItem, deleteItem, toggleStatus, branchId } = useInventory();
     const { activeStoreId, branches } = useStore();
 
     const activeBranch = branches.find(b => b.id === activeStoreId);
@@ -320,7 +320,7 @@ export default function InventoryScreen() {
                 initialTab={filterTab}
             />
 
-            {storeId && (
+            {branchId && (
                 <AddCustomProductModal
                     visible={editModalVisible}
                     onClose={() => {
@@ -332,7 +332,7 @@ export default function InventoryScreen() {
                         setItemToEdit(null);
                         refetch();
                     }}
-                    storeId={storeId}
+                    storeId={branchId}
                     itemToEdit={itemToEdit}
                 />
             )}

@@ -11,6 +11,7 @@ interface RejectionReasonModalProps {
 }
 
 const REASONS = [
+    'Item Out of Stock',
     'Store Closing Soon',
     'Too Many Orders',
     'Price Mismatch',

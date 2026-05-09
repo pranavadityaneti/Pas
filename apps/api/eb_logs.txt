@@ -1,0 +1,434 @@
+Retrieving logs...
+============= i-0d70e7a2d56f2a735 ==============
+----------------------------------------
+/var/log/eb-engine.log
+----------------------------------------
+2026/04/29 01:54:37.618420 [INFO] Recreating /var/app/staging/
+2026/04/29 01:54:37.618524 [INFO] extracting /opt/elasticbeanstalk/deployment/app_source_bundle to /var/app/staging/
+2026/04/29 01:54:37.618536 [INFO] Running command: /usr/bin/unzip -q -o /opt/elasticbeanstalk/deployment/app_source_bundle -d /var/app/staging/
+2026/04/29 01:54:38.026303 [INFO] finished extracting /opt/elasticbeanstalk/deployment/app_source_bundle to /var/app/staging/ successfully
+2026/04/29 01:54:38.047666 [INFO] Executing instruction: RunAppDeployPreBuildHooks
+2026/04/29 01:54:38.047699 [INFO] No hooks found in .platform/hooks/prebuild/, skipping
+2026/04/29 01:54:38.047704 [INFO] Executing instruction: Install customer specified node.js version
+2026/04/29 01:54:38.047831 [WARN] using default version of nodejs instead of installing specified version of nodejs
+2026/04/29 01:54:38.047850 [INFO] Executing instruction: Use NPM to install dependencies
+2026/04/29 01:54:38.047855 [INFO] found node modules dependencies, skip installing dependencies
+2026/04/29 01:54:38.047858 [INFO] Executing instruction: check Procfile
+2026/04/29 01:54:38.047860 [INFO] checking Procfile
+2026/04/29 01:54:38.047864 [INFO] detected Procfile in application source bundle ...
+2026/04/29 01:54:38.047867 [INFO] Executing instruction: configure X-Ray
+2026/04/29 01:54:38.047870 [INFO] X-Ray is not enabled.
+2026/04/29 01:54:38.047872 [INFO] Executing instruction: configure proxy server
+2026/04/29 01:54:38.047882 [INFO] Recreating /var/proxy/staging/nginx
+2026/04/29 01:54:38.070827 [INFO] Executing instruction: configure healthd specific proxy conf
+2026/04/29 01:54:38.074928 [INFO] Running command: systemctl show -p PartOf healthd.service
+2026/04/29 01:54:38.087912 [WARN] Warning: process healthd is already registered...
+Deregistering the process ...
+2026/04/29 01:54:38.087937 [INFO] Running command: systemctl show -p PartOf healthd.service
+2026/04/29 01:54:38.099074 [INFO] Running command: systemctl is-active healthd.service
+2026/04/29 01:54:38.107872 [INFO] Running command: systemctl show -p PartOf healthd.service
+2026/04/29 01:54:38.117955 [INFO] Running command: systemctl stop healthd.service
+2026/04/29 01:54:38.222613 [INFO] Running command: systemctl disable healthd.service
+2026/04/29 01:54:38.482292 [INFO] Removed "/etc/systemd/system/multi-user.target.wants/healthd.service".
+
+2026/04/29 01:54:38.482453 [INFO] Running command: systemctl daemon-reload
+2026/04/29 01:54:38.723861 [INFO] Running command: systemctl reset-failed
+2026/04/29 01:54:38.735223 [INFO] Running command: systemctl daemon-reload
+2026/04/29 01:54:38.941092 [INFO] Running command: systemctl reset-failed
+2026/04/29 01:54:38.948845 [INFO] Running command: systemctl is-enabled aws-eb.target
+2026/04/29 01:54:38.956919 [INFO] Running command: systemctl enable aws-eb.target
+2026/04/29 01:54:39.200660 [INFO] Running command: systemctl start aws-eb.target
+2026/04/29 01:54:39.209258 [INFO] Running command: systemctl enable healthd.service
+2026/04/29 01:54:39.451237 [INFO] Created symlink /etc/systemd/system/multi-user.target.wants/healthd.service → /etc/systemd/system/healthd.service.
+
+2026/04/29 01:54:39.451266 [INFO] Running command: systemctl show -p PartOf healthd.service
+2026/04/29 01:54:39.461692 [INFO] Running command: systemctl is-active healthd.service
+2026/04/29 01:54:39.469136 [INFO] Running command: systemctl start healthd.service
+2026/04/29 01:54:39.525440 [INFO] Copying file /opt/elasticbeanstalk/config/private/healthd/healthd_logformat.conf to /var/proxy/staging/nginx/conf.d/healthd_logformat.conf
+2026/04/29 01:54:39.526698 [INFO] Copying file /opt/elasticbeanstalk/config/private/healthd/healthd_nginx.conf to /var/proxy/staging/nginx/conf.d/elasticbeanstalk/healthd.conf
+2026/04/29 01:54:39.527892 [INFO] Executing instruction: configure log streaming
+2026/04/29 01:54:39.527903 [INFO] log streaming is not enabled
+2026/04/29 01:54:39.527907 [INFO] disable log stream
+2026/04/29 01:54:39.527919 [INFO] Running command: systemctl show -p PartOf amazon-cloudwatch-agent.service
+2026/04/29 01:54:39.543536 [INFO] Running command: systemctl stop amazon-cloudwatch-agent.service
+2026/04/29 01:54:39.559486 [INFO] Executing instruction: GetToggleForceRotate
+2026/04/29 01:54:39.559508 [INFO] Checking if logs need forced rotation
+2026/04/29 01:54:39.559529 [INFO] Running command: /opt/aws/bin/cfn-get-metadata -s arn:aws:cloudformation:ap-south-1:854408056396:stack/awseb-e-wk9muqt2pc-stack/553bdf10-2b93-11f1-8ebf-027269123837 -r AWSEBAutoScalingGroup --region ap-south-1
+2026/04/29 01:54:39.924897 [INFO] Running command: /opt/aws/bin/cfn-get-metadata -s arn:aws:cloudformation:ap-south-1:854408056396:stack/awseb-e-wk9muqt2pc-stack/553bdf10-2b93-11f1-8ebf-027269123837 -r AWSEBBeanstalkMetadata --region ap-south-1
+2026/04/29 01:54:40.329377 [INFO] Generating rsyslog config from Procfile
+2026/04/29 01:54:40.332463 [INFO] Running command: systemctl restart rsyslog.service
+2026/04/29 01:54:40.761949 [INFO] Executing instruction: PostBuildEbExtension
+2026/04/29 01:54:40.762018 [INFO] Starting executing the config set Infra-EmbeddedPostBuild.
+2026/04/29 01:54:40.762035 [INFO] Running command: /opt/aws/bin/cfn-init -s arn:aws:cloudformation:ap-south-1:854408056396:stack/awseb-e-wk9muqt2pc-stack/553bdf10-2b93-11f1-8ebf-027269123837 -r AWSEBAutoScalingGroup --region ap-south-1 --configsets Infra-EmbeddedPostBuild
+2026/04/29 01:54:41.171546 [INFO] Finished executing the config set Infra-EmbeddedPostBuild.
+
+2026/04/29 01:54:41.171666 [INFO] Executing instruction: CleanEbExtensions
+2026/04/29 01:54:41.171768 [INFO] Cleaned ebextensions subdirectories from app staging directory.
+2026/04/29 01:54:41.171773 [INFO] Executing instruction: RunAppDeployPreDeployHooks
+2026/04/29 01:54:41.171810 [INFO] Executing platform hooks in .platform/hooks/predeploy/
+2026/04/29 01:54:41.171861 [INFO] Following scripts will be executed in order: [01_build.sh]
+2026/04/29 01:54:41.171866 [INFO] Try add execution permission
+2026/04/29 01:54:41.171876 [INFO] Running command: file -b /var/app/staging/.platform/hooks/predeploy/01_build.sh
+2026/04/29 01:54:41.203646 [INFO] Bourne-Again shell script, ASCII text executable
+
+2026/04/29 01:54:41.203679 [INFO] Running script: .platform/hooks/predeploy/01_build.sh
+2026/04/29 01:54:59.526366 [ERROR] An error occurred during execution of command [app-deploy] - [RunAppDeployPreDeployHooks]. Stop running the command. Error: Command .platform/hooks/predeploy/01_build.sh failed with error exit status 2. Stderr:npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+npm warn deprecated rimraf@2.7.1: Rimraf versions prior to v4 are no longer supported
+npm warn deprecated lodash.isequal@4.5.0: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated fstream@1.0.12: This package is no longer supported.
+npm notice
+npm notice New minor version of npm available! 11.11.0 -> 11.13.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.13.0
+npm notice To update run: npm install -g npm@11.13.0
+npm notice
+ 
+
+2026/04/29 01:54:59.526985 [INFO] Executing cleanup logic
+2026/04/29 01:54:59.541514 [INFO] CommandService Response: {"status":"FAILURE","api_version":"1.0","results":[{"status":"FAILURE","msg":"Engine execution has encountered an error.","returncode":1,"events":[{"msg":"Instance deployment: The deployment used the default Node.js version for your platform version instead of the Node.js version included in your 'package.json'.","timestamp":1777427678047,"severity":"WARN"},{"msg":"Instance deployment failed. For details, see 'eb-engine.log'.","timestamp":1777427699527,"severity":"ERROR"}]}]}
+
+2026/04/29 01:54:59.663854 [INFO] Platform Engine finished execution on command: app-deploy
+
+2026/04/29 01:55:33.017475 [INFO] Starting...
+2026/04/29 01:55:33.017522 [INFO] Starting EBPlatform-PlatformEngine
+2026/04/29 01:55:33.017607 [INFO] reading event message file
+2026/04/29 01:55:33.023193 [INFO] Engine received EB command cfn-hup-exec
+
+2026/04/29 01:55:33.204123 [INFO] Running command: /opt/aws/bin/cfn-get-metadata -s arn:aws:cloudformation:ap-south-1:854408056396:stack/awseb-e-wk9muqt2pc-stack/553bdf10-2b93-11f1-8ebf-027269123837 -r AWSEBAutoScalingGroup --region ap-south-1
+2026/04/29 01:55:33.869627 [INFO] Running command: /opt/aws/bin/cfn-get-metadata -s arn:aws:cloudformation:ap-south-1:854408056396:stack/awseb-e-wk9muqt2pc-stack/553bdf10-2b93-11f1-8ebf-027269123837 -r AWSEBBeanstalkMetadata --region ap-south-1
+2026/04/29 01:55:34.155067 [INFO] checking whether command tail-log is applicable to this instance...
+2026/04/29 01:55:34.155085 [INFO] this command is applicable to the instance, thus instance should execute command
+2026/04/29 01:55:34.155089 [INFO] Engine command: (tail-log)
+
+2026/04/29 01:55:34.156296 [INFO] Executing instruction: GetTailLogs
+2026/04/29 01:55:34.156303 [INFO] Tail Logs...
+2026/04/29 01:55:34.158474 [INFO] Running command: tail -n 100 /var/log/eb-engine.log
+
+
+----------------------------------------
+/var/log/eb-hooks.log
+----------------------------------------
+a different dependency.
+
+Run `npm audit` for details.
+[Pre-deploy] Building TypeScript...
+[Pre-deploy] Generating Prisma client...
+Prisma schema loaded from prisma/schema.prisma
+
+✔ Generated Prisma Client (v5.22.0) to ./node_modules/@prisma/client in 569ms
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: Easily identify and fix slow SQL queries in your app. Optimize helps you enhance your visibility: https://pris.ly/--optimize
+
+[Pre-deploy] Pruning devDependencies...
+
+removed 60 packages, and audited 248 packages in 977ms
+
+26 packages are looking for funding
+  run `npm fund` for details
+
+6 vulnerabilities (2 moderate, 3 high, 1 critical)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+Some issues need review, and may require choosing
+a different dependency.
+
+Run `npm audit` for details.
+[Pre-deploy] Build complete!
+
+2026/04/12 10:02:03.102178 [INFO] npm warn deprecated rimraf@2.7.1: Rimraf versions prior to v4 are no longer supported
+npm warn deprecated lodash.isequal@4.5.0: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.
+npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated fstream@1.0.12: This package is no longer supported.
+npm notice
+npm notice New minor version of npm available! 11.11.0 -> 11.12.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.12.1
+npm notice To update run: npm install -g npm@11.12.1
+npm notice
+┌─────────────────────────────────────────────────────────┐
+│  Update available 5.22.0 -> 7.7.0                       │
+│                                                         │
+│  This is a major update - please follow the guide at    │
+│  https://pris.ly/d/major-version-upgrade                │
+│                                                         │
+│  Run the following to update                            │
+│    npm i --save-dev prisma@latest                       │
+│    npm i @prisma/client@latest                          │
+└─────────────────────────────────────────────────────────┘
+
+2026/04/29 01:54:41.203690 [INFO] Running command: .platform/hooks/predeploy/01_build.sh
+2026/04/29 01:54:59.522903 [INFO] [Pre-deploy] Installing ALL dependencies (including devDependencies)...
+
+> pas-api@1.0.0 postinstall
+> prisma generate
+
+Prisma schema loaded from prisma/schema.prisma
+
+✔ Generated Prisma Client (v5.22.0) to ./node_modules/@prisma/client in 614ms
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: Want to react to database changes in your app as they happen? Discover how with Pulse: https://pris.ly/tip-1-pulse
+
+
+added 269 packages, changed 45 packages, and audited 315 packages in 12s
+
+33 packages are looking for funding
+  run `npm fund` for details
+
+12 vulnerabilities (8 moderate, 4 high)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues possible (including breaking changes), run:
+  npm audit fix --force
+
+Some issues need review, and may require choosing
+a different dependency.
+
+Run `npm audit` for details.
+[Pre-deploy] Building TypeScript...
+src/index.ts(1894,13): error TS2322: Type '{ orderNumber: string; userId: any; storeId: any; totalAmount: any; status: "PENDING"; isPaid: false; items: { create: any; }; }' is not assignable to type '(Without<OrderCreateInput, OrderUncheckedCreateInput> & OrderUncheckedCreateInput) | (Without<...> & OrderCreateInput)'.
+  Type '{ orderNumber: string; userId: any; storeId: any; totalAmount: any; status: "PENDING"; isPaid: false; items: { create: any; }; }' is not assignable to type 'Without<OrderUncheckedCreateInput, OrderCreateInput> & OrderCreateInput'.
+    Type '{ orderNumber: string; userId: any; storeId: any; totalAmount: any; status: "PENDING"; isPaid: false; items: { create: any; }; }' is missing the following properties from type 'OrderCreateInput': store, branch, user
+
+2026/04/29 01:54:59.523581 [INFO] npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+npm warn deprecated rimraf@2.7.1: Rimraf versions prior to v4 are no longer supported
+npm warn deprecated lodash.isequal@4.5.0: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated fstream@1.0.12: This package is no longer supported.
+npm notice
+npm notice New minor version of npm available! 11.11.0 -> 11.13.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.13.0
+npm notice To update run: npm install -g npm@11.13.0
+npm notice
+
+
+
+----------------------------------------
+/var/log/nginx/access.log
+----------------------------------------
+172.31.43.3 - - [29/Apr/2026:01:43:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:43:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:43:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:44:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:44:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:44:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:44:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:44:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:44:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:44:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:44:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:45:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:45:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:45:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:45:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:45:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:45:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:45:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:45:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:46:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:46:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:46:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:46:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:46:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:46:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:46:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:46:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:47:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:47:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:47:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:47:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:47:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:47:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:47:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:47:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:48:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:48:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:48:20 +0000] "POST /HNAP1/ HTTP/1.1" 400 0 "-" "-" "45.230.66.111"
+172.31.2.122 - - [29/Apr/2026:01:48:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:48:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:48:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:48:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:48:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:48:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:49:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:49:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:49:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:49:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:49:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:49:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:49:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:49:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:50:03 +0000] "GET / HTTP/1.1" 200 31 "-" "Mozilla/5.0" "204.76.203.206"
+172.31.2.122 - - [29/Apr/2026:01:50:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:50:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:50:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:50:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:50:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:50:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:50:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:50:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:51:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:51:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:51:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:51:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:51:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:51:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:51:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:51:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:52:05 +0000] "POST /auth/send-otp HTTP/1.1" 200 56 "-" "Expo/54.0.6 CFNetwork/3860.300.31 Darwin/25.3.0" "157.50.145.145"
+172.31.43.3 - - [29/Apr/2026:01:52:09 +0000] "POST /auth/verify-otp HTTP/1.1" 500 45 "-" "Expo/54.0.6 CFNetwork/3860.300.31 Darwin/25.3.0" "157.50.145.145"
+172.31.2.122 - - [29/Apr/2026:01:52:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:52:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:52:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:52:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:52:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:52:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:52:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:52:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:53:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:53:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:53:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:53:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:53:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:53:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:53:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:53:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:54:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:54:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:54:23 +0000] "GET / HTTP/1.1" 200 31 "-" "Mozilla/5.0" "204.76.203.206"
+172.31.2.122 - - [29/Apr/2026:01:54:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:54:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:54:39 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:54:42 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:54:54 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:54:57 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:55:09 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:55:12 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.2.122 - - [29/Apr/2026:01:55:24 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+172.31.43.3 - - [29/Apr/2026:01:55:27 +0000] "GET /health HTTP/1.1" 200 84 "-" "ELB-HealthChecker/2.0" "-"
+
+
+----------------------------------------
+/var/log/nginx/error.log
+----------------------------------------
+2026/04/12 10:02:06 [warn] 2208#2208: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/12 10:02:06 [warn] 2242#2242: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/12 10:02:06 [warn] 2243#2243: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/21 01:29:19 [error] 2245#2245: *214256 client intended to send too large body: 10485761 bytes, client: 172.31.9.150, server: , request: "POST / HTTP/1.1", host: "3.6.169.16"
+2026/04/29 01:54:41 [warn] 783164#783164: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+2026/04/29 01:54:41 [notice] 783164#783164: signal process started
+2026/04/29 01:54:41 [warn] 2244#2244: could not build optimal types_hash, you should increase either types_hash_max_size: 1024 or types_hash_bucket_size: 64; ignoring types_hash_bucket_size
+
+
+----------------------------------------
+/var/log/web.stdout.log
+----------------------------------------
+Apr 29 01:45:42 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:45:54 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:45:57 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:46:09 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:46:12 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:46:24 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:46:27 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:46:39 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:46:42 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:46:54 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:46:57 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:47:09 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:47:12 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:47:24 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:47:27 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:47:39 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:47:42 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:47:54 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:47:57 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:48:09 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:48:12 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:48:24 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:48:27 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:48:39 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:48:42 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:48:54 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:48:57 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:49:09 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:49:12 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:49:24 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:49:27 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:49:39 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:49:42 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:49:54 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:49:57 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:50:03 ip-172-31-13-171 web[2191]: [API Request] GET /
+Apr 29 01:50:09 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:50:12 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:50:24 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:50:27 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:50:39 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:50:42 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:50:54 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:50:57 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:51:09 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:51:12 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:51:24 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:51:27 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:51:39 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:51:42 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:51:54 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:51:57 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:52:05 ip-172-31-13-171 web[2191]: [API Request] POST /auth/send-otp
+Apr 29 01:52:05 ip-172-31-13-171 web[2191]: >>> [DEBUG] INCOMING BODY: {"phone":"919959777027","isLogin":true}
+Apr 29 01:52:05 ip-172-31-13-171 web[2191]: >>> [DEBUG] PARSED PHONE: 919959777027
+Apr 29 01:52:05 ip-172-31-13-171 web[2191]: [Reviewer Bypass] Intercepted Send OTP request. Bypassing WhatsApp API.
+Apr 29 01:52:09 ip-172-31-13-171 web[2191]: [API Request] POST /auth/verify-otp
+Apr 29 01:52:09 ip-172-31-13-171 web[2191]: >>> [DEBUG] INCOMING BODY: {"phone":"919959777027","otp":"123456"}
+Apr 29 01:52:09 ip-172-31-13-171 web[2191]: >>> [DEBUG] PARSED PHONE: 919959777027
+Apr 29 01:52:09 ip-172-31-13-171 web[2191]: [Reviewer Bypass] Test credentials verified. Fetching email for UUID: 200ea527-0fb9-4db0-8165-ca1286ea91b0
+Apr 29 01:52:09 ip-172-31-13-171 web[2191]: [Reviewer Bypass] Failed to resolve email: AuthApiError: User not found
+Apr 29 01:52:09 ip-172-31-13-171 web[2191]:    at handleError (/var/app/current/node_modules/@supabase/auth-js/dist/main/lib/fetch.js:66:11)
+Apr 29 01:52:09 ip-172-31-13-171 web[2191]:    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+Apr 29 01:52:09 ip-172-31-13-171 web[2191]:    at async _handleRequest (/var/app/current/node_modules/@supabase/auth-js/dist/main/lib/fetch.js:109:9)
+Apr 29 01:52:09 ip-172-31-13-171 web[2191]:    at async _request (/var/app/current/node_modules/@supabase/auth-js/dist/main/lib/fetch.js:91:18)
+Apr 29 01:52:09 ip-172-31-13-171 web[2191]:    at async GoTrueAdminApi.getUserById (/var/app/current/node_modules/@supabase/auth-js/dist/main/GoTrueAdminApi.js:198:20)
+Apr 29 01:52:09 ip-172-31-13-171 web[2191]:    at async /var/app/current/dist/index.js:2612:58 {
+Apr 29 01:52:09 ip-172-31-13-171 web[2191]:  __isAuthError: true,
+Apr 29 01:52:09 ip-172-31-13-171 web[2191]:  status: 404,
+Apr 29 01:52:09 ip-172-31-13-171 web[2191]:  code: 'user_not_found'
+Apr 29 01:52:09 ip-172-31-13-171 web[2191]: }
+Apr 29 01:52:09 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:52:12 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:52:24 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:52:27 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:52:39 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:52:42 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:52:54 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:52:57 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:53:09 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:53:12 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:53:24 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:53:27 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:53:39 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:53:42 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:53:54 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:53:57 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:54:09 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:54:12 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:54:23 ip-172-31-13-171 web[2191]: [API Request] GET /
+Apr 29 01:54:24 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:54:27 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:54:39 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:54:42 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:54:54 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:54:57 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:55:09 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:55:12 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:55:24 ip-172-31-13-171 web[2191]: [API Request] GET /health
+Apr 29 01:55:27 ip-172-31-13-171 web[2191]: [API Request] GET /health
+
+

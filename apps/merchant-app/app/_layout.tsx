@@ -6,6 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 import { StoreProvider } from '../src/context/StoreContext';
 import { NotificationProvider } from '../src/context/NotificationContext';
 import { UserProvider } from '../src/context/UserContext';
+import { ToastContainer } from '../src/components/NotificationToast';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { DefaultTheme, ThemeProvider } from '@react-navigation/native';
@@ -27,6 +28,7 @@ export default function RootLayout() {
                                         <Stack.Screen name="(auth)" />
                                         <Stack.Screen name="(main)" />
                                     </Stack>
+                                    <ToastContainer />
                                 </NotificationProvider>
                             </StoreProvider>
                         </UserProvider>

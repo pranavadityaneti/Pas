@@ -119,7 +119,7 @@ export default function CategoryDetailScreen() {
         if (modalSortBy === 'distance') {
             list.sort((a, b) => a.rawDist - b.rawDist);
         } else if (modalSortBy === 'prep_time') {
-            list.sort((a, b) => (parseInt(a.prepTime) || 99) - (parseInt(b.prepTime) || 99));
+            list.sort((a, b) => (parseInt(a.prepTime || '99') || 99) - (parseInt(b.prepTime || '99') || 99));
         }
 
         // ── Quick filter pills (applied after modal sort) ──
