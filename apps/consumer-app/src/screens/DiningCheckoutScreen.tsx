@@ -964,6 +964,7 @@ export default function DiningCheckoutScreen() {
                             
                             {showDatePicker && (
                                 <DateTimePicker
+                                    key="date-picker"
                                     value={tempDate}
                                     mode="date"
                                     display="spinner"
@@ -971,10 +972,12 @@ export default function DiningCheckoutScreen() {
                                     maximumDate={maxDate}
                                     onChange={onDateChange}
                                     textColor="#111827"
+                                    themeVariant="light"
                                 />
                             )}
                             {showTimePicker && (
                                 <DateTimePicker
+                                    key="time-picker"
                                     value={tempTime}
                                     mode="time"
                                     display="spinner"
@@ -982,6 +985,7 @@ export default function DiningCheckoutScreen() {
                                     minimumDate={date.toDateString() === new Date().toDateString() ? new Date(Date.now() + 30 * 60000) : undefined}
                                     onChange={onTimeChange}
                                     textColor="#111827"
+                                    themeVariant="light"
                                 />
                             )}
                         </View>

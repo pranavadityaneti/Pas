@@ -11,6 +11,7 @@
       "distribution": "internal"
     },
     "production": {
+      "channel": "production",
       "autoIncrement": true,
       "distribution": "store",
       "env": {

@@ -63,10 +63,16 @@ export function useOrderRequests(): UseOrderRequestsReturn {
         setLoading(true);
 
         try {
-            // First check session — if expired, try to refresh
+            // First check session — if expired or expiring soon, refresh proactively
             let { data: { session } } = await supabase.auth.getSession();
-            if (!session) {
-                console.warn('[useOrderRequests] No session — attempting refresh');
+            
+            // Check if token is expired or expiring within 60 seconds
+            const tokenExpired = session?.expires_at 
+                ? (session.expires_at * 1000) - Date.now() < 60_000 
+                : true;
+            
+            if (!session || tokenExpired) {
+                console.warn('[useOrderRequests] Session missing or expiring — attempting refresh');
                 const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
                 if (refreshError || !refreshData.session) {
                     throw new Error('Your session has expired. Please log in again.');

@@ -8,6 +8,12 @@
     "scheme": "consumerapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "updates": {
+      "url": "https://u.expo.dev/350a8772-4cd9-439e-9d0e-a99a91c08915"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.pas.consumerapp",

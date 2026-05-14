@@ -13,85 +13,41 @@ export default function ProfileScreen() {
     const [modalVisible, setModalVisible] = useState(false);
     const [saving, setSaving] = useState(false);
 
-    // OTP State
-    const [otpSent, setOtpSent] = useState(false);
-    const [otp, setOtp] = useState('');
-    const [verifying, setVerifying] = useState(false);
-
     // Form State
     const [formState, setFormState] = useState({
         name: '',
-        phone: '',
         email: ''
     });
 
-    const handleInitialSave = async () => {
+    const handleSave = async () => {
         Keyboard.dismiss();
-        // Check if phone number changed
-        if (formState.phone !== contextUser?.phone) {
-            // Trigger OTP Flow
-            setOtpSent(true);
-            Alert.alert('Verification Code Sent', 'A verification code has been sent to your new number (Mock: 123456)');
-        } else {
-            // Normal Save
-            handleFinalSave();
-        }
-    };
-
-    const handleVerifyAndSave = async () => {
-        if (otp !== '123456') {
-            Alert.alert('Invalid OTP', 'Please enter the correct verification code.');
-            return;
-        }
-        handleFinalSave();
-    };
-
-    const handleFinalSave = async () => {
         if (!contextUser?.id) return;
         setSaving(true);
-        setVerifying(true);
-
         try {
             const { error } = await supabase
                 .from('User')
                 .update({
                     name: formState.name,
-                    email: formState.email,
-                    phone: formState.phone
+                    email: formState.email
                 })
                 .eq('id', contextUser.id);
-
             if (error) throw error;
-
-            // Close modal and reset state
             setModalVisible(false);
-            setOtpSent(false);
-            setOtp('');
-
-            // The realtime subscription in UserContext will automatically
-            // update contextUser when the User row changes — no need to
-            // call refreshUser() here (that was causing double-updates
-            // and rapid re-renders/flickering)
             Alert.alert('Success', 'Profile updated successfully');
-
         } catch (error) {
             console.error('Error updating profile:', error);
             Alert.alert('Error', 'Failed to update profile');
         } finally {
             setSaving(false);
-            setVerifying(false);
         }
     };
 
     const handleClose = () => {
         setModalVisible(false);
-        setOtpSent(false);
-        setOtp('');
         // Reset to context user
         if (contextUser) {
             setFormState({
                 name: contextUser.name || '',
-                phone: contextUser.phone || '',
                 email: contextUser.email || ''
             });
         }
@@ -139,7 +95,6 @@ export default function ProfileScreen() {
                     if (contextUser) {
                         setFormState({
                             name: contextUser.name || '',
-                            phone: contextUser.phone || '',
                             email: contextUser.email || ''
                         });
                     }
@@ -152,97 +107,50 @@ export default function ProfileScreen() {
             <BottomModal
                 visible={modalVisible}
                 onClose={handleClose}
-                title={otpSent ? "Verify Phone Number" : "Edit Profile"}
+                title="Edit Profile"
             >
                 <View style={styles.form}>
-                    {!otpSent ? (
-                        <>
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.inputLabel}>Full Name</Text>
-                                <TextInput
-                                    style={styles.input}
-                                    value={formState.name}
-                                    onChangeText={t => setFormState({ ...formState, name: t })}
-                                    placeholder="Enter full name"
-                                />
-                            </View>
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.inputLabel}>Role</Text>
-                                <TextInput
-                                    style={[styles.input, { backgroundColor: '#F3F4F6', color: '#6B7280' }]}
-                                    value={contextUser?.role || 'User'}
-                                    editable={false}
-                                />
-                            </View>
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.inputLabel}>Phone Number</Text>
-                                <TextInput
-                                    style={styles.input}
-                                    value={formState.phone}
-                                    onChangeText={t => setFormState({ ...formState, phone: t })}
-                                    placeholder="Enter phone number"
-                                    keyboardType="phone-pad"
-                                />
-                            </View>
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.inputLabel}>Email (Optional)</Text>
-                                <TextInput
-                                    style={styles.input}
-                                    value={formState.email}
-                                    onChangeText={t => setFormState({ ...formState, email: t })}
-                                    placeholder="Enter email"
-                                    autoCapitalize="none"
-                                    keyboardType="email-address"
-                                />
-                            </View>
-
-                            <View style={styles.modalActions}>
-                                <TouchableOpacity style={styles.modalCancel} onPress={handleClose}>
-                                    <Text style={styles.modalCancelText}>Cancel</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={[styles.modalSave, saving && { opacity: 0.7 }]}
-                                    onPress={handleInitialSave}
-                                    disabled={saving}
-                                >
-                                    <Text style={styles.modalSaveText}>
-                                        {formState.phone !== contextUser?.phone ? 'Verify & Save' : 'Save Changes'}
-                                    </Text>
-                                </TouchableOpacity>
-                            </View>
-                        </>
-                    ) : (
-                        <>
-                            <Text style={{ textAlign: 'center', marginBottom: 20, color: '#666' }}>
-                                We've sent a verification code to {formState.phone}. Please enter it below.
-                            </Text>
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.inputLabel}>Verification Code (OTP)</Text>
-                                <TextInput
-                                    style={[styles.input, { textAlign: 'center', letterSpacing: 8, fontSize: 24 }]}
-                                    value={otp}
-                                    onChangeText={setOtp}
-                                    placeholder="123456"
-                                    keyboardType="number-pad"
-                                    maxLength={6}
-                                    autoFocus
-                                    textContentType="oneTimeCode"
-                                />
-                            </View>
-                            <View style={styles.modalActions}>
-                                <TouchableOpacity style={styles.modalCancel} onPress={() => setOtpSent(false)}>
-                                    <Text style={styles.modalCancelText}>Back</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={[styles.modalSave, verifying && { opacity: 0.7 }]}
-                                    onPress={handleVerifyAndSave}
-                                    disabled={verifying}
-                                >
-                                    <Text style={styles.modalSaveText}>{verifying ? 'Verifying...' : 'Confirm'}</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </>
-                    )}
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Full Name</Text>
+                        <TextInput
+                            style={styles.input}
+                            value={formState.name}
+                            onChangeText={t => setFormState({ ...formState, name: t })}
+                            placeholder="Enter full name"
+                        />
+                    </View>
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Phone Number</Text>
+                        <TextInput
+                            style={[styles.input, { backgroundColor: '#F3F4F6', color: '#6B7280' }]}
+                            value={contextUser?.phone || ''}
+                            editable={false}
+                        />
+                        <Text style={{ fontSize: 12, color: '#9CA3AF', marginTop: 4 }}>Phone number cannot be changed</Text>
+                    </View>
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Email (Optional)</Text>
+                        <TextInput
+                            style={styles.input}
+                            value={formState.email}
+                            onChangeText={t => setFormState({ ...formState, email: t })}
+                            placeholder="Enter email"
+                            autoCapitalize="none"
+                            keyboardType="email-address"
+                        />
+                    </View>
+                    <View style={styles.modalActions}>
+                        <TouchableOpacity style={styles.modalCancel} onPress={handleClose}>
+                            <Text style={styles.modalCancelText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.modalSave, saving && { opacity: 0.7 }]}
+                            onPress={handleSave}
+                            disabled={saving}
+                        >
+                            <Text style={styles.modalSaveText}>{saving ? 'Saving...' : 'Save Changes'}</Text>
+                        </TouchableOpacity>
+                    </View>
                 </View>
             </BottomModal>
         </SafeAreaView>

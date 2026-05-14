@@ -183,11 +183,20 @@ export default function BookingModal({ visible, onClose, restaurant }: BookingMo
     const handleConfirm = async () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-        const { data: { session } } = await supabase.auth.getSession();
+        let { data: { session } } = await supabase.auth.getSession();
 
-        if (!session) {
-            setAuthModalVisible(true);
-            return;
+        const tokenExpired = session?.expires_at
+            ? (session.expires_at * 1000) - Date.now() < 60_000
+            : true;
+
+        if (!session || tokenExpired) {
+            console.warn('[BookingModal] Session missing or expiring — attempting refresh');
+            const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+            if (refreshError || !refreshData.session) {
+                setAuthModalVisible(true);
+                return;
+            }
+            session = refreshData.session;
         }
 
         try {
@@ -231,12 +240,23 @@ export default function BookingModal({ visible, onClose, restaurant }: BookingMo
                 return;
             }
 
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
-                Alert.alert('Error', 'User session expired. Please login again.');
-                setShowPayment(false);
-                return;
+            let { data: { session: paymentSession } } = await supabase.auth.getSession();
+
+            const paymentTokenExpired = paymentSession?.expires_at
+                ? (paymentSession.expires_at * 1000) - Date.now() < 60_000
+                : true;
+
+            if (!paymentSession || paymentTokenExpired) {
+                console.warn('[BookingModal] Payment session missing or expiring — attempting refresh');
+                const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+                if (refreshError || !refreshData.session) {
+                    Alert.alert('Error', 'Your session has expired. Please log in again.');
+                    setShowPayment(false);
+                    return;
+                }
+                paymentSession = refreshData.session;
             }
+            const user = paymentSession.user;
 
             // Resolve the branch ID for the API call
             // If multiple branches and one is selected, use that branch's id
@@ -562,21 +582,27 @@ export default function BookingModal({ visible, onClose, restaurant }: BookingMo
                 {/* Native pickers */}
                 {showDatePicker && (
                     <DateTimePicker
+                        key="booking-date-picker"
                         value={date}
                         mode="date"
                         display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                         minimumDate={new Date()}
                         maximumDate={maxDate}
                         onChange={onDateChange}
+                        textColor="#111827"
+                        themeVariant="light"
                     />
                 )}
                 {showTimePicker && (
                     <DateTimePicker
+                        key="booking-time-picker"
                         value={time}
                         mode="time"
                         display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                         minuteInterval={15}
                         onChange={onTimeChange}
+                        textColor="#111827"
+                        themeVariant="light"
                     />
                 )}
 
