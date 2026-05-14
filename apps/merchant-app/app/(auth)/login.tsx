@@ -17,7 +17,7 @@ const getApiUrl = () => {
 };
 
 const fetchWithTimeout = async (resource: RequestInfo | string, options: RequestInit & { timeout?: number } = {}) => {
-    const { timeout = 15000, ...fetchOptions } = options;
+    const { timeout = 30000, ...fetchOptions } = options;
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeout);
     try {
@@ -130,9 +130,10 @@ export default function LoginScreen() {
                 });
             }
 
-            const addManagerBranch = (merchantId: string, branchId: string, branchName: string) => {
+            const addManagerBranch = (merchantId: string, branchId: string, branchName: string, role: string = 'manager') => {
                 if (contextMap.has(merchantId)) {
                     const ctx = contextMap.get(merchantId)!;
+                    if (role === 'owner') ctx.role = 'owner';
                     if (!ctx.branches.find((b: any) => b.branchId === branchId)) {
                         ctx.branches.push({ branchId, branchName });
                     }
@@ -140,27 +141,37 @@ export default function LoginScreen() {
                     contextMap.set(merchantId, {
                         merchantId,
                         merchantName: '',
-                        role: 'manager',
+                        role: role,
                         branches: [{ branchId, branchName }]
                     });
                 }
             };
 
             if (managerData) {
-                managerData.forEach((b: any) => addManagerBranch(b.merchant_id, b.id, b.branch_name));
+                managerData.forEach((b: any) => {
+                    const staffRecord = staffRoles?.find((s: any) => s.store_id === b.id);
+                    addManagerBranch(b.merchant_id, b.id, b.branch_name, staffRecord?.role);
+                });
             }
 
             if (staffRoles && staffRoles.length > 0) {
                 const storeIds = staffRoles.map((s: any) => s.store_id);
                 const { data: branchCheck } = await supabase.from('merchant_branches').select('id, branch_name, merchant_id').in('id', storeIds);
                 if (branchCheck) {
-                    branchCheck.forEach((b: any) => addManagerBranch(b.merchant_id, b.id, b.branch_name));
+                    branchCheck.forEach((b: any) => {
+                        const staffRecord = staffRoles.find((s: any) => s.store_id === b.id);
+                        addManagerBranch(b.merchant_id, b.id, b.branch_name, staffRecord?.role);
+                    });
                 }
                 const { data: mainStoreCheck } = await supabase.from('merchants').select('id, store_name').in('id', storeIds);
                 if (mainStoreCheck) {
                     mainStoreCheck.forEach((m: any) => {
+                        const staffRecord = staffRoles.find((s: any) => s.store_id === m.id);
+                        const role = staffRecord?.role || 'manager';
+
                         if (contextMap.has(m.id)) {
                              const ctx = contextMap.get(m.id)!;
+                             if (role === 'owner') ctx.role = 'owner';
                              if (!ctx.branches.find((b: any) => b.branchId === m.id)) {
                                  ctx.branches.push({ branchId: m.id, branchName: m.store_name || 'Main Store' });
                              }
@@ -168,7 +179,7 @@ export default function LoginScreen() {
                              contextMap.set(m.id, {
                                  merchantId: m.id,
                                  merchantName: m.store_name || 'Main Store',
-                                 role: 'manager',
+                                 role: role,
                                  branches: [{ branchId: m.id, branchName: m.store_name || 'Main Store' }]
                              });
                         }

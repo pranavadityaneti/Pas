@@ -9,6 +9,7 @@ export type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY' | 'COM
 
 export interface OrderItem {
     id: string;
+    product_name?: string;
     quantity: number;
     price: number;
     storeProduct: {
@@ -29,6 +30,9 @@ export interface Order {
     isPaid: boolean;
     otp?: string;
     createdAt: string;
+    arrivalTime?: string;
+    orderType?: string;
+    guestsCount?: number;
     user: {
         id?: string;
         name: string;
@@ -45,6 +49,7 @@ export interface Order {
 export interface DateRange {
     startDate: string; // ISO string
     endDate: string;   // ISO string
+    isDefault?: boolean; // Track if this is the default 7-day rolling window
 }
 
 function getDefaultDateRange(): DateRange {
@@ -54,7 +59,8 @@ function getDefaultDateRange(): DateRange {
     start.setHours(0, 0, 0, 0);
     return {
         startDate: start.toISOString(),
-        endDate: end.toISOString()
+        endDate: end.toISOString(),
+        isDefault: true
     };
 }
 
@@ -68,6 +74,12 @@ export function useOrders(dateRange?: DateRange) {
 
     // Ensure date range is always a valid, stable ISO string pair
     const safeStartDate = useMemo(() => {
+        if (dateRange?.isDefault) {
+            const fallback = new Date();
+            fallback.setDate(fallback.getDate() - 7);
+            fallback.setHours(0, 0, 0, 0);
+            return fallback.toISOString();
+        }
         try {
             const d = dateRange?.startDate ? new Date(dateRange.startDate) : null;
             if (d && !isNaN(d.getTime())) return d.toISOString();
@@ -76,15 +88,26 @@ export function useOrders(dateRange?: DateRange) {
         fallback.setDate(fallback.getDate() - 7);
         fallback.setHours(0, 0, 0, 0);
         return fallback.toISOString();
-    }, [dateRange?.startDate]);
+    }, [dateRange?.startDate, dateRange?.isDefault]);
 
     const safeEndDate = useMemo(() => {
+        if (dateRange?.isDefault) {
+            return null; // Signals fetchOrders to use live Date.now()
+        }
         try {
             const d = dateRange?.endDate ? new Date(dateRange.endDate) : null;
-            if (d && !isNaN(d.getTime())) return d.toISOString();
+            if (d && !isNaN(d.getTime())) {
+                // If the selected end date is today (or future), fetch live to prevent "freezing"
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                if (d >= today) {
+                    return null;
+                }
+                return d.toISOString();
+            }
         } catch {}
-        return new Date().toISOString();
-    }, [dateRange?.endDate]);
+        return null;
+    }, [dateRange?.endDate, dateRange?.isDefault]);
 
     const formatId = (id: string) => {
         const hash = id.split('-')[0];
@@ -106,12 +129,16 @@ export function useOrders(dateRange?: DateRange) {
         else setLoading(true);
 
         try {
+            // Use a LIVE timestamp for endDate so new orders are never filtered out.
+            // safeEndDate is only non-null when the user explicitly picks a date range (History tab).
+            const liveEndDate = safeEndDate || new Date().toISOString();
+
             let query = supabase
                 .from('orders')
                 .select(`
                     *,
                     items:order_items(
-                        id, quantity, price,
+                        id, quantity, price, product_name,
                         storeProduct:"StoreProduct"(
                             stock,
                             product:"Product"(name, image, gstRate)
@@ -120,8 +147,12 @@ export function useOrders(dateRange?: DateRange) {
                 `)
                 .eq('store_id', merchantId)
                 .gte('created_at', safeStartDate)
-                .lte('created_at', safeEndDate)
                 .order('created_at', { ascending: false });
+
+            // Only apply end-date cutoff for historical date ranges (not live mode)
+            if (safeEndDate) {
+                query = query.lte('created_at', safeEndDate);
+            }
 
             // Branch routing: scope orders to the active workspace
             if (activeStoreId && merchantId) {
@@ -137,6 +168,7 @@ export function useOrders(dateRange?: DateRange) {
             const { data, error } = await query;
 
             if (error) throw error;
+            console.log('[useOrders] orders query returned:', data?.length || 0, 'rows. liveEndDate:', liveEndDate);
 
             // Application-level JOIN for user profiles to bypass missing physical foreign keys
             const userIds = [...new Set((data || []).map((o: any) => o.user_id).filter(Boolean))];
@@ -156,17 +188,21 @@ export function useOrders(dateRange?: DateRange) {
             // Use real data strictly
             const realOrders = (data || []).map((o: any) => ({
                 id: o.id,
-                displayId: formatId(o.id), // Use formatId for real orders too
+                displayId: o.order_number || formatId(o.id), // Prefer DB order_number
                 status: o.status,
                 totalAmount: o.total_amount,
                 isPaid: o.ispaid,
                 otp: o.otp || o.otp_code,
                 createdAt: o.created_at,
+                arrivalTime: o.arrival_time,
+                orderType: o.order_type || null,
+                guestsCount: o.guests_count || null,
                 user: { id: o.user_id, name: profilesMap[o.user_id]?.name || 'Guest', phone: 'N/A' },
                 items: (o.items || []).map((item: any) => ({
                     id: item.id,
                     quantity: item.quantity,
                     price: item.price,
+                    product_name: item.product_name,
                     storeProduct: Array.isArray(item.storeProduct) ? item.storeProduct[0] : item.storeProduct
                 })),
                 cancelledReason: o.cancelled_reason, // Map cancelled_reason
@@ -181,8 +217,11 @@ export function useOrders(dateRange?: DateRange) {
                 .select('*')
                 .eq('store_id', merchantId)
                 .in('status', ['PENDING', 'ACCEPTED', 'REJECTED'])
-                .gte('created_at', safeStartDate)
-                .lte('created_at', safeEndDate);
+                .gte('created_at', safeStartDate);
+
+            if (safeEndDate) {
+                reqQuery = reqQuery.lte('created_at', safeEndDate);
+            }
 
             // Branch routing: mirror the orders query logic
             if (activeStoreId === merchantId) {
@@ -194,6 +233,7 @@ export function useOrders(dateRange?: DateRange) {
             }
 
             const { data: requestData } = await reqQuery;
+            console.log('[useOrders] order_requests query returned:', requestData?.length || 0, 'rows. Statuses:', requestData?.map((r: any) => r.status));
 
             // 2. Map to mimic real Orders, but flag the ID
             const statusMap = (s: string): OrderStatus => {
@@ -208,18 +248,23 @@ export function useOrders(dateRange?: DateRange) {
                 totalAmount: r.subtotal,
                 isPaid: false,
                 createdAt: r.created_at,
+                arrivalTime: r.arrival_time,
+                orderType: r.order_type || 'pickup',
+                guestsCount: r.guests_count || null,
                 user: { id: r.consumer_user_id, name: r.status === 'REJECTED' ? 'Rejected Request' : 'Awaiting Payment', phone: 'N/A' },
                 items: r.items.map((item: any) => ({
                     id: String(item.id || Math.random()),
                     quantity: item.quantity,
                     price: item.price,
-                    storeProduct: { stock: 99, product: { name: item.name, image: '', gstRate: 0 } }
+                    product_name: item.name,
+                    storeProduct: { stock: null, product: { name: item.name, image: '', gstRate: 5 } }
                 })),
                 cancelledReason: r.rejection_reason || undefined,
                 returnReason: undefined,
                 returnImages: []
             }));
 
+            console.log('[useOrders] Before dedup. realOrders:', realOrders.map((o: any) => ({ id: o.id.slice(0, 8), status: o.status, num: o.displayId })), 'requests:', mappedRequests.map((r: any) => ({ id: r.id.slice(0, 12), status: r.status })));
             // Deduplication logic: Aggressively filter out order_requests if a real paid Order exists 
             // for the same user that was created recently (assuming it's the fulfillment of the request).
             mappedRequests = mappedRequests.filter((req: any) => {
@@ -231,23 +276,32 @@ export function useOrders(dateRange?: DateRange) {
             });
 
             if (currentFetchId === fetchIdRef.current) {
+                console.log('[useOrders] setOrders called. Total:', mappedRequests.length + realOrders.length, '(real:', realOrders.length, 'requests:', mappedRequests.length, ')');
                 setOrders([...mappedRequests, ...realOrders]);
+            } else {
+                console.log('[useOrders] setOrders SKIPPED due to fetchIdRef mismatch. currentFetchId:', currentFetchId, 'latest:', fetchIdRef.current);
             }
         } catch (error) {
             console.error('Error fetching orders:', error);
-            setOrders([]);
+            // Don't wipe existing orders on transient errors — keep stale data visible.
+            // Only clear orders if this is the initial load (no data yet).
+            setOrders(prev => prev.length === 0 ? [] : prev);
         } finally {
             setLoading(false);
             setRefreshing(false);
         }
     }, [merchantId, activeStoreId, safeStartDate, safeEndDate]);
 
+    const fetchOrdersRef = useRef(fetchOrders);
     useEffect(() => {
-        fetchOrders();
+        fetchOrdersRef.current = fetchOrders;
+    }, [fetchOrders]);
+
+    useEffect(() => {
+        fetchOrdersRef.current();
 
         if (merchantId && activeStoreId) {
-            // Keep realtime subscription broad (store-level) to avoid
-            // Supabase filter quirks with is.null on branch_id
+            console.log('[useOrders] Subscription effect ran. merchantId:', merchantId, 'activeStoreId:', activeStoreId);
             const channel = supabase.channel(`orders-${merchantId}-${activeStoreId}`)
                 .on('postgres_changes', {
                     event: '*',
@@ -257,7 +311,7 @@ export function useOrders(dateRange?: DateRange) {
                 }, (payload) => {
                     if (payload.eventType === 'DELETE') {
                         console.log('Real-time order update (unconditional):', payload.eventType);
-                        fetchOrders();
+                        fetchOrdersRef.current();
                         return;
                     }
 
@@ -266,19 +320,19 @@ export function useOrders(dateRange?: DateRange) {
                     const incoming = (payload.new ?? payload.old) as any;
                     const incomingBranchId = incoming?.branch_id;
 
-                    // Branch view — only care about orders for the active branch
                     const isRelevant = incomingBranchId === activeStoreId;
 
                     if (isRelevant) {
                         console.log('Real-time order update (relevant):', payload.eventType);
-                        fetchOrders();
+                        fetchOrdersRef.current();
                     } else {
                         console.log('Real-time order update (filtered out — different branch)');
                     }
                 })
-                .subscribe();
+                .subscribe((status) => {
+                    console.log('[useOrders] orders channel status:', status);
+                });
 
-            // Secondary subscription for order_requests
             const reqChannel = supabase.channel(`requests-${merchantId}-${activeStoreId}`)
                 .on('postgres_changes', {
                     event: '*',
@@ -288,22 +342,23 @@ export function useOrders(dateRange?: DateRange) {
                 }, (payload) => {
                     if (payload.eventType === 'DELETE') {
                         console.log('Real-time order request update (unconditional):', payload.eventType);
-                        fetchOrders();
+                        fetchOrdersRef.current();
                         return;
                     }
 
-                    // With server-side filtering on branch_id, all received events are relevant.
                     console.log('Real-time order request (relevant):', payload.eventType);
-                    fetchOrders();
+                    fetchOrdersRef.current();
                 })
-                .subscribe();
+                .subscribe((status) => {
+                    console.log('[useOrders] requests channel status:', status);
+                });
 
             return () => {
                 supabase.removeChannel(channel);
                 supabase.removeChannel(reqChannel);
             };
         }
-    }, [merchantId, activeStoreId, fetchOrders]);
+    }, [merchantId, activeStoreId]);
 
     const updateOrderStatus = async (orderId: string, status: OrderStatus, cancellationReason?: string) => {
         // INTERCEPT: If this is an order_request, bypass the backend and update Supabase directly

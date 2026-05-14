@@ -6,6 +6,7 @@ import { formatDistanceToNow } from 'date-fns';
 import BottomModal from './BottomModal';
 import { useNotificationContext } from '../context/NotificationContext';
 import { Notification } from '../hooks/useNotifications';
+import { parseUtc } from '../utils/dateFormat';
 
 interface NotificationCenterProps {
     visible: boolean;
@@ -39,7 +40,7 @@ export default function NotificationCenter({ visible, onClose }: NotificationCen
             <View style={styles.contentContainer}>
                 <View style={styles.headerRow}>
                     <Text style={styles.title}>{item.title}</Text>
-                    <Text style={styles.time}>{formatDistanceToNow(new Date(item.createdAt), { addSuffix: true })}</Text>
+                    <Text style={styles.time}>{formatDistanceToNow(parseUtc(item.createdAt), { addSuffix: true })}</Text>
                 </View>
                 <Text style={styles.message} numberOfLines={2}>{item.message}</Text>
             </View>

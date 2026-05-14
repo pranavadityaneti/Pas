@@ -24,13 +24,13 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 
 // Tell Supabase Auth to continuously refresh the session automatically only
 // while the app is in the foreground. (Per official Supabase React Native guide.)
-// AppState.addEventListener('change', (state) => {
-//     if (state === 'active') {
-//         supabase.auth.startAutoRefresh();
-//     } else {
-//         supabase.auth.stopAutoRefresh();
-//     }
-// });
+AppState.addEventListener('change', (state) => {
+    if (state === 'active') {
+        supabase.auth.startAutoRefresh();
+    } else {
+        supabase.auth.stopAutoRefresh();
+    }
+});
 
 /**
  * Manually establish a Supabase session using server-provided tokens after

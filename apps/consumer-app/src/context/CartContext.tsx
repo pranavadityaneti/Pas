@@ -4,7 +4,6 @@ import React, { createContext, useContext, useState, ReactNode, useEffect, useRe
 import { Alert } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../lib/supabase';
-import { RESTAURANTS } from '../lib/data';
 
 interface CartItem {
     id: string;
@@ -15,7 +14,9 @@ interface CartItem {
     storeId: string;
     storeName: string;
     isDining: boolean;
+    isVeg: boolean;
     uom?: string;
+    stock?: number;
 }
 
 interface CartContextType {
@@ -135,8 +136,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
                 quantity: ci.quantity,
                 storeId: String(ci.store_id),
                 storeName: ci.store_name,
-                // Derive isDining for legacy persistence or items without it since DB schema is locked
-                isDining: RESTAURANTS.some(r => String(r.id) === String(ci.store_id))
+                isDining: ci.is_dining ?? false,
+                isVeg: ci.is_veg ?? true
             }));
 
             if (localItemsToMerge.length > 0) {
@@ -193,7 +194,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
                 image: item.image,
                 quantity: item.quantity,
                 store_id: String(item.storeId),
-                store_name: item.storeName
+                store_name: item.storeName,
+                is_dining: item.isDining,
+                is_veg: item.isVeg
             }));
 
             // Safely Upsert
@@ -229,7 +232,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
                             style: "destructive",
                             onPress: () => {
                                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                                setItems([{ ...item, id: String(item.id), storeId: String(item.storeId), quantity: 1 }]);
+                                setItems([{ ...item, id: String(item.id), storeId: String(item.storeId), quantity: 1, stock: item.stock }]);
                             }
                         }
                     ]
@@ -242,9 +245,16 @@ export function CartProvider({ children }: { children: ReactNode }) {
         setItems(prev => {
             const existing = prev.find(i => String(i.id) === String(item.id));
             if (existing) {
-                return prev.map(i => String(i.id) === String(item.id) ? { ...i, quantity: i.quantity + 1 } : i);
+                // Apply optional stock cap if known
+                const maxStock = item.stock !== undefined ? item.stock : Infinity;
+                const nextQty = existing.quantity + 1;
+                if (nextQty > maxStock) {
+                    Alert.alert('Max Stock', `Only ${maxStock} available.`);
+                    return prev;
+                }
+                return prev.map(i => String(i.id) === String(item.id) ? { ...i, quantity: nextQty } : i);
             }
-            return [...prev, { ...item, id: String(item.id), storeId: String(item.storeId), quantity: 1 }];
+            return [...prev, { ...item, id: String(item.id), storeId: String(item.storeId), quantity: 1, stock: item.stock }];
         });
     };
 
@@ -266,7 +276,22 @@ export function CartProvider({ children }: { children: ReactNode }) {
             removeItem(id);
             return;
         }
-        setItems(prev => prev.map(i => String(i.id) === String(id) ? { ...i, quantity } : i));
+        setItems(prev => {
+            const target = prev.find(i => String(i.id) === String(id));
+            if (!target) return prev;
+
+            // Cap by stock if available
+            if (target.stock !== undefined && target.stock !== null) {
+                if (quantity > target.stock) {
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                    Alert.alert('Stock Limit Reached', `Sorry, only ${target.stock} left.`);
+                    // Explicitly return previous state without changing anything
+                    return prev;
+                }
+            }
+
+            return prev.map(i => String(i.id) === String(id) ? { ...i, quantity } : i);
+        });
     };
 
     const clearCart = () => {

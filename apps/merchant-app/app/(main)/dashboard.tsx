@@ -37,8 +37,6 @@ export default function DashboardScreen() {
         { label: "Revenue", value: formatCurrency(stats.today), icon: 'wallet', color: '#8B5CF6' },
     ];
 
-    const recentOrders = orders.slice(0, 5);
-
     const [isLunchBreak, setIsLunchBreak] = React.useState(false);
     const [isClosedToday, setIsClosedToday] = React.useState(false);
 
@@ -240,54 +238,6 @@ export default function DashboardScreen() {
                                 <Text style={styles.actionLabel}>All Orders</Text>
                             </TouchableOpacity>
                         </View>
-                    </View>
-
-                    <View style={styles.section}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Recent Orders</Text>
-                            <TouchableOpacity onPress={() => router.push('/orders')}>
-                                <Text style={styles.viewAllText}>View All</Text>
-                            </TouchableOpacity>
-                        </View>
-
-                        {recentOrders.length === 0 ? (
-                            <View style={styles.emptyOrders}>
-                                <Text style={styles.emptyText}>No orders yet</Text>
-                            </View>
-                        ) : (
-                            recentOrders.map((order) => (
-                                <TouchableOpacity
-                                    key={order.id}
-                                    style={styles.orderCard}
-                                    onPress={() => router.push({ pathname: '/orders', params: { orderId: order.id } })}
-                                >
-                                    <View style={styles.orderIcon}>
-                                        <Ionicons name="bag-handle-outline" size={20} color={Colors.primary} />
-                                    </View>
-                                    <View style={styles.orderInfo}>
-                                        <Text style={styles.orderTitle}>Order #{order.displayId}</Text>
-                                        <Text style={styles.orderSubtitle}>
-                                            {order.items.length} items • ₹{order.totalAmount}
-                                        </Text>
-                                    </View>
-                                    <View style={[
-                                        styles.statusBadge,
-                                        order.status === 'PENDING' && styles.statusBadgePending,
-                                        order.status === 'READY' && styles.statusBadgeReady,
-                                        order.status === 'COMPLETED' && styles.statusBadgeCompleted
-                                    ]}>
-                                        <Text style={[
-                                            styles.statusText,
-                                            order.status === 'PENDING' && styles.statusTextPending,
-                                            order.status === 'READY' && styles.statusTextReady,
-                                            order.status === 'COMPLETED' && styles.statusTextCompleted
-                                        ]}>
-                                            {order.status}
-                                        </Text>
-                                    </View>
-                                </TouchableOpacity>
-                            ))
-                        )}
                     </View>
                 </View>
             </ScrollView>

@@ -9,7 +9,7 @@ export interface OrderRequest {
     store_id: string;
     branch_id: string;
     store_name: string;
-    items: { id?: number; name: string; quantity: number; price: number }[];
+    items: { id?: string | number; name: string; quantity: number; price: number }[];
     subtotal: number;
     status: OrderRequestStatus;
     rejection_reason: string | null;
@@ -25,10 +25,13 @@ interface UseOrderRequestsReturn {
     acceptedRequests: OrderRequest[];
     rejectedRequests: OrderRequest[];
     createRequests: (stores: {
-        storeId: number;
+        storeId: string | number;
         storeName: string;
-        items: { id?: number; name: string; quantity: number; price: number }[];
+        items: { id?: string | number; name: string; quantity: number; price: number }[];
         total: number;
+        arrivalTime?: string;
+        orderType?: 'pickup' | 'dine-in';
+        guestsCount?: number;
     }[], replaceRequestId?: string) => Promise<OrderRequest[]>;
     expireRequest: (requestId: string) => Promise<void>;
     cleanup: () => void;
@@ -49,15 +52,29 @@ export function useOrderRequests(): UseOrderRequestsReturn {
 
     // Create order requests for each store
     const createRequests = useCallback(async (stores: {
-        storeId: number;
+        storeId: string | number;
         storeName: string;
-        items: { id?: number; name: string; quantity: number; price: number }[];
+        items: { id?: string | number; name: string; quantity: number; price: number }[];
         total: number;
+        arrivalTime?: string;
+        orderType?: 'pickup' | 'dine-in';
+        guestsCount?: number;
     }[], replaceRequestId?: string): Promise<OrderRequest[]> => {
         setLoading(true);
 
         try {
-            const { data: { user } } = await supabase.auth.getUser();
+            // First check session — if expired, try to refresh
+            let { data: { session } } = await supabase.auth.getSession();
+            if (!session) {
+                console.warn('[useOrderRequests] No session — attempting refresh');
+                const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+                if (refreshError || !refreshData.session) {
+                    throw new Error('Your session has expired. Please log in again.');
+                }
+                session = refreshData.session;
+            }
+            
+            const user = session.user;
             if (!user) throw new Error('User not authenticated');
 
             // Fetch the parent merchant IDs for the legacy schema constraints
@@ -79,7 +96,10 @@ export function useOrderRequests(): UseOrderRequestsReturn {
                     store_name: store.storeName,
                     items: store.items.map(i => ({ id: i.id, name: i.name, quantity: i.quantity, price: i.price })),
                     subtotal: store.total,
-                    status: 'PENDING' as const
+                    status: 'PENDING' as const,
+                    arrival_time: store.arrivalTime || null,
+                    order_type: store.orderType || null,
+                    guests_count: store.guestsCount || null
                 };
             });
 
@@ -91,7 +111,6 @@ export function useOrderRequests(): UseOrderRequestsReturn {
             const apiUrl = process.env.EXPO_PUBLIC_API_URL;
             if (!apiUrl) throw new Error('API URL is not defined');
 
-            const { data: { session } } = await supabase.auth.getSession();
             if (!session?.access_token) throw new Error('No valid session token');
 
             const response = await fetch(`${apiUrl}/order-requests`, {

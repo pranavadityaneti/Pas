@@ -1,6 +1,6 @@
 import React from 'react';
-import { Modal, View, Text, StyleSheet, TouchableOpacity, TouchableWithoutFeedback, Platform, DimensionValue, KeyboardAvoidingView, ScrollView } from 'react-native';
-import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
+import { Modal, View, Text, StyleSheet, TouchableOpacity, TouchableWithoutFeedback, Platform, DimensionValue, KeyboardAvoidingView, ScrollView, Keyboard } from 'react-native';
+// Removed KeyboardAwareScrollView as requested by user
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +18,21 @@ interface BottomModalProps {
 
 export default function BottomModal({ visible, onClose, title, children, height }: BottomModalProps) {
     const insets = useSafeAreaInsets();
+    const [keyboardHeight, setKeyboardHeight] = React.useState(0);
+
+    React.useEffect(() => {
+        if (Platform.OS !== 'android') return;
+        const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+            setKeyboardHeight(e.endCoordinates.height);
+        });
+        const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+            setKeyboardHeight(0);
+        });
+        return () => {
+            showSub.remove();
+            hideSub.remove();
+        };
+    }, []);
 
     return (
         <Modal
@@ -27,13 +42,13 @@ export default function BottomModal({ visible, onClose, title, children, height 
             onRequestClose={onClose}
             statusBarTranslucent={true}
         >
-            <View style={styles.overlay}>
+            <View style={[styles.overlay, Platform.OS === 'android' && { paddingBottom: keyboardHeight }]}>
                 <TouchableWithoutFeedback onPress={onClose}>
                     <View style={styles.backdrop} />
                 </TouchableWithoutFeedback>
 
                 <KeyboardAvoidingView
-                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                     style={{ flex: 1, justifyContent: 'flex-end' }}
                     keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
                 >

@@ -6,6 +6,7 @@ import { Order } from '../hooks/useOrders';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { useStore } from '../hooks/useStore';
+import { parseUtc } from '../utils/dateFormat';
 
 interface ReceiptSummaryModalProps {
     visible: boolean;
@@ -128,7 +129,7 @@ export default function ReceiptSummaryModal({ visible, onClose, order }: Receipt
         }
     };
 
-    const formattedDate = new Date(order.createdAt).toLocaleString('en-IN', {
+    const formattedDate = parseUtc(order.createdAt).toLocaleString('en-IN', {
         day: '2-digit',
         month: 'short',
         year: 'numeric',
@@ -165,6 +166,23 @@ export default function ReceiptSummaryModal({ visible, onClose, order }: Receipt
                         <Text style={styles.dataValue}>{formattedDate}</Text>
                     </View>
 
+                    {(order.orderType === 'dine-in' || order.guestsCount) && (
+                        <View style={styles.ticketDataGrid}>
+                            {order.orderType === 'dine-in' && (
+                                <View style={styles.dataBlock}>
+                                    <Text style={styles.dataLabel}>ORDER TYPE</Text>
+                                    <Text style={[styles.dataValue, { color: '#7C3AED' }]}>Dine-In</Text>
+                                </View>
+                            )}
+                            {order.guestsCount ? (
+                                <View style={styles.dataBlock}>
+                                    <Text style={[styles.dataLabel, order.orderType === 'dine-in' ? { textAlign: 'right' } : {}]}>GUESTS</Text>
+                                    <Text style={[styles.dataValue, order.orderType === 'dine-in' ? { textAlign: 'right' } : {}]}>{order.guestsCount} {order.guestsCount === 1 ? 'Person' : 'People'}</Text>
+                                </View>
+                            ) : null}
+                        </View>
+                    )}
+
                     <View style={styles.summaryContainer}>
                         <Text style={styles.summaryTitle}>Order Summary</Text>
                         <ScrollView style={styles.itemList} showsVerticalScrollIndicator={false}>
@@ -172,7 +190,7 @@ export default function ReceiptSummaryModal({ visible, onClose, order }: Receipt
                                 <View key={index} style={styles.itemRow}>
                                     <View style={styles.itemTextContainer}>
                                         <Text style={styles.itemQty}>{item.quantity}x</Text>
-                                        <Text style={styles.itemName} numberOfLines={1}> {item.storeProduct.product.name}</Text>
+                                        <Text style={styles.itemName} numberOfLines={1}> {item.product_name || item.storeProduct?.product?.name || 'Menu Item'}</Text>
                                     </View>
                                     <Text style={styles.itemPrice}>₹{item.price * item.quantity}</Text>
                                 </View>

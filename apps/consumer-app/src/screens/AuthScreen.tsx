@@ -21,7 +21,7 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // Helper to prevent infinite fetch hangs on physical devices
 const fetchWithTimeout = async (resource: RequestInfo | string, options: RequestInit & { timeout?: number } = {}) => {
-    const { timeout = 15000, ...fetchOptions } = options;
+    const { timeout = 30000, ...fetchOptions } = options;
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeout);
     try {

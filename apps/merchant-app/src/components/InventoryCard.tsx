@@ -88,7 +88,10 @@ export default function InventoryCard({ item, onUpdate, onDelete, onToggleStatus
                 </View>
 
                 <View style={styles.info}>
-                    <Text style={styles.name} numberOfLines={2}>{item.product?.name || item.name}</Text>
+                    <Text style={styles.name} numberOfLines={2}>
+                        {item.product?.name || item.name}
+                        {item.variant && item.variant !== 'Standard' ? ` - ${item.variant}` : ''}
+                    </Text>
                     <Text style={styles.category}>
                         {item.product?.subcategory || CATEGORY_MAP[item.product?.category_id || ''] || 'Others'}
                     </Text>

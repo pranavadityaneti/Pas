@@ -10,6 +10,7 @@ import { useStore } from '../../src/hooks/useStore';
 import OTPVerificationModal from '../../src/components/OTPVerificationModal';
 import ReceiptSummaryModal from '../../src/components/ReceiptSummaryModal';
 import RejectionReasonModal from '../../src/components/RejectionReasonModal';
+import { parseUtc } from '../../src/utils/dateFormat';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -40,13 +41,12 @@ const HISTORY_FILTER_STATUS_MAP: Record<HistoryFilter, OrderStatus[] | null> = {
 };
 
 export default function OrdersScreen() {
-    // Date range state — default to last 7 days
     const getDefaultRange = (): DateRange => {
         const end = new Date();
         const start = new Date();
         start.setDate(start.getDate() - 7);
         start.setHours(0, 0, 0, 0);
-        return { startDate: start.toISOString(), endDate: end.toISOString() };
+        return { startDate: start.toISOString(), endDate: end.toISOString(), isDefault: true };
     };
     const [dateRange, setDateRange] = useState<DateRange>(getDefaultRange);
 
@@ -123,8 +123,8 @@ export default function OrdersScreen() {
 
         // Apply sort
         filtered = [...filtered].sort((a, b) => {
-            const tA = new Date(a.createdAt).getTime();
-            const tB = new Date(b.createdAt).getTime();
+            const tA = parseUtc(a.createdAt).getTime();
+            const tB = parseUtc(b.createdAt).getTime();
             return sortOrder === 'desc' ? tB - tA : tA - tB;
         });
 
@@ -175,7 +175,7 @@ export default function OrdersScreen() {
     };
 
     const formatTimer = (createdAtStr: string) => {
-        const createdAt = new Date(createdAtStr).getTime();
+        const createdAt = parseUtc(createdAtStr).getTime();
         const expiresAt = createdAt + (2 * 60 * 1000); // 2 minutes auto-reject
         const remaining = Math.max(0, expiresAt - now);
 
@@ -213,77 +213,100 @@ export default function OrdersScreen() {
 
         const subTotal = item.items.reduce((acc, oi) => acc + (oi.price * oi.quantity), 0);
         const tax = item.items.reduce((acc, oi) => {
-            const rate = oi.storeProduct?.product?.gstRate ?? 0;
+            // Fallback to 5% (standard restaurant GST) when storeProduct join is null (dine-in items)
+            const rate = oi.storeProduct?.product?.gstRate ?? 5;
             return acc + (oi.price * oi.quantity * (rate / 100));
         }, 0);
 
         return (
             <View style={styles.orderCard}>
                 <View style={styles.cardHeader}>
-                    <View>
-                        <Text style={styles.orderId}>Order #{item.displayId}</Text>
-                        <Text style={styles.placedAt}>Placed at {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
-                    </View>
-                    {isPending && (
-                        <View style={styles.approvalBadge}>
-                            <Text style={styles.approvalText}>APPROVAL NEEDED</Text>
+                    <Text style={styles.orderId}>#{item.displayId}</Text>
+                    {item.orderType === 'dine-in' ? (
+                        <View style={[styles.orderTypeBadge, { backgroundColor: '#7C3AED' }]}>
+                            <Text style={styles.orderTypeBadgeText}>DINE-IN</Text>
                         </View>
-                    )}
-                    {item.isPaid && isProcessing && (
-                        <View style={styles.paidBadge}>
-                            <Text style={styles.paidBadgeText}>PAID - START PACKING</Text>
-                        </View>
-                    )}
-                    {!item.isPaid && isProcessing && (
-                        <View style={[styles.paidBadge, { backgroundColor: '#F59E0B' }]}>
-                            <Text style={styles.paidBadgeText}>AWAITING PAYMENT</Text>
-                        </View>
-                    )}
-                    {item.status === 'COMPLETED' && (
-                        <View style={[styles.paidBadge, { backgroundColor: '#10B981' }]}>
-                            <Text style={styles.paidBadgeText}>COMPLETED</Text>
-                        </View>
-                    )}
-                    {item.status === 'CANCELLED' && (
-                        <View style={[styles.approvalBadge, { backgroundColor: '#EF4444' }]}>
-                            <Text style={styles.approvalText}>CANCELLED</Text>
-                        </View>
-                    )}
-                    {item.status === 'REJECTED' && (
-                        <View style={[styles.approvalBadge, { backgroundColor: '#6B7280' }]}>
-                            <Text style={styles.approvalText}>REJECTED</Text>
-                        </View>
-                    )}
-                    {item.status === 'RETURN_REQUESTED' && (
-                        <View style={[styles.approvalBadge, { backgroundColor: '#F97316' }]}>
-                            <Text style={styles.approvalText}>RETURN REQUESTED</Text>
-                        </View>
-                    )}
-                    {item.status === 'RETURN_APPROVED' && (
-                        <View style={[styles.paidBadge, { backgroundColor: '#10B981' }]}>
-                            <Text style={styles.paidBadgeText}>RETURN APPROVED</Text>
-                        </View>
-                    )}
-                    {item.status === 'RETURN_REJECTED' && (
-                        <View style={[styles.approvalBadge, { backgroundColor: '#EF4444' }]}>
-                            <Text style={styles.approvalText}>RETURN REJECTED</Text>
-                        </View>
-                    )}
-                    {item.status === 'REFUNDED' && (
-                        <View style={[styles.approvalBadge, { backgroundColor: '#8B5CF6' }]}>
-                            <Text style={styles.approvalText}>REFUNDED</Text>
+                    ) : (
+                        <View style={[styles.orderTypeBadge, { backgroundColor: '#3B82F6' }]}>
+                            <Text style={styles.orderTypeBadgeText}>PICKUP</Text>
                         </View>
                     )}
                 </View>
 
-                {isPending && (
-                    <View style={[styles.timerBar, isExpiringSoon && styles.timerBarUrgent]}>
-                        <Ionicons name="time-outline" size={16} color={isExpiringSoon ? '#EF4444' : '#10B981'} />
-                        <Text style={[styles.timerText, isExpiringSoon && styles.timerTextUrgent]}>
-                            Auto-rejects in {timerText}
+                {/* Status Strip Container */}
+                <View style={styles.statusStripContainer}>
+                    {isPending && (
+                        <View style={[styles.approvalStrip, isExpiringSoon && styles.approvalStripUrgent]}>
+                            <Text style={styles.approvalStripText}>APPROVAL NEEDED</Text>
+                            <Text style={[styles.approvalStripTimer, isExpiringSoon && styles.approvalStripTimerUrgent]}>
+                                {timerText}
+                            </Text>
+                        </View>
+                    )}
+                    {item.isPaid && isProcessing && (
+                        <View style={[styles.approvalStrip, { backgroundColor: '#10B981', justifyContent: 'center' }]}>
+                            <Text style={styles.approvalStripText}>PAID - START PACKING</Text>
+                        </View>
+                    )}
+                    {!item.isPaid && isProcessing && (
+                        <View style={[styles.approvalStrip, { backgroundColor: '#F59E0B', justifyContent: 'center' }]}>
+                            <Text style={styles.approvalStripText}>AWAITING PAYMENT</Text>
+                        </View>
+                    )}
+                    {item.status === 'COMPLETED' && (
+                        <View style={[styles.approvalStrip, { backgroundColor: '#10B981', justifyContent: 'center' }]}>
+                            <Text style={styles.approvalStripText}>COMPLETED</Text>
+                        </View>
+                    )}
+                    {item.status === 'CANCELLED' && (
+                        <View style={[styles.approvalStrip, { backgroundColor: '#EF4444', justifyContent: 'center' }]}>
+                            <Text style={styles.approvalStripText}>CANCELLED</Text>
+                        </View>
+                    )}
+                    {item.status === 'REJECTED' && (
+                        <View style={[styles.approvalStrip, { backgroundColor: '#6B7280', justifyContent: 'center' }]}>
+                            <Text style={styles.approvalStripText}>REJECTED</Text>
+                        </View>
+                    )}
+                    {item.status === 'RETURN_REQUESTED' && (
+                        <View style={[styles.approvalStrip, { backgroundColor: '#F97316', justifyContent: 'center' }]}>
+                            <Text style={styles.approvalStripText}>RETURN REQUESTED</Text>
+                        </View>
+                    )}
+                    {item.status === 'RETURN_APPROVED' && (
+                        <View style={[styles.approvalStrip, { backgroundColor: '#10B981', justifyContent: 'center' }]}>
+                            <Text style={styles.approvalStripText}>RETURN APPROVED</Text>
+                        </View>
+                    )}
+                    {item.status === 'RETURN_REJECTED' && (
+                        <View style={[styles.approvalStrip, { backgroundColor: '#EF4444', justifyContent: 'center' }]}>
+                            <Text style={styles.approvalStripText}>RETURN REJECTED</Text>
+                        </View>
+                    )}
+                    {item.status === 'REFUNDED' && (
+                        <View style={[styles.approvalStrip, { backgroundColor: '#8B5CF6', justifyContent: 'center' }]}>
+                            <Text style={styles.approvalStripText}>REFUNDED</Text>
+                        </View>
+                    )}
+                </View>
+
+                <View style={styles.dottedSeparator} />
+
+                <View style={styles.timeSection}>
+                    <Text style={styles.placedAt}>Placed at {parseUtc(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+                    {item.arrivalTime ? (
+                        <Text style={styles.pickupAt}>{item.orderType === 'dine-in' ? 'Dine-in time' : 'Pickup'}: {item.arrivalTime}</Text>
+                    ) : null}
+                    {item.guestsCount ? (
+                        <Text style={{ fontSize: 13, color: '#7C3AED', marginTop: 2, fontWeight: '600' }}>
+                            👥 {item.guestsCount} {item.guestsCount === 1 ? 'Guest' : 'Guests'}
                         </Text>
-                    </View>
-                )}
+                    ) : null}
+                </View>
+
+                <View style={styles.dottedSeparator} />
+
+
 
 
 
@@ -297,20 +320,20 @@ export default function OrdersScreen() {
                             <View style={styles.itemMainInfo}>
                                 <View style={styles.itemDot} />
                                 <Text style={styles.itemText} numberOfLines={1}>
-                                    <Text style={styles.itemQty}>{oi.quantity}x</Text> {oi.storeProduct?.product?.name || 'Unknown Product'}
+                                    <Text style={styles.itemQty}>{oi.quantity}x</Text> {oi.product_name || oi.storeProduct?.product?.name || 'Unknown Product'}
                                 </Text>
                             </View>
 
                             <View style={styles.itemSideInfo}>
-                                {oi.storeProduct?.stock !== undefined && oi.storeProduct.stock < 5 ? (
+                                {oi.storeProduct?.stock != null && oi.storeProduct.stock < 5 ? (
                                     <View style={styles.lowStockBadge}>
                                         <Text style={styles.lowStockText}>⚠️ Low</Text>
                                     </View>
-                                ) : (
+                                ) : oi.storeProduct?.stock != null ? (
                                     <View style={styles.stockBadge}>
                                         <Text style={styles.stockText}>Stock: {oi.storeProduct?.stock ?? 'N/A'}</Text>
                                     </View>
-                                )}
+                                ) : null}
                                 <Text style={styles.itemPrice}>₹{oi.price * oi.quantity}</Text>
                             </View>
                         </View>
@@ -319,7 +342,7 @@ export default function OrdersScreen() {
 
                 <View style={[styles.cardFooter, isExpanded && styles.cardFooterExpanded]}>
                     <View>
-                        <Text style={styles.valueLabel}>Total Bill: <Text style={styles.valueAmount}>₹{item.totalAmount}</Text></Text>
+                        <Text style={styles.valueLabel}>Total Bill: <Text style={styles.valueAmount}>₹{(subTotal + tax).toFixed(2)}</Text></Text>
                     </View>
                     <TouchableOpacity onPress={() => toggleAccordion(item.id)} style={styles.breakupBtn}>
                         <Text style={styles.breakupText}>View Breakup</Text>
@@ -331,16 +354,16 @@ export default function OrdersScreen() {
                     <View style={styles.breakupContent}>
                         <View style={styles.breakupRow}>
                             <Text style={styles.breakupLabel}>Subtotal</Text>
-                            <Text style={styles.breakupValue}>₹{subTotal.toFixed(0)}</Text>
+                            <Text style={styles.breakupValue}>₹{subTotal.toFixed(2)}</Text>
                         </View>
                         <View style={styles.breakupRow}>
                             <Text style={styles.breakupLabel}>Tax</Text>
-                            <Text style={styles.breakupValue}>₹{tax.toFixed(0)}</Text>
+                            <Text style={styles.breakupValue}>₹{tax.toFixed(2)}</Text>
                         </View>
                         <View style={styles.breakupDivider} />
                         <View style={styles.breakupRow}>
                             <Text style={styles.breakupTotalLabel}>Total</Text>
-                            <Text style={styles.breakupTotalValue}>₹{item.totalAmount}</Text>
+                            <Text style={styles.breakupTotalValue}>₹{(subTotal + tax).toFixed(2)}</Text>
                         </View>
                     </View>
                 )}
@@ -537,11 +560,11 @@ export default function OrdersScreen() {
                         if (calendarPickingField === 'start') {
                             const d = new Date(date);
                             d.setHours(0, 0, 0, 0);
-                            setDateRange(prev => ({ ...prev, startDate: d.toISOString() }));
+                            setDateRange(prev => ({ ...prev, startDate: d.toISOString(), isDefault: false }));
                         } else {
                             const d = new Date(date);
                             d.setHours(23, 59, 59, 999);
-                            setDateRange(prev => ({ ...prev, endDate: d.toISOString() }));
+                            setDateRange(prev => ({ ...prev, endDate: d.toISOString(), isDefault: false }));
                         }
                     }}
                     onCancel={() => setCalendarVisible(false)}
@@ -619,13 +642,41 @@ const styles = StyleSheet.create({
         shadowRadius: 12,
         elevation: 3
     },
-    cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
-    orderId: { fontSize: 18, fontWeight: 'bold', color: '#111827' },
-    placedAt: { fontSize: 13, color: '#6B7280', marginTop: 2 },
-    approvalBadge: { backgroundColor: Colors.primary, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-    approvalText: { fontSize: 11, fontWeight: 'bold', color: '#FFFFFF' },
-    paidBadge: { backgroundColor: '#10B981', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-    paidBadgeText: { fontSize: 11, fontWeight: 'bold', color: '#FFFFFF' },
+    cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    orderId: { fontSize: 18, fontWeight: '800', color: '#111827' },
+    orderTypeBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+    orderTypeBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: 'bold' },
+
+    statusStripContainer: { width: '100%', marginTop: 12 },
+    approvalStrip: { 
+        flexDirection: 'row', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        backgroundColor: Colors.primary, 
+        padding: 12, 
+        borderRadius: 10, 
+        width: '100%' 
+    },
+    approvalStripUrgent: { backgroundColor: '#DC2626' },
+    approvalStripText: { fontSize: 13, fontWeight: 'bold', color: '#FFFFFF' },
+    approvalStripTimer: { 
+        fontSize: 18, 
+        fontWeight: 'bold', 
+        color: '#FFFFFF', 
+        fontVariant: ['tabular-nums'] 
+    },
+    approvalStripTimerUrgent: { color: '#FEF2F2' },
+
+    dottedSeparator: {
+        borderBottomWidth: 1,
+        borderBottomColor: '#E5E7EB',
+        borderStyle: 'dashed',
+        marginVertical: 12
+    },
+    
+    timeSection: { width: '100%' },
+    placedAt: { fontSize: 13, color: '#6B7280' },
+    pickupAt: { fontSize: 13, color: '#B52725', marginTop: 4, fontWeight: '600' },
 
     timerBar: {
         flexDirection: 'row',

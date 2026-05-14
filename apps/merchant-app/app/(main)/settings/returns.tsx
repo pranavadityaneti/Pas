@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Colors } from '../../../constants/Colors';
 import { useOrders, Order } from '../../../src/hooks/useOrders';
+import { parseUtc } from '../../../src/utils/dateFormat';
 
 export default function ReturnsScreen() {
     const { orders, loading, updateOrderStatus, refundOrder } = useOrders();
@@ -55,7 +56,7 @@ export default function ReturnsScreen() {
                 <View style={styles.header}>
                     <View>
                         <Text style={styles.orderId}>Order #{item.displayId}</Text>
-                        <Text style={styles.date}>{new Date(item.createdAt).toLocaleDateString()} at {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+                        <Text style={styles.date}>{parseUtc(item.createdAt).toLocaleDateString()} at {parseUtc(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
                     </View>
                     <View style={[styles.badge, (styles as any)[item.status] || styles.badge]}>
                         <Text style={styles.badgeText}>{item.status.replace('RETURN_', '').replace('_', ' ')}</Text>

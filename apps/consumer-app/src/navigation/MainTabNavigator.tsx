@@ -10,6 +10,9 @@ import HomeFeedScreen from '../screens/HomeFeedScreen';
 import DiningScreen from '../screens/DiningScreen';
 import CartScreen from '../screens/CartScreen';
 import HomeScreen from '../screens/HomeScreen';
+import DiningCheckoutScreen from '../screens/DiningCheckoutScreen';
+import CheckoutScreen from '../screens/CheckoutScreen';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 export type MainTabParamList = {
     Home: undefined;
@@ -19,6 +22,17 @@ export type MainTabParamList = {
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
+const CartStack = createNativeStackNavigator();
+
+function CartStackNavigator() {
+    return (
+        <CartStack.Navigator screenOptions={{ headerShown: false }}>
+            <CartStack.Screen name="CartMain" component={CartScreen} />
+            <CartStack.Screen name="DiningCheckout" component={DiningCheckoutScreen} options={{ gestureEnabled: false }} />
+            <CartStack.Screen name="Checkout" component={CheckoutScreen} options={{ gestureEnabled: false }} />
+        </CartStack.Navigator>
+    );
+}
 
 export default function MainTabNavigator() {
     const insets = useSafeAreaInsets();
@@ -72,7 +86,7 @@ export default function MainTabNavigator() {
             <Tab.Screen name="Home" component={HomeScreen} />
             <Tab.Screen name="Pickup" component={HomeFeedScreen} />
             <Tab.Screen name="Dining" component={DiningScreen} />
-            <Tab.Screen name="Cart" component={CartScreen} />
+            <Tab.Screen name="Cart" component={CartStackNavigator} />
         </Tab.Navigator>
     );
 }

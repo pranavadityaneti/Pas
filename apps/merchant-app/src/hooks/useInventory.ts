@@ -25,6 +25,7 @@ export interface InventoryItem {
         uom?: string;
         gstRate?: number;
         createdByStoreId?: string;
+        extra_data?: any;
     };
 }
 // ... interface definition ends ...
@@ -66,7 +67,8 @@ export function useInventory() {
                         ean,
                         uom,
                         gstRate,
-                        createdByStoreId
+                        createdByStoreId,
+                        extra_data
                     )
                 `)
                 .eq('storeId', branchId)

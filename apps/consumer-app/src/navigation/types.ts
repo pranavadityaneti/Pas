@@ -23,9 +23,6 @@ export type RootStackParamList = {
     PaymentMethods: undefined;
     Support: undefined;
     AddPaymentMethod: undefined;
-    ConfirmPreOrder: {
-        selectedCoupon?: { code: string; discount: number },
-        specialInstructions?: string
-    };
+
     SwapScreen: undefined;
 };

@@ -106,10 +106,16 @@ export default function YourOrdersScreen() {
         );
     };
 
-    const getStatusDisplay = (status: string) => {
+    const getStatusDisplay = (status: string, orderType?: string) => {
         const normalized = (status || '').toUpperCase();
+        const isDining = orderType === 'dine-in';
+        
         if (normalized === 'PENDING') return { text: 'CONFIRMED', bg: 'bg-black', textClass: 'text-white' };
-        if (normalized === 'ACCEPTED' || normalized === 'READY') return { text: 'PREPARING', bg: 'bg-yellow-400', textClass: 'text-black' };
+        if (normalized === 'ACCEPTED' || normalized === 'READY') {
+            return isDining 
+                ? { text: 'RESERVED', bg: 'bg-blue-100', textClass: 'text-blue-800' }
+                : { text: 'PREPARING', bg: 'bg-yellow-400', textClass: 'text-black' };
+        }
         if (normalized === 'COMPLETED' || normalized === 'DELIVERED') return { text: 'COMPLETED', bg: 'bg-green-100', textClass: 'text-green-800' };
         return { text: 'CANCELLED', bg: 'bg-red-100', textClass: 'text-red-800' }; // Fallback
     };
@@ -162,7 +168,7 @@ export default function YourOrdersScreen() {
                 ) : (
                     orders.map((order) => {
                         console.log("ORDER STATUS DEBUG:", order.id, "STATUS:", order.status);
-                        const statusConfig = getStatusDisplay(order.status);
+                        const statusConfig = getStatusDisplay(order.status, order.order_type);
                         return (
                         <TouchableOpacity
                             key={order.id}
@@ -177,7 +183,9 @@ export default function YourOrdersScreen() {
                                     </View>
                                     <View className="flex-1 pr-2">
                                         <Text className="text-[18px] font-bold text-white" numberOfLines={1}>{order.store_name}</Text>
-                                        <Text className="text-[13px] text-red-50 font-medium mt-0.5">Pickup: {order.arrival_time || 'ASAP'}</Text>
+                                        <Text className="text-[13px] text-red-50 font-medium mt-0.5">
+                                            {order.order_type === 'dine-in' ? 'Booking' : 'Pickup'}: {order.arrival_time || 'ASAP'}
+                                        </Text>
                                     </View>
                                 </View>
                                 <View className={`px-3 py-1 rounded-full ${statusConfig.bg}`}>
@@ -193,24 +201,50 @@ export default function YourOrdersScreen() {
                                     <Text className="text-[14px] text-gray-500 font-medium">Order #</Text>
                                     <Text className="text-[14px] text-gray-900 font-mono font-bold">{order.order_number}</Text>
                                 </View>
+                                {order.order_type !== 'dine-in' && (
+                                    <View className="flex-row justify-between items-center mb-1">
+                                        <Text className="text-[13px] text-gray-500 font-medium">GST (5%)</Text>
+                                        <Text className="text-[13px] text-gray-500 font-medium">₹{(order.amount * 0.05).toFixed(2)}</Text>
+                                    </View>
+                                )}
                                 <View className="flex-row justify-between items-center mb-3">
-                                    <Text className="text-[15px] font-bold text-gray-900">Total</Text>
-                                    <Text className="text-[18px] font-bold text-gray-900">₹{order.amount}</Text>
+                                    <Text className="text-[15px] font-bold text-gray-900">
+                                        {order.order_type === 'dine-in' ? 'Booking Deposit' : 'Total'}
+                                    </Text>
+                                    <Text className="text-[18px] font-bold text-gray-900">₹{order.order_type === 'dine-in' ? order.amount : (order.amount * 1.05).toFixed(2)}</Text>
                                 </View>
                                 <View className="border-b border-gray-100" />
                             </View>
 
-                            {/* Block 3: Order Details */}
-                            <View className="px-1 mb-4">
-                                <Text className="text-[13px] text-gray-500 font-bold uppercase tracking-wider mb-3">Order Details</Text>
-                                {order.order_items && order.order_items.map((item: any, idx: number) => (
-                                    <View key={idx} className="flex-row items-center mb-2">
+                            {/* Block 3: Order Details (food) OR Reservation Details (dine-in) */}
+                            {order.order_type === 'dine-in' ? (
+                                <View className="px-1 mb-4">
+                                    <Text className="text-[13px] text-gray-500 font-bold uppercase tracking-wider mb-3">Reservation Details</Text>
+                                    <View className="flex-row items-center mb-2">
                                         <View className="w-1.5 h-1.5 rounded-full bg-gray-400 mr-3" />
-                                        <Text className="text-[14px] text-gray-700 font-medium flex-1">{item.quantity}x {item.product_name}</Text>
-                                        <Text className="text-[14px] text-gray-900 font-semibold">₹{item.price * item.quantity}</Text>
+                                        <Text className="text-[14px] text-gray-700 font-medium flex-1">
+                                            {order.guests_count || 1} {(order.guests_count || 1) === 1 ? 'Guest' : 'Guests'}
+                                        </Text>
                                     </View>
-                                ))}
-                            </View>
+                                    <View className="flex-row items-center mb-2">
+                                        <View className="w-1.5 h-1.5 rounded-full bg-gray-400 mr-3" />
+                                        <Text className="text-[14px] text-gray-700 font-medium flex-1">
+                                            Arrival: {order.arrival_time || 'Not specified'}
+                                        </Text>
+                                    </View>
+                                </View>
+                            ) : (
+                                <View className="px-1 mb-4">
+                                    <Text className="text-[13px] text-gray-500 font-bold uppercase tracking-wider mb-3">Order Details</Text>
+                                    {order.order_items && order.order_items.map((item: any, idx: number) => (
+                                        <View key={idx} className="flex-row items-center mb-2">
+                                            <View className="w-1.5 h-1.5 rounded-full bg-gray-400 mr-3" />
+                                            <Text className="text-[14px] text-gray-700 font-medium flex-1">{item.quantity}x {item.product_name}</Text>
+                                            <Text className="text-[14px] text-gray-900 font-semibold">₹{item.price * item.quantity}</Text>
+                                        </View>
+                                    ))}
+                                </View>
+                            )}
 
                             {/* Block 4: Contact & Location */}
                             <View className="border-b border-gray-100 mb-4" />

@@ -9,8 +9,8 @@ import { useInventory } from '../../src/hooks/useInventory';
 import ConfigureProductsModal from '../../src/components/ConfigureProductsModal';
 import FilterModal, { FilterState } from '../../src/components/FilterModal';
 import AddCustomProductModal from '../../src/components/AddCustomProductModal';
-
-
+import AddMenuProductModal from '../../src/components/AddMenuProductModal';
+import { useStore } from '../../src/context/StoreContext';
 
 const DEFAULT_FILTERS: FilterState = {
     sortBy: 'price_low',
@@ -26,6 +26,7 @@ const DEFAULT_FILTERS: FilterState = {
 export default function CatalogPicker() {
     const router = useRouter();
     const { branchId, refetch: refetchInventory, loading: inventoryLoading } = useInventory();
+    const { store } = useStore();
 
     const [products, setProducts] = useState<any[]>([]);
     const [search, setSearch] = useState('');
@@ -355,14 +356,24 @@ export default function CatalogPicker() {
             />
 
             {/* Custom Product Modal */}
-            <AddCustomProductModal
-                visible={showCustomModal}
-                onClose={() => setShowCustomModal(false)}
-                onSuccess={handleCustomSuccess}
-                storeId={branchId!}
-                initialName={search}
-                verticalPills={verticalPills}
-            />
+            {store?.isDining ? (
+                <AddMenuProductModal
+                    visible={showCustomModal}
+                    onClose={() => setShowCustomModal(false)}
+                    onSuccess={handleCustomSuccess}
+                    storeId={branchId!}
+                    initialName={search}
+                />
+            ) : (
+                <AddCustomProductModal
+                    visible={showCustomModal}
+                    onClose={() => setShowCustomModal(false)}
+                    onSuccess={handleCustomSuccess}
+                    storeId={branchId!}
+                    initialName={search}
+                    verticalPills={verticalPills}
+                />
+            )}
 
             {/* Filter Modal */}
             <FilterModal

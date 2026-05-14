@@ -6,6 +6,7 @@ import { Colors } from '../../constants/Colors';
 import { useRouter } from 'expo-router';
 import { useNotificationContext } from '../../src/context/NotificationContext';
 import { useStore } from '../../src/hooks/useStore';
+import { parseUtc } from '../../src/utils/dateFormat';
 
 export default function NotificationsScreen() {
     const router = useRouter();
@@ -23,7 +24,7 @@ export default function NotificationsScreen() {
 
     const formatTime = (createdAt: string) => {
         const now = new Date();
-        const then = new Date(createdAt);
+        const then = parseUtc(createdAt);
         const diffMs = now.getTime() - then.getTime();
         const diffMins = Math.floor(diffMs / 60000);
         const diffHours = Math.floor(diffMins / 60);

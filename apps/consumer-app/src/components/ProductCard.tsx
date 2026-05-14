@@ -22,6 +22,7 @@ interface ProductCardProps {
         distance?: string;
         rating?: string | number;
         isVeg?: boolean;
+        stock?: number;
     };
     quantity: number;
     onAdd: (item: any) => void;
@@ -43,6 +44,7 @@ export default function ProductCard({
     onAuthRequired
 }: ProductCardProps) {
     const cardWidthStyle = fullWidth ? { width: '100%' } : { width: CARD_WIDTH };
+    const isOutOfStock = (item.stock !== undefined && item.stock !== null) ? item.stock <= 0 : false;
 
     const { productFavorites, toggleProductFavorite } = useProductFavorites(onAuthRequired);
     const isFavorited = productFavorites.includes(String(item.id));
@@ -51,8 +53,8 @@ export default function ProductCard({
         <TouchableOpacity
             delayPressIn={0}
             activeOpacity={0.95}
-            onPress={onPress}
-            style={[cardWidthStyle as any, { backgroundColor: '#FFFFFF', height: 300 }]}
+            onPress={isOutOfStock ? undefined : onPress}
+            style={[cardWidthStyle as any, { backgroundColor: '#FFFFFF', height: 300, opacity: isOutOfStock ? 0.55 : 1 }]}
             className="rounded-[20px] overflow-hidden border border-gray-100 shadow-sm relative mb-4"
         >
             {/* 1. UPPER SECTION (Image) */}
@@ -81,25 +83,25 @@ export default function ProductCard({
                 >
                     <Heart size={14} color="#B52725" fill={isFavorited ? '#B52725' : 'transparent'} />
                 </TouchableOpacity>
+
+                {/* Out of Stock Tag */}
+                {isOutOfStock && (
+                    <View className="absolute bottom-0 left-0 right-0 bg-gray-900/80 py-1.5 items-center">
+                        <Text className="text-white text-[11px] font-extrabold uppercase tracking-wider">Out of Stock</Text>
+                    </View>
+                )}
             </View>
 
             {/* 2. LOWER SECTION (Content) */}
             <View className="bg-white px-3 py-3 rounded-b-[20px]" style={{ height: 160, justifyContent: 'space-between' }}>
                 <View>
 
-                {/* Meta Row (Distance & Rating) */}
-                {(item.distance || item.rating) && (
+                {/* Meta Row (Distance) */}
+                {(item.distance) && (
                     <View className="flex-row items-center justify-between mb-1.5">
-                        {item.distance && (
-                            <Text className="text-[11px] font-semibold text-[#64748B]">
-                                📍 {item.distance}
-                            </Text>
-                        )}
-                        {item.rating && (
-                            <Text className="text-[11px] font-bold text-[#EAB308]">
-                                ★ {item.rating}
-                            </Text>
-                        )}
+                        <Text className="text-[11px] font-semibold text-[#64748B]">
+                            📍 {item.distance}
+                        </Text>
                     </View>
                 )}
 
@@ -143,11 +145,23 @@ export default function ProductCard({
                             </Text>
                             <TouchableOpacity
                                 delayPressIn={0}
-                                onPress={() => onIncrement(String(item.id), quantity + 1)}
+                                onPress={() => {
+                                    const currentStock = (item.stock !== undefined && item.stock !== null) ? item.stock : Infinity;
+                                    if (quantity >= currentStock) {
+                                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                                        Alert.alert('Max Available', `Only ${currentStock} left in stock.`);
+                                        return;
+                                    }
+                                    onIncrement(String(item.id), quantity + 1);
+                                }}
                                 className="w-6 h-full items-center justify-center active:opacity-70"
                             >
                                 <Plus size={14} color="white" strokeWidth={3} />
                             </TouchableOpacity>
+                        </View>
+                    ) : isOutOfStock ? (
+                        <View className="h-8 rounded-full bg-gray-300 items-center justify-center px-3">
+                            <Text className="text-[11px] font-bold text-gray-500 uppercase">Unavailable</Text>
                         </View>
                     ) : (
                         <TouchableOpacity

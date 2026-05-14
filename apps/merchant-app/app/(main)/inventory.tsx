@@ -10,6 +10,7 @@ import { useStore } from '../../src/context/StoreContext';
 import InventoryCard from '../../src/components/InventoryCard';
 import FilterModal, { FilterState } from '../../src/components/FilterModal';
 import AddCustomProductModal from '../../src/components/AddCustomProductModal';
+import AddMenuProductModal from '../../src/components/AddMenuProductModal';
 import { Colors } from '../../constants/Colors';
 import { InventoryItem } from '../../src/hooks/useInventory';
 
@@ -35,7 +36,7 @@ const DEFAULT_FILTERS: FilterState = {
 export default function InventoryScreen() {
     const router = useRouter();
     const { inventory, loading, refreshing, error, refetch, updateItem, deleteItem, toggleStatus, branchId } = useInventory();
-    const { activeStoreId, branches } = useStore();
+    const { activeStoreId, branches, store } = useStore();
 
     const activeBranch = branches.find(b => b.id === activeStoreId);
 
@@ -155,12 +156,59 @@ export default function InventoryScreen() {
                         style={styles.illustration}
                     />
                     <Text style={styles.emptyTitle}>Your inventory is empty</Text>
-                    <Text style={styles.emptyDesc}>Add items from the Master Catalog to start selling.</Text>
+                    <Text style={styles.emptyDesc}>
+                        {store?.isDining ? "Build your menu, one item at a time." : "Add items from the Master Catalog to start selling."}
+                    </Text>
 
-                    <TouchableOpacity style={styles.bigAddBtn} onPress={() => router.push('/(main)/catalog-picker')}>
-                        <Text style={styles.bigAddText}>Start Adding Products</Text>
+                    <TouchableOpacity 
+                        style={styles.bigAddBtn} 
+                        onPress={() => {
+                            if (store?.isDining) {
+                                setEditModalVisible(true);
+                            } else {
+                                router.push('/(main)/catalog-picker');
+                            }
+                        }}
+                    >
+                        <Text style={styles.bigAddText}>
+                            {store?.isDining ? "Add Menu Item" : "Start Adding Products"}
+                        </Text>
                     </TouchableOpacity>
                 </View>
+
+                {branchId && store?.isDining && (
+                    <AddMenuProductModal
+                        visible={editModalVisible}
+                        onClose={() => {
+                            setEditModalVisible(false);
+                            setItemToEdit(null);
+                        }}
+                        onSuccess={() => {
+                            setEditModalVisible(false);
+                            setItemToEdit(null);
+                            refetch();
+                        }}
+                        storeId={branchId}
+                        itemToEdit={itemToEdit}
+                    />
+                )}
+                
+                {branchId && !store?.isDining && (
+                    <AddCustomProductModal
+                        visible={editModalVisible}
+                        onClose={() => {
+                            setEditModalVisible(false);
+                            setItemToEdit(null);
+                        }}
+                        onSuccess={() => {
+                            setEditModalVisible(false);
+                            setItemToEdit(null);
+                            refetch();
+                        }}
+                        storeId={branchId}
+                        itemToEdit={itemToEdit}
+                    />
+                )}
             </SafeAreaView>
         );
     }
@@ -279,9 +327,20 @@ export default function InventoryScreen() {
             </View>
 
             {/* Add Button */}
-            <TouchableOpacity style={styles.mainAddBtn} onPress={() => router.push('/(main)/catalog-picker')}>
+            <TouchableOpacity 
+                style={styles.mainAddBtn} 
+                onPress={() => {
+                    if (store?.isDining) {
+                        setEditModalVisible(true);
+                    } else {
+                        router.push('/(main)/catalog-picker');
+                    }
+                }}
+            >
                 <Ionicons name="add" size={24} color="#fff" />
-                <Text style={styles.mainAddText}>Add Products to Inventory</Text>
+                <Text style={styles.mainAddText}>
+                    {store?.isDining ? "Add Menu Item" : "Add Products to Inventory"}
+                </Text>
             </TouchableOpacity>
 
             <FlatList
@@ -320,7 +379,24 @@ export default function InventoryScreen() {
                 initialTab={filterTab}
             />
 
-            {branchId && (
+            {branchId && store?.isDining && (
+                <AddMenuProductModal
+                    visible={editModalVisible}
+                    onClose={() => {
+                        setEditModalVisible(false);
+                        setItemToEdit(null);
+                    }}
+                    onSuccess={() => {
+                        setEditModalVisible(false);
+                        setItemToEdit(null);
+                        refetch();
+                    }}
+                    storeId={branchId}
+                    itemToEdit={itemToEdit}
+                />
+            )}
+            
+            {branchId && !store?.isDining && (
                 <AddCustomProductModal
                     visible={editModalVisible}
                     onClose={() => {

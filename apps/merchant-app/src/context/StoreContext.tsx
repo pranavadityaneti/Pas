@@ -11,6 +11,9 @@ export interface Store {
     active: boolean;
     operating_hours?: any;
     prep_time_minutes?: number;
+    isDining?: boolean;
+    isPremium?: boolean;
+    requiresFssai?: boolean;
 }
 
 export interface Branch {
@@ -96,7 +99,7 @@ const CACHE_KEY = 'cached_store_state';
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
     // Raw store data from fetchStore — NOT the derived store object consumers see
-    const [rawStoreData, setRawStoreData] = useState<{ id: string; image: string | null; operating_hours?: any; prep_time_minutes?: number } | null>(null);
+    const [rawStoreData, setRawStoreData] = useState<{ id: string; image: string | null; operating_hours?: any; prep_time_minutes?: number; vertical?: any } | null>(null);
     const [merchantId, setMerchantId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [branches, setBranches] = useState<Branch[]>([]);
@@ -120,6 +123,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             active: activeBranch?.isActive ?? true,
             operating_hours: rawStoreData.operating_hours,
             prep_time_minutes: rawStoreData.prep_time_minutes,
+            isDining: rawStoreData.vertical?.isDining ?? false,
+            isPremium: rawStoreData.vertical?.isPremium ?? false,
+            requiresFssai: rawStoreData.vertical?.requiresFssai ?? false,
         };
     }, [activeContext, activeStoreId, branches, rawStoreData]);
 
@@ -157,9 +163,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 });
             }
 
-            const addManagerBranch = (merchantId: string, branchId: string, branchName: string) => {
+            const addManagerBranch = (merchantId: string, branchId: string, branchName: string, role: string = 'manager') => {
                 if (contextMap.has(merchantId)) {
                     const ctx = contextMap.get(merchantId)!;
+                    if (role === 'owner') ctx.role = 'owner';
                     if (!ctx.branches.find(b => b.branchId === branchId)) {
                         ctx.branches.push({ branchId, branchName });
                     }
@@ -167,27 +174,37 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                     contextMap.set(merchantId, {
                         merchantId,
                         merchantName: '',
-                        role: 'manager',
+                        role: role as 'owner' | 'manager',
                         branches: [{ branchId, branchName }]
                     });
                 }
             };
 
             if (managerData) {
-                managerData.forEach(b => addManagerBranch(b.merchant_id, b.id, b.branch_name));
+                managerData.forEach(b => {
+                    const staffRecord = staffRoles?.find(s => s.store_id === b.id);
+                    addManagerBranch(b.merchant_id, b.id, b.branch_name, staffRecord?.role);
+                });
             }
 
             if (staffRoles && staffRoles.length > 0) {
                 const storeIds = staffRoles.map(s => s.store_id);
                 const { data: branchCheck } = await supabase.from('merchant_branches').select('id, branch_name, merchant_id').in('id', storeIds);
                 if (branchCheck) {
-                    branchCheck.forEach(b => addManagerBranch(b.merchant_id, b.id, b.branch_name));
+                    branchCheck.forEach(b => {
+                        const staffRecord = staffRoles.find(s => s.store_id === b.id);
+                        addManagerBranch(b.merchant_id, b.id, b.branch_name, staffRecord?.role);
+                    });
                 }
                 const { data: mainStoreCheck } = await supabase.from('merchants').select('id, store_name').in('id', storeIds);
                 if (mainStoreCheck) {
                     mainStoreCheck.forEach(m => {
+                        const staffRecord = staffRoles.find(s => s.store_id === m.id);
+                        const role = staffRecord?.role || 'manager';
+
                         if (contextMap.has(m.id)) {
                              const ctx = contextMap.get(m.id)!;
+                             if (role === 'owner') ctx.role = 'owner';
                              if (!ctx.branches.find(b => b.branchId === m.id)) {
                                  ctx.branches.push({ branchId: m.id, branchName: m.store_name || 'Main Store' });
                              }
@@ -195,7 +212,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                              contextMap.set(m.id, {
                                  merchantId: m.id,
                                  merchantName: m.store_name || 'Main Store',
-                                 role: 'manager',
+                                 role: role as 'owner' | 'manager',
                                  branches: [{ branchId: m.id, branchName: m.store_name || 'Main Store' }]
                              });
                         }
@@ -257,6 +274,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 return null;
             }
 
+            let verticalData = null;
+            if (pData.vertical_id) {
+                const { data: v } = await supabase.from('Vertical').select('*').eq('id', pData.vertical_id).maybeSingle();
+                verticalData = v;
+            }
+
             const defaultBranch = finalContext.branches.find(b => b.branchId === finalContext.merchantId) ?? finalContext.branches[0];
             let finalBranchId = defaultBranch?.branchId || finalContext.merchantId;
 
@@ -265,25 +288,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             }
             console.log('[fetchStore] Final branch ID:', finalBranchId);
 
-            const { data: bData } = await supabase.from('merchant_branches').select('*').eq('merchant_id', finalContext.merchantId);
+            const { data: bData, error: bError } = await supabase.from('merchant_branches').select('*').eq('merchant_id', finalContext.merchantId);
             const allBranches: Branch[] = [];
-            allBranches.push({ id: finalContext.merchantId, name: finalContext.merchantName, type: 'main', isActive: pData.status === 'active' || pData.status === true || pData.status == null, address: pData.address, city: null });
-            if (bData) {
+            
+            if (bData && bData.length > 0) {
                  bData.forEach(b => {
                      if (finalContext.role === 'owner' || finalContext.branches.find(cb => cb.branchId === b.id)) {
-                         allBranches.push({ id: b.id, name: b.branch_name, type: 'branch', isActive: b.is_active ?? true, address: b.address, city: b.city });
+                         allBranches.push({ id: b.id, name: b.branch_name, type: 'main', isActive: b.is_active ?? true, address: b.address, city: b.city });
                      }
                  });
+            } else {
+                 allBranches.push({ id: finalContext.merchantId, name: finalContext.merchantName, type: 'main', isActive: pData.status === 'active' || pData.status === true || pData.status == null, address: pData.address, city: null });
             }
 
             const activeBranchObj = allBranches.find(b => b.id === finalBranchId) || allBranches[0];
+            finalBranchId = activeBranchObj.id;
 
             // Store raw data — the reactive useMemo derives the consumer-facing `store` object
+            // Read operating_hours and prep_time_minutes from the ACTIVE BRANCH, not the parent merchant.
+            // The merchants table doesn't reliably have these columns; merchant_branches is the source of truth.
+            const activeBranchData = bData?.find(b => b.id === finalBranchId);
             const rawData = {
                 id: pData.id,
                 image: pData.logo_url || null,
-                operating_hours: pData.operating_hours || null,
-                prep_time_minutes: pData.prep_time_minutes ?? undefined,
+                operating_hours: activeBranchData?.operating_hours || pData.operating_hours || null,
+                prep_time_minutes: activeBranchData?.prep_time_minutes ?? pData.prep_time_minutes ?? undefined,
+                vertical: verticalData
             };
 
             setMerchantId(finalContext.merchantId);
@@ -335,7 +365,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         switchContext,
         toggleStoreStatus: async () => ({ success: true }),
         refreshStore: async () => fetchStore(),
-        updateStoreDetails: async () => ({ success: true })
+        updateStoreDetails: async (updates) => {
+            if (!activeStoreId) return { success: false, error: 'No active branch' };
+            try {
+                // Write ONLY to merchant_branches — this is the source of truth for
+                // operating_hours and prep_time_minutes.
+                const { error: bError } = await supabase
+                    .from('merchant_branches')
+                    .update(updates)
+                    .eq('id', activeStoreId);
+                
+                if (bError) throw new Error(bError.message);
+                
+                await fetchStore();
+                return { success: true };
+            } catch (err: any) {
+                return { success: false, error: err.message };
+            }
+        }
     };
 
     return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;

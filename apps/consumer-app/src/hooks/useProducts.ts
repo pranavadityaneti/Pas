@@ -14,7 +14,7 @@ export interface ProductItem {
   subCategory: string;
   isVeg: boolean;
   isBestseller: boolean;
-  rating: string;
+  rating?: string | null;
   discount: number;
 }
 
@@ -70,7 +70,7 @@ export const useProducts = (storeId: string | null) => {
                     
                     return {
                         id: item.id, // We use the StoreProduct ID for uniqueness in cart
-                        name: p.name || 'Unknown Product',
+                        name: p.name + (item.variant ? ` - ${item.variant}` : ''),
                         description: p.description || null,
                         image: p.image || 'https://images.unsplash.com/photo-1542838132-92c53300491?w=400',
                         price: item.price,
@@ -81,7 +81,7 @@ export const useProducts = (storeId: string | null) => {
                         // Logic for dietary/metadata from extra_data if needed, or defaults
                         isVeg: p.extra_data?.isVeg ?? true, 
                         isBestseller: item.is_best_seller || false,
-                        rating: p.avg_rating ? String(p.avg_rating) : '4.2',
+                        rating: p.avg_rating ? String(p.avg_rating) : null,
                         discount: discount
                     };
                 });

@@ -12,7 +12,7 @@ import * as Haptics from 'expo-haptics';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import TransactionalAuthModal from '../components/TransactionalAuthModal';
-import { STORES, RESTAURANTS } from '../lib/data';
+import { STORES } from '../lib/data';
 
 export default function CartScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -34,8 +34,8 @@ export default function CartScreen() {
     }, [route.params]);
     const subtotal = getTotal();
     const itemCount = getItemCount();
-    const isRestaurantOrder = items.some(item => RESTAURANTS.some(r => String(r.id) === String(item.storeId)));
-    const gst = isRestaurantOrder ? Math.round(subtotal * 0.05) : 0;
+    const isRestaurantOrder = items.some(item => item.isDining);
+    const gst = isRestaurantOrder ? parseFloat((subtotal * 0.05).toFixed(2)) : 0;
 
     useEffect(() => {
         // Evaluate coupon minimum requirements
@@ -60,7 +60,7 @@ export default function CartScreen() {
         // 1. The Success Condition
         if (user && !isProfileLoading) {
             setIsWaitingForAuthSync(false);
-            const isRestaurantOrder = items.length > 0 && RESTAURANTS.some(r => String(r.id) === String(items[0].storeId));
+            const isRestaurantOrder = items.length > 0 && items[0].isDining;
             if (isRestaurantOrder) {
                 navigation.navigate('DiningCheckout', { selectedCoupon: coupon } as any);
             } else {
@@ -96,7 +96,7 @@ export default function CartScreen() {
             return;
         }
 
-        const isRestaurantOrder = items.length > 0 && RESTAURANTS.some(r => String(r.id) === String(items[0].storeId));
+        const isRestaurantOrder = items.length > 0 && items[0].isDining;
         if (isRestaurantOrder) {
             navigation.navigate('DiningCheckout', { selectedCoupon: coupon } as any);
         } else {
@@ -162,14 +162,14 @@ export default function CartScreen() {
                     {Object.keys(groupedItems).map((storeId) => {
                         const storeItems = groupedItems[storeId];
                         const storeName = storeItems[0].storeName;
-                        const storeMeta = STORES.find(s => String(s.id) === String(storeId)) || RESTAURANTS.find(r => String(r.id) === String(storeId));
+                        const storeMeta = STORES.find(s => String(s.id) === String(storeId));
                         
                         return (
                             <View key={storeId} className="bg-white rounded-[20px] p-5 mb-4 border border-gray-100 shadow-sm">
                                 <View className="flex-row justify-between items-center mb-1">
                                     <Text className="text-[17px] font-bold text-gray-900 flex-1 mr-2" numberOfLines={1} ellipsizeMode="tail">{storeName}</Text>
                                 </View>
-                                <Text className="text-[12px] text-gray-400 font-medium mb-5">{RESTAURANTS.some(r => String(r.id) === String(storeId)) ? 'Pre-order items' : 'Items to be picked up from here'}</Text>
+                                <Text className="text-[12px] text-gray-400 font-medium mb-5">{storeItems[0]?.isDining ? 'Dine-in items' : 'Items to be picked up from here'}</Text>
 
                                 {storeItems.map((item: any, index: number) => (
                                     <View key={item.id} className={`flex-row items-center py-3 ${index < storeItems.length - 1 ? 'border-b border-gray-50' : ''}`}>
@@ -210,8 +210,8 @@ export default function CartScreen() {
                         </View>
                         {gst > 0 && (
                             <View className="flex-row justify-between items-center mb-3">
-                                <Text className="text-[14px] font-medium text-gray-500">Taxes & Platform Fee</Text>
-                                <Text className="text-[14px] font-medium text-gray-900">₹{gst}</Text>
+                                <Text className="text-[14px] font-medium text-gray-500">GST (5%)</Text>
+                                <Text className="text-[14px] font-medium text-gray-900">₹{gst.toFixed(2)}</Text>
                             </View>
                         )}
                         {discount > 0 && (
@@ -223,7 +223,7 @@ export default function CartScreen() {
                         <View className="border-t border-gray-100 mt-2 mb-3" />
                         <View className="flex-row justify-between items-center">
                             <Text className="text-[16px] font-bold text-gray-900">Grand Total</Text>
-                            <Text className="text-[16px] font-extrabold text-[#111827]">₹{total}</Text>
+                            <Text className="text-[16px] font-extrabold text-[#111827]">₹{total.toFixed(2)}</Text>
                         </View>
                     </View>
                 </View>

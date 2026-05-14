@@ -106,6 +106,7 @@ export default function FavoritesScreen() {
             storeId: product.storeId,
             storeName: product.storeName,
             isDining: product.isDining,
+            isVeg: product.isVeg ?? true,
             uom: product.uom || '1 Pc',
         });
     };

@@ -26,6 +26,7 @@ import ProductCard from '../components/ProductCard';
 import { transformStoreData, TransformedStore } from '../utils/dataTransformer';
 import { useCategories } from '../context/CategoryContext';
 import { useFavorites } from '../hooks/useFavorites';
+import { parseUtc } from '../utils/dateFormat';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2;
@@ -197,6 +198,10 @@ export default function StorefrontScreen({ route }: any) {
             Alert.alert('Store Offline', 'This store is currently not accepting orders.');
             return;
         }
+        if ((product.stock !== undefined && product.stock !== null) && product.stock <= 0) {
+            Alert.alert('Out of Stock', 'This item is currently unavailable.');
+            return;
+        }
         addItem({
             id: product.id,
             name: product.name,
@@ -205,7 +210,9 @@ export default function StorefrontScreen({ route }: any) {
             storeId: String(restaurant.id),
             storeName: restaurant.name,
             isDining: restaurant.isDining,
+            isVeg: product.isVeg ?? true,
             uom: product.uom || '1 Pc',
+            stock: product.stock,
         });
     };
 
@@ -459,7 +466,7 @@ export default function StorefrontScreen({ route }: any) {
                                             <Star size={16} color="#1F2937" fill="#1F2937" />
                                             <Text className="text-[14px] font-bold text-gray-900 ml-1.5">{restaurant.rating}</Text>
                                         </>
-                                    ) : (((restaurant as any).created_at || (restaurant as any).createdAt) && (new Date().getTime() - new Date((restaurant as any).created_at || (restaurant as any).createdAt).getTime()) < 30 * 24 * 60 * 60 * 1000) ? (
+                                    ) : (((restaurant as any).created_at || (restaurant as any).createdAt) && (new Date().getTime() - parseUtc((restaurant as any).created_at || (restaurant as any).createdAt).getTime()) < 30 * 24 * 60 * 60 * 1000) ? (
                                         <View className="bg-gray-100 px-2 py-0.5 rounded-md">
                                             <Text className="text-[11px] font-extrabold text-gray-400 uppercase tracking-wider">NEW</Text>
                                         </View>

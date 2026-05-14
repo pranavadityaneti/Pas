@@ -12,8 +12,6 @@ import OnboardingScreen from '../screens/OnboardingScreen';
 import AuthScreen from '../screens/AuthScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import ProfileSetupScreen from '../screens/ProfileSetupScreen';
-import CheckoutScreen from '../screens/CheckoutScreen';
-import DiningCheckoutScreen from '../screens/DiningCheckoutScreen';
 import OffersScreen from '../screens/OffersScreen';
 import SpotlightDetailScreen from '../screens/SpotlightDetailScreen';
 import CategoryDetailScreen from '../screens/CategoryDetailScreen';
@@ -108,8 +106,6 @@ export default function RootNavigator() {
             {/* Auth-gated screens — individual screens handle auth checks */}
             <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
             <Stack.Screen name="Profile" component={ProfileScreen} />
-            <Stack.Screen name="Checkout" component={CheckoutScreen} />
-            <Stack.Screen name="DiningCheckout" component={DiningCheckoutScreen} />
             <Stack.Screen name="Offers" component={OffersScreen} />
             <Stack.Screen name="YourOrders" component={YourOrdersScreen} />
             <Stack.Screen name="Favorites" component={FavoritesScreen} />

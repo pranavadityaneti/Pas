@@ -1,7 +1,7 @@
 // @lock — Do NOT overwrite. Approved layout & hardened duplicate prevention as of Mar 16, 2026.
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, ActivityIndicator, Alert, Platform, Image, Dimensions, ScrollView, Keyboard, KeyboardAvoidingView } from 'react-native';
-// Remove KeyboardAwareScrollView to avoid ghost padding issues
+// Removed KeyboardAwareScrollView as requested by user
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -43,6 +43,23 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
 
     // Dropdown State
     const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+
+    // Keyboard State for Android Translucent Modals
+    const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+    useEffect(() => {
+        if (Platform.OS !== 'android') return;
+        const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+            setKeyboardHeight(e.endCoordinates.height);
+        });
+        const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+            setKeyboardHeight(0);
+        });
+        return () => {
+            showSub.remove();
+            hideSub.remove();
+        };
+    }, []);
 
     // Change Detection
     const [originalData, setOriginalData] = useState<{
@@ -543,8 +560,8 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
 
     return (
         <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose} statusBarTranslucent={true}>
-            <View style={styles.overlay}>
-                <View style={[styles.container, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+            <View style={[styles.overlay, Platform.OS === 'android' && { paddingBottom: keyboardHeight }]}>
+                <View style={[styles.container, { paddingBottom: Math.max(insets.bottom, 20), paddingTop: insets.top }]}>
                     {/* Header stays pinned at top of container */}
                     <View style={styles.header}>
                         <Text style={styles.title}>{itemToEdit ? "Edit Product" : "Add Custom Product"}</Text>

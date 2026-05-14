@@ -2,9 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import {
     View, Text, TouchableOpacity, Modal, Pressable,
-    Platform, Alert, ActivityIndicator
+    Platform, Alert, ActivityIndicator, ScrollView
 } from 'react-native';
-import { Minus, Plus, ChevronDown, CheckCircle, Info, MapPin } from 'lucide-react-native';
+import { Minus, Plus, ChevronDown, CheckCircle, Info, MapPin, AlertTriangle } from 'lucide-react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import * as Haptics from 'expo-haptics';
 import RazorpayCheckout from './RazorpayCheckout';
@@ -33,7 +33,7 @@ const getDefaultTime = () => {
 export default function BookingModal({ visible, onClose, restaurant }: BookingModalProps) {
     const navigation = useNavigation<any>();
     const [step, setStep] = useState<'form' | 'confirmed'>('form');
-    const [branchesData, setBranchesData] = useState<{ name: string; address?: string }[]>([]);
+    const [branchesData, setBranchesData] = useState<{ id: string; name: string; address?: string; operating_hours?: any }[]>([]);
     const [branchesLoading, setBranchesLoading] = useState(false);
     const [selectedBranch, setSelectedBranch] = useState('');
     const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
@@ -45,6 +45,8 @@ export default function BookingModal({ visible, onClose, restaurant }: BookingMo
     const [showPayment, setShowPayment] = useState(false);
     const [authModalVisible, setAuthModalVisible] = useState(false);
     const [razorpayOrderId, setRazorpayOrderId] = useState<string | undefined>();
+    const [bookingOtp, setBookingOtp] = useState('');
+    const [bookingOrderNumber, setBookingOrderNumber] = useState('');
 
     // Booking Fee Calculation: ₹25 per 2 guests, capped at ₹100
     const bookingFee = Math.min(100, Math.ceil(guestCount / 2) * 25);
@@ -76,14 +78,14 @@ export default function BookingModal({ visible, onClose, restaurant }: BookingMo
             try {
                 const { data, error } = await supabase
                     .from('merchant_branches')
-                    .select('branch_name, address')
+                    .select('id, branch_name, address, operating_hours')
                     .eq('merchant_id', restaurant.merchantId)
                     .eq('is_active', true);
 
                 if (error) throw error;
 
                 if (data && data.length > 0) {
-                    const mapped = data.map(b => ({ name: b.branch_name, address: b.address || undefined }));
+                    const mapped = data.map(b => ({ id: b.id, name: b.branch_name, address: b.address || undefined, operating_hours: b.operating_hours || null }));
                     setBranchesData(mapped);
                     setSelectedBranch(mapped[0].name);
                 } else {
@@ -105,6 +107,78 @@ export default function BookingModal({ visible, onClose, restaurant }: BookingMo
     // Max date: 7 days from now
     const maxDate = new Date();
     maxDate.setDate(maxDate.getDate() + 7);
+
+    // ── Operating Hours Validation ──
+    const selectedBranchData = branchesData.find(b => b.name === selectedBranch);
+    const operatingHours = selectedBranchData?.operating_hours || (branchesData.length === 1 ? branchesData[0]?.operating_hours : null);
+
+    const getBookingValidation = () => {
+        if (!operatingHours || !operatingHours.open || !operatingHours.close) {
+            return { isValid: true, reason: '' }; // No hours configured — allow booking
+        }
+
+        // Check if selected day is an operating day
+        // operating_hours.days is an array of day indices: 0=Mon, 1=Tue, ..., 6=Sun
+        if (operatingHours.days && Array.isArray(operatingHours.days)) {
+            const jsDay = date.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+            // Convert JS day (0=Sun) to operating_hours format (0=Mon, 6=Sun)
+            const ohDay = jsDay === 0 ? 6 : jsDay - 1;
+            if (!operatingHours.days.includes(ohDay)) {
+                const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+                const openDays = operatingHours.days.map((d: number) => dayNames[d]).join(', ');
+                return { isValid: false, reason: `Restaurant is closed on this day. Open days: ${openDays}` };
+            }
+        }
+
+        // Check if selected time is within open/close range
+        const [openH, openM] = operatingHours.open.split(':').map(Number);
+        const [closeH, closeM] = operatingHours.close.split(':').map(Number);
+        const selectedMinutes = time.getHours() * 60 + time.getMinutes();
+        const openMinutes = openH * 60 + openM;
+        const closeMinutes = closeH * 60 + closeM;
+
+        if (selectedMinutes < openMinutes || selectedMinutes >= closeMinutes) {
+            const formatHM = (h: number, m: number) => {
+                const period = h >= 12 ? 'PM' : 'AM';
+                const h12 = h % 12 || 12;
+                return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+            };
+            return { isValid: false, reason: `Please select a time between ${formatHM(openH, openM)} and ${formatHM(closeH, closeM)}` };
+        }
+
+        // Check lunch break
+        if (operatingHours.hasLunchBreak && operatingHours.lunchStart && operatingHours.lunchEnd) {
+            const [lsH, lsM] = operatingHours.lunchStart.split(':').map(Number);
+            const [leH, leM] = operatingHours.lunchEnd.split(':').map(Number);
+            const lunchStartMin = lsH * 60 + lsM;
+            const lunchEndMin = leH * 60 + leM;
+            if (selectedMinutes >= lunchStartMin && selectedMinutes < lunchEndMin) {
+                const formatHM = (h: number, m: number) => {
+                    const period = h >= 12 ? 'PM' : 'AM';
+                    const h12 = h % 12 || 12;
+                    return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+                };
+                return { isValid: false, reason: `Restaurant has a break from ${formatHM(lsH, lsM)} to ${formatHM(leH, leM)}. Please select a different time.` };
+            }
+        }
+
+        return { isValid: true, reason: '' };
+    };
+
+    const bookingValidation = getBookingValidation();
+
+    // Format operating hours for display
+    const getOperatingHoursDisplay = () => {
+        if (!operatingHours || !operatingHours.open || !operatingHours.close) return null;
+        const formatHM = (timeStr: string) => {
+            const [h, m] = timeStr.split(':').map(Number);
+            const period = h >= 12 ? 'PM' : 'AM';
+            const h12 = h % 12 || 12;
+            return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+        };
+        return `${formatHM(operatingHours.open)} – ${formatHM(operatingHours.close)}`;
+    };
+    const operatingHoursDisplay = getOperatingHoursDisplay();
 
     const handleConfirm = async () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -158,38 +232,58 @@ export default function BookingModal({ visible, onClose, restaurant }: BookingMo
             }
 
             const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-                // Generate a random 4-digit OTP for the table booking
-                const bookingOtp = Math.floor(1000 + Math.random() * 9000).toString();
-                // Generate order number manually
-                const orderNumber = `PAS-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${user.id.slice(0, 4).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
-
-                const now = new Date().toISOString();
-                const { error: bookingError } = await supabase
-                    .from('orders')
-                    .insert({
-                        user_id: user.id,
-                        order_number: orderNumber,
-                        customer_name: user.user_metadata?.full_name || user.email?.split('@')[0],
-                        customer_phone: user.phone || '',
-                        store_id: restaurant.id ? String(restaurant.id) : null,
-                        store_name: `${restaurant.name}${selectedBranch ? ` (${selectedBranch})` : ''}`,
-                        amount: bookingFee,
-                        total_amount: bookingFee,
-                        order_type: 'dine-in',
-                        otp_code: bookingOtp,
-                        otp: bookingOtp,
-                        items_count: 0,
-                        status: 'CONFIRMED',
-                        special_instructions: 'Table Booking Only',
-                        arrival_time: `${formatDate(date)}, ${formatTime(time)}`,
-                        guests_count: guestCount,
-                        created_at: now,
-                        updated_at: now
-                    });
-
-                if (bookingError) throw bookingError;
+            if (!user) {
+                Alert.alert('Error', 'User session expired. Please login again.');
+                setShowPayment(false);
+                return;
             }
+
+            // Resolve the branch ID for the API call
+            // If multiple branches and one is selected, use that branch's id
+            // If single-location, fall back to restaurant.merchantId (treated as store_id = branch_id at API level)
+            const selectedBranchData = branchesData.find(b => b.name === selectedBranch);
+            const branchId = selectedBranchData?.id || restaurant.merchantId || (restaurant.id ? String(restaurant.id) : null);
+            const storeId = restaurant.merchantId || (restaurant.id ? String(restaurant.id) : null);
+
+            if (!storeId || !branchId) {
+                Alert.alert('Error', 'Restaurant configuration is incomplete. Please try again.');
+                setShowPayment(false);
+                return;
+            }
+
+            const orderRes = await fetch(`${apiUrl}/orders`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userId: user.id,
+                    storeId,
+                    branchId,
+                    items: [],
+                    totalAmount: bookingFee,
+                    paid: true,
+                    paymentId: id,
+                    customerName: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Guest',
+                    customerPhone: user.phone || '',
+                    storeName: `${restaurant.name}${selectedBranch ? ` (${selectedBranch})` : ''}`,
+                    specialInstructions: 'Table Booking Only',
+                    arrivalTime: `${formatDate(date)}, ${formatTime(time)}`,
+                    orderType: 'dine-in',
+                    guestsCount: guestCount
+                })
+            });
+
+            if (!orderRes.ok) {
+                const errorBody = await orderRes.text();
+                console.error('[BookingModal] API order creation failed:', orderRes.status, errorBody);
+                Alert.alert('Booking Error', 'Could not save your booking. Please contact support with your payment ID.');
+                setShowPayment(false);
+                return;
+            }
+
+            const createdOrder = await orderRes.json();
+            // Store the server-generated OTP in state so the confirmation screen can display it
+            setBookingOtp(createdOrder.otp_code || createdOrder.otp || '');
+            setBookingOrderNumber(createdOrder.order_number || createdOrder.orderNumber || '');
         } catch (error) {
             console.error('Failed to persist booking to Supabase:', error);
             // In a production app you might want to retry. We proceed to confirmation for UX.
@@ -204,6 +298,21 @@ export default function BookingModal({ visible, onClose, restaurant }: BookingMo
         setShowPayment(false);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         console.warn('Booking payment failed:', error);
+        Alert.alert(
+            'Payment Failed',
+            error || 'Your payment could not be completed. No money was deducted. Please try again.',
+            [{ text: 'OK' }]
+        );
+    };
+
+    const handlePaymentDismiss = () => {
+        setShowPayment(false);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        Alert.alert(
+            'Payment Cancelled',
+            'You closed the payment screen. No money was deducted. You can try again whenever you\'re ready.',
+            [{ text: 'OK' }]
+        );
     };
 
     const handleDone = () => {
@@ -246,37 +355,54 @@ export default function BookingModal({ visible, onClose, restaurant }: BookingMo
         return (
             <Modal visible={visible} transparent animationType="fade">
                 <View className="flex-1 items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-                    <View className="bg-white rounded-3xl mx-6 w-5/6 items-center" style={{ paddingVertical: 32, paddingHorizontal: 24 }}>
-                        {/* Green check */}
-                        <View className="w-16 h-16 rounded-full bg-green-50 items-center justify-center mb-5">
-                            <CheckCircle size={36} color="#16A34A" />
-                        </View>
-
-                        <Text className="text-[22px] font-bold text-gray-900 text-center">Booking Confirmed!</Text>
-                        <Text className="text-[14px] text-gray-500 font-medium text-center" style={{ marginTop: 6 }}>Your table has been reserved</Text>
-
-                        {/* Details card */}
-                        <View className="w-full bg-gray-50 rounded-2xl mt-6" style={{ paddingVertical: 16, paddingHorizontal: 20 }}>
-                            <DetailRow label="Restaurant" value={restaurant.name} />
-                            {selectedBranch ? <DetailRow label="Branch" value={selectedBranch} /> : null}
-                            <DetailRow label="Date & Time" value={`${formatDate(date)}, ${formatTime(time)}`} />
-                            <DetailRow label="Guests" value={`${guestCount} ${guestCount === 1 ? 'Person' : 'People'}`} />
-                            <DetailRow label="Booking Fee Paid" value={`₹${bookingFee}`} isLast />
-                        </View>
-
-                        <Text className="text-[12px] text-gray-400 font-medium text-center mt-5 px-2">
-                            A confirmation has been sent to your phone. Please arrive 10 minutes before your reservation time.
-                        </Text>
-
-                        {/* Done button */}
-                        <TouchableOpacity
-                            onPress={handleDone}
-                            className="w-full bg-[#B52725] rounded-2xl items-center justify-center mt-6"
-                            style={{ height: 52 }}
-                            activeOpacity={0.9}
+                    <View className="bg-white rounded-3xl mx-6" style={{ width: '88%', maxHeight: '85%' }}>
+                        <ScrollView 
+                            contentContainerStyle={{ padding: 24 }}
+                            showsVerticalScrollIndicator={false}
                         >
-                            <Text className="text-[15px] font-bold text-white">Done</Text>
-                        </TouchableOpacity>
+                            {/* Title block */}
+                            <View className="items-center mb-5">
+                                <View className="w-14 h-14 rounded-full bg-green-50 items-center justify-center mb-3">
+                                    <CheckCircle size={32} color="#16A34A" />
+                                </View>
+                                <Text className="text-[22px] font-bold text-gray-900 text-center">Booking Confirmed!</Text>
+                                <Text className="text-[13px] text-gray-500 font-medium text-center mt-1">Your table has been reserved</Text>
+                            </View>
+
+                            {/* OTP Card — HIGHEST PRIORITY */}
+                            {bookingOtp ? (
+                                <View className="w-full bg-[#FEF2F2] rounded-2xl border-2 border-[#FECACA] items-center mb-4" style={{ paddingVertical: 24, paddingHorizontal: 20 }}>
+                                    <Text className="text-[11px] font-bold text-[#B52725] uppercase tracking-wider mb-2">Show this at the restaurant</Text>
+                                    <Text className="text-[40px] font-bold text-[#B52725] tracking-[8px]">
+                                        {bookingOtp}
+                                    </Text>
+                                </View>
+                            ) : null}
+
+                            {/* Details card — compact */}
+                            <View className="w-full bg-gray-50 rounded-2xl" style={{ paddingVertical: 14, paddingHorizontal: 18 }}>
+                                {bookingOrderNumber ? <DetailRow label="Order #" value={bookingOrderNumber} /> : null}
+                                <DetailRow label="Restaurant" value={restaurant.name} />
+                                <DetailRow label="Date & Time" value={`${formatDate(date)}, ${formatTime(time)}`} />
+                                <DetailRow label="Guests" value={`${guestCount} ${guestCount === 1 ? 'Person' : 'People'}`} />
+                                <DetailRow label="Deposit Paid" value={`₹${bookingFee}`} isLast />
+                            </View>
+
+                            {/* Arrival reminder */}
+                            <Text className="text-[11px] text-gray-400 font-medium text-center mt-4 px-2">
+                                Please arrive 10 minutes before your reservation time.
+                            </Text>
+
+                            {/* Done button */}
+                            <TouchableOpacity
+                                onPress={handleDone}
+                                className="w-full bg-[#B52725] rounded-2xl items-center justify-center mt-5"
+                                style={{ height: 52 }}
+                                activeOpacity={0.9}
+                            >
+                                <Text className="text-[15px] font-bold text-white">Done</Text>
+                            </TouchableOpacity>
+                        </ScrollView>
                     </View>
                 </View>
             </Modal>
@@ -454,11 +580,31 @@ export default function BookingModal({ visible, onClose, restaurant }: BookingMo
                     />
                 )}
 
+                {/* Operating Hours Info */}
+                {operatingHoursDisplay && (
+                    <View className="flex-row items-center bg-blue-50 p-3 rounded-xl border border-blue-100" style={{ marginTop: 16 }}>
+                        <Info size={14} color="#2563EB" />
+                        <Text className="text-[11px] text-blue-700 font-semibold ml-2 flex-1">
+                            Open Hours: {operatingHoursDisplay}
+                        </Text>
+                    </View>
+                )}
+
+                {/* Booking Blocked Warning */}
+                {!bookingValidation.isValid && (
+                    <View className="flex-row items-start bg-red-50 p-3 rounded-xl border border-red-200" style={{ marginTop: 12 }}>
+                        <AlertTriangle size={14} color="#DC2626" style={{ marginTop: 1 }} />
+                        <Text className="text-[11px] text-red-700 font-semibold ml-2 flex-1">
+                            {bookingValidation.reason}
+                        </Text>
+                    </View>
+                )}
+
                 {/* Policy Note */}
-                <View className="flex-row items-center bg-gray-50 p-3 rounded-xl border border-gray-100" style={{ marginTop: 24 }}>
+                <View className="flex-row items-center bg-gray-50 p-3 rounded-xl border border-gray-100" style={{ marginTop: bookingValidation.isValid ? 24 : 12 }}>
                     <Info size={14} color="#B52725" />
                     <Text className="text-[11px] text-gray-500 font-medium ml-2 flex-1">
-                        A non-refundable booking fee of ₹{bookingFee} is required to confirm your reservation.
+                        A ₹{bookingFee} booking deposit will be adjusted in your final bill at the restaurant.
                     </Text>
                 </View>
 
@@ -473,19 +619,20 @@ export default function BookingModal({ visible, onClose, restaurant }: BookingMo
                     </TouchableOpacity>
                     <TouchableOpacity
                         onPress={handleConfirm}
-                        className="flex-1 bg-[#B52725] rounded-2xl items-center justify-center"
+                        className={`flex-1 rounded-2xl items-center justify-center ${bookingValidation.isValid ? 'bg-[#B52725]' : 'bg-gray-300'}`}
                         style={{ height: 52 }}
                         activeOpacity={0.9}
                         hitSlop={{ top: 10, bottom: 10, left: 20, right: 20 }}
+                        disabled={!bookingValidation.isValid}
                     >
-                        <Text className="text-[14px] font-bold text-white">Pay & Confirm</Text>
+                        <Text className="text-[14px] font-bold text-white">{bookingValidation.isValid ? 'Pay & Confirm' : 'Unavailable'}</Text>
                     </TouchableOpacity>
                 </View>
             </View>
 
             <RazorpayCheckout
                 visible={showPayment}
-                onClose={() => setShowPayment(false)}
+                onClose={handlePaymentDismiss}
                 onSuccess={handlePaymentSuccess}
                 onError={handlePaymentError}
                 amount={bookingFee}

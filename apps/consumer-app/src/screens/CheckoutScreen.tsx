@@ -1,5 +1,5 @@
 // Confirm Pre-order Screen: Order review with arrival details → Order confirmed with OTP.
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
     View, Text, TouchableOpacity, TextInput,
     ScrollView, Platform, Alert, Modal, FlatList, ActivityIndicator, BackHandler
@@ -11,7 +11,7 @@ import {
     Tag, MessageSquare, X, Info, HelpCircle, Utensils,
     MapPin, Clock, User, CircleDot, Circle, Search
 } from 'lucide-react-native';
-import { useNavigation, useRoute, RouteProp, CommonActions } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, CommonActions, usePreventRemove } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { useCart } from '../context/CartContext';
@@ -23,6 +23,7 @@ import TransactionalAuthModal from '../components/TransactionalAuthModal';
 import { STORES, RESTAURANTS, findAlternativeStores, ALL_PRODUCTS } from '../lib/data';
 import RazorpayCheckout from '../components/RazorpayCheckout';
 import * as Contacts from 'expo-contacts';
+import { parseUtc } from '../utils/dateFormat';
 
 const TIME_OPTIONS = ['Today, 6:00 PM - 7:00 PM', 'Today, 7:00 PM - 8:00 PM', 'Today, 8:00 PM - 9:00 PM'];
 const AVAILABLE_COUPONS = [
@@ -87,7 +88,7 @@ export default function CheckoutScreen() {
     const [isTimeModalVisible, setIsTimeModalVisible] = useState(false);
     const [activeStoreForTime, setActiveStoreForTime] = useState<string | null>(null);
     const [selectedDay, setSelectedDay] = useState<'Today' | 'Tomorrow'>('Today');
-    const [confirmedOrders, setConfirmedOrders] = useState<{ storeId: string, storeName: string, items: any[], total: number, otp: string }[]>([]);
+    const [confirmedOrders, setConfirmedOrders] = useState<{ storeId: string, storeName: string, items: any[], total: number, orderNumber?: string, otp: string }[]>([]);
     const [specialInstructions, setSpecialInstructions] = useState('');
     const [couponCode, setCouponCode] = useState('');
     const [couponApplied, setCouponApplied] = useState(false);
@@ -109,6 +110,9 @@ export default function CheckoutScreen() {
     const [contactSearchText, setContactSearchText] = useState('');
     const [alternativesMap, setAlternativesMap] = useState<Record<string, any[]>>({});
 
+    // Detect dining vs pickup context from cart items
+    const isDiningOrder = items.some(item => item.isDining);
+
     // Hooks: Effects
     useEffect(() => {
         if (items.length === 0) return; // Don't reset OTPs when cart is cleared
@@ -120,24 +124,51 @@ export default function CheckoutScreen() {
         setStoreOtps(otps);
     }, [items]);
 
-    useEffect(() => {
-        const handleBackPress = () => {
-            if (step === 'waiting' || step === 'results') {
-                Alert.alert(
-                    'Cancel Checkout?',
-                    'You are in the middle of confirming your order. Are you sure you want to go back and cancel these requests?',
-                    [
-                        { text: 'No, Stay', style: 'cancel' },
-                        { text: 'Yes, Cancel', style: 'destructive', onPress: () => navigation.goBack() }
-                    ]
-                );
-                return true;
+    const forceNav = useRef(false);
+
+    // Handle cancellation via API
+    const executeCancelOrder = async () => {
+        try {
+            const apiUrl = process.env.EXPO_PUBLIC_API_URL;
+            const activeRequest = acceptedRequests[0] || requests.find(r => r.status === 'ACCEPTED' || r.status === 'PENDING');
+            if (activeRequest) {
+                const reqId = activeRequest.id.replace('req_', '');
+                await fetch(`${apiUrl}/order-requests/${reqId}/status`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: 'CANCELLED', reason: 'Cancelled by customer' })
+                });
+                Alert.alert('Order Cancelled', 'Your order has been cancelled. No charges applied.');
             }
-            return false;
-        };
-        const backHandler = BackHandler.addEventListener('hardwareBackPress', handleBackPress);
-        return () => backHandler.remove();
-    }, [step, navigation]);
+            forceNav.current = true;
+        } catch (err) {
+            console.error('[Checkout] Cancel failed:', err);
+            Alert.alert('Error', 'Failed to cancel. Please try again.');
+        }
+    };
+
+    usePreventRemove((step === 'results' || step === 'waiting') && !forceNav.current, (e) => {
+        if (step === 'results') {
+            Alert.alert(
+                'Cancel Order?',
+                'Your order has been approved by the restaurant. Going back will cancel this approval. You\'ll need to place a new request.',
+                [
+                    { text: 'Stay', style: 'cancel' },
+                    { 
+                        text: 'Cancel Order', 
+                        style: 'destructive', 
+                        onPress: async () => {
+                            await executeCancelOrder();
+                            navigation.dispatch(e.data.action);
+                        } 
+                    }
+                ]
+            );
+        } else if (step === 'waiting') {
+            // Just block it silently or show a wait message
+            Alert.alert('Please Wait', 'We are waiting for the restaurant to respond.');
+        }
+    });
 
     useEffect(() => {
         if (step === 'waiting' && allResolved) {
@@ -197,9 +228,9 @@ export default function CheckoutScreen() {
             // Only query Supabase if we have valid UUIDs
             if (dbQueryIds.length > 0) {
                 try {
-                    const { data, error } = await supabase
+                                    const { data, error } = await supabase
                         .from('merchant_branches')
-                        .select('id, branch_name, address, city, operating_hours, merchants(Vertical(name))')
+                        .select('id, branch_name, address, city, operating_hours, prep_time_minutes, merchants(Vertical(name))')
                         .in('id', dbQueryIds);
                     
                     if (data) {
@@ -210,8 +241,9 @@ export default function CheckoutScreen() {
                                 id: b.id,
                                 name: b.branch_name,
                                 address: b.address + (b.city ? `, ${b.city}` : ''),
-                                openingTime: oh.openTime || '09:00',
-                                closingTime: oh.closeTime || '22:00',
+                                openingTime: oh.open || '09:00',
+                                closingTime: oh.close || '22:00',
+                                prep_time: b.prep_time_minutes || 15,
                                 type: verticalName
                             };
                         });
@@ -352,15 +384,15 @@ export default function CheckoutScreen() {
     // Derived Logic (Non-hook)
     const storeNamesList = groupedStores.map(g => g.storeName).join(', ');
     const subtotal = getTotal();
-    const gst = Math.round(groupedStores.reduce((sum, group) => {
+    const exactGst = parseFloat(groupedStores.reduce((sum, group) => {
         // Check both branch and parent IDs to find the vertical type
         const storeInfo = storeLocations[group.branch_id] || storeLocations[group.storeId] || {};
         const type = storeInfo.type?.toLowerCase() || '';
         const isFnB = ['restaurant', 'bakery', 'cafe'].some(t => type.includes(t));
         return sum + (isFnB ? (group.total * 0.05) : 0);
-    }, 0));
+    }, 0).toFixed(2));
     const discount = couponApplied ? couponDiscount : 0;
-    const total = Math.max(0, subtotal + gst - discount);
+    const total = subtotal + exactGst - discount;
 
     // Helpers
     const getIsVeg = (productId: string) => {
@@ -410,7 +442,7 @@ export default function CheckoutScreen() {
             const msg = missingTimeStores.length === 1
                 ? `Please select a pickup time for ${missingTimeStores[0].storeName} before placing your order.`
                 : 'Please select a pickup time for all your orders before proceeding.';
-            Alert.alert('Select Pickup Time', msg);
+            Alert.alert(isDiningOrder ? 'Select Arrival Time' : 'Select Pickup Time', msg);
             return;
         }
 
@@ -430,7 +462,9 @@ export default function CheckoutScreen() {
                 storeId: g.storeId,
                 storeName: g.storeName,
                 items: g.items,
-                total: g.total
+                total: g.total,
+                arrivalTime: selectedTime[g.storeId] || 'ASAP',
+                orderType: 'pickup' as const
             })));
             setStep('waiting');
         } catch (e) {
@@ -462,7 +496,8 @@ export default function CheckoutScreen() {
             }
 
             // Step 2: Create orders via Backend API (NOT direct Supabase)
-            const { data: { user } } = await supabase.auth.getUser();
+            // Use the cached `user` from useAuth() context instead of calling
+            // supabase.auth.getUser() — the Razorpay WebView can evict the session.
             if (!user) throw new Error('User not authenticated');
 
             const actualSubtotal = acceptedRequests.reduce((sum: number, r: any) => sum + r.subtotal, 0);
@@ -511,8 +546,8 @@ export default function CheckoutScreen() {
 
                 if (!orderRes.ok) {
                     const errBody = await orderRes.json().catch(() => ({}));
-                    console.error(`[CheckoutScreen] API order creation failed for ${req.store_name}:`, errBody);
-                    throw new Error(errBody.error || 'Failed to create order on server');
+                    console.error(`[CheckoutScreen] API order creation failed for ${req.store_name}:`, JSON.stringify(errBody));
+                    throw new Error(errBody.details || errBody.error || 'Failed to create order on server');
                 }
 
                 const orderData = await orderRes.json();
@@ -523,12 +558,17 @@ export default function CheckoutScreen() {
             // Step 3: Save OTPs into confirmedOrders BEFORE clearing cart
             setConfirmedOrders(acceptedRequests.map((r: any) => {
                 const sid = String(r.store_id);
+                const serverOrder = createdOrders.find((o: any) => String(o.storeId) === sid || String(o.store_id) === sid);
+                if (!serverOrder?.otp_code && !serverOrder?.otp) {
+                    console.error('[Checkout] No OTP returned from API for order', sid);
+                }
                 return {
                     storeId: sid,
                     storeName: r.store_name,
                     items: r.items,
                     total: r.subtotal,
-                    otp: storeOtps[sid] || Math.floor(1000 + Math.random() * 9000).toString()
+                    orderNumber: serverOrder?.order_number || serverOrder?.orderNumber || 'Unknown',
+                    otp: serverOrder?.otp_code || serverOrder?.otp || ''
                 };
             }));
             clearCart();
@@ -608,7 +648,7 @@ export default function CheckoutScreen() {
                                             <View className="bg-orange-50 px-3 py-1.5 rounded-full border border-orange-100">
                                                 <Text className="text-[14px] font-bold text-orange-600">
                                                     {(() => {
-                                                        const expires = new Date(req.expires_at).getTime();
+                                                        const expires = parseUtc(req.expires_at).getTime();
                                                         const remaining = Math.max(0, Math.floor((expires - nowTimer) / 1000));
                                                         const mins = Math.floor(remaining / 60);
                                                         const secs = remaining % 60;
@@ -665,7 +705,6 @@ export default function CheckoutScreen() {
             try {
                 // Fetch the API URL from process.env
                 const apiUrl = process.env.EXPO_PUBLIC_API_URL;
-                const { data: { user } } = await supabase.auth.getUser();
                 const res = await fetch(`${apiUrl}/payments/create-order`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -704,9 +743,9 @@ export default function CheckoutScreen() {
             const newReqItems = alt.matchedItems.map((item: any) => ({
                 id: item.id, name: item.name, quantity: req.items.find((i: any) => i.name === item.name)?.quantity || 1, price: item.price
             }));
-            const newStoreGroup = { storeId: alt.storeId, storeName: alt.storeName, items: newReqItems, total: newTotal };
+            const newStoreGroup = { storeId: alt.storeId, storeName: alt.storeName, items: newReqItems, total: newTotal, arrivalTime: selectedTime[alt.storeId] || selectedTime[String(req.store_id)] || 'ASAP', orderType: 'pickup' as const };
             setStoreOtps(prev => ({ ...prev, [alt.storeId]: Math.floor(1000 + Math.random() * 9000).toString() }));
-            const reqStoreId = parseInt(req.store_id, 10);
+            const reqStoreId = String(req.store_id);
             if (selectedTime[reqStoreId]) setSelectedTime(prev => ({ ...prev, [alt.storeId]: prev[reqStoreId] }));
             try {
                 await createRequests([newStoreGroup], req.id);
@@ -753,7 +792,7 @@ export default function CheckoutScreen() {
                         <View className="px-5 mb-6">
                             <Text className="text-[13px] font-extrabold text-green-700 uppercase tracking-wider mb-3 px-1">Ready to Fulfill</Text>
                             {acceptedRequests.map((req: any) => {
-                                const storeIdNum = parseInt(req.store_id, 10);
+                                const storeIdStr = String(req.store_id);
                                 return (
                                     <View key={req.id} className="bg-white p-5 rounded-2xl mb-3 border border-green-200 shadow-sm">
                                         <View className="flex-row items-center mb-3">
@@ -763,7 +802,7 @@ export default function CheckoutScreen() {
                                             <View className="flex-1">
                                                 <Text className="font-extrabold text-gray-900 text-[16px] mb-1">{req.store_name}</Text>
                                                 <Text className="text-[12px] text-gray-600 font-medium mb-0.5">Order ID: #REQ-{req.id.substring(0,4).toUpperCase()}</Text>
-                                                <Text className="text-[12px] text-gray-600 font-medium mb-0.5">Pickup Time: {selectedTime[req.branch_id] || selectedTime[req.store_id] || selectedTime[String(storeIdNum)] || 'ASAP'}</Text>
+                                                <Text className="text-[12px] text-gray-600 font-medium mb-0.5">{isDiningOrder ? 'Arrival' : 'Pickup'} Time: {selectedTime[req.branch_id] || selectedTime[req.store_id] || selectedTime[storeIdStr] || 'ASAP'}</Text>
                                                 <Text className="text-[12px] text-gray-600 font-medium">Location: {storeLocations[req.branch_id]?.address || storeLocations[req.store_id]?.address || 'Store Location'}</Text>
                                             </View>
                                             <Text className="text-[15px] font-bold text-gray-900">₹{req.subtotal}</Text>
@@ -862,12 +901,17 @@ export default function CheckoutScreen() {
                 </ScrollView>
 
                 {/* Bottom CTA */}
-                <View className="px-5 bg-white border-t border-gray-100 pt-4 pb-8">
+                <View className="px-5 bg-white border-t border-gray-100 pt-4 pb-[90px]">
                     {acceptedRequests.length > 0 && pendingSwaps.length === 0 ? (
-                        <TouchableOpacity onPress={confirmAccepted} className="w-full bg-[#212121] rounded-[20px] items-center justify-between flex-row px-6" style={{ height: 60 }}>
-                            <Text className="text-[16px] font-bold text-white">Proceed to Pay</Text>
-                            <Text className="text-[16px] font-bold text-white">₹{resultTotal}</Text>
-                        </TouchableOpacity>
+                        <View className="flex-row items-center justify-between">
+                            <TouchableOpacity onPress={() => navigation.goBack()} className="w-[30%] bg-[#DC2626] rounded-[20px] items-center justify-center" style={{ height: 60 }}>
+                                <Text className="text-[15px] font-bold text-white text-center">Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={confirmAccepted} className="w-[67%] bg-[#212121] rounded-[20px] items-center justify-between flex-row px-6" style={{ height: 60 }}>
+                                <Text className="text-[16px] font-bold text-white">Proceed to Pay</Text>
+                                <Text className="text-[16px] font-bold text-white">₹{resultTotal}</Text>
+                            </TouchableOpacity>
+                        </View>
                     ) : pendingSwaps.length > 0 ? (
                         <View className="w-full bg-gray-300 rounded-[20px] items-center justify-center" style={{ height: 60 }}>
                             <Text className="text-[14px] font-bold text-gray-600">Waiting for {pendingSwaps.length} swap{pendingSwaps.length > 1 ? 's' : ''} to confirm...</Text>
@@ -903,13 +947,16 @@ export default function CheckoutScreen() {
                         </View>
                         <Text className="text-[28px] font-extrabold text-gray-900 text-center">Order Confirmed!</Text>
                         <Text className="text-[14px] text-gray-500 font-medium text-center mt-2 px-8">
-                            Show the OTP at the store when you arrive to collect your order.
+                            {isDiningOrder
+                                ? 'Show the OTP at the restaurant when you arrive. Your table and food will be ready!'
+                                : 'Show the OTP at the store when you arrive to collect your order.'
+                            }
                         </Text>
                     </View>
 
                     {/* OTP Cards */}
                     <View className="px-5 mt-6">
-                        <Text className="text-[12px] font-extrabold text-gray-400 uppercase tracking-wider mb-4 px-1">Your Pickup Codes</Text>
+                        <Text className="text-[12px] font-extrabold text-gray-400 uppercase tracking-wider mb-4 px-1">{isDiningOrder ? 'Your Dining Codes' : 'Your Pickup Codes'}</Text>
                         {confirmedOrders.map((group, idx) => (
                             <View key={group.storeId} className="bg-white rounded-2xl mb-4 border border-gray-200 shadow-sm overflow-hidden">
                                 {/* Store Header */}
@@ -919,12 +966,24 @@ export default function CheckoutScreen() {
                                     </View>
                                     <View className="flex-1">
                                         <Text className="text-[15px] font-extrabold text-gray-900">{group.storeName}</Text>
-                                        <Text className="text-[11px] text-gray-400 font-medium mt-0.5">{group.items.length} item{group.items.length > 1 ? 's' : ''} • ₹{group.total}</Text>
+                                        <Text className="text-[11px] text-gray-400 font-medium mt-0.5">Order #{group.orderNumber}</Text>
                                     </View>
                                 </View>
+
+                                {/* Order Details Block */}
+                                <View className="px-5 mb-4">
+                                    {group.items && group.items.map((item: any, iIdx: number) => (
+                                        <View key={iIdx} className="flex-row items-center mb-2">
+                                            <View className="w-1.5 h-1.5 rounded-full bg-gray-400 mr-3" />
+                                            <Text className="text-[14px] text-gray-700 font-medium flex-1">{item.quantity}x {item.name}</Text>
+                                            <Text className="text-[14px] text-gray-900 font-semibold">₹{item.price * item.quantity}</Text>
+                                        </View>
+                                    ))}
+                                </View>
+
                                 {/* OTP Display */}
                                 <View className="mx-5 mb-4 bg-gray-50 rounded-xl p-4 items-center border border-gray-100">
-                                    <Text className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Pickup OTP</Text>
+                                    <Text className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">{isDiningOrder ? 'Dining OTP' : 'Pickup OTP'}</Text>
                                     <Text className="text-[32px] font-extrabold text-[#212121] tracking-[8px]">{group.otp}</Text>
                                 </View>
                             </View>
@@ -962,7 +1021,7 @@ export default function CheckoutScreen() {
                 </View>
 
                 <View className="px-5 mt-6 mb-3">
-                    <Text className="text-[12px] font-extrabold text-[#B52725] uppercase tracking-wider">Pickup Locations</Text>
+                    <Text className="text-[12px] font-extrabold text-[#B52725] uppercase tracking-wider">{isDiningOrder ? 'Restaurant' : 'Pickup Locations'}</Text>
                 </View>
 
                 {groupedStores.map((group, idx) => {
@@ -982,7 +1041,7 @@ export default function CheckoutScreen() {
                             <View className="flex-row items-center justify-between bg-gray-50 rounded-xl px-4 py-3.5 border border-gray-100 mt-2">
                                 <View className="flex-row items-center flex-1">
                                     <Clock size={18} color="#4B5563" />
-                                    <Text className="text-[14px] font-bold text-gray-900 ml-3 flex-1" numberOfLines={1}>{selectedTime[group.storeId] || 'Select Pickup Time'}</Text>
+                                    <Text className="text-[14px] font-bold text-gray-900 ml-3 flex-1" numberOfLines={1}>{selectedTime[group.storeId] || (isDiningOrder ? 'Select Arrival Time' : 'Select Pickup Time')}</Text>
                                 </View>
                                 <TouchableOpacity onPress={() => { setActiveStoreForTime(group.storeId); setIsTimeModalVisible(true); }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                                     <Text className="text-[13px] font-bold text-gray-900 underline">Change</Text>
@@ -993,7 +1052,7 @@ export default function CheckoutScreen() {
                 })}
 
                 <View className="px-5 mt-4 mb-3">
-                    <Text className="text-[12px] font-extrabold text-[#B52725] uppercase tracking-wider">Picking up for</Text>
+                    <Text className="text-[12px] font-extrabold text-[#B52725] uppercase tracking-wider">{isDiningOrder ? 'Dining reservation for' : 'Picking up for'}</Text>
                 </View>
                 <View className="mx-5 mb-4 bg-white rounded-[20px] border border-gray-100 p-5 shadow-sm">
                     <View className="flex-row bg-gray-100/80 rounded-xl p-1 mb-4">
@@ -1041,20 +1100,20 @@ export default function CheckoutScreen() {
                 <View className="px-5 mt-4 mb-3"><Text className="text-[12px] font-extrabold text-[#B52725] uppercase tracking-wider">Bill Details</Text></View>
                 <View className="mx-5 mb-20 bg-white rounded-2xl border border-gray-100 p-5">
                     <View className="flex-row justify-between mb-2.5"><Text className="text-[13px] text-gray-500 font-semibold">Item Total</Text><Text className="text-[13px] text-gray-900 font-bold">₹{subtotal}</Text></View>
-                    {gst > 0 && (
-                        <View className="flex-row justify-between mb-2.5"><Text className="text-[13px] text-gray-500 font-semibold">Taxes & Platform Fee</Text><Text className="text-[13px] text-gray-900 font-bold">₹{gst}</Text></View>
+                    {exactGst > 0 && (
+                        <View className="flex-row justify-between mb-2.5"><Text className="text-[13px] text-gray-500 font-semibold">GST (5%)</Text><Text className="text-[13px] text-gray-900 font-bold">₹{exactGst.toFixed(2)}</Text></View>
                     )}
-                    {couponApplied && <View className="flex-row justify-between mb-2.5"><Text className="text-[13px] text-green-600 font-bold">Offer Discount</Text><Text className="text-[13px] text-green-600 font-bold">−₹{discount}</Text></View>}
+                    {couponApplied && <View className="flex-row justify-between mb-2.5"><Text className="text-[13px] text-green-600 font-bold">Offer Discount</Text><Text className="text-[13px] text-green-600 font-bold">−₹{discount.toFixed(2)}</Text></View>}
                     <View className="border-t border-gray-100 my-3" />
-                    <View className="flex-row justify-between items-center"><Text className="text-[15px] text-gray-900 font-bold">To Pay</Text><Text className="text-[18px] text-gray-900 font-bold">₹{total}</Text></View>
+                    <View className="flex-row justify-between items-center"><Text className="text-[15px] text-gray-900 font-bold">To Pay</Text><Text className="text-[18px] text-gray-900 font-bold">₹{total.toFixed(2)}</Text></View>
                 </View>
                 <View style={{ height: 100 }} />
             </ScrollView>
 
-            <View className="absolute bottom-0 left-0 right-0 px-4 pb-8 bg-white border-t border-gray-50 pt-4">
+            <View className="absolute bottom-0 left-0 right-0 px-4 bg-white border-t border-gray-50 pt-4 pb-[110px]">
                 <TouchableOpacity onPress={handlePayConfirm} disabled={loading} className={`w-full rounded-[20px] items-center justify-between flex-row px-6 ${loading ? 'bg-gray-400' : 'bg-[#212121]'}`} style={{ height: 60 }}>
                     <Text className="text-[16px] font-bold text-white">{loading ? 'Processing...' : 'Place Order'}</Text>
-                    {!loading && <Text className="text-[16px] font-bold text-white">₹{total}</Text>}
+                    {!loading && <Text className="text-[16px] font-bold text-white">₹{total.toFixed(2)}</Text>}
                 </TouchableOpacity>
             </View>
 
@@ -1099,7 +1158,7 @@ export default function CheckoutScreen() {
                 <View className="flex-1 justify-end bg-black/40">
                     <TouchableOpacity className="flex-1" onPress={() => setIsTimeModalVisible(false)} />
                     <View className="bg-white rounded-t-3xl pt-4 pb-8 p-5">
-                        <Text className="text-[18px] font-extrabold text-gray-900 text-center mb-6">Select Pickup Time</Text>
+                        <Text className="text-[18px] font-extrabold text-gray-900 text-center mb-6">{isDiningOrder ? 'Select Arrival Time' : 'Select Pickup Time'}</Text>
                         <View className="flex-row bg-gray-50 rounded-xl p-1 mb-6">
                             <TouchableOpacity onPress={() => setSelectedDay('Today')} className={`flex-1 py-3 rounded-lg items-center ${selectedDay === 'Today' ? 'bg-white shadow-sm' : ''}`}><Text className={`text-[14px] font-bold ${selectedDay === 'Today' ? 'text-gray-900' : 'text-gray-400'}`}>Today</Text></TouchableOpacity>
                             <TouchableOpacity onPress={() => setSelectedDay('Tomorrow')} className={`flex-1 py-3 rounded-lg items-center ${selectedDay === 'Tomorrow' ? 'bg-white shadow-sm' : ''}`}><Text className={`text-[14px] font-bold ${selectedDay === 'Tomorrow' ? 'text-gray-900' : 'text-gray-400'}`}>Tomorrow</Text></TouchableOpacity>

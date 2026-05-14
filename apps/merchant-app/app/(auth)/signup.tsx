@@ -31,21 +31,12 @@ if (Constants.appOwnership !== 'expo') {
 
 const STEPS = ['Identity', 'Store', 'Photos', 'Branches', 'KYC', 'Subscription', 'Review'];
 
-const STORE_CATEGORIES = [
-    'Grocery & Kirana', 'Fruits & Vegetables', 'Restaurants & Cafes', 
-    'Bakeries & Desserts', 'Meat & Seafood', 'Pharmacy & Wellness', 
-    'Electronics & Accessories', 'Fashion & Apparel', 'Home & Lifestyle', 
-    'Beauty & Personal Care', 'Pet Care & Supplies'
-];
-
-const FSSAI_CATEGORIES = [
-    'Grocery & Kirana', 'Fruits & Vegetables', 'Restaurants & Cafes', 
-    'Bakeries & Desserts', 'Meat & Seafood'
-];
-
-const PREMIUM_CATEGORIES = [
-    'Restaurants & Cafes'
-];
+interface Vertical {
+    id: string;
+    name: string;
+    requiresFssai: boolean;
+    isPremium: boolean;
+}
 
 interface Branch {
     name: string;
@@ -169,15 +160,7 @@ export default function SignupScreen() {
             // Fetch remote state to check for existing subscription (Guard)
             fetchRemoteMerchantState(data.session.access_token);
 
-            try {
-                await fetchWithTimeout(`${getApiUrl()}/auth/merchant/draft`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${data.session.access_token}` },
-                    body: JSON.stringify({ ownerName: identity.ownerName, email: identity.email.trim(), phone: `91${cleaned}` })
-                });
-            } catch (err: any) {
-                console.warn('[Signup] Draft creation failed', err);
-            }
+            // Step 1 only collects local data. Persistence happens at Step 5 via PATCH /auth/merchant/draft.
         } catch (error: any) {
             console.error('[Signup] Verify OTP Error:', error);
             Alert.alert('Verification Failed', error.message || 'Incorrect OTP or network error. Please try again.');
@@ -202,13 +185,39 @@ export default function SignupScreen() {
     // Step 2: Store
     const [store, setStore] = useState({
         storeName: '',
-        category: '',
+        categoryId: '',
+        categoryName: '',
         city: 'Hyderabad',
         address: '',
         latitude: 17.385,
         longitude: 78.4867,
     });
     const [showCategoryPicker, setShowCategoryPicker] = useState(false);
+
+    const [verticals, setVerticals] = useState<Vertical[]>([]);
+    const [verticalsLoading, setVerticalsLoading] = useState(false);
+    const [verticalsError, setVerticalsError] = useState('');
+
+    const fetchVerticals = async () => {
+        setVerticalsLoading(true);
+        setVerticalsError('');
+        try {
+            const response = await fetchWithTimeout(`${getApiUrl()}/verticals`, { method: 'GET' });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Failed to fetch verticals');
+            setVerticals(Array.isArray(data) ? data : data.verticals || []);
+        } catch (err: any) {
+            setVerticalsError(err.message || 'Error fetching verticals');
+        } finally {
+            setVerticalsLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchVerticals();
+    }, []);
+
+    const selectedVertical = verticals.find(v => v.id === store.categoryId);
 
     // Step 3: Branches
     const [hasBranches, setHasBranches] = useState(false);
@@ -239,6 +248,7 @@ export default function SignupScreen() {
     const [storePhotos, setStorePhotos] = useState<string[]>([]);
 
     // Step 6: Payment
+    const [paymentStatus, setPaymentStatus] = useState<'idle' | 'success' | 'failed'>('idle');
     const [paymentDetails, setPaymentDetails] = useState<any>(null);
 
     const fetchRemoteMerchantState = async (token?: string) => {
@@ -283,7 +293,13 @@ export default function SignupScreen() {
                     const parsed = JSON.parse(draft);
                     if (parsed.step) setStep(parsed.step);
                     if (parsed.identity) setIdentity(parsed.identity);
-                    if (parsed.store) setStore(parsed.store);
+                    if (parsed.store) {
+                        setStore({
+                            ...parsed.store,
+                            categoryId: parsed.store.categoryId || '',
+                            categoryName: parsed.store.categoryName || parsed.store.category || '',
+                        });
+                    }
                     if (parsed.hasBranches !== undefined) setHasBranches(parsed.hasBranches);
                     if (parsed.branches) setBranches(parsed.branches);
                     if (parsed.kyc) setKyc(parsed.kyc);
@@ -370,7 +386,7 @@ export default function SignupScreen() {
             }
         }
         if (step === 2) {
-            if (!store.storeName || !store.category || !store.address) {
+            if (!store.storeName || !store.categoryId || !store.address) {
                 Alert.alert('Error', 'Please enter store name, category and full address');
                 return false;
             }
@@ -417,7 +433,7 @@ export default function SignupScreen() {
             }
 
             // FSSAI Validation
-            if (FSSAI_CATEGORIES.includes(store.category)) {
+            if (selectedVertical?.requiresFssai) {
                 const fssaiRegex = /^\d{14}$/;
                 if (!kyc.fssaiNumber || !fssaiRegex.test(kyc.fssaiNumber)) {
                     Alert.alert('Invalid FSSAI', 'FSSAI License Number must be exactly 14 digits.');
@@ -466,7 +482,7 @@ export default function SignupScreen() {
     };
 
     const handlePayment = async () => {
-        const isPremium = PREMIUM_CATEGORIES.includes(store.category);
+        const isPremium = selectedVertical?.isPremium || false;
         const subscriptionAmount = isPremium ? 2999 : 999;
         
         let orderId = '';
@@ -481,7 +497,7 @@ export default function SignupScreen() {
                     userId: identity.phone || 'merchant',
                     notes: {
                         plan_type: isPremium ? 'Premium Subscription' : 'Standard Subscription',
-                        store_category: store.category
+                        store_category: store.categoryId
                     }
                 })
             });
@@ -626,14 +642,24 @@ export default function SignupScreen() {
 
         const uploadFile = async (uri: string, path: string, maxRetries = 3) => {
             if (!uri) return null;
+
+            // If it's already a Supabase path or URL, skip re-uploading
+            if (uri.includes('supabase.co') || (!uri.startsWith('file://') && !uri.startsWith('content://'))) {
+                return uri;
+            }
+
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
                     const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
                     const { error } = await supabase.storage.from('merchant-docs').upload(path, decode(base64), { contentType: 'image/jpeg', upsert: true });
-                    if (error) throw error;
+                    if (error) {
+                        console.error('[Upload Error details]:', error);
+                        throw new Error(error.message || 'Supabase upload error');
+                    }
                     return path;
-                } catch (error) {
-                    if (attempt === maxRetries) throw new Error('Upload failed');
+                } catch (error: any) {
+                    console.error(`[Upload Attempt ${attempt} failed]:`, error.message || error);
+                    if (attempt === maxRetries) throw new Error(error.message || 'Upload failed');
                     await new Promise(resolve => setTimeout(resolve, attempt * 1500));
                 }
             }
@@ -656,7 +682,7 @@ export default function SignupScreen() {
             email: identity.email,
             phone: identity.phone,
             storeName: store.storeName,
-            category: store.category,
+            verticalId: store.categoryId,
             city: store.city,
             address: store.address,
             latitude: store.latitude,
@@ -932,8 +958,8 @@ export default function SignupScreen() {
                                     style={styles.selectInput}
                                     onPress={() => setShowCategoryPicker(true)}
                                 >
-                                    <Text style={store.category ? styles.selectText : styles.selectPlaceholder}>
-                                        {store.category || 'Select category'}
+                                    <Text style={store.categoryId ? styles.selectText : styles.selectPlaceholder}>
+                                        {store.categoryName || 'Select category'}
                                     </Text>
                                     <Ionicons name="chevron-down" size={20} color="#6B7280" />
                                 </TouchableOpacity>
@@ -948,24 +974,35 @@ export default function SignupScreen() {
                                         <View style={styles.modalOverlay}>
                                             <View style={styles.modalContent}>
                                                 <Text style={styles.modalTitle}>Select Category</Text>
-                                                <ScrollView style={{ maxHeight: 300 }}>
-                                                    {STORE_CATEGORIES.map((cat) => (
-                                                        <TouchableOpacity
-                                                            key={cat}
-                                                            style={styles.modalItem}
-                                                            onPress={() => {
-                                                                setStore({ ...store, category: cat });
-                                                                setShowCategoryPicker(false);
-                                                            }}
-                                                        >
-                                                            <Text style={[
-                                                                styles.modalItemText,
-                                                                store.category === cat && styles.modalItemTextActive
-                                                            ]}>{cat}</Text>
-                                                            {store.category === cat && <Ionicons name="checkmark" size={20} color={Colors.primary} />}
+                                                {verticalsLoading ? (
+                                                    <ActivityIndicator size="large" color={Colors.primary} style={{ marginVertical: 20 }} />
+                                                ) : verticalsError ? (
+                                                    <View style={{ alignItems: 'center', padding: 20 }}>
+                                                        <Text style={{ color: '#EF4444', textAlign: 'center', marginBottom: 12 }}>{verticalsError}</Text>
+                                                        <TouchableOpacity onPress={fetchVerticals} style={{ padding: 8, backgroundColor: Colors.primary, borderRadius: 8 }}>
+                                                            <Text style={{ color: '#FFF' }}>Retry</Text>
                                                         </TouchableOpacity>
-                                                    ))}
-                                                </ScrollView>
+                                                    </View>
+                                                ) : (
+                                                    <ScrollView style={{ maxHeight: 300 }}>
+                                                        {verticals.map((v) => (
+                                                            <TouchableOpacity
+                                                                key={v.id}
+                                                                style={styles.modalItem}
+                                                                onPress={() => {
+                                                                    setStore({ ...store, categoryId: v.id, categoryName: v.name });
+                                                                    setShowCategoryPicker(false);
+                                                                }}
+                                                            >
+                                                                <Text style={[
+                                                                    styles.modalItemText,
+                                                                    store.categoryId === v.id && styles.modalItemTextActive
+                                                                ]}>{v.name}</Text>
+                                                                {store.categoryId === v.id && <Ionicons name="checkmark" size={20} color={Colors.primary} />}
+                                                            </TouchableOpacity>
+                                                        ))}
+                                                    </ScrollView>
+                                                )}
                                                 <TouchableOpacity
                                                     style={styles.modalCloseBtn}
                                                     onPress={() => setShowCategoryPicker(false)}
@@ -1248,7 +1285,7 @@ export default function SignupScreen() {
                                 />
                             </View>
 
-                            {FSSAI_CATEGORIES.includes(store.category) && (
+                            {selectedVertical?.requiresFssai && (
                                 <>
                                     <View style={styles.divider} />
                                     <Text style={styles.sectionHeader}>Food Safety (FSSAI)</Text>
@@ -1364,10 +1401,10 @@ export default function SignupScreen() {
 
                                 <View style={{ flexDirection: 'row', alignItems: 'baseline', marginBottom: 24 }}>
                                     <Text style={{ fontSize: 20, color: '#9CA3AF', textDecorationLine: 'line-through', marginRight: 12 }}>
-                                        {PREMIUM_CATEGORIES.includes(store.category) ? '₹4999' : '₹2499'}
+                                        {selectedVertical?.isPremium ? '₹4999' : '₹2499'}
                                     </Text>
                                     <Text style={{ fontSize: 40, fontWeight: '800', color: '#10B981' }}>
-                                        {PREMIUM_CATEGORIES.includes(store.category) ? '₹2999' : '₹999'}
+                                        {selectedVertical?.isPremium ? '₹2999' : '₹999'}
                                     </Text>
                                 </View>
 
@@ -1433,7 +1470,7 @@ export default function SignupScreen() {
                             <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Phone</Text><Text style={styles.reviewValue}>{identity.phone || '-'}</Text></View>
                             <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Email</Text><Text style={styles.reviewValue}>{identity.email || '-'}</Text></View>
                             <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Store Name</Text><Text style={styles.reviewValue}>{store.storeName}</Text></View>
-                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Category</Text><Text style={styles.reviewValue}>{store.category}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Category</Text><Text style={styles.reviewValue}>{store.categoryName}</Text></View>
                             <View style={styles.reviewRow}><Text style={styles.reviewLabel}>City</Text><Text style={styles.reviewValue}>{store.city}</Text></View>
                             <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Address</Text><Text style={[styles.reviewValue, {flex: 2, textAlign: 'right'}]} numberOfLines={2}>{store.address || '-'}</Text></View>
                             <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Location Pin</Text><Text style={styles.reviewValue}>{store.latitude && store.longitude ? 'Captured' : 'Missing'}</Text></View>
@@ -1460,8 +1497,8 @@ export default function SignupScreen() {
                             {kyc.fssaiNumber && <View style={styles.reviewRow}><Text style={styles.reviewLabel}>FSSAI Certificate</Text><Text style={{...styles.reviewValue, color: docFiles.fssai ? '#10B981' : '#EF4444'}}>{docFiles.fssai ? 'Uploaded' : 'Missing'}</Text></View>}
 
                             <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#111827', marginTop: 16, marginBottom: 8, borderBottomWidth: 1, borderBottomColor: '#E5E7EB', paddingBottom: 4 }}>Subscription & Payment</Text>
-                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Category Tier</Text><Text style={styles.reviewValue}>{PREMIUM_CATEGORIES.includes(store.category) ? 'Premium' : 'Standard'}</Text></View>
-                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Lifetime Access</Text><Text style={styles.reviewValue}>{PREMIUM_CATEGORIES.includes(store.category) ? '₹2999' : '₹999'}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Category Tier</Text><Text style={styles.reviewValue}>{selectedVertical?.isPremium ? 'Premium' : 'Standard'}</Text></View>
+                            <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Lifetime Access</Text><Text style={styles.reviewValue}>{selectedVertical?.isPremium ? '₹2999' : '₹999'}</Text></View>
                             <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Payment Status</Text><Text style={{...styles.reviewValue, color: '#10B981'}}>{paymentStatus === 'success' ? 'Successful' : 'Simulated'}</Text></View>
                             <View style={styles.reviewRow}><Text style={styles.reviewLabel}>Transaction ID</Text><Text style={styles.reviewValue}>{paymentDetails?.paymentId || 'Verified'}</Text></View>
                         </View>
