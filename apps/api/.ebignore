@@ -22,7 +22,7 @@ Dockerfile
 api_dev.log
 root_dev.log
 test.*
-package-lock.json
+# package-lock.json (commented out to include it in EB bundle)
 
 # Force include compiled JS for AWS deployment
 !dist/
