@@ -2,7 +2,7 @@
   "expo": {
     "name": "Pick At Store",
     "slug": "consumer-app",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "consumerapp",
@@ -11,7 +11,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.pas.consumerapp",
-      "buildNumber": "2",
+      "buildNumber": "3",
       "config": {
         "googleMapsApiKey": "AIzaSyAQAg7zpYvmd2BJGCGmf1opDLDC4KXbKUg"
       },
@@ -21,7 +21,7 @@
       }
     },
     "android": {
-      "versionCode": 2,
+      "versionCode": 3,
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyAQAg7zpYvmd2BJGCGmf1opDLDC4KXbKUg"
