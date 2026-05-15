@@ -516,6 +516,7 @@ export default function DiningCheckoutScreen() {
 
     const handleBackToHome = () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        forceNav.current = true;
         navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Main' }] }));
     };
 

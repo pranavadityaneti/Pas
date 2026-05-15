@@ -570,63 +570,7 @@ export default function StorefrontScreen({ route }: any) {
                 }
             />
 
-            {/* ===== FLOATING BOTTOM BAR ===== */}
-            {itemCount > 0 && (
-                <View
-                    className="absolute bottom-0 left-0 right-0 px-5 pt-3"
-                    pointerEvents="box-none"
-                    style={{
-                        backgroundColor: 'transparent',
-                        paddingBottom: Math.max(insets.bottom, 20),
-                        shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.05, shadowRadius: 10,
-                        elevation: 10,
-                        zIndex: 999
-                    }}
-                >
-                    <TouchableOpacity
-                        delayPressIn={0}
-                        onPress={async () => {
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-                            try {
-                                let session = null;
-                                try {
-                                    const result = await Promise.race([
-                                        supabase.auth.getSession(),
-                                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
-                                    ]) as any;
-                                    session = result?.data?.session;
-                                } catch {
-                                    // Timeout — assume authenticated if we have items in cart
-                                }
-
-                                if (!session) {
-                                    setAuthModalVisible(true);
-                                    return;
-                                }
-
-                                navigation.navigate('Main', { screen: 'Cart' } as any);
-                            } catch {
-                                // Fallback — navigate anyway
-                                navigation.navigate('Main', { screen: 'Cart' } as any);
-                            }
-                        }}
-                        className="bg-[#B52725] rounded-3xl flex-row items-center justify-between px-6"
-                        style={{ height: 64, backgroundColor: '#B52725' }}
-                        activeOpacity={0.9}
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    >
-                        <View>
-                            <Text className="text-[16px] font-extrabold text-white">{itemCount} {itemCount === 1 ? 'Item' : 'Items'}</Text>
-                            <Text className="text-[13px] font-bold text-white/90">₹{totalAmount} (estimated)</Text>
-                        </View>
-                        <View className="flex-row items-center">
-                            <Text className="text-[16px] font-extrabold text-white mr-2">Proceed</Text>
-                            <ChevronRight size={20} color="#FFFFFF" />
-                        </View>
-                    </TouchableOpacity>
-                </View>
-            )}
 
             <TransactionalAuthModal
                 visible={authModalVisible}

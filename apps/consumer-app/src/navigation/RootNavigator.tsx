@@ -23,8 +23,8 @@ import SupportScreen from '../screens/SupportScreen';
 import AddPaymentMethodScreen from '../screens/AddPaymentMethodScreen';
 import SwapScreen from '../screens/SwapScreen';
 import { RootStackParamList } from './types';
-
 import { useAuth } from '../context/AuthContext';
+import FloatingCartBand from '../components/FloatingCartBand';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -84,36 +84,39 @@ export default function RootNavigator() {
     };
 
     return (
-        <Stack.Navigator
-            initialRouteName={getInitialRoute()}
-            screenOptions={{ headerShown: false }}
-        >
-            {/* Onboarding — shown only on first launch */}
-            <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+        <>
+            <Stack.Navigator
+                initialRouteName={getInitialRoute()}
+                screenOptions={{ headerShown: false }}
+            >
+                {/* Onboarding — shown only on first launch */}
+                <Stack.Screen name="Onboarding" component={OnboardingScreen} />
 
-            {/* Main feed — ALWAYS accessible, even as guest */}
-            <Stack.Screen name="Main" component={MainTabNavigator} />
+                {/* Main feed — ALWAYS accessible, even as guest */}
+                <Stack.Screen name="Main" component={MainTabNavigator} />
 
-            {/* Auth — navigable screen, NOT a gate */}
-            <Stack.Screen name="Auth" component={AuthScreen} options={{ presentation: 'modal' }} />
+                {/* Auth — navigable screen, NOT a gate */}
+                <Stack.Screen name="Auth" component={AuthScreen} options={{ presentation: 'modal' }} />
 
-            {/* Browsable screens — no session required */}
-            <Stack.Screen name="Storefront" component={StorefrontScreen} />
-            <Stack.Screen name="CategoryDetail" component={CategoryDetailScreen} />
-            <Stack.Screen name="SpotlightDetail" component={SpotlightDetailScreen} />
-            <Stack.Screen name="LocationPicker" component={LocationPickerScreen} options={{ presentation: 'fullScreenModal' }} />
+                {/* Browsable screens — no session required */}
+                <Stack.Screen name="Storefront" component={StorefrontScreen} />
+                <Stack.Screen name="CategoryDetail" component={CategoryDetailScreen} />
+                <Stack.Screen name="SpotlightDetail" component={SpotlightDetailScreen} />
+                <Stack.Screen name="LocationPicker" component={LocationPickerScreen} options={{ presentation: 'fullScreenModal' }} />
 
-            {/* Auth-gated screens — individual screens handle auth checks */}
-            <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
-            <Stack.Screen name="Profile" component={ProfileScreen} />
-            <Stack.Screen name="Offers" component={OffersScreen} />
-            <Stack.Screen name="YourOrders" component={YourOrdersScreen} />
-            <Stack.Screen name="Favorites" component={FavoritesScreen} />
-            <Stack.Screen name="Support" component={SupportScreen} />
-            <Stack.Screen name="PaymentMethods" component={PaymentMethodsScreen} />
-            <Stack.Screen name="AddPaymentMethod" component={AddPaymentMethodScreen} />
-            <Stack.Screen name="SwapScreen" component={SwapScreen} />
-            <Stack.Screen name="Cart" component={CartScreen} />
-        </Stack.Navigator>
+                {/* Auth-gated screens — individual screens handle auth checks */}
+                <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
+                <Stack.Screen name="Profile" component={ProfileScreen} />
+                <Stack.Screen name="Offers" component={OffersScreen} />
+                <Stack.Screen name="YourOrders" component={YourOrdersScreen} />
+                <Stack.Screen name="Favorites" component={FavoritesScreen} />
+                <Stack.Screen name="Support" component={SupportScreen} />
+                <Stack.Screen name="PaymentMethods" component={PaymentMethodsScreen} />
+                <Stack.Screen name="AddPaymentMethod" component={AddPaymentMethodScreen} />
+                <Stack.Screen name="SwapScreen" component={SwapScreen} />
+                <Stack.Screen name="Cart" component={CartScreen} />
+            </Stack.Navigator>
+            <FloatingCartBand />
+        </>
     );
 }
