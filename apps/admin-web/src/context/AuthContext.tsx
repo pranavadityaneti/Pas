@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import api from '../lib/api';
 import type { User as SupabaseUser, Session } from '@supabase/supabase-js';
 
 interface AdminUser {
@@ -7,6 +8,7 @@ interface AdminUser {
     email: string;
     name: string | null;
     role: string;
+    isAdmin?: boolean;
 }
 
 interface AuthContextType {
@@ -17,12 +19,20 @@ interface AuthContextType {
     isAuthenticated: boolean;
     mustChangePassword: boolean;
     login: (email: string, password: string) => Promise<{ error: string | null }>;
+    sendAdminOtp: (phone: string) => Promise<{ error: string | null }>;
+    loginWithOtp: (phone: string, otp: string) => Promise<{ error: string | null }>;
     logout: () => Promise<void>;
     createAdmin: (email: string, password: string, name: string) => Promise<{ error: string | null }>;
     clearPasswordChangeFlag: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+// An authorized admin is either a legacy email SUPER_ADMIN or a phone-OTP admin
+// flagged via User.isAdmin (which survives the merchant JIT role overwrite).
+function isAdminProfile(profile: AdminUser | null): boolean {
+    return !!profile && (profile.role === 'SUPER_ADMIN' || profile.isAdmin === true);
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<AdminUser | null>(null);
@@ -40,7 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // @ts-ignore
             const { data, error } = await supabase
                 .from('User')
-                .select('id, email, name, role')
+                .select('id, email, name, role, isAdmin')
                 .eq('id', supabaseUser.id)
                 .single()
                 .abortSignal(controller.signal);
@@ -102,7 +112,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     if (fetchError && fetchError.includes('Connection')) {
                         // Network error - preserve session but flag error
                         setProfileError(fetchError);
-                    } else if (profile?.role === 'SUPER_ADMIN') {
+                    } else if (isAdminProfile(profile)) {
                         if (isMounted) setUser(profile);
                     } else {
                         // User exists but is definitively not an admin OR record missing
@@ -143,7 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 
                 if (fetchError && fetchError.includes('Connection')) {
                     setProfileError(fetchError);
-                } else if (profile?.role === 'SUPER_ADMIN') {
+                } else if (isAdminProfile(profile)) {
                     if (isMounted) setUser(profile);
                 } else {
                     if (isMounted) setUser(null);
@@ -182,7 +192,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     return { error: `Profile error: ${fetchError}` };
                 }
                 
-                if (profile?.role === 'SUPER_ADMIN') {
+                if (isAdminProfile(profile)) {
                     // Check if user needs to change password
                     const userMetadata = data.user.user_metadata;
                     if (userMetadata?.mustChangePassword) {
@@ -200,6 +210,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch (err) {
             console.error('Login exception:', err);
             return { error: `Exception: ${err instanceof Error ? err.message : String(err)}` };
+        }
+    };
+
+    const sendAdminOtp = async (phone: string): Promise<{ error: string | null }> => {
+        try {
+            await api.post('/auth/send-otp', { phone, purpose: 'admin' });
+            return { error: null };
+        } catch (err: any) {
+            return { error: err?.response?.data?.error || err?.message || 'Failed to send OTP' };
+        }
+    };
+
+    const loginWithOtp = async (phone: string, otp: string): Promise<{ error: string | null }> => {
+        try {
+            const resp = await api.post('/auth/verify-otp', { phone, otp, purpose: 'admin' });
+            const sess = resp.data?.session;
+            if (!sess?.access_token || !sess?.refresh_token) {
+                return { error: 'No session returned from server' };
+            }
+            const { data, error } = await supabase.auth.setSession({
+                access_token: sess.access_token,
+                refresh_token: sess.refresh_token,
+            });
+            if (error || !data.user) {
+                return { error: error?.message || 'Failed to establish session' };
+            }
+            const { profile, error: fetchError } = await fetchUserProfile(data.user);
+            if (fetchError) {
+                await supabase.auth.signOut();
+                return { error: `Profile error: ${fetchError}` };
+            }
+            if (isAdminProfile(profile)) {
+                setUser(profile);
+                return { error: null };
+            }
+            await supabase.auth.signOut();
+            return { error: 'Access denied. Admin privileges required.' };
+        } catch (err: any) {
+            return { error: err?.response?.data?.error || err?.message || 'OTP verification failed' };
         }
     };
 
@@ -287,6 +336,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 isAuthenticated: !!user,
                 mustChangePassword,
                 login,
+                sendAdminOtp,
+                loginWithOtp,
                 logout,
                 createAdmin,
                 clearPasswordChangeFlag,
