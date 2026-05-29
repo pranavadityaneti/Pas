@@ -41,11 +41,69 @@ export const apiClient = {
 
             clearTimeout(timeoutId);
 
-            // 2. Global 401 Interceptor (Mandate 1)
+            // 2. Global 401 Interceptor — soft-recovery first; purge only on confirmed permanent failure
             if (response.status === 401) {
-                console.warn('[API] 401 Unauthorized detected. Purging session...');
-                await purgeAuthSession();
-                return response; // Caller handles the rest if needed, but nav has been triggered
+                // If we never sent a token, this is server-side auth rejection of an anon request —
+                // not our session's problem. Return as-is.
+                if (!token) {
+                    console.warn('[API] 401 on unauthenticated request — returning as-is');
+                    return response;
+                }
+
+                console.warn('[API] 401 detected — attempting session refresh before any purge');
+                const { data: refreshData, error: refreshError } =
+                    await supabase.auth.refreshSession();
+
+                if (!refreshError && refreshData?.session?.access_token) {
+                    // Refresh succeeded — retry the original request once with the new token
+                    const newToken = refreshData.session.access_token;
+                    console.log('[API] Refresh succeeded — retrying original request once');
+
+                    const retryController = new AbortController();
+                    const retryTimeoutId = setTimeout(() => retryController.abort(), timeout);
+                    try {
+                        const retryResponse = await fetch(url, {
+                            ...fetchOptions,
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${newToken}`,
+                                ...fetchOptions.headers,
+                            },
+                            signal: retryController.signal,
+                        });
+                        clearTimeout(retryTimeoutId);
+
+                        if (retryResponse.status === 401) {
+                            // Refresh worked but server still rejects → session is genuinely dead
+                            console.warn('[API] Retry after refresh still 401 — purging session');
+                            await purgeAuthSession();
+                        }
+                        return retryResponse;
+                    } catch (retryError: any) {
+                        clearTimeout(retryTimeoutId);
+                        // Network/timeout on retry — preserve session, return original 401
+                        console.warn('[API] Retry after refresh failed transiently — preserving session:', retryError.message);
+                        return response;
+                    }
+                }
+
+                // Refresh itself failed — purge only if it's a permanent auth failure
+                const errorMsg = (refreshError?.message || '').toLowerCase();
+                const isPermanentFailure =
+                    errorMsg.includes('invalid_grant') ||
+                    errorMsg.includes('refresh_token_not_found') ||
+                    errorMsg.includes('invalid refresh token') ||
+                    errorMsg.includes('user_not_found');
+
+                if (isPermanentFailure) {
+                    console.warn('[API] Refresh permanently failed — purging session:', errorMsg);
+                    await purgeAuthSession();
+                } else {
+                    // Transient (network, server hiccup) — keep the session, just surface the 401
+                    console.warn('[API] Refresh failed transiently — preserving session:', errorMsg || 'unknown');
+                }
+
+                return response;
             }
 
             return response;

@@ -1,8 +1,9 @@
-import { Tabs } from 'expo-router';
+import { Tabs, Redirect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/Colors';
 import { usePushNotifications } from '../../src/hooks/usePushNotifications';
+import { useStore } from '../../src/context/StoreContext';
 
 export default function MainLayout() {
     const insets = useSafeAreaInsets();
@@ -11,6 +12,16 @@ export default function MainLayout() {
 
     // Register push token after successful auth (runs once on mount)
     usePushNotifications();
+
+    // Defense-in-depth approval gate: only admin-approved merchants may reach the
+    // main app. A draft/awaiting-approval merchant (Store.active=false) has a Store
+    // row but must NOT be able to manage it or add inventory before completing +
+    // paying for onboarding. index.tsx routes here too; this guard also catches
+    // direct deep-links into protected tabs.
+    const { store, loading, isApproved } = useStore();
+    if (!loading && store && !isApproved) {
+        return <Redirect href="/(auth)/pending" />;
+    }
 
     return (
         <Tabs

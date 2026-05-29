@@ -8,15 +8,19 @@ const SCREEN_WIDTH = Dimensions.get('window').width;
 const TOAST_DURATION = 4500; // Auto-dismiss after 4.5s
 
 // --- Type Map for icon + accent color ---
+// Canonical UPPERCASE notification types — matches what the server emits.
+// Keep in sync with NotificationType in useNotifications.ts and getIcon in app/(main)/notifications.tsx.
 const TYPE_CONFIG: Record<string, { icon: string; color: string; bg: string }> = {
-    NEW_ORDER:      { icon: 'receipt',           color: '#10B981', bg: '#ECFDF5' },
-    CANCELLED:      { icon: 'close-circle',      color: '#EF4444', bg: '#FEF2F2' },
-    COMPLETED:      { icon: 'checkmark-circle',  color: '#10B981', bg: '#ECFDF5' },
-    READY:          { icon: 'bag-check',         color: '#3B82F6', bg: '#EFF6FF' },
-    ORDER_UPDATE:   { icon: 'refresh-circle',    color: '#8B5CF6', bg: '#F5F3FF' },
-    LOW_STOCK:      { icon: 'warning',           color: '#F59E0B', bg: '#FFFBEB' },
-    RIDER_ARRIVED:  { icon: 'bicycle',           color: '#06B6D4', bg: '#ECFEFF' },
-    DEFAULT:        { icon: 'notifications',     color: '#6B7280', bg: '#F9FAFB' },
+    NEW_ORDER:          { icon: 'receipt',           color: '#10B981', bg: '#ECFDF5' },
+    NEW_ORDER_REQUEST:  { icon: 'file-tray',         color: '#10B981', bg: '#ECFDF5' },
+    ORDER_CANCELLED:    { icon: 'close-circle',      color: '#EF4444', bg: '#FEF2F2' },
+    CANCELLED:          { icon: 'close-circle',      color: '#EF4444', bg: '#FEF2F2' },
+    COMPLETED:          { icon: 'checkmark-circle',  color: '#10B981', bg: '#ECFDF5' },
+    READY:              { icon: 'bag-check',         color: '#3B82F6', bg: '#EFF6FF' },
+    ORDER_UPDATE:       { icon: 'refresh-circle',    color: '#8B5CF6', bg: '#F5F3FF' },
+    LOW_STOCK:          { icon: 'warning',           color: '#F59E0B', bg: '#FFFBEB' },
+    RIDER_ARRIVED:      { icon: 'bicycle',           color: '#06B6D4', bg: '#ECFEFF' },
+    DEFAULT:            { icon: 'notifications',     color: '#6B7280', bg: '#F9FAFB' },
 };
 
 interface ToastData {

@@ -187,9 +187,17 @@ export default function LoginScreen() {
                 }
             }
 
-            if (ownerData && ownerData.length > 0) {
-                 const ownerIds = ownerData.map((o: any) => o.id);
-                 const { data: ownedBranches } = await supabase.from('merchant_branches').select('id, branch_name, merchant_id').in('merchant_id', ownerIds);
+            // Fetch ALL branches for every merchant where the user is an owner
+            const ownerMerchantIds = Array.from(contextMap.entries())
+                .filter(([_, ctx]) => ctx.role === 'owner')
+                .map(([id]) => id);
+            if (ownerData) {
+                ownerData.forEach((o: any) => {
+                    if (!ownerMerchantIds.includes(o.id)) ownerMerchantIds.push(o.id);
+                });
+            }
+            if (ownerMerchantIds.length > 0) {
+                 const { data: ownedBranches } = await supabase.from('merchant_branches').select('id, branch_name, merchant_id').in('merchant_id', ownerMerchantIds);
                  if (ownedBranches) {
                      ownedBranches.forEach((b: any) => {
                           const ctx = contextMap.get(b.merchant_id);
@@ -256,13 +264,14 @@ export default function LoginScreen() {
         }
     };
 
-    const handleSelectContext = async (context: any) => {
-        console.log('\n=== CONTEXT SELECTION ===');
-        console.log('1. User tapped:', context.merchantName);
-        
+    const handleSelectBranch = async (context: any, branchId: string) => {
+        console.log('\n=== BRANCH SELECTION ===');
+        console.log('1. User tapped:', context.merchantName, 'branch:', branchId);
+
         await AsyncStorage.setItem('active_context', JSON.stringify(context));
+        await AsyncStorage.setItem('active_branch_id', branchId);
         setShowRoleModal(false);
-        
+
         if (refreshStore) {
             console.log('2. Triggering Context Refresh...');
             await refreshStore();
@@ -270,7 +279,7 @@ export default function LoginScreen() {
 
         setTimeout(() => {
             console.log('3. Executing route to /');
-            router.replace('/'); 
+            router.replace('/');
         }, 800);
     };
 
@@ -387,23 +396,33 @@ export default function LoginScreen() {
 
                 <Text style={styles.footer}>Protected by Pick At Store Secure Gateway</Text>
 
-                {/* Context Selection Modal */}
+                {/* Context Selection Modal — shows individual branches */}
                 <Modal visible={showRoleModal} transparent={true} animationType="slide">
                     <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'flex-end' }}>
-                        <View style={{ backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 }}>
+                        <View style={{ backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, maxHeight: '70%' }}>
                             <View style={{ width: 40, height: 4, backgroundColor: '#ddd', borderRadius: 2, alignSelf: 'center', marginBottom: 16 }} />
-                            <Text style={{ fontSize: 20, fontWeight: '700', marginBottom: 20 }}>Select Account</Text>
-                            {multiRoles.map((context, index) => (
-                                <TouchableOpacity key={index} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' }} onPress={() => handleSelectContext(context)}>
-                                    <Text style={{ fontSize: 24, marginRight: 16 }}>{context.role === 'owner' ? '👑' : '🏪'}</Text>
-                                    <View>
-                                        <Text style={{ fontSize: 16, fontWeight: '600' }}>{context.merchantName}</Text>
-                                        <Text style={{ fontSize: 14, color: '#666' }}>
-                                            {context.role === 'owner' ? 'Store Owner' : 'Branch Manager'} 
-                                            {context.branches.length > 0 && ` • ${context.branches.length} Location${context.branches.length > 1 ? 's' : ''}`}
-                                        </Text>
-                                    </View>
-                                </TouchableOpacity>
+                            <Text style={{ fontSize: 20, fontWeight: '700', marginBottom: 20 }}>Select Store</Text>
+                            {multiRoles.map((context, ctxIndex) => (
+                                <View key={ctxIndex} style={{ marginBottom: 16 }}>
+                                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
+                                        {context.merchantName} {context.role === 'owner' ? '· Owner' : '· Manager'}
+                                    </Text>
+                                    {context.branches.map((branch: any, bIndex: number) => (
+                                        <TouchableOpacity
+                                            key={branch.branchId}
+                                            style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: bIndex < context.branches.length - 1 ? 1 : 0, borderBottomColor: '#F3F4F6' }}
+                                            onPress={() => handleSelectBranch(context, branch.branchId)}
+                                        >
+                                            <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
+                                                <Ionicons name="storefront-outline" size={18} color="#374151" />
+                                            </View>
+                                            <View style={{ flex: 1 }}>
+                                                <Text style={{ fontSize: 15, fontWeight: '600', color: '#111' }}>{branch.branchName}</Text>
+                                            </View>
+                                            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
                             ))}
                         </View>
                     </View>

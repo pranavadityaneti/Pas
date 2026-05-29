@@ -1,8 +1,9 @@
+// @lock — Do NOT overwrite. Keyboard fix approved May 19, 2026. Manual Keyboard listener for bottom-sheet modal.
 import React, { useState, useRef, useEffect } from 'react';
 import {
     View, Text, TextInput, TouchableOpacity,
     ActivityIndicator, Alert, Modal, Pressable,
-    Platform, KeyboardAvoidingView, ScrollView
+    Platform, Keyboard, Animated, ScrollView
 } from 'react-native';
 import { Phone, ArrowLeft, MessageCircle, X } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
@@ -53,6 +54,31 @@ export default function TransactionalAuthModal({
     const [otpValues, setOtpValues] = useState(['', '', '', '', '', '']);
     const [resendTimer, setResendTimer] = useState(0);
     const otpRefs = useRef<(TextInput | null)[]>([]);
+
+    // Manual keyboard avoidance — KAV is unreliable inside Modal + bottom-sheet pattern
+    const sheetTranslateY = useRef(new Animated.Value(0)).current;
+    useEffect(() => {
+        if (!visible) { sheetTranslateY.setValue(0); return; }
+        const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+        const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+        const onShow = (e: any) => {
+            Animated.timing(sheetTranslateY, {
+                toValue: -(e.endCoordinates.height * 0.75),
+                duration: Platform.OS === 'ios' ? e.duration || 250 : 200,
+                useNativeDriver: true,
+            }).start();
+        };
+        const onHide = () => {
+            Animated.timing(sheetTranslateY, {
+                toValue: 0,
+                duration: 200,
+                useNativeDriver: true,
+            }).start();
+        };
+        const showSub = Keyboard.addListener(showEvent, onShow);
+        const hideSub = Keyboard.addListener(hideEvent, onHide);
+        return () => { showSub.remove(); hideSub.remove(); };
+    }, [visible]);
 
     // Resend timer countdown
     useEffect(() => {
@@ -166,14 +192,11 @@ export default function TransactionalAuthModal({
 
     return (
         <Modal visible={visible} transparent animationType="slide">
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                className="flex-1"
-            >
+            <View className="flex-1">
                 <Pressable className="flex-1 bg-black/50" onPress={onClose} />
-                <View 
+                <Animated.View
                     className="bg-white rounded-t-[32px] px-8 pt-8 shadow-xl"
-                    style={{ paddingBottom: 400, marginBottom: -360 }}
+                    style={{ paddingBottom: 400, marginBottom: -360, transform: [{ translateY: sheetTranslateY }] }}
                 >
                     {/* Header */}
                     <View className="flex-row items-center justify-between mb-6">
@@ -211,7 +234,7 @@ export default function TransactionalAuthModal({
                                         onChangeText={setPhoneNumber}
                                         autoFocus
                                         textAlignVertical="center"
-                                        style={{ includeFontPadding: false }}
+                                        style={{ paddingVertical: 0, includeFontPadding: false }}
                                     />
                                 </View>
 
@@ -261,7 +284,7 @@ export default function TransactionalAuthModal({
                                                 onKeyPress={(e) => handleOtpKeyPress(e, i)}
                                                 autoFocus={i === 0}
                                                 textAlignVertical="center"
-                                                style={{ color: '#B52725' }}
+                                                style={{ color: '#B52725', paddingVertical: 0, includeFontPadding: false }}
                                             />
                                     ))}
                                 </View>
@@ -298,8 +321,8 @@ export default function TransactionalAuthModal({
                             <Text className="text-gray-400 text-sm">Authentication is handled securely via OTP.</Text>
                         </View>
                     </ScrollView>
-                </View>
-            </KeyboardAvoidingView>
+                </Animated.View>
+            </View>
         </Modal>
     );
 }

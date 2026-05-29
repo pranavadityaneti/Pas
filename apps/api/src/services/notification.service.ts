@@ -9,6 +9,20 @@ export interface SendNotificationParams {
     body: string;
     type: string;           // 'NEW_ORDER', 'CANCELLED', 'READY', 'LOW_STOCK', etc.
     referenceId?: string;   // The order ID or entity ID for deep linking
+    link?: string;          // Deep-link path used by merchant app's routeForNotification helper (e.g., '/(main)/orders')
+    metadata?: any;         // Rich JSON payload (order total, customer name, item count) for offline browsing
+    tx?: any;               // Optional Prisma.TransactionClient
+}
+
+export interface SendConsumerNotificationParams {
+    userId: string;          // The consumer's auth UID (the customer who placed the order)
+    title: string;
+    body: string;
+    type: string;           // 'ORDER_CONFIRMED', 'PAYMENT_SUCCESSFUL', 'ORDER_READY', 'ORDER_COMPLETED', 'ORDER_CANCELLED', 'DINING_BOOKED', 'DINING_READY'
+    referenceId?: string;   // The order ID or entity ID for deep linking
+    link?: string;          // Deep-link path used by customer app's routeForNotification helper
+    metadata?: any;         // Rich JSON payload (order total, store name, item count) for offline browsing
+    storeId?: string;       // Optional — the merchant's store/branch UUID for context (so notifications can be grouped by store later)
     tx?: any;               // Optional Prisma.TransactionClient
 }
 
@@ -24,7 +38,7 @@ class NotificationService {
      * to all active devices registered for the store's owner.
      */
     async sendMerchantNotification(params: SendNotificationParams): Promise<void> {
-        const { storeId, title, body, type, referenceId, tx } = params;
+        const { storeId, title, body, type, referenceId, link, metadata, tx } = params;
         const prismaClient = tx ?? this.prisma;
 
         console.log(`[NotificationService] Attempting dispatch | storeId=${storeId} type=${type} referenceId=${referenceId}`);
@@ -51,7 +65,10 @@ class NotificationService {
                         title,
                         message: body,
                         referenceId: referenceId || null,
-                        isRead: false
+                        link: link || null,
+                        metadata: metadata ?? null,
+                        isRead: false,
+                        recipientRole: 'merchant'
                     }
                 });
                 console.log(`[NotificationService] DB Insert success | notificationId=${dbResult.id} storeId=${storeId} recipientUserId=${recipientUserId} referenceId=${referenceId}`);
@@ -82,7 +99,7 @@ class NotificationService {
                     sound: 'default' as const,
                     title,
                     body,
-                    data: { type, referenceId, storeId },
+                    data: { type, referenceId, storeId, link },
                     priority: 'high' as const
                 }));
 
@@ -105,6 +122,99 @@ class NotificationService {
             }
         } catch (error) {
             console.error('[NotificationService] Fatal error in sendMerchantNotification:', error);
+        }
+    }
+
+    /**
+     * Customer-side dispatch: writes an in-app notification for a specific consumer (auth user)
+     * AND sends push notifications to all of their active devices.
+     *
+     * Differs from sendMerchantNotification by:
+     *  - Taking userId directly (no storeId-to-owner resolution step)
+     *  - storeId is optional (context only — for grouping notifications by store later)
+     *
+     * Reuses the same `notifications` table and `MerchantPushToken` table (which is
+     * misnamed but functionally generic — it stores tokens by userId without any
+     * merchant-specific scoping). Cleanup rename to `UserPushToken` is queued separately.
+     */
+    async sendConsumerNotification(params: SendConsumerNotificationParams): Promise<void> {
+        const { userId, title, body, type, referenceId, link, metadata, storeId, tx } = params;
+        const prismaClient = tx ?? this.prisma;
+
+        console.log(`[NotificationService] Consumer dispatch | userId=${userId} type=${type} referenceId=${referenceId}`);
+
+        if (!this.isValidUUID(userId)) {
+            console.warn(`[NotificationService] Consumer userId "${userId}" is not a valid UUID — skipping`);
+            return;
+        }
+
+        try {
+            // Step 1: Write the in-app notification record
+            let dbResult;
+            try {
+                dbResult = await (prismaClient as any).notification.create({
+                    data: {
+                        userId,
+                        storeId: storeId || null,
+                        type,
+                        title,
+                        message: body,
+                        referenceId: referenceId || null,
+                        link: link || null,
+                        metadata: metadata ?? null,
+                        isRead: false,
+                        recipientRole: 'consumer'
+                    }
+                });
+                console.log(`[NotificationService] Consumer DB Insert success | notificationId=${dbResult.id} userId=${userId} referenceId=${referenceId}`);
+            } catch (dbError) {
+                console.error('[NotificationService] Failed to create consumer notification record:', dbError);
+                // If tx is provided, throw to roll back the transaction
+                if (tx) throw dbError;
+            }
+
+            // Step 2: Fetch ALL active push tokens for this consumer (multi-device support).
+            // Note: we use the existing MerchantPushToken model — misnamed but functionally generic.
+            // Always use this.prisma (not the tx) for push lookup since push is network I/O outside the tx.
+            const tokens = await (this.prisma as any).merchantPushToken.findMany({
+                where: { userId, isActive: true }
+            });
+
+            if (!tokens || tokens.length === 0) {
+                console.log(`[NotificationService] No active push tokens for consumer ${userId}. In-app notification saved, no push sent.`);
+                return;
+            }
+
+            // Step 3: Build Expo push messages
+            const messages: ExpoPushMessage[] = tokens
+                .filter((t: any) => Expo.isExpoPushToken(t.expoPushToken))
+                .map((t: any) => ({
+                    to: t.expoPushToken,
+                    sound: 'default' as const,
+                    title,
+                    body,
+                    data: { type, referenceId, link },
+                    priority: 'high' as const
+                }));
+
+            if (messages.length === 0) {
+                console.warn('[NotificationService] All consumer tokens were invalid Expo push tokens.');
+                return;
+            }
+
+            // Step 4: Send via Expo Push API (chunked for batches > 100)
+            const chunks = expo.chunkPushNotifications(messages);
+            for (const chunk of chunks) {
+                try {
+                    const tickets = await expo.sendPushNotificationsAsync(chunk);
+                    await this.deactivateStaleTokens(tickets, tokens);
+                    console.log(`[NotificationService] Consumer push sent: ${tickets.length} ticket(s) for "${title}"`);
+                } catch (pushError) {
+                    console.error('[NotificationService] Consumer Expo push dispatch failed:', pushError);
+                }
+            }
+        } catch (error) {
+            console.error('[NotificationService] Fatal error in sendConsumerNotification:', error);
         }
     }
 

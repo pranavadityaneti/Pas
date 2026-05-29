@@ -57,7 +57,7 @@ const getVariantsForCategory = (category?: string) => {
 };
 
 export default function ConfigureProductsModal({ visible, storeId, products, onClose, onSuccess }: ConfigureProductsModalProps) {
-    const { activeRole } = useStore();
+    const { activeRole, hasRealBranch } = useStore();
     const insets = useSafeAreaInsets();
     // Config Structure: { [productId]: { [variantLabel]: { price, stock, active } } }
     const [config, setConfig] = useState<Record<string, Record<string, { price: string; stock: string; active: boolean }>>>({});
@@ -129,6 +129,16 @@ export default function ConfigureProductsModal({ visible, storeId, products, onC
         if (!targetBranchId) {
             console.error('[ConfigureProductsModal] handleSave aborted: targetBranchId is null');
             Alert.alert("Error", "No active store or branch selected. Please try switching stores.");
+            return;
+        }
+        // Layer 3 defense (May 20, 2026): refuse to write StoreProduct rows when
+        // no real merchant_branches row exists for this merchant. Without this guard
+        // the FK fk_storeproduct_branch will violate and the user sees a raw DB error.
+        if (!hasRealBranch) {
+            Alert.alert(
+                'Set up your branch first',
+                'You need to add at least one branch before adding products. Go to Settings → Branches → Add Branch.',
+            );
             return;
         }
 

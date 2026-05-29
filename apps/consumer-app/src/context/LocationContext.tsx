@@ -24,7 +24,7 @@ interface LocationContextType {
 
 const LocationContext = createContext<LocationContextType | undefined>(undefined);
 
-const FAILSAFE_TIMEOUT_MS = 8000; // Force-unblock spinners after 8 seconds
+const FAILSAFE_TIMEOUT_MS = 15000; // Force-unblock spinners after 15 seconds
 const LAST_LOCATION_KEY = 'pas_last_active_location'; // AsyncStorage key for manual selection persistence
 
 // Math utility to calculate straight-line distance between two GPS coordinates
@@ -58,7 +58,10 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
     const selectLocation = async (location: DeliveryLocation) => {
         setIsManualSelection(true);
         setActiveLocation(location);
-        // Persist the manual selection to AsyncStorage so it survives app restarts
+        if (!location.latitude || !location.longitude) {
+            console.warn('[LocationContext] Manual selection missing coordinates — not persisting');
+            return;
+        }
         try {
             await AsyncStorage.setItem(LAST_LOCATION_KEY, JSON.stringify(location));
             console.log('[LocationContext] Persisted manual selection:', location.type);
@@ -68,10 +71,13 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
     };
 
     const refreshLocation = async (passedUser?: any, forceRefresh: boolean = false) => {
-        if (isManualSelection) {
+        if (isManualSelection && !forceRefresh) {
             console.log("[LocationContext] Skipping auto-refresh due to manual selection");
             setIsLoadingLocation(false);
             return;
+        }
+        if (forceRefresh) {
+            setIsManualSelection(false);
         }
 
         // --- Rate Limit Guard (bypassed on auth hydration) ---
@@ -107,31 +113,33 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
 
             // 2. Ping Live GPS
             const locationConfig = await Location.getCurrentPositionAsync({
-                accuracy: Location.Accuracy.High
+                accuracy: Location.Accuracy.Balanced
             });
             const currentLat = locationConfig.coords.latitude;
             const currentLon = locationConfig.coords.longitude;
 
             // --- PRIORITY 1: Restore last manual selection from AsyncStorage ---
+            // Only restore NAMED selections (e.g. "Home", "Work"). Skip generic
+            // "Current Location" so Priority 2 can check for a nearby saved address.
+            let cachedLocation: DeliveryLocation | null = null;
             try {
                 const cached = await AsyncStorage.getItem(LAST_LOCATION_KEY);
                 if (cached) {
                     const lastLocation: DeliveryLocation = JSON.parse(cached);
-                    // Validate it has coordinates (not a stale/corrupt entry)
                     if (lastLocation.latitude && lastLocation.longitude) {
-                        // Only restore if user is still within 5km of that saved location
-                        // (prevents snapping to "Home" when user is in a different city)
                         const distToLast = getDistanceFromLatLonInKm(
                             currentLat, currentLon,
                             lastLocation.latitude, lastLocation.longitude
                         );
-                        if (distToLast <= 5) {
+                        if (distToLast <= 5 && lastLocation.type !== 'Current Location') {
                             console.log(`[LocationContext] PRIORITY 1: Restoring persisted selection "${lastLocation.type}" (${distToLast.toFixed(1)}km away)`);
                             setActiveLocation(lastLocation);
-                            return; // finally block will clean up
-                        } else {
+                            return;
+                        } else if (distToLast > 5) {
                             console.log(`[LocationContext] Persisted "${lastLocation.type}" is ${distToLast.toFixed(1)}km away — too far, clearing`);
                             await AsyncStorage.removeItem(LAST_LOCATION_KEY);
+                        } else {
+                            cachedLocation = lastLocation;
                         }
                     }
                 }
@@ -139,19 +147,13 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
                 console.warn('[LocationContext] Failed to read persisted location:', cacheErr);
             }
 
-            // --- PRIORITY 2: Auto-snap to saved address within 2km ---
+            // --- PRIORITY 2: Auto-snap to nearest saved address within 5km ---
             if (resolvedUser) {
                 try {
-                    const addressTimeout = new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error('Address lookup timeout (8s)')), 8000)
-                    );
-                    const { data: addresses, error } = await Promise.race([
-                        supabase
-                            .from('consumer_addresses')
-                            .select('*')
-                            .eq('user_id', resolvedUser.id),
-                        addressTimeout
-                    ]) as any;
+                    const { data: addresses, error } = await supabase
+                        .from('consumer_addresses')
+                        .select('*')
+                        .eq('user_id', resolvedUser.id) as any;
 
                     if (!error && addresses && addresses.length > 0) {
                         let closestAddress = null;
@@ -167,24 +169,30 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
                             }
                         }
 
-                        if (closestAddress && minDistance <= 2) {
-                            console.log(`[LocationContext] PRIORITY 2: Auto-snapping to "${closestAddress.type}" (${minDistance.toFixed(2)}km away)`);
+                        if (closestAddress && minDistance <= 5) {
+                            console.log(`[LocationContext] Auto-snapping to "${closestAddress.type}" (${minDistance.toFixed(2)}km away)`);
                             setActiveLocation({
                                 type: closestAddress.type,
                                 address: closestAddress.address,
                                 latitude: closestAddress.latitude,
                                 longitude: closestAddress.longitude,
                             });
-                            return; // finally block will clean up
+                            return;
                         }
                     }
                 } catch (dbError) {
                     console.warn("[LocationContext] Supabase address lookup failed, falling back to GPS:", dbError);
-                    // Don't rethrow — fall through to geocoding
                 }
             }
 
-            // 4. Fallback: Reverse Geocode the Live GPS
+            // --- PRIORITY 3: Use cached "Current Location" if available ---
+            if (cachedLocation) {
+                console.log('[LocationContext] PRIORITY 3: Restoring cached "Current Location"');
+                setActiveLocation(cachedLocation);
+                return;
+            }
+
+            // --- PRIORITY 4: Reverse Geocode the Live GPS ---
             try {
                 const geocodeCache = await Location.reverseGeocodeAsync({ latitude: currentLat, longitude: currentLon });
                 if (geocodeCache.length > 0) {
@@ -210,7 +218,7 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
                 console.warn("[LocationContext] Geocoding failed, using raw GPS:", geoError);
                 setActiveLocation({
                     type: 'Current Location',
-                    address: 'GPS coordinates',
+                    address: `${currentLat.toFixed(4)}, ${currentLon.toFixed(4)}`,
                     latitude: currentLat,
                     longitude: currentLon
                 });

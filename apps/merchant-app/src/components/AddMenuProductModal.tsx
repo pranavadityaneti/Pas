@@ -32,7 +32,7 @@ interface AddMenuProductModalProps {
 }
 
 export default function AddMenuProductModal({ visible, onClose, onSuccess, storeId, initialName, itemToEdit }: AddMenuProductModalProps) {
-    const { activeRole } = useStore();
+    const { activeRole, hasRealBranch } = useStore();
     const insets = useSafeAreaInsets();
     const [loading, setLoading] = useState(false);
     
@@ -248,6 +248,16 @@ export default function AddMenuProductModal({ visible, onClose, onSuccess, store
     };
 
     const handleSave = async () => {
+        // Layer 3 defense (May 20, 2026): refuse to write StoreProduct rows when
+        // no real merchant_branches row exists. Without this, fk_storeproduct_branch
+        // would violate on the upsert at line 395.
+        if (!hasRealBranch) {
+            return Alert.alert(
+                'Set up your branch first',
+                'You need to add at least one branch before adding menu items. Go to Settings → Branches → Add Branch.',
+            );
+        }
+
         const finalMenuSection = menuSectionPreset === 'Custom...' ? customMenuSection : menuSectionPreset;
 
         // 1. Name
@@ -302,7 +312,21 @@ export default function AddMenuProductModal({ visible, onClose, onSuccess, store
 
         try {
             const isEditing = !!itemToEdit;
-            const productId = isEditing ? itemToEdit.productId : uuid.v4().toString();
+            let productId = isEditing ? itemToEdit.productId : uuid.v4().toString();
+
+            // Check if a Product with the same name already exists for this store (prevents unique constraint violation)
+            if (!isEditing) {
+                const { data: existing } = await supabase
+                    .from('Product')
+                    .select('id')
+                    .eq('createdByStoreId', activeRole?.id || storeId)
+                    .eq('name', name.trim())
+                    .limit(1)
+                    .maybeSingle();
+                if (existing) {
+                    productId = existing.id;
+                }
+            }
 
             // 1. Upload Images
             const uploadedUrls = [];
@@ -362,10 +386,11 @@ export default function AddMenuProductModal({ visible, onClose, onSuccess, store
                 await supabase.from('StoreProduct').delete().eq('productId', productId).eq('storeId', storeId);
             }
 
+            const branchId = activeRole?.id || storeId;
             const storeProductPayloads = variantsToSave.map(v => ({
                 id: uuid.v4().toString(),
-                storeId: activeRole?.id || storeId,
-                branch_id: activeRole?.id || storeId,
+                storeId: branchId,
+                branch_id: branchId,
                 productId,
                 price: parseFloat(v.price),
                 stock: 0,
@@ -375,7 +400,12 @@ export default function AddMenuProductModal({ visible, onClose, onSuccess, store
                 updatedAt: new Date().toISOString()
             }));
 
-            const { error: spError } = await supabase.from('StoreProduct').upsert(storeProductPayloads);
+            const { error: spError } = await supabase
+                .from('StoreProduct')
+                .upsert(storeProductPayloads, {
+                    onConflict: 'branch_id,productId,variant',
+                    ignoreDuplicates: false,
+                });
             if (spError) throw spError;
 
             onSuccess();

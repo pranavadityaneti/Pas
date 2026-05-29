@@ -104,12 +104,23 @@ model User {
   role                    Role     @default(CONSUMER)
   name                    String?
   phone                   String?
+  isAdmin                 Boolean  @default(false)
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
   notificationPreferences Json?    @map("notification_preferences")
   managedStore            Store?   @relation("StoreManager")
   orders                  Order[]  @relation("CustomerOrders")
 
+  @@schema("public")
+}
+
+model AdminAllowlist {
+  phone     String   @id
+  name      String?
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("admin_allowlist")
   @@schema("public")
 }
 
@@ -125,6 +136,10 @@ model Notification {
   createdAt   DateTime @default(now()) @map("created_at")
   storeId     String?  @map("store_id") @db.Uuid
   referenceId String?  @map("reference_id")
+  // 'merchant' | 'consumer' — separates notifications for dual-role accounts.
+  // Staged 2026-05-28; migration applies on the June 6 deploy. Until then the
+  // consumer app scopes by a type allowlist (see consumer useNotifications.ts).
+  recipientRole String? @map("recipient_role")
 
   @@index([userId])
   @@index([storeId], map: "idx_notifications_store_id")
@@ -341,6 +356,7 @@ model Order {
   special_instructions String?
   arrival_time         String?
   guests_count         Int?
+  slot_time_at         DateTime?      @map("slot_time_at") @db.Timestamptz(6)
   branchId             String         @map("branch_id")
   items                OrderItem[]
   store                Store          @relation(fields: [storeId], references: [id], onUpdate: NoAction, map: "fk_orders_store")
@@ -422,6 +438,9 @@ model Merchant {
   gstNumber           String?          @map("gst_number")
   gstCertificateUrl   String?          @map("gst_certificate_url")
   storePhotos         String[]         @map("store_photos")
+  cuisines            String[]         @default([]) @map("cuisines")
+  isVeg               Boolean          @default(false) @map("is_veg")
+  restaurantType      String?          @map("restaurant_type")
   bankName            String?          @map("bank_name")
   bankBeneficiaryName String?          @map("bank_beneficiary_name")
   fssaiCertificateUrl String?          @map("fssai_certificate_url")
@@ -458,12 +477,48 @@ model MerchantBranch {
   permissions         Json?          @map("permissions")
   operating_hours     Json?          @map("operating_hours")
   prep_time_minutes   Int            @default(15) @map("prep_time_minutes")
+  cuisines            String[]       @default([]) @map("cuisines")
+  isVeg               Boolean?       @map("is_veg")
+  restaurantType      String?        @map("restaurant_type")
+  branchPhotos        String[]       @default([]) @map("branch_photos")
+  servicePickup       Boolean        @default(true) @map("service_pickup")
+  serviceDinein       Boolean        @default(true) @map("service_dinein")
+  serviceTableBooking Boolean        @default(false) @map("service_table_booking")
+  slotConfig          Json?          @default("[]") @map("slot_config")
   StoreProduct        StoreProduct[]
   merchant            Merchant?      @relation(fields: [merchantId], references: [id])
   orders              Order[]
+  tableBookings       TableBooking[]
 
   @@unique([merchantId, branchName])
   @@map("merchant_branches")
+  @@schema("public")
+}
+
+model TableBooking {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branchId         String   @map("branch_id")
+  userId           String   @map("user_id") @db.Uuid
+  slotDate         DateTime @map("slot_date") @db.Date
+  slotTime         String   @map("slot_time")
+  guestsCount      Int      @default(2) @map("guests_count")
+  bookingFee       Int      @default(25) @map("booking_fee")
+  status           String   @default("CONFIRMED")
+  paymentId        String?  @map("payment_id")
+  razorpayOrderId  String?  @map("razorpay_order_id")
+  otp              String
+  orderId          String?  @map("order_id") @db.Uuid
+  customerName     String?  @map("customer_name")
+  customerPhone    String?  @map("customer_phone")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  branch           MerchantBranch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([branchId, slotDate, slotTime])
+  @@index([userId])
+  @@index([branchId, status, slotDate])
+  @@map("table_bookings")
   @@schema("public")
 }
 
@@ -1072,6 +1127,7 @@ model order_requests {
   order_type       String?
   guests_count     Int?
   expires_at       DateTime @db.Timestamptz(6)
+  slot_time_at     DateTime? @db.Timestamptz(6)
   created_at       DateTime @default(now()) @db.Timestamptz(6)
   updated_at       DateTime @default(now()) @db.Timestamptz(6)
   branch_id        String

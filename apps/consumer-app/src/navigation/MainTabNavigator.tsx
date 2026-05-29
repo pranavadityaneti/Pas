@@ -1,4 +1,3 @@
-// @lock — Do NOT overwrite. Approved layout as of Feb 27, 2026.
 // Main Tab Navigator: Bottom tabs (Home, Pickup, Dining, Cart) with redline effect.
 import React from 'react';
 import { View, Image } from 'react-native';
@@ -10,6 +9,9 @@ import HomeFeedScreen from '../screens/HomeFeedScreen';
 import DiningScreen from '../screens/DiningScreen';
 import CartScreen from '../screens/CartScreen';
 import HomeScreen from '../screens/HomeScreen';
+import StorefrontScreen from '../screens/StorefrontScreen';
+import CategoryDetailScreen from '../screens/CategoryDetailScreen';
+import SpotlightDetailScreen from '../screens/SpotlightDetailScreen';
 import DiningCheckoutScreen from '../screens/DiningCheckoutScreen';
 import CheckoutScreen from '../screens/CheckoutScreen';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -22,7 +24,41 @@ export type MainTabParamList = {
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
+const HomeStack = createNativeStackNavigator();
+const PickupStack = createNativeStackNavigator();
+const DiningStack = createNativeStackNavigator();
 const CartStack = createNativeStackNavigator();
+
+function HomeStackNavigator() {
+    return (
+        <HomeStack.Navigator screenOptions={{ headerShown: false }}>
+            <HomeStack.Screen name="HomeMain" component={HomeScreen} />
+            <HomeStack.Screen name="Storefront" component={StorefrontScreen} />
+            <HomeStack.Screen name="CategoryDetail" component={CategoryDetailScreen} />
+            <HomeStack.Screen name="SpotlightDetail" component={SpotlightDetailScreen} />
+        </HomeStack.Navigator>
+    );
+}
+
+function PickupStackNavigator() {
+    return (
+        <PickupStack.Navigator screenOptions={{ headerShown: false }}>
+            <PickupStack.Screen name="PickupMain" component={HomeFeedScreen} />
+            <PickupStack.Screen name="Storefront" component={StorefrontScreen} />
+            <PickupStack.Screen name="CategoryDetail" component={CategoryDetailScreen} />
+        </PickupStack.Navigator>
+    );
+}
+
+function DiningStackNavigator() {
+    return (
+        <DiningStack.Navigator screenOptions={{ headerShown: false }}>
+            <DiningStack.Screen name="DiningMain" component={DiningScreen} />
+            <DiningStack.Screen name="Storefront" component={StorefrontScreen} />
+            <DiningStack.Screen name="SpotlightDetail" component={SpotlightDetailScreen} />
+        </DiningStack.Navigator>
+    );
+}
 
 function CartStackNavigator() {
     return (
@@ -39,6 +75,7 @@ export default function MainTabNavigator() {
 
     return (
         <Tab.Navigator
+            backBehavior="history"
             screenOptions={({ route }) => ({
                 headerShown: false,
                 tabBarIcon: ({ color, size, focused }) => {
@@ -83,9 +120,9 @@ export default function MainTabNavigator() {
                 }
             })}
         >
-            <Tab.Screen name="Home" component={HomeScreen} />
-            <Tab.Screen name="Pickup" component={HomeFeedScreen} />
-            <Tab.Screen name="Dining" component={DiningScreen} />
+            <Tab.Screen name="Home" component={HomeStackNavigator} />
+            <Tab.Screen name="Pickup" component={PickupStackNavigator} />
+            <Tab.Screen name="Dining" component={DiningStackNavigator} />
             <Tab.Screen name="Cart" component={CartStackNavigator} />
         </Tab.Navigator>
     );

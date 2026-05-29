@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useLocation } from '../context/LocationContext';
 
 export const useNearbyStores = () => {
+    const channelId = useRef(`nearby-stores-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).current;
     const { activeLocation, isLoadingLocation } = useLocation();
     const [nearbyStoreIds, setNearbyStoreIds] = useState<string[]>([]);
     const [distanceMap, setDistanceMap] = useState<Record<string, number>>({});
@@ -74,7 +75,7 @@ export const useNearbyStores = () => {
 
         fetchNearby();
 
-        const channel = supabase.channel('nearby-stores-updates')
+        const channel = supabase.channel(channelId)
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'merchant_branches' }, (payload) => {
                 console.log('Realtime branch update received:', payload);
                 if (isMounted) fetchNearby();

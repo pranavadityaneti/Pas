@@ -13,14 +13,19 @@ import { useLocation } from '../context/LocationContext';
 import { supabase } from '../lib/supabase';
 import * as Haptics from 'expo-haptics';
 import { useCart } from '../context/CartContext';
+import { getStoreImageUrl } from '../utils/storageUrl';
+import { checkIsOpen } from '../utils/dataTransformer';
 import CartSummaryBar from '../components/CartSummaryBar';
 import { LinearGradient } from 'expo-linear-gradient';
 import GlobalHeader from '../components/GlobalHeader';
 import { useCategories } from '../context/CategoryContext';
 import { useStores } from '../hooks/useStores';
 import { useNearbyStores } from '../hooks/useNearbyStores';
-import { useGlobalSearch } from '../hooks/useGlobalSearch';
+import { useGlobalSearch, SearchResultStore } from '../hooks/useGlobalSearch';
 import { ActivityIndicator } from 'react-native';
+import SearchResults from '../components/SearchResults';
+import StoreFilterModal, { StoreModalFilters, DEFAULT_MODAL_FILTERS } from '../components/StoreFilterModal';
+import { Filter } from 'lucide-react-native';
 
 const { width } = Dimensions.get('window');
 
@@ -35,12 +40,34 @@ export default function HomeFeedScreen() {
     const [searchText, setSearchText] = useState('');
     const [activeFilter, setActiveFilter] = useState<FilterType | null>('nearest');
     const { stores, loading, error: storesError, refresh: refreshStores } = useStores();
+    const [storeFilterVisible, setStoreFilterVisible] = useState(false);
+    const [storeFilters, setStoreFilters] = useState<StoreModalFilters>({ ...DEFAULT_MODAL_FILTERS });
     const { nearbyStoreIds, distanceMap, loading: nearbyLoading } = useNearbyStores();
     const { items, getTotal } = useCart();
     const { verticals } = useCategories();
+    const [availableBrands, setAvailableBrands] = useState<string[]>([]);
+
+    // Fetch available brands from nearby stores
+    useEffect(() => {
+        if (nearbyStoreIds.length === 0) return;
+        supabase
+            .from('StoreProduct')
+            .select('product:Product!inner(brand)')
+            .in('branch_id', nearbyStoreIds.slice(0, 50))
+            .eq('active', true)
+            .not('product.brand', 'is', null)
+            .then(({ data }) => {
+                if (data) {
+                    const brands = [...new Set(
+                        (data as any[]).map(d => d.product?.brand).filter(Boolean)
+                    )].sort();
+                    setAvailableBrands(brands as string[]);
+                }
+            });
+    }, [nearbyStoreIds]);
 
     // --- Global Search (Postgres RPC) ---
-    const { results: searchResults, isLoading: isSearchLoading } = useGlobalSearch(
+    const { results: searchResults, allMatchedProducts, isLoading: isSearchLoading } = useGlobalSearch(
         searchText,
         activeLocation?.latitude,
         activeLocation?.longitude,
@@ -86,9 +113,7 @@ export default function HomeFeedScreen() {
                 id: s.branch_id,
                 name: s.branch_name,
                 address: s.address || 'Address not available',
-                image: s.store_photos?.[0]
-                    ? `https://llhxkonraqaxtradyycj.supabase.co/storage/v1/object/public/store-photos/${s.store_photos[0]}`
-                    : 'https://images.unsplash.com/photo-1542838132-92c53300491?w=400',
+                image: getStoreImageUrl(s.store_photos?.[0]),
                 rating: null,
                 rawDist: s.distance_meters,
                 distance: s.distance_meters >= 1000
@@ -97,7 +122,7 @@ export default function HomeFeedScreen() {
                 category: s.vertical_name || 'Uncategorized',
                 isDining: false,
                 isRestaurant: false,
-                isOpen: s.is_active,
+                isOpen: checkIsOpen(s.is_active ?? true, s.operating_hours, s.prep_time_minutes || 15),
                 cuisine: s.vertical_name || '',
                 products: s.matched_products || [],
                 prepTime: s.prep_time_minutes ? `${s.prep_time_minutes} mins` : '30 mins',
@@ -135,8 +160,22 @@ export default function HomeFeedScreen() {
             list.sort((a, b) => a.rawDist - b.rawDist);
         }
 
+        // Apply StoreFilterModal filters
+        if (storeFilters.openNow) list = list.filter(v => v.isOpen);
+        if (storeFilters.maxDistance) list = list.filter(v => v.rawDist <= storeFilters.maxDistance! * 1000);
+        if (storeFilters.brands.length > 0) {
+            list = list.filter(v => {
+                const products = (v as any).products || [];
+                return products.some((p: any) => storeFilters.brands.includes(p.brand));
+            });
+        }
+
+        // Sort overrides from modal
+        if (storeFilters.sortBy === 'distance') list.sort((a, b) => a.rawDist - b.rawDist);
+        else if (storeFilters.sortBy === 'prep_time') list.sort((a, b) => (parseInt((a as any).prepTime || '99') || 99) - (parseInt((b as any).prepTime || '99') || 99));
+
         return list;
-    }, [activeFilter, searchText, stores, distanceMap, searchResults]);
+    }, [activeFilter, searchText, stores, distanceMap, searchResults, storeFilters]);
 
     // (Quick Grab & Go removed — replaced by store-level curated sections)
 
@@ -186,7 +225,7 @@ export default function HomeFeedScreen() {
             key={venue.id}
             onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                navigation.navigate('Storefront', { storeId: venue.id as any });
+                navigation.navigate('Storefront', { storeId: venue.id, orderMode: 'pickup' } as any);
             }}
             style={isFullWidth ? {} : { width: width * 0.75 }}
             className={`rounded-[28px] bg-white border border-gray-100 overflow-hidden shadow-sm ${isFullWidth ? 'mb-5 w-full' : 'mr-4'} ${!venue.isOpen ? 'opacity-70' : ''}`}
@@ -256,10 +295,21 @@ export default function HomeFeedScreen() {
 
     return (
         <SafeAreaView edges={['top']} className="flex-1 bg-white">
-            <GlobalHeader 
-                searchText={searchText} 
-                onSearchChange={setSearchText} 
+            <GlobalHeader
+                searchText={searchText}
+                onSearchChange={setSearchText}
                 searchPlaceholder="Find places to pick up near you..."
+                rightContent={
+                    <TouchableOpacity
+                        onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setStoreFilterVisible(true); }}
+                        className="w-11 h-11 rounded-full bg-gray-100 items-center justify-center border border-gray-200 relative"
+                    >
+                        <Filter size={18} color="#4B5563" />
+                        {(storeFilters.sortBy !== 'relevance' || storeFilters.maxDistance !== null || storeFilters.openNow || storeFilters.priceMin > 0 || storeFilters.priceMax < 1000 || storeFilters.brands.length > 0) && (
+                            <View style={{ position: 'absolute', top: 2, right: 2, width: 8, height: 8, borderRadius: 4, backgroundColor: '#B52725' }} />
+                        )}
+                    </TouchableOpacity>
+                }
                 bottomContent={
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row overflow-visible">
                         {filters.map(filter => {
@@ -370,54 +420,73 @@ export default function HomeFeedScreen() {
                 </>
                 )}
 
-                {/* Flowing Feed */}
-                <View className="px-5 pb-8">
-                    {searchText ? (
-                        <Text className="text-[20px] font-extrabold text-gray-900 tracking-tight mb-5 px-1 mt-4">
-                            Search Results
-                        </Text>
+                {/* Flowing Feed / Search Results */}
+                <View className="pb-8">
+                    {searchText.trim() ? (
+                        <SearchResults
+                            searchText={searchText}
+                            results={searchResults}
+                            allMatchedProducts={allMatchedProducts}
+                            isLoading={isSearchLoading}
+                            storeCardRenderer={(store: SearchResultStore) => (
+                                <StandardVenueCard
+                                    venue={{
+                                        id: store.branch_id,
+                                        name: store.branch_name,
+                                        address: store.address || 'Address not available',
+                                        image: getStoreImageUrl(store.store_photos?.[0]),
+                                        rating: null,
+                                        rawDist: store.distance_meters,
+                                        distance: store.distance_meters >= 1000
+                                            ? `${(store.distance_meters / 1000).toFixed(1)} km`
+                                            : `${Math.round(store.distance_meters)} m`,
+                                        category: store.vertical_name || 'Uncategorized',
+                                        isDining: false,
+                                        isRestaurant: false,
+                                        isOpen: checkIsOpen(store.is_active ?? true, store.operating_hours, store.prep_time_minutes || 15),
+                                        cuisine: store.vertical_name || '',
+                                    }}
+                                    isFullWidth
+                                />
+                            )}
+                        />
                     ) : (
-                        <Text className="text-xl font-bold text-gray-900 mb-4 ml-1">Nearby Stores</Text>
-                    )}
-
-                    {allVenues.length > 0 ? (
-                        allVenues.map((venue) => (
-                            <StandardVenueCard key={venue.id} venue={venue} isFullWidth />
-                        ))
-                    ) : (isLoadingLocation || nearbyLoading || isSearchLoading) ? (
-                        <View className="py-20 items-center justify-center">
-                            <ActivityIndicator size="large" color="#B52725" />
-                            <Text className="text-gray-400 text-[13px] font-bold mt-4 uppercase tracking-widest">
-                                {searchText.trim() ? 'Searching nearby stores...' : nearbyLoading ? 'Loading nearby stores...' : 'Locating nearby stores...'}
-                            </Text>
-                        </View>
-                    ) : searchText.trim() ? (
-                        <View className="py-12 items-center justify-center">
-                            <Search size={48} color="#D1D5DB" strokeWidth={1.5} />
-                            <Text className="text-gray-900 text-[16px] font-bold mt-4">No results for "{searchText}"</Text>
-                            <Text className="text-gray-400 text-[13px] font-medium mt-1 text-center px-10">Try a different search term or check nearby stores.</Text>
-                        </View>
-                    ) : storesError ? (
-                        <View className="py-12 items-center justify-center">
-                            <WifiOff size={48} color="#D1D5DB" strokeWidth={1.5} />
-                            <Text className="text-gray-900 text-[16px] font-bold mt-4">Could not reach the server</Text>
-                            <Text className="text-gray-400 text-[13px] font-medium mt-1 text-center px-10">Check your connection and try again.</Text>
-                            <TouchableOpacity
-                                onPress={() => {
-                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                                    refreshLocation();
-                                    refreshStores();
-                                }}
-                                className="mt-5 px-6 py-3 bg-[#B52725] rounded-xl"
-                            >
-                                <Text className="text-white font-bold text-[13px]">Retry</Text>
-                            </TouchableOpacity>
-                        </View>
-                    ) : (
-                        <View className="py-12 items-center justify-center">
-                            <MapPinOff size={48} color="#D1D5DB" strokeWidth={1.5} />
-                            <Text className="text-gray-900 text-[16px] font-bold mt-4">No stores nearby</Text>
-                            <Text className="text-gray-400 text-[13px] font-medium mt-1 text-center px-10">We're onboarding stores in your area. Check back soon!</Text>
+                        <View className="px-5">
+                            <Text className="text-xl font-bold text-gray-900 mb-4 ml-1">Nearby Stores</Text>
+                            {allVenues.length > 0 ? (
+                                allVenues.map((venue) => (
+                                    <StandardVenueCard key={venue.id} venue={venue} isFullWidth />
+                                ))
+                            ) : (isLoadingLocation || nearbyLoading) ? (
+                                <View className="py-20 items-center justify-center">
+                                    <ActivityIndicator size="large" color="#B52725" />
+                                    <Text className="text-gray-400 text-[13px] font-bold mt-4 uppercase tracking-widest">
+                                        {nearbyLoading ? 'Loading nearby stores...' : 'Locating nearby stores...'}
+                                    </Text>
+                                </View>
+                            ) : storesError ? (
+                                <View className="py-12 items-center justify-center">
+                                    <WifiOff size={48} color="#D1D5DB" strokeWidth={1.5} />
+                                    <Text className="text-gray-900 text-[16px] font-bold mt-4">Could not reach the server</Text>
+                                    <Text className="text-gray-400 text-[13px] font-medium mt-1 text-center px-10">Check your connection and try again.</Text>
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                                            refreshLocation();
+                                            refreshStores();
+                                        }}
+                                        className="mt-5 px-6 py-3 bg-[#B52725] rounded-xl"
+                                    >
+                                        <Text className="text-white font-bold text-[13px]">Retry</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            ) : (
+                                <View className="py-12 items-center justify-center">
+                                    <MapPinOff size={48} color="#D1D5DB" strokeWidth={1.5} />
+                                    <Text className="text-gray-900 text-[16px] font-bold mt-4">No stores nearby</Text>
+                                    <Text className="text-gray-400 text-[13px] font-medium mt-1 text-center px-10">We're onboarding stores in your area. Check back soon!</Text>
+                                </View>
+                            )}
                         </View>
                     )}
                 </View>
@@ -426,6 +495,19 @@ export default function HomeFeedScreen() {
             )}
 
             <CartSummaryBar itemCount={items.length} totalAmount={getTotal()} />
+
+            <StoreFilterModal
+                visible={storeFilterVisible}
+                filters={storeFilters}
+                onApply={(f) => setStoreFilters(f)}
+                onClose={() => setStoreFilterVisible(false)}
+                showBrands={true}
+                availableBrands={availableBrands}
+                showRatings={false}
+                showDietary={false}
+                showPriceRange={true}
+                showSortOptions={['relevance', 'distance', 'prep_time', 'most_items']}
+            />
         </SafeAreaView>
     );
 }

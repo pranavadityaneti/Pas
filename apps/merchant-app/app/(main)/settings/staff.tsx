@@ -1,5 +1,4 @@
-// @lock — Do NOT overwrite. Approved layout as of March 22, 2026.
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,37 +18,61 @@ interface StaffMember {
     role: string;
     phone: string;
     initials: string;
-    branch?: string;
-    activities?: string[];
+    branchName: string;
+    storeId: string;
+    activities: string[];
 }
 
 export default function StaffScreen() {
-    const { activeRole } = useStore();
+    const { activeRole, merchantId } = useStore();
     const [modalVisible, setModalVisible] = useState(false);
     const [actionLoading, setActionLoading] = useState(false);
     const { mutateAsync: provisionManager } = useCreateManager();
 
-    // Realtime Data Hook
+    // Fetch all branches for this merchant so we can (a) filter store_staff to all of them
+    // and (b) resolve branch_name for each staff card.
+    const [branchMap, setBranchMap] = useState<Map<string, string>>(new Map());
+    const [branchIds, setBranchIds] = useState<string[]>([]);
+
+    useEffect(() => {
+        if (!merchantId) return;
+        (async () => {
+            const { data } = await supabase
+                .from('merchant_branches')
+                .select('id, branch_name')
+                .eq('merchant_id', merchantId);
+            if (data) {
+                const map = new Map<string, string>();
+                data.forEach((b: any) => map.set(b.id, b.branch_name));
+                setBranchMap(map);
+                setBranchIds(data.map((b: any) => b.id));
+            }
+        })();
+    }, [merchantId]);
+
+    // Realtime Data Hook — fetch all active staff (no store_id filter; client-side filter below)
     const { data: rawStaff, loading: tableLoading, setData } = useRealtimeTable({
         tableName: 'store_staff',
-        filter: activeRole?.id ? `store_id=eq.${activeRole.id},is_active=eq.true` : undefined,
+        filter: 'is_active=eq.true',
         orderBy: { column: 'created_at', ascending: false },
-        enabled: !!activeRole?.id
+        enabled: branchIds.length > 0
     });
 
     const staff = useMemo(() => {
+        const branchIdSet = new Set(branchIds);
         return rawStaff
-            .filter(item => item.is_active !== false) // Client-side safety for realtime
+            .filter(item => item.is_active !== false && branchIdSet.has(item.store_id))
             .map(item => ({
                 id: item.id,
                 name: item.name,
                 role: item.role,
                 phone: item.phone,
-                branch: item.branch,
+                storeId: item.store_id,
+                branchName: branchMap.get(item.store_id) || 'Unknown branch',
                 initials: item.name ? item.name.charAt(0).toUpperCase() : '?',
                 activities: Array.isArray(item.activities) ? item.activities : []
             })) as StaffMember[];
-    }, [rawStaff]);
+    }, [rawStaff, branchMap, branchIds]);
 
     const loading = tableLoading && staff.length === 0;
 
@@ -77,7 +100,7 @@ export default function StaffScreen() {
         setName(member.name);
         setRole(member.role);
         setPhone(member.phone);
-        setBranch(member.branch || MOCK_BRANCHES[0]);
+        setBranch(member.branchName || MOCK_BRANCHES[0]);
         setModalVisible(true);
     };
 
@@ -226,25 +249,43 @@ export default function StaffScreen() {
                         </View>
                     </View>
 
-                    {staff.map((member) => (
-                        <View key={member.id} style={styles.card}>
-                            <View style={styles.avatar}>
-                                <Text style={styles.avatarText}>{member.initials}</Text>
+                    {staff.map((member) => {
+                        const isOwner = member.role?.toLowerCase() === 'owner';
+                        const privileges = member.activities.length > 0
+                            ? member.activities
+                            : (isOwner ? ['Full access'] : ['Not set']);
+                        return (
+                            <View key={member.id} style={styles.card}>
+                                <View style={styles.avatar}>
+                                    <Text style={styles.avatarText}>{member.initials}</Text>
+                                </View>
+                                <View style={styles.info}>
+                                    <Text style={styles.name}>{member.name}</Text>
+                                    <Text style={styles.role}>{member.role}</Text>
+                                    <View style={styles.metaRow}>
+                                        <Ionicons name="storefront-outline" size={12} color={Colors.textSecondary} />
+                                        <Text style={styles.metaText}>{member.branchName}</Text>
+                                    </View>
+                                    <View style={styles.metaRow}>
+                                        <Ionicons name="call-outline" size={12} color={Colors.textSecondary} />
+                                        <Text style={styles.metaText}>{member.phone}</Text>
+                                    </View>
+                                    <View style={styles.privilegesRow}>
+                                        {privileges.map((p, idx) => (
+                                            <View key={idx} style={[styles.privilegeChip, isOwner && member.activities.length === 0 && styles.privilegeChipOwner]}>
+                                                <Text style={[styles.privilegeText, isOwner && member.activities.length === 0 && styles.privilegeTextOwner]}>{p}</Text>
+                                            </View>
+                                        ))}
+                                    </View>
+                                </View>
+                                <View style={styles.actions}>
+                                    <TouchableOpacity style={styles.iconButton} onPress={() => openEditModal(member)}>
+                                        <Ionicons name="pencil" size={20} color={Colors.text} />
+                                    </TouchableOpacity>
+                                </View>
                             </View>
-                            <View style={styles.info}>
-                                <Text style={styles.name}>{member.name}</Text>
-                                <Text style={styles.role}>{member.role}</Text>
-                                <Text style={styles.phone}>{member.phone}</Text>
-                                {member.branch && <Text style={styles.branchRole}>{member.branch}</Text>}
-                            </View>
-                            <View style={styles.actions}>
-                                <TouchableOpacity style={styles.iconButton} onPress={() => openEditModal(member)}>
-                                    <Ionicons name="pencil" size={20} color={Colors.text} />
-                                </TouchableOpacity>
-                                {/* Note: Delete functionality should be added here later */}
-                            </View>
-                        </View>
-                    ))}
+                        );
+                    })}
 
                     <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
                         <Ionicons name="add" size={24} color={Colors.white} style={{ marginRight: 8 }} />
@@ -360,14 +401,21 @@ const styles = StyleSheet.create({
     badgeText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
     emptyText: { textAlign: 'center', color: Colors.textSecondary, marginTop: 20, fontSize: 14 },
 
-    card: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.white, padding: 20, borderRadius: 16, marginBottom: 16, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-    avatar: { width: 50, height: 50, borderRadius: 25, backgroundColor: Colors.border, justifyContent: 'center', alignItems: 'center' },
-    avatarText: { fontSize: 20, fontWeight: '600', color: Colors.textSecondary },
-    info: { flex: 1, marginLeft: 16 },
-    name: { fontSize: 18, fontWeight: 'bold', color: Colors.text },
-    role: { fontSize: 15, color: Colors.textSecondary, marginTop: 4 },
-    phone: { fontSize: 14, color: Colors.textSecondary, marginTop: 2 },
+    card: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: Colors.white, padding: 16, borderRadius: 16, marginBottom: 12, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
+    avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.border, justifyContent: 'center', alignItems: 'center', marginTop: 2 },
+    avatarText: { fontSize: 18, fontWeight: '600', color: Colors.textSecondary },
+    info: { flex: 1, marginLeft: 12 },
+    name: { fontSize: 16, fontWeight: 'bold', color: Colors.text },
+    role: { fontSize: 13, color: Colors.primary, marginTop: 2, fontWeight: '600' },
+    phone: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
     branchRole: { fontSize: 11, color: Colors.primary, marginTop: 2, fontWeight: '600' },
+    metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
+    metaText: { fontSize: 12, color: Colors.textSecondary },
+    privilegesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+    privilegeChip: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB' },
+    privilegeChipOwner: { backgroundColor: '#ECFDF5', borderColor: '#10B981' },
+    privilegeText: { fontSize: 10, fontWeight: '600', color: '#6B7280' },
+    privilegeTextOwner: { color: '#065F46' },
 
     actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     iconButton: { padding: 8 },

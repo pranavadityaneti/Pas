@@ -14,6 +14,10 @@ export interface Store {
     isDining?: boolean;
     isPremium?: boolean;
     requiresFssai?: boolean;
+    service_pickup?: boolean;
+    service_dinein?: boolean;
+    service_table_booking?: boolean;
+    slot_config?: any;
 }
 
 export interface Branch {
@@ -32,6 +36,12 @@ export interface ParentStoreContext {
     merchantName: string;
     role: 'owner' | 'manager';
     branches: { branchId: string; branchName: string }[];
+    // Admin-approval gate: true only when the merchant's Store is approved
+    // (merchant.status === 'active' / Store.active = true). Drafts and
+    // finalized-but-unapproved merchants are false → blocked from the main app.
+    // NOTE: this is the APPROVAL flag, distinct from the merchant's online/offline
+    // availability toggle (merchant_branches.is_active).
+    isApproved: boolean;
 }
 
 export const ROLE_PERMISSIONS = {
@@ -87,6 +97,15 @@ interface StoreContextType {
     activeContext: ParentStoreContext | null;
     permissions: RolePermissions;
     isSwitching: boolean;
+    // Defense-in-depth (Layer 3, May 20, 2026): true when this merchant has at least
+    // one real row in merchant_branches. False when the StoreContext is using the
+    // legacy phantom-branch fallback (activeStoreId = merchant_id, NOT a real FK target).
+    // Product-save flows MUST check this and refuse to write when false, otherwise
+    // the StoreProduct.branch_id FK violates fk_storeproduct_branch.
+    hasRealBranch: boolean;
+    // True only when the active merchant is admin-approved (Store.active=true).
+    // The main app is gated on this; not-approved merchants are routed to /(auth)/pending.
+    isApproved: boolean;
     switchBranch: (branchId: string) => void;
     switchContext: (context: ParentStoreContext) => Promise<void>;
     toggleStoreStatus: (newStatus: boolean) => Promise<{ success: boolean; error?: string }>;
@@ -99,10 +118,13 @@ const CACHE_KEY = 'cached_store_state';
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
     // Raw store data from fetchStore — NOT the derived store object consumers see
-    const [rawStoreData, setRawStoreData] = useState<{ id: string; image: string | null; operating_hours?: any; prep_time_minutes?: number; vertical?: any } | null>(null);
+    const [rawStoreData, setRawStoreData] = useState<{ id: string; image: string | null; vertical?: any } | null>(null);
+    // Per-branch data keyed by branch ID — operating_hours, prep_time, service modes, etc.
+    const [branchDataMap, setBranchDataMap] = useState<Record<string, any>>({});
     const [merchantId, setMerchantId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [branches, setBranches] = useState<Branch[]>([]);
+    const [hasRealBranch, setHasRealBranch] = useState<boolean>(false);
     const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
     const [availableContexts, setAvailableContexts] = useState<ParentStoreContext[]>([]);
     const [activeContext, setActiveContext] = useState<ParentStoreContext | null>(null);
@@ -115,19 +137,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const store = useMemo<Store | null>(() => {
         if (!activeContext || !activeStoreId || !rawStoreData) return null;
         const activeBranch = branches.find(b => b.id === activeStoreId);
+        const bd = branchDataMap[activeStoreId] || {};
         return {
             id: activeContext.merchantId,
             name: activeBranch?.name ?? activeContext.merchantName,
             address: activeBranch?.address ?? null,
             image: rawStoreData.image,
             active: activeBranch?.isActive ?? true,
-            operating_hours: rawStoreData.operating_hours,
-            prep_time_minutes: rawStoreData.prep_time_minutes,
+            operating_hours: bd.operating_hours ?? null,
+            prep_time_minutes: bd.prep_time_minutes ?? 15,
+            service_pickup: bd.service_pickup ?? true,
+            service_dinein: bd.service_dinein ?? true,
+            service_table_booking: bd.service_table_booking ?? false,
+            slot_config: bd.slot_config ?? [],
             isDining: rawStoreData.vertical?.isDining ?? false,
             isPremium: rawStoreData.vertical?.isPremium ?? false,
             requiresFssai: rawStoreData.vertical?.requiresFssai ?? false,
         };
-    }, [activeContext, activeStoreId, branches, rawStoreData]);
+    }, [activeContext, activeStoreId, branches, rawStoreData, branchDataMap]);
 
     const fetchStore = useCallback(async () => {
         try {
@@ -158,7 +185,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                         merchantId: o.id,
                         merchantName: o.store_name || 'Main Store',
                         role: 'owner',
-                        branches: [{ branchId: o.id, branchName: o.store_name || 'Main Store' }]
+                        branches: [{ branchId: o.id, branchName: o.store_name || 'Main Store' }],
+                        // Approval gate: only 'active' merchants are admin-approved.
+                        isApproved: (o as any).status === 'active',
                     });
                 });
             }
@@ -175,7 +204,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                         merchantId,
                         merchantName: '',
                         role: role as 'owner' | 'manager',
-                        branches: [{ branchId, branchName }]
+                        branches: [{ branchId, branchName }],
+                        // Managers/staff are provisioned only for already-operational stores,
+                        // so they pass the approval gate. (Drafts have no staff.)
+                        isApproved: true,
                     });
                 }
             };
@@ -213,16 +245,27 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                                  merchantId: m.id,
                                  merchantName: m.store_name || 'Main Store',
                                  role: role as 'owner' | 'manager',
-                                 branches: [{ branchId: m.id, branchName: m.store_name || 'Main Store' }]
+                                 branches: [{ branchId: m.id, branchName: m.store_name || 'Main Store' }],
+                                 // Discovered via store_staff → an operational store (drafts have no staff).
+                                 isApproved: true,
                              });
                         }
                     });
                 }
             }
 
-            if (ownerData && ownerData.length > 0) {
-                 const ownerIds = ownerData.map(o => o.id);
-                 const { data: ownedBranches } = await supabase.from('merchant_branches').select('id, branch_name, merchant_id').in('merchant_id', ownerIds);
+            // Fetch ALL branches for every merchant where the user is an owner
+            // This includes merchants discovered via phone match AND via staffRoles
+            const ownerMerchantIds = Array.from(contextMap.entries())
+                .filter(([_, ctx]) => ctx.role === 'owner')
+                .map(([id]) => id);
+            if (ownerData) {
+                ownerData.forEach(o => {
+                    if (!ownerMerchantIds.includes(o.id)) ownerMerchantIds.push(o.id);
+                });
+            }
+            if (ownerMerchantIds.length > 0) {
+                 const { data: ownedBranches } = await supabase.from('merchant_branches').select('id, branch_name, merchant_id').in('merchant_id', ownerMerchantIds);
                  if (ownedBranches) {
                      ownedBranches.forEach(b => {
                           const ctx = contextMap.get(b.merchant_id);
@@ -280,19 +323,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 verticalData = v;
             }
 
-            const defaultBranch = finalContext.branches.find(b => b.branchId === finalContext.merchantId) ?? finalContext.branches[0];
-            let finalBranchId = defaultBranch?.branchId || finalContext.merchantId;
-
-            if (savedBranchIdRaw && finalContext.branches.find(b => b.branchId === savedBranchIdRaw)) {
-                finalBranchId = savedBranchIdRaw;
-            }
-            console.log('[fetchStore] Final branch ID:', finalBranchId);
-
             const { data: bData, error: bError } = await supabase.from('merchant_branches').select('*').eq('merchant_id', finalContext.merchantId);
             const allBranches: Branch[] = [];
-            
+            // Set of real branch IDs from merchant_branches table
+            const realBranchIds = new Set<string>();
+
             if (bData && bData.length > 0) {
                  bData.forEach(b => {
+                     realBranchIds.add(b.id);
                      if (finalContext.role === 'owner' || finalContext.branches.find(cb => cb.branchId === b.id)) {
                          allBranches.push({ id: b.id, name: b.branch_name, type: 'main', isActive: b.is_active ?? true, address: b.address, city: b.city });
                      }
@@ -301,24 +339,58 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                  allBranches.push({ id: finalContext.merchantId, name: finalContext.merchantName, type: 'main', isActive: pData.status === 'active' || pData.status === true || pData.status == null, address: pData.address, city: null });
             }
 
+            // Clean up phantom branches: remove context branches that don't exist
+            // in merchant_branches (e.g., merchantId added as branchId during discovery).
+            // This prevents activeStoreId from pointing to a non-existent branch row.
+            if (realBranchIds.size > 0) {
+                finalContext.branches = finalContext.branches.filter(
+                    b => realBranchIds.has(b.branchId)
+                );
+                // Ensure at least one branch remains (use first real branch)
+                if (finalContext.branches.length === 0 && allBranches.length > 0) {
+                    finalContext.branches.push({ branchId: allBranches[0].id, branchName: allBranches[0].name });
+                }
+            }
+
+            // Resolve active branch: prefer saved branch, then first real branch
+            let finalBranchId = allBranches[0]?.id || finalContext.merchantId;
+
+            if (savedBranchIdRaw && allBranches.find(b => b.id === savedBranchIdRaw)) {
+                finalBranchId = savedBranchIdRaw;
+            }
+
             const activeBranchObj = allBranches.find(b => b.id === finalBranchId) || allBranches[0];
             finalBranchId = activeBranchObj.id;
+            console.log('[fetchStore] Final branch ID:', finalBranchId, '(real branch:', realBranchIds.has(finalBranchId), ')');
 
-            // Store raw data — the reactive useMemo derives the consumer-facing `store` object
-            // Read operating_hours and prep_time_minutes from the ACTIVE BRANCH, not the parent merchant.
-            // The merchants table doesn't reliably have these columns; merchant_branches is the source of truth.
-            const activeBranchData = bData?.find(b => b.id === finalBranchId);
+            // Build per-branch data map from ALL fetched branches
+            const newBranchDataMap: Record<string, any> = {};
+            if (bData) {
+                bData.forEach(b => {
+                    newBranchDataMap[b.id] = {
+                        operating_hours: b.operating_hours || null,
+                        prep_time_minutes: b.prep_time_minutes ?? 15,
+                        service_pickup: b.service_pickup ?? true,
+                        service_dinein: b.service_dinein ?? true,
+                        service_table_booking: b.service_table_booking ?? false,
+                        slot_config: b.slot_config ?? [],
+                    };
+                });
+            }
+
             const rawData = {
                 id: pData.id,
                 image: pData.logo_url || null,
-                operating_hours: activeBranchData?.operating_hours || pData.operating_hours || null,
-                prep_time_minutes: activeBranchData?.prep_time_minutes ?? pData.prep_time_minutes ?? undefined,
                 vertical: verticalData
             };
 
             setMerchantId(finalContext.merchantId);
             setRawStoreData(rawData);
+            setBranchDataMap(newBranchDataMap);
             setBranches(allBranches);
+            // Layer 3 defense: only flip true when at least one REAL merchant_branches row exists.
+            // The phantom-branch fallback (id = merchant_id) does NOT count.
+            setHasRealBranch(realBranchIds.size > 0);
             setActiveStoreId(finalBranchId);
             setAvailableContexts(discoveredContexts);
             setActiveContext(finalContext);
@@ -353,30 +425,109 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         fetchStore();
     }, [fetchStore]);
 
+    // Keep branch state in sync with DB across three channels:
+    //  1. App foreground refetch — catches DB changes that happened while backgrounded
+    //  2. Realtime UPDATE on merchant_branches — picks up changes from other devices,
+    //     admin tools, or any external mutation
+    //  3. 60s polling fallback — Android aggressively kills WebSockets in background,
+    //     so realtime alone is unreliable (same pattern as useOrderRequests fix)
+    useEffect(() => {
+        if (!merchantId) return;
+
+        // 1. AppState foreground refetch
+        const appStateSub = AppState.addEventListener('change', (state: AppStateStatus) => {
+            if (state === 'active') {
+                fetchStore();
+            }
+        });
+
+        // 2. Realtime UPDATE on merchant_branches
+        const channel = supabase
+            .channel(`merchant_branches_${merchantId}_${Date.now()}`)
+            .on(
+                'postgres_changes' as any,
+                {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'merchant_branches',
+                    filter: `merchant_id=eq.${merchantId}`,
+                },
+                () => {
+                    fetchStore();
+                }
+            )
+            .subscribe();
+
+        // 3. 60s polling fallback
+        heartbeatInterval.current = setInterval(() => {
+            fetchStore();
+        }, 60000);
+
+        return () => {
+            appStateSub.remove();
+            supabase.removeChannel(channel);
+            if (heartbeatInterval.current) {
+                clearInterval(heartbeatInterval.current);
+                heartbeatInterval.current = null;
+            }
+        };
+    }, [merchantId, fetchStore]);
+
     const value: StoreContextType = {
         store, merchantId, loading, branches,
         activeStoreId, activeBranchId: activeStoreId,
         availableContexts, activeContext, permissions,
-        isSwitching,
+        isSwitching, hasRealBranch,
+        isApproved: activeContext?.isApproved ?? false,
         switchBranch: (id) => {
             setActiveStoreId(id);
             AsyncStorage.setItem('active_branch_id', id).catch(console.error);
         },
         switchContext,
-        toggleStoreStatus: async () => ({ success: true }),
+        toggleStoreStatus: async (newStatus: boolean) => {
+            if (!activeStoreId) return { success: false, error: 'No active branch' };
+            try {
+                const { error, data } = await supabase
+                    .from('merchant_branches')
+                    .update({ is_active: newStatus })
+                    .eq('id', activeStoreId)
+                    .select('id');
+                if (error) throw new Error(error.message);
+                if (!data || data.length === 0) {
+                    console.error('[toggleStoreStatus] 0 rows updated — activeStoreId may not exist in merchant_branches:', activeStoreId);
+                    return { success: false, error: 'Branch not found. Please restart the app.' };
+                }
+                // Update local branches state
+                setBranches(prev => prev.map(b => b.id === activeStoreId ? { ...b, isActive: newStatus } : b));
+                return { success: true };
+            } catch (err: any) {
+                return { success: false, error: err.message };
+            }
+        },
         refreshStore: async () => fetchStore(),
         updateStoreDetails: async (updates) => {
             if (!activeStoreId) return { success: false, error: 'No active branch' };
             try {
                 // Write ONLY to merchant_branches — this is the source of truth for
                 // operating_hours and prep_time_minutes.
-                const { error: bError } = await supabase
+                const { error: bError, data: updatedRows } = await supabase
                     .from('merchant_branches')
                     .update(updates)
-                    .eq('id', activeStoreId);
-                
+                    .eq('id', activeStoreId)
+                    .select('id');
+
                 if (bError) throw new Error(bError.message);
-                
+                if (!updatedRows || updatedRows.length === 0) {
+                    console.error('[updateStoreDetails] 0 rows updated — activeStoreId may not exist in merchant_branches:', activeStoreId);
+                    return { success: false, error: 'Branch not found. Changes were not saved. Please restart the app.' };
+                }
+
+                // Optimistically update the branchDataMap so the UI reflects changes immediately
+                setBranchDataMap(prev => ({
+                    ...prev,
+                    [activeStoreId]: { ...prev[activeStoreId], ...updates }
+                }));
+
                 await fetchStore();
                 return { success: true };
             } catch (err: any) {

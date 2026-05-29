@@ -9,7 +9,7 @@ import { Colors } from '../../../constants/Colors';
 import { useUser } from '../../../src/context/UserContext';
 
 export default function ProfileScreen() {
-    const { user: contextUser, loading: userLoading } = useUser();
+    const { user: contextUser, loading: userLoading, refreshUser } = useUser();
     const [modalVisible, setModalVisible] = useState(false);
     const [saving, setSaving] = useState(false);
 
@@ -32,6 +32,7 @@ export default function ProfileScreen() {
                 })
                 .eq('id', contextUser.id);
             if (error) throw error;
+            await refreshUser();
             setModalVisible(false);
             Alert.alert('Success', 'Profile updated successfully');
         } catch (error) {

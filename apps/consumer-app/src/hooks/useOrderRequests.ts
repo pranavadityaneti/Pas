@@ -1,4 +1,9 @@
+// @lock
+// VERIFIED WORKING in production (Android pickup order, May 25 2026). Polling
+// fallback + AppState reconnect for Supabase Realtime. Do NOT edit without
+// explicit user approval — order acceptance UX hangs on this hook.
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { AppState } from 'react-native';
 import { supabase } from '../lib/supabase';
 
 export type OrderRequestStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED';
@@ -43,6 +48,8 @@ export function useOrderRequests(): UseOrderRequestsReturn {
     const [requests, setRequests] = useState<OrderRequest[]>([]);
     const [loading, setLoading] = useState(false);
     const channelRef = useRef<any>(null);
+    const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const pendingIdsRef = useRef<string[]>([]);
     const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
     // Derived state
@@ -63,21 +70,20 @@ export function useOrderRequests(): UseOrderRequestsReturn {
         setLoading(true);
 
         try {
-            // First check session — if expired or expiring soon, refresh proactively
-            let { data: { session } } = await supabase.auth.getSession();
-            
-            // Check if token is expired or expiring within 60 seconds
-            const tokenExpired = session?.expires_at 
-                ? (session.expires_at * 1000) - Date.now() < 60_000 
-                : true;
-            
-            if (!session || tokenExpired) {
-                console.warn('[useOrderRequests] Session missing or expiring — attempting refresh');
-                const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-                if (refreshError || !refreshData.session) {
-                    throw new Error('Your session has expired. Please log in again.');
+            // Always refresh the session before calling protected endpoints — safer than
+            // relying on local expires_at math (which can drift if device clock is off
+            // or the session was loaded from stale storage).
+            console.log('[useOrderRequests] Forcing session refresh before request');
+            const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+            let session: any = refreshData?.session;
+            if (refreshError || !session) {
+                // Fall back to existing session
+                const { data: { session: existingSession } } = await supabase.auth.getSession();
+                session = existingSession;
+                if (!session) {
+                    throw new Error('Your session has expired. Please sign out and sign in again.');
                 }
-                session = refreshData.session;
+                console.warn('[useOrderRequests] refreshSession failed, using existing session', refreshError);
             }
             
             const user = session.user;
@@ -129,8 +135,12 @@ export function useOrderRequests(): UseOrderRequestsReturn {
             });
 
             if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(`API error: ${errText}`);
+                let errBody: any = {};
+                try { errBody = await response.json(); } catch { errBody = { error: await response.text() }; }
+                if (errBody.error === 'STORE_OFFLINE') {
+                    throw new Error(errBody.message || 'This store is currently offline and not accepting orders.');
+                }
+                throw new Error(errBody.message || errBody.error || 'Failed to submit order request');
             }
 
             const data = await response.json();
@@ -163,45 +173,124 @@ export function useOrderRequests(): UseOrderRequestsReturn {
         }
     }, []);
 
-    // Subscribe to realtime changes
+    // Apply a realtime update to local state (shared by WebSocket and poll)
+    const applyUpdate = useCallback((updated: OrderRequest) => {
+        setRequests(prev => prev.map(r =>
+            r.id === updated.id ? { ...r, ...updated } : r
+        ));
+
+        // Clear the expiry timer if already resolved
+        if (updated.status !== 'PENDING') {
+            const timer = timersRef.current.get(updated.id);
+            if (timer) {
+                clearTimeout(timer);
+                timersRef.current.delete(updated.id);
+            }
+        }
+    }, []);
+
+    // Poll order_requests status as a safety net (Android kills WebSockets aggressively)
+    const startPolling = useCallback((requestIds: string[]) => {
+        if (pollRef.current) clearInterval(pollRef.current);
+        pendingIdsRef.current = requestIds;
+
+        pollRef.current = setInterval(async () => {
+            const ids = pendingIdsRef.current;
+            if (ids.length === 0) {
+                if (pollRef.current) clearInterval(pollRef.current);
+                return;
+            }
+
+            try {
+                const { data, error } = await supabase
+                    .from('order_requests')
+                    .select('*')
+                    .in('id', ids)
+                    .neq('status', 'PENDING');
+
+                if (error) {
+                    console.warn('[useOrderRequests] Poll error:', error.message);
+                    return;
+                }
+
+                if (data && data.length > 0) {
+                    console.log('[useOrderRequests] Poll caught update:', data.map(d => `${d.store_name}=${d.status}`).join(', '));
+                    data.forEach(updated => {
+                        applyUpdate(updated as OrderRequest);
+                        // Remove from pending list so we stop polling for it
+                        pendingIdsRef.current = pendingIdsRef.current.filter(id => id !== updated.id);
+                    });
+
+                    // Stop polling if nothing left
+                    if (pendingIdsRef.current.length === 0 && pollRef.current) {
+                        clearInterval(pollRef.current);
+                    }
+                }
+            } catch (e) {
+                console.warn('[useOrderRequests] Poll exception:', e);
+            }
+        }, 5000); // Every 5 seconds
+    }, [applyUpdate]);
+
+    // Subscribe to realtime changes + start polling fallback
     const subscribeToUpdates = useCallback((requestIds: string[], userId: string) => {
         // Clean up previous subscription
         if (channelRef.current) {
             supabase.removeChannel(channelRef.current);
         }
 
-        const channel = supabase
-            .channel(`order_requests_${userId}_${Date.now()}`)
-            .on(
-                'postgres_changes' as any,
-                {
-                    event: 'UPDATE',
-                    schema: 'public',
-                    table: 'order_requests',
-                    filter: `consumer_user_id=eq.${userId}`
-                },
-                (payload: any) => {
-                    const updated = payload.new as OrderRequest;
-                    console.log('[useOrderRequests] Realtime update:', updated.store_name, updated.status);
+        const setupChannel = () => {
+            const channel = supabase
+                .channel(`order_requests_${userId}_${Date.now()}`)
+                .on(
+                    'postgres_changes' as any,
+                    {
+                        event: 'UPDATE',
+                        schema: 'public',
+                        table: 'order_requests',
+                        filter: `consumer_user_id=eq.${userId}`
+                    },
+                    (payload: any) => {
+                        const updated = payload.new as OrderRequest;
+                        console.log('[useOrderRequests] Realtime update:', updated.store_name, updated.status);
+                        applyUpdate(updated);
 
-                    setRequests(prev => prev.map(r =>
-                        r.id === updated.id ? { ...r, ...updated } : r
-                    ));
-
-                    // Clear the expiry timer if already resolved
-                    if (updated.status !== 'PENDING') {
-                        const timer = timersRef.current.get(updated.id);
-                        if (timer) {
-                            clearTimeout(timer);
-                            timersRef.current.delete(updated.id);
-                        }
+                        // Remove from polling pending list (poll is now redundant for this id)
+                        pendingIdsRef.current = pendingIdsRef.current.filter(id => id !== updated.id);
                     }
-                }
-            )
-            .subscribe();
+                )
+                .subscribe((status: string) => {
+                    console.log('[useOrderRequests] Channel status:', status);
+                });
 
-        channelRef.current = channel;
-    }, []);
+            channelRef.current = channel;
+        };
+
+        setupChannel();
+
+        // Start polling fallback (catches updates if Android kills the WebSocket)
+        startPolling(requestIds);
+
+        // Re-subscribe when app returns to foreground (Android reconnect)
+        const appStateListener = AppState.addEventListener('change', (state) => {
+            if (state === 'active') {
+                console.log('[useOrderRequests] App foregrounded — re-subscribing + polling');
+                if (channelRef.current) {
+                    supabase.removeChannel(channelRef.current);
+                }
+                setupChannel();
+                // Restart polling with remaining pending IDs
+                if (pendingIdsRef.current.length > 0) {
+                    startPolling(pendingIdsRef.current);
+                }
+            }
+        });
+
+        // Store listener ref for cleanup (attach to channel for convenience)
+        if (channelRef.current) {
+            (channelRef.current as any).__appStateListener = appStateListener;
+        }
+    }, [applyUpdate, startPolling]);
 
     // Expire a request (auto-called after 2 minutes)
     const expireRequest = useCallback(async (requestId: string) => {
@@ -237,10 +326,19 @@ export function useOrderRequests(): UseOrderRequestsReturn {
 
     // Cleanup
     const cleanup = useCallback(() => {
+        // Remove AppState listener if attached
+        if (channelRef.current && (channelRef.current as any).__appStateListener) {
+            (channelRef.current as any).__appStateListener.remove();
+        }
         if (channelRef.current) {
             supabase.removeChannel(channelRef.current);
             channelRef.current = null;
         }
+        if (pollRef.current) {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+        }
+        pendingIdsRef.current = [];
         timersRef.current.forEach(timer => clearTimeout(timer));
         timersRef.current.clear();
         setRequests([]);

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
@@ -9,13 +9,90 @@ import { useEarnings } from '../../src/hooks/useEarnings';
 import { useOrders } from '../../src/hooks/useOrders';
 import { useRouter } from 'expo-router';
 import { useNotificationContext } from '../../src/context/NotificationContext';
+import { ActivityIndicator } from 'react-native';
 
 export default function DashboardScreen() {
     const router = useRouter();
     const { unreadCount } = useNotificationContext();
-    const { store, toggleStoreStatus } = useStore();
+    const { store, loading: storeLoading, toggleStoreStatus } = useStore();
     const { stats, loading: earningsLoading } = useEarnings();
     const { orders, loading: ordersLoading } = useOrders();
+
+    // ── All hooks MUST be above the early return (React Rules of Hooks) ──
+    const [isLunchBreak, setIsLunchBreak] = React.useState(false);
+    const [isClosedToday, setIsClosedToday] = React.useState(false);
+    const [isOutsideHours, setIsOutsideHours] = React.useState(false);
+
+    // Evaluate schedule status from current store data + current time
+    const checkStatus = React.useCallback(() => {
+        if (!store?.operating_hours) {
+            setIsClosedToday(false);
+            setIsLunchBreak(false);
+            setIsOutsideHours(false);
+            return;
+        }
+        const oh = store.operating_hours;
+
+        const now = new Date();
+        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+        const parseTime = (timeStr: string) => {
+            const [h, m] = timeStr.split(':').map(Number);
+            return h * 60 + m;
+        };
+
+        // 1. Check if closed today
+        // JS getDay(): 0=Sun, 1=Mon, ..., 6=Sat
+        // Store days: 0=Mon, 1=Tue, ..., 6=Sun
+        const todayJS = now.getDay();
+        const todayIndex = (todayJS + 6) % 7;
+
+        setIsClosedToday(oh.days ? !oh.days.includes(todayIndex) : false);
+
+        // 2. Check if current time is outside open/close window
+        if (oh.open && oh.close) {
+            const openMinutes = parseTime(oh.open);
+            const closeMinutes = parseTime(oh.close);
+            const prepTime = store?.prep_time_minutes || 15;
+            setIsOutsideHours(currentMinutes < openMinutes || currentMinutes > (closeMinutes - prepTime));
+        } else {
+            setIsOutsideHours(false);
+        }
+
+        // 3. Check for lunch break status
+        if (oh.hasLunchBreak && oh.lunchStart && oh.lunchEnd) {
+            const lunchStartMinutes = parseTime(oh.lunchStart);
+            const lunchEndMinutes = parseTime(oh.lunchEnd);
+            setIsLunchBreak(currentMinutes >= lunchStartMinutes && currentMinutes < lunchEndMinutes);
+        } else {
+            setIsLunchBreak(false);
+        }
+    }, [store?.operating_hours, store?.prep_time_minutes]);
+
+    // Re-evaluate every 30 seconds so time-based transitions are near-instant
+    React.useEffect(() => {
+        checkStatus();
+        const interval = setInterval(checkStatus, 30000);
+        return () => clearInterval(interval);
+    }, [checkStatus]);
+
+    // No useFocusEffect needed: updateStoreDetails already calls fetchStore()
+    // before returning, so store data is fresh when navigating back from Timings.
+    // The useEffect above re-evaluates immediately when store.operating_hours changes.
+    // The 30s timer handles ongoing time-based transitions (open/close boundary).
+
+    // ── Guard: don't render dashboard until store data is loaded ──
+    // Without this, store is null during fetch → !store?.active → offline banner flash.
+    if (storeLoading || !store) {
+        return (
+            <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                    <ActivityIndicator size="large" color={Colors.primary} />
+                    <Text style={{ marginTop: 12, color: '#6B7280', fontSize: 14 }}>Loading store...</Text>
+                </View>
+            </SafeAreaView>
+        );
+    }
 
     const getGreeting = () => {
         const hour = new Date().getHours();
@@ -37,59 +114,20 @@ export default function DashboardScreen() {
         { label: "Revenue", value: formatCurrency(stats.today), icon: 'wallet', color: '#8B5CF6' },
     ];
 
-    const [isLunchBreak, setIsLunchBreak] = React.useState(false);
-    const [isClosedToday, setIsClosedToday] = React.useState(false);
-
-    // Check for lunch break and schedule status
-    React.useEffect(() => {
-        const checkStatus = () => {
-            if (!store?.operating_hours) return;
-            const oh = store.operating_hours;
-
-            // 1. Check if closed today
-            // JS getDay(): 0=Sun, 1=Mon, ..., 6=Sat
-            // Store days: 0=Mon, 1=Tue, ..., 6=Sun
-            const todayJS = new Date().getDay();
-            const todayIndex = (todayJS + 6) % 7;
-            
-            if (oh.days && !oh.days.includes(todayIndex)) {
-                setIsClosedToday(true);
-            } else {
-                setIsClosedToday(false);
-            }
-
-            // 2. Check for lunch break status
-            if (!oh.hasLunchBreak || !oh.lunchStart || !oh.lunchEnd) {
-                setIsLunchBreak(false);
-                return;
-            }
-
-            const now = new Date();
-            const currentMinutes = now.getHours() * 60 + now.getMinutes();
-
-            const [startH, startM] = oh.lunchStart.split(':').map(Number);
-            const startMinutes = startH * 60 + startM;
-
-            const [endH, endM] = oh.lunchEnd.split(':').map(Number);
-            const endMinutes = endH * 60 + endM;
-
-            if (currentMinutes >= startMinutes && currentMinutes < endMinutes) {
-                setIsLunchBreak(true);
-            } else {
-                setIsLunchBreak(false);
-            }
-        };
-
-        checkStatus();
-        const interval = setInterval(checkStatus, 60000); // Check every minute
-        return () => clearInterval(interval);
-    }, [store?.operating_hours]);
-
     const handleToggleStatus = () => {
         if (isClosedToday) {
             Alert.alert(
                 'Store Closed Today',
                 'Your store is scheduled as closed today. To go online, please enable this day in the Store Timings settings.'
+            );
+            return;
+        }
+
+        if (isOutsideHours) {
+            const oh = store?.operating_hours;
+            Alert.alert(
+                'Outside Operating Hours',
+                `Your store is scheduled to open at ${oh?.open || '—'} and close at ${oh?.close || '—'}. You can go online when operating hours begin.`
             );
             return;
         }
@@ -105,37 +143,38 @@ export default function DashboardScreen() {
             ? 'Your store will start accepting new orders.'
             : 'Your store will stop accepting new orders. Existing orders can still be processed.';
 
-        Alert.alert(
-            title,
-            message,
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Confirm',
-                    onPress: async () => {
-                        const result = await toggleStoreStatus(newStatus);
-                        if (!result.success) {
-                            Alert.alert('Error', result.error || 'Failed to update store status. Please try again.');
-                        }
+        Alert.alert(title, message, [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Confirm',
+                onPress: async () => {
+                    const result = await toggleStoreStatus(newStatus);
+                    if (!result.success) {
+                        Alert.alert('Error', result.error || 'Failed to update store status.');
                     }
                 }
-            ]
-        );
+            }
+        ]);
     };
 
-    const isOffline = !store?.active || isLunchBreak || isClosedToday;
+    // Schedule-based reasons (closed day, outside hours, lunch break) use amber banner.
+    // Manual offline (is_active toggle) uses red banner.
+    const isScheduleOffline = isClosedToday || isOutsideHours || isLunchBreak;
+    const isOffline = !store?.active || isScheduleOffline;
 
     return (
         <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
             {isOffline && (
-                <View style={[styles.offlineBanner, (isLunchBreak || isClosedToday) && { backgroundColor: '#F59E0B' }]}>
-                    <Ionicons name={isLunchBreak ? "restaurant" : (isClosedToday ? "calendar" : "close-circle")} size={20} color="#FFF" />
+                <View style={[styles.offlineBanner, isScheduleOffline && { backgroundColor: '#F59E0B' }]}>
+                    <Ionicons name={isClosedToday ? "calendar" : isOutsideHours ? "time" : isLunchBreak ? "restaurant" : "close-circle"} size={20} color="#FFF" />
                     <Text style={styles.offlineText}>
                         {isClosedToday
                             ? "Store Closed - Today is a non-working day"
-                            : (isLunchBreak
-                                ? "Lunch Break - Store is temporarily offline"
-                                : "Store Offline - Not accepting new orders")}
+                            : isOutsideHours
+                                ? `Outside Hours - Opens at ${store?.operating_hours?.open || '—'}`
+                                : isLunchBreak
+                                    ? "Lunch Break - Store is temporarily offline"
+                                    : "Store Offline - Not accepting new orders"}
                     </Text>
                 </View>
             )}
@@ -143,45 +182,36 @@ export default function DashboardScreen() {
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <View style={[styles.contentWrapper, isOffline && styles.greyscale]}>
                     <View style={styles.header}>
-                        <View>
+                        <View style={{ flex: 1 }}>
                             <Text style={styles.greeting}>{getGreeting()}</Text>
-                            <View style={styles.storeHeader}>
-                                <Text style={styles.storeName}>{store?.name || 'Loading...'}</Text>
-                                <TouchableOpacity
-                                    style={[
-                                        styles.statusBadgeButton,
-                                        !store?.active && styles.statusBadgeOffline,
-                                        isLunchBreak && { backgroundColor: '#FEF3C7' }
-                                    ]}
-                                    onPress={handleToggleStatus}
-                                >
-                                    <View style={[
-                                        styles.statusDot,
-                                        !store?.active && styles.statusDotOffline,
-                                        isLunchBreak && { backgroundColor: '#F59E0B' }
-                                    ]} />
-                                    <Text style={[
-                                        styles.statusLabel,
-                                        !store?.active && styles.statusLabelOffline,
-                                        (isLunchBreak || isClosedToday) && { color: '#B45309' }
-                                    ]}>
-                                        {isClosedToday ? 'Closed Today' : (isLunchBreak ? 'Lunch Break' : (store?.active ? 'Online' : 'Offline'))}
-                                    </Text>
-                                    <Ionicons name="chevron-down" size={14} color={store?.active && !isClosedToday && !isLunchBreak ? '#10B981' : '#6B7280'} />
-                                </TouchableOpacity>
-                            </View>
+                            <Text style={styles.storeName}>{store?.name || 'Loading...'}</Text>
                         </View>
-                        <TouchableOpacity
-                            style={styles.notificationButton}
-                            onPress={() => router.push('/(main)/notifications')}
-                        >
-                            <Ionicons name="notifications-outline" size={24} color="#374151" />
-                            {unreadCount > 0 && (
-                                <View style={styles.notificationBadge}>
-                                    <Text style={styles.notificationBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
-                                </View>
-                            )}
-                        </TouchableOpacity>
+                        <View style={styles.headerRight}>
+                            <View style={styles.switchWrapper}>
+                                <Switch
+                                    value={store?.active && !isScheduleOffline}
+                                    onValueChange={handleToggleStatus}
+                                    trackColor={{ false: '#D1D5DB', true: '#10B981' }}
+                                    thumbColor="#fff"
+                                    disabled={isScheduleOffline}
+                                    style={{ transform: [{ scaleX: 0.85 }, { scaleY: 0.85 }] }}
+                                />
+                                <Text style={[styles.switchLabel, !(store?.active && !isScheduleOffline) && styles.switchLabelOff]}>
+                                    {isClosedToday ? 'Closed' : isOutsideHours ? 'Closed' : isLunchBreak ? 'Break' : store?.active ? 'Online' : 'Offline'}
+                                </Text>
+                            </View>
+                            <TouchableOpacity
+                                style={styles.notificationButton}
+                                onPress={() => router.push('/(main)/notifications')}
+                            >
+                                <Ionicons name="notifications-outline" size={24} color="#374151" />
+                                {unreadCount > 0 && (
+                                    <View style={styles.notificationBadge}>
+                                        <Text style={styles.notificationBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                                    </View>
+                                )}
+                            </TouchableOpacity>
+                        </View>
                     </View>
 
                     <View style={styles.statsGrid}>
@@ -261,37 +291,11 @@ const styles = StyleSheet.create({
     scrollContent: { padding: 16, paddingBottom: 0 },
     header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
     greeting: { fontSize: 14, color: '#6B7280' },
-    storeHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
-    storeName: { fontSize: 22, fontWeight: '700', color: '#111827' },
-    statusBadgeButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#D1FAE5',
-        paddingHorizontal: 10,
-        paddingVertical: 5,
-        borderRadius: 20,
-        gap: 4
-    },
-    statusBadgeOffline: {
-        backgroundColor: '#F3F4F6'
-    },
-    statusDot: {
-        width: 6,
-        height: 6,
-        borderRadius: 3,
-        backgroundColor: '#10B981'
-    },
-    statusDotOffline: {
-        backgroundColor: '#6B7280'
-    },
-    statusLabel: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#10B981'
-    },
-    statusLabelOffline: {
-        color: '#6B7280'
-    },
+    storeName: { fontSize: 22, fontWeight: '700', color: '#111827', marginTop: 4 },
+    headerRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    switchWrapper: { alignItems: 'center' },
+    switchLabel: { fontSize: 10, fontWeight: '600', color: '#10B981', marginTop: -2 },
+    switchLabelOff: { color: '#6B7280' },
     notificationButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
     notificationBadge: { position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, borderRadius: 8, backgroundColor: '#EF4444', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 3 },
     notificationBadgeText: { color: '#fff', fontSize: 9, fontWeight: '700' },

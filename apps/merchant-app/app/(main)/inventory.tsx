@@ -1,4 +1,16 @@
-import React, { useState, useCallback } from 'react';
+// @lock — DO NOT EDIT THE FILTER WIRING (DINING OR PICKUP) WITHOUT EXPLICIT USER PERMISSION.
+// Pass 3 approved May 19, 2026.
+// Locked sections:
+//   - DEFAULT_FILTERS (must include menuSections / dietaryTags / spiceLevels)
+//   - `availableCategories` useMemo (derives category name strings via subcategory ?? CATEGORY_MAP[category_id] ?? 'Others')
+//   - The FilterModal invocation props (isDining, products, availableCategories) — all required for correct wiring
+//   - Dining filter application logic (subcategory / extra_data.dietaryTag / extra_data.spice_level matching)
+//   - The isDining-conditioned Availability branch (Active/Inactive vs stock-based)
+//   - The conditional quick-filter chips (Out of Stock / Low Stock hidden for dining, Inactive chip shown)
+//   - CATEGORY_MAP — used by both the availableCategories memo and the displayCategory match logic
+// Edits to OTHER parts of this screen (e.g. layout, empty states, add-product buttons) are fine.
+// Filter-related changes require user approval in chat.
+import React, { useState, useCallback, useMemo } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator, ScrollView } from 'react-native';
 import LottieView from 'lottie-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -31,6 +43,9 @@ const DEFAULT_FILTERS: FilterState = {
     onlyDiscounted: false,
     showInactive: false,
     isBestSeller: false,
+    menuSections: [],
+    dietaryTags: [],
+    spiceLevels: [],
 };
 
 export default function InventoryScreen() {
@@ -56,6 +71,18 @@ export default function InventoryScreen() {
     const [appliedFilters, setAppliedFilters] = useState<FilterState | null>(null);
     const [filterTab, setFilterTab] = useState('sort');
 
+    // Available category names derived from current inventory.
+    // Matches the displayCategory string used in the filter-match logic below.
+    const availableCategories = useMemo(() => {
+        const set = new Set<string>();
+        inventory.forEach(item => {
+            const sub = item.product?.subcategory;
+            const mapped = CATEGORY_MAP[item.product?.category_id || ''] || 'Others';
+            set.add(sub || mapped);
+        });
+        return Array.from(set).sort();
+    }, [inventory]);
+
     // Initial Loading State
     if (loading && !refreshing) {
         return (
@@ -77,18 +104,32 @@ export default function InventoryScreen() {
             
             if (appliedFilters.categories.length > 0 && !appliedFilters.categories.includes(displayCategory)) matchesFilter = false;
 
-            // Availability
-            if (appliedFilters.availability.includes('Low Stock') && item.stock >= 5) matchesFilter = false;
-            if (appliedFilters.availability.includes('Out of Stock') && item.stock > 0) matchesFilter = false;
-            if (appliedFilters.availability.includes('In Stock') && item.stock === 0) matchesFilter = false;
+            // Menu Section (dining)
+            if (appliedFilters.menuSections.length > 0 && !appliedFilters.menuSections.includes(item.product?.subcategory || '')) matchesFilter = false;
 
-            // Brand (if applicable)
+            // Dietary Tag (dining)
+            if (appliedFilters.dietaryTags.length > 0 && !appliedFilters.dietaryTags.includes((item.product as any)?.extra_data?.dietaryTag || '')) matchesFilter = false;
+
+            // Spice Level (dining)
+            if (appliedFilters.spiceLevels.length > 0 && !appliedFilters.spiceLevels.includes((item.product as any)?.extra_data?.spice_level || '')) matchesFilter = false;
+
+            // Availability — dining uses Active/Inactive, pickup uses stock-based
+            if (store?.isDining) {
+                if (appliedFilters.availability.includes('Active') && !item.active) matchesFilter = false;
+                if (appliedFilters.availability.includes('Inactive') && item.active) matchesFilter = false;
+            } else {
+                if (appliedFilters.availability.includes('Low Stock') && item.stock >= 5) matchesFilter = false;
+                if (appliedFilters.availability.includes('Out of Stock') && item.stock > 0) matchesFilter = false;
+                if (appliedFilters.availability.includes('In Stock') && item.stock === 0) matchesFilter = false;
+            }
+
+            // Brand (if applicable — pickup only)
             if (appliedFilters.brands.length > 0 && !appliedFilters.brands.includes(item.product.brand || '')) matchesFilter = false;
 
             // Price Range
             if (item.price < appliedFilters.priceRange[0] || item.price > appliedFilters.priceRange[1]) matchesFilter = false;
 
-            // Discount
+            // Discount (pickup only)
             if (appliedFilters.onlyDiscounted && item.price >= item.product.mrp) matchesFilter = false;
 
             // Inactive
@@ -264,39 +305,62 @@ export default function InventoryScreen() {
                         <Text style={[styles.chipText, appliedFilters?.sortBy !== 'price_low' && { color: '#fff' }]}>Sort</Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity
-                        style={[styles.chip, appliedFilters?.availability.includes('Out of Stock') && styles.activeChip]}
-                        onPress={() => {
-                            const current = appliedFilters?.availability || [];
-                            const next = current.includes('Out of Stock')
-                                ? current.filter(i => i !== 'Out of Stock')
-                                : [...current, 'Out of Stock'];
-                            setAppliedFilters(prev => ({
-                                ...(prev || DEFAULT_FILTERS),
-                                availability: next
-                            }));
-                        }}
-                    >
-                        <MaterialCommunityIcons name="package-variant-remove" size={16} color={appliedFilters?.availability.includes('Out of Stock') ? "#fff" : "#000"} />
-                        <Text style={[styles.chipText, appliedFilters?.availability.includes('Out of Stock') && { color: '#fff' }]}>Out of Stock</Text>
-                    </TouchableOpacity>
+                    {!store?.isDining && (
+                        <TouchableOpacity
+                            style={[styles.chip, appliedFilters?.availability.includes('Out of Stock') && styles.activeChip]}
+                            onPress={() => {
+                                const current = appliedFilters?.availability || [];
+                                const next = current.includes('Out of Stock')
+                                    ? current.filter(i => i !== 'Out of Stock')
+                                    : [...current, 'Out of Stock'];
+                                setAppliedFilters(prev => ({
+                                    ...(prev || DEFAULT_FILTERS),
+                                    availability: next
+                                }));
+                            }}
+                        >
+                            <MaterialCommunityIcons name="package-variant-remove" size={16} color={appliedFilters?.availability.includes('Out of Stock') ? "#fff" : "#000"} />
+                            <Text style={[styles.chipText, appliedFilters?.availability.includes('Out of Stock') && { color: '#fff' }]}>Out of Stock</Text>
+                        </TouchableOpacity>
+                    )}
 
-                    <TouchableOpacity
-                        style={[styles.chip, appliedFilters?.availability.includes('Low Stock') && styles.activeChip]}
-                        onPress={() => {
-                            const current = appliedFilters?.availability || [];
-                            const next = current.includes('Low Stock')
-                                ? current.filter(i => i !== 'Low Stock')
-                                : [...current, 'Low Stock'];
-                            setAppliedFilters(prev => ({
-                                ...(prev || DEFAULT_FILTERS),
-                                availability: next
-                            }));
-                        }}
-                    >
-                        <MaterialCommunityIcons name="alert-outline" size={16} color={appliedFilters?.availability.includes('Low Stock') ? "#fff" : "#000"} />
-                        <Text style={[styles.chipText, appliedFilters?.availability.includes('Low Stock') && { color: '#fff' }]}>Low Stock</Text>
-                    </TouchableOpacity>
+                    {!store?.isDining && (
+                        <TouchableOpacity
+                            style={[styles.chip, appliedFilters?.availability.includes('Low Stock') && styles.activeChip]}
+                            onPress={() => {
+                                const current = appliedFilters?.availability || [];
+                                const next = current.includes('Low Stock')
+                                    ? current.filter(i => i !== 'Low Stock')
+                                    : [...current, 'Low Stock'];
+                                setAppliedFilters(prev => ({
+                                    ...(prev || DEFAULT_FILTERS),
+                                    availability: next
+                                }));
+                            }}
+                        >
+                            <MaterialCommunityIcons name="alert-outline" size={16} color={appliedFilters?.availability.includes('Low Stock') ? "#fff" : "#000"} />
+                            <Text style={[styles.chipText, appliedFilters?.availability.includes('Low Stock') && { color: '#fff' }]}>Low Stock</Text>
+                        </TouchableOpacity>
+                    )}
+
+                    {store?.isDining && (
+                        <TouchableOpacity
+                            style={[styles.chip, appliedFilters?.availability.includes('Inactive') && styles.activeChip]}
+                            onPress={() => {
+                                const current = appliedFilters?.availability || [];
+                                const next = current.includes('Inactive')
+                                    ? current.filter(i => i !== 'Inactive')
+                                    : [...current, 'Inactive'];
+                                setAppliedFilters(prev => ({
+                                    ...(prev || DEFAULT_FILTERS),
+                                    availability: next
+                                }));
+                            }}
+                        >
+                            <MaterialCommunityIcons name="eye-off-outline" size={16} color={appliedFilters?.availability.includes('Inactive') ? "#fff" : "#000"} />
+                            <Text style={[styles.chipText, appliedFilters?.availability.includes('Inactive') && { color: '#fff' }]}>Inactive</Text>
+                        </TouchableOpacity>
+                    )}
 
                     <TouchableOpacity
                         style={[styles.chip, appliedFilters?.isBestSeller && styles.activeChip]}
@@ -377,6 +441,9 @@ export default function InventoryScreen() {
                 onApply={setAppliedFilters}
                 initialFilters={appliedFilters || undefined}
                 initialTab={filterTab}
+                isDining={store?.isDining}
+                products={inventory}
+                availableCategories={availableCategories}
             />
 
             {branchId && store?.isDining && (

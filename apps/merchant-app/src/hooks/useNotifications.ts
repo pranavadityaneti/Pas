@@ -5,16 +5,35 @@ import { playSound } from '../lib/audio';
 import { showToast } from '../components/NotificationToast';
 import { useStore } from './useStore';
 
+// Canonical UPPERCASE notification types — matches what the server emits.
+// Server source: apps/api/src/services/notification.service.ts + index.ts dispatch sites.
+// Keep in sync with TYPE_CONFIG in NotificationToast.tsx and getIcon in app/(main)/notifications.tsx.
+export type NotificationType =
+    | 'NEW_ORDER'
+    | 'NEW_ORDER_REQUEST'
+    | 'ORDER_CANCELLED'
+    | 'CANCELLED'
+    | 'RIDER_ARRIVED'
+    | 'ORDER_UPDATE'
+    | 'COMPLETED'
+    | 'READY'
+    | 'LOW_STOCK'
+    | string; // permissive — accepts future types without forcing a rebuild
+
+// Field names mirror the REAL snake_case columns PostgREST returns from the
+// `notifications` table (Prisma maps camelCase model fields → snake_case columns).
+// Reading camelCase (e.g. `createdAt`) yields undefined → "NaN min ago" bugs.
 export interface Notification {
     id: string;
-    merchantId: string;
-    storeId?: string;
-    type: 'order' | 'stock' | 'payout' | 'system';
+    user_id: string;
+    store_id?: string;
+    type: NotificationType;
     title: string;
     message: string;
     is_read: boolean;
-    createdAt: string;
+    created_at: string;
     link?: string;
+    reference_id?: string;
     metadata?: any;
 }
 
@@ -71,16 +90,23 @@ export function useNotifications(user: any) {
 
             fetchNotifications();
 
-            // Subscribe to real-time updates scoped to user AND store
+            // Subscribe to real-time INSERTs for this merchant.
+            // Realtime postgres_changes supports only ONE filter condition (no
+            // comma-AND), so we filter by user_id here and narrow to the active
+            // store in the callback. The previous two-part filter
+            // (`user_id=eq.…,store_id=eq.…`) was invalid — it matched nothing, so
+            // no live in-app notifications arrived while the app was open.
             subscription = supabase
                 .channel(`notifications-${activeStoreId}`)
                 .on('postgres_changes', {
                     event: 'INSERT',
                     schema: 'public',
                     table: 'notifications',
-                    filter: `user_id=eq.${user.id},store_id=eq.${activeStoreId}`
+                    filter: `user_id=eq.${user.id}`
                 }, (payload) => {
                     const newNotif = payload.new as Notification;
+                    // Narrow to the currently-active store (the store_id half of the old filter).
+                    if (newNotif.store_id !== activeStoreId) return;
                     const notifType = (newNotif.type || '').toUpperCase();
 
                     // --- Preference-Gated Alerting ---
@@ -94,7 +120,9 @@ export function useNotifications(user: any) {
                         if (notifType === 'NEW_ORDER' && prefs.newOrder === false) {
                             shouldAlert = false;
                         }
-                        if (notifType === 'CANCELLED' && prefs.orderCancelled === false) {
+                        // Cancellations: covers both lifecycle cancel (`CANCELLED`)
+                        // AND customer-side request cancel (`ORDER_CANCELLED`).
+                        if ((notifType === 'CANCELLED' || notifType === 'ORDER_CANCELLED') && prefs.orderCancelled === false) {
                             shouldAlert = false;
                         }
                         // All other types (LOW_STOCK, READY, COMPLETED, etc.) always alert

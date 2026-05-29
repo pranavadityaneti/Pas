@@ -31,6 +31,7 @@ export interface SearchResultStore {
     distance_meters: number;
     matched_products: MatchedProduct[];
     store_name_match: boolean;
+    service_table_booking?: boolean;
 }
 
 const DEBOUNCE_MS = 500;

@@ -54,7 +54,10 @@ const wati_service_1 = require("./services/wati.service");
 const apify_service_1 = require("./services/apify.service");
 const email_service_1 = require("./services/email.service");
 const notification_service_1 = require("./services/notification.service");
+const scheduled_jobs_1 = require("./services/scheduled-jobs");
+const parseArrivalTime_1 = require("./utils/parseArrivalTime");
 const staff_1 = __importDefault(require("./routes/staff"));
+const bookings_1 = __importDefault(require("./routes/bookings"));
 // --- Configuration ---
 const app = (0, express_1.default)();
 const port = process.env.PORT || 3000;
@@ -66,6 +69,9 @@ app.use((req, res, next) => {
 app.disable('x-powered-by');
 const prisma = new client_1.PrismaClient();
 const notificationService = new notification_service_1.NotificationService(prisma);
+// Mount scheduled background jobs (node-cron) — runs every 1 minute.
+// Jobs: pickup/dining reminders + order_requests expiry. See scheduled-jobs.ts.
+(0, scheduled_jobs_1.initScheduledJobs)(prisma, notificationService);
 // Supabase Setup
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
@@ -81,6 +87,8 @@ app.use((0, cors_1.default)({ origin: true, credentials: true }));
 app.use(express_1.default.json({ limit: '50mb' }));
 // --- Staff RBAC Routes ---
 app.use('/api/staff', staff_1.default);
+// --- Table Booking Routes ---
+app.use('/bookings', bookings_1.default);
 // --- Helper Functions ---
 async function getAuthUser(req) {
     const authHeader = req.headers.authorization;
@@ -633,19 +641,13 @@ async function processScraperDataset(datasetId) {
             return str;
         return str.replace(/\u0000/g, '');
     };
-    // Master Catalog Categories
-    const validCategories = [
-        'Dairy', 'Bakery', 'Snacks', 'Staples', 'Condiments',
-        'Confectionery', 'Grocery', 'Beverages', 'Personal Care',
-        'Home Essentials', 'Fashion', 'Pharmacy', 'Meat', 'Fruits & Vegetables'
-    ];
     const mapCategory = (rawCategory) => {
         if (!rawCategory)
             return { vertical: 'Grocery & Kirana', category: 'General' };
         const lowerCat = rawCategory.toLowerCase();
-        // 1. Fruits & Vegetables (Standalone Vertical)
+        // 1. Fresh Items (Fruits & Vegetables)
         if (lowerCat.includes('fruit') || lowerCat.includes('veg') || lowerCat.includes('produce'))
-            return { vertical: 'Fruits & Vegetables', category: 'Fresh Produce' };
+            return { vertical: 'Fresh Items', category: 'Fresh Produce' };
         // 2. Pharmacy & Wellness (Includes Personal Care/Hygiene)
         if (lowerCat.includes('pharmacy') || lowerCat.includes('wellness') || lowerCat.includes('med') ||
             lowerCat.includes('personal care') || lowerCat.includes('hygiene') || lowerCat.includes('skin') ||
@@ -667,6 +669,13 @@ async function processScraperDataset(datasetId) {
             return { vertical: 'Grocery & Kirana', category: 'Beverages' };
         return { vertical: 'Grocery & Kirana', category: 'General' };
     };
+    // Pre-fetch taxonomy lookup maps for resolving category strings → UUIDs
+    const allVerticals = await prisma.vertical.findMany({ select: { id: true, name: true } });
+    const allTier2Categories = await prisma.tier2Category.findMany({
+        select: { id: true, name: true, verticalId: true }
+    });
+    const verticalMap = new Map(allVerticals.map((v) => [v.name, v.id]));
+    const categoryLookup = new Map(allTier2Categories.map((c) => [`${c.verticalId}::${c.name}`, c.id]));
     const sanitizeScraperData = (obj) => {
         if (typeof obj === 'string')
             return sanitizeNullBytes(obj);
@@ -709,6 +718,11 @@ async function processScraperDataset(datasetId) {
             const sellingPrice = rawSp > 1000 ? rawSp / 100 : rawSp;
             const rawCategory = sanitizeNullBytes(entry?.primaryCategoryName) || sanitizeNullBytes(productData?.category);
             const { vertical, category } = mapCategory(rawCategory);
+            // Resolve mapped category/vertical strings to taxonomy UUIDs
+            const resolvedVerticalId = verticalMap.get(vertical) || null;
+            const resolvedCategoryId = resolvedVerticalId
+                ? (categoryLookup.get(`${resolvedVerticalId}::${category}`) || null)
+                : null;
             const subcategory = sanitizeNullBytes(entry?.primarySubcategoryName) || sanitizeNullBytes(productData?.subcategory) || null;
             const sourceProductId = String(productData?.id || itemData?.sku_id || itemData?.id);
             if (!sourceProductId || sourceProductId === 'undefined')
@@ -739,7 +753,9 @@ async function processScraperDataset(datasetId) {
                     subcategory,
                     packsize,
                     image,
-                    metadata: itemData
+                    metadata: itemData,
+                    vertical_id: resolvedVerticalId,
+                    category_id: resolvedCategoryId,
                 },
                 create: {
                     name,
@@ -750,7 +766,9 @@ async function processScraperDataset(datasetId) {
                     image,
                     sourceProductId,
                     status: 'PENDING',
-                    metadata: itemData
+                    metadata: itemData,
+                    vertical_id: resolvedVerticalId,
+                    category_id: resolvedCategoryId,
                 }
             });
             itemsAdded++;
@@ -875,9 +893,16 @@ app.get('/catalog/sync/queue', async (req, res) => {
     try {
         const queue = await prisma.syncQueue.findMany({
             where: { status: 'PENDING' },
-            orderBy: { createdAt: 'desc' }
+            orderBy: { createdAt: 'desc' },
+            include: { Vertical: { select: { name: true } }, Tier2Category: { select: { name: true } } }
         });
-        res.json(queue);
+        // Flatten relation names into top-level fields the frontend expects
+        const mapped = queue.map((item) => ({
+            ...item,
+            vertical: item.Vertical?.name || null,
+            category: item.Tier2Category?.name || null,
+        }));
+        res.json(mapped);
     }
     catch (error) {
         res.status(500).json({ error: 'Failed to fetch sync queue' });
@@ -982,10 +1007,29 @@ app.post('/catalog/sync/approve', async (req, res) => {
         return res.status(400).json({ error: 'Valid items array required' });
     }
     try {
-        // 1. Pre-validation: Taxonomy Integrity Check
-        for (const item of items) {
-            if (item.vertical_id && item.category_id) {
-                const isValid = await validateTaxonomy(item.vertical_id, item.category_id);
+        // 1. Pre-fetch taxonomy for resolving string names → UUIDs
+        //    Handles: pre-resolved UUIDs from scraper, user-edited dropdown strings, and nulls
+        const allVerticals = await prisma.vertical.findMany({ select: { id: true, name: true } });
+        const allTier2Cats = await prisma.tier2Category.findMany({
+            select: { id: true, name: true, verticalId: true }
+        });
+        const vertNameToId = new Map(allVerticals.map((v) => [v.name, v.id]));
+        const catNameToId = new Map(allTier2Cats.map((c) => [`${c.verticalId}::${c.name}`, c.id]));
+        // 2. Resolve each item's vertical_id and category_id
+        const resolvedItems = items.map((item) => {
+            // Prefer string name lookup (catches user edits), fall back to existing UUID
+            let vId = item.vertical ? (vertNameToId.get(item.vertical) || null) : (item.vertical_id || null);
+            let cId = null;
+            if (vId) {
+                const catName = item.category;
+                cId = catName ? (catNameToId.get(`${vId}::${catName}`) || null) : (item.category_id || null);
+            }
+            return { ...item, resolved_vertical_id: vId, resolved_category_id: cId };
+        });
+        // 3. Pre-validation: Taxonomy Integrity Check
+        for (const item of resolvedItems) {
+            if (item.resolved_vertical_id && item.resolved_category_id) {
+                const isValid = await validateTaxonomy(item.resolved_vertical_id, item.resolved_category_id);
                 if (!isValid) {
                     return res.status(400).json({
                         error: `Invalid Category/Vertical pairing for item: ${item.name}`,
@@ -995,18 +1039,19 @@ app.post('/catalog/sync/approve', async (req, res) => {
             }
         }
         await prisma.$transaction(async (tx) => {
-            // 2. High-Performance Bulk Upsert via Raw SQL
-            // Using PostgreSQL "INSERT ... ON CONFLICT" for O(1) performance
-            for (const item of items) {
+            // 4. High-Performance Bulk Upsert via Raw SQL
+            for (const item of resolvedItems) {
                 const sourceId = item.source_product_id || item.sourceProductId;
+                const vId = item.resolved_vertical_id || null;
+                const cId = item.resolved_category_id || null;
                 await tx.$executeRaw `
                     INSERT INTO "Product" (
-                        id, name, brand, mrp, image, uom, source, source_product_id, 
+                        id, name, brand, mrp, image, uom, source, source_product_id,
                         vertical_id, category_id, "updatedAt", "createdAt"
                     ) VALUES (
-                        ${crypto.randomUUID()}, ${item.name}, ${item.brand}, ${Number(item.mrp)}, 
-                        ${item.image}, ${item.packsize || item.uom}, 'purchased_catalog', 
-                        ${sourceId}, ${item.vertical_id}::uuid, ${item.category_id}::uuid, 
+                        ${crypto.randomUUID()}, ${item.name}, ${item.brand}, ${Number(item.mrp)},
+                        ${item.image}, ${item.packsize || item.uom}, 'purchased_catalog',
+                        ${sourceId}, ${vId}::uuid, ${cId}::uuid,
                         NOW(), NOW()
                     )
                     ON CONFLICT (source_product_id) DO UPDATE SET
@@ -1020,18 +1065,17 @@ app.post('/catalog/sync/approve', async (req, res) => {
                         "updatedAt" = NOW()
                 `;
             }
-            // 3. Batched Audit (Inside Transaction for Atomicity)
-            // Fetch resolved IDs for auditing (since Raw SQL doesn't return them easily in bulk)
-            const resolvedProducts = await tx.product.findMany({
-                where: { sourceProductId: { in: items.map(i => i.source_product_id || i.sourceProductId) } },
+            // 5. Batched Audit (Inside Transaction for Atomicity)
+            const auditProducts = await tx.product.findMany({
+                where: { sourceProductId: { in: resolvedItems.map((i) => i.source_product_id || i.sourceProductId) } },
                 select: { id: true }
             });
-            await logBulkAudit(resolvedProducts.map((p, idx) => ({
+            await logBulkAudit(auditProducts.map((p, idx) => ({
                 id: p.id,
-                item: items[idx]
+                item: resolvedItems[idx]
             })), 'CATALOG_SYNC_APPROVE', 'system', tx);
-            // 4. Batch Cleanup
-            const idsToDelete = items.map(i => i.id);
+            // 6. Batch Cleanup
+            const idsToDelete = resolvedItems.map((i) => i.id);
             await tx.syncQueue.deleteMany({
                 where: { id: { in: idsToDelete } }
             });
@@ -1781,6 +1825,43 @@ app.post('/orders', async (req, res) => {
         if (!userId || !storeId || !branchId || !items || !totalAmount) {
             return res.status(400).json({ error: 'Missing required fields: userId, storeId, branchId, items, totalAmount' });
         }
+        // ── Store Status Gate: reject orders for offline/closed stores ──
+        const branch = await prisma.merchantBranch.findUnique({
+            where: { id: branchId },
+            select: { isActive: true, operating_hours: true, prep_time_minutes: true }
+        });
+        if (!branch) {
+            return res.status(404).json({ error: 'Store branch not found.' });
+        }
+        if (!branch.isActive) {
+            return res.status(403).json({ error: 'STORE_OFFLINE', message: 'This store is currently offline and not accepting orders.' });
+        }
+        // Check operating hours server-side
+        const oh = branch.operating_hours;
+        if (oh && oh.days && oh.open && oh.close) {
+            const now = new Date();
+            const jsDay = now.getDay();
+            const todayIndex = (jsDay + 6) % 7; // Convert JS day (0=Sun) to store day (0=Mon)
+            if (!oh.days.includes(todayIndex)) {
+                return res.status(403).json({ error: 'STORE_CLOSED_TODAY', message: 'This store is closed today.' });
+            }
+            const currentMinutes = now.getHours() * 60 + now.getMinutes();
+            const [openH, openM] = oh.open.split(':').map(Number);
+            const [closeH, closeM] = oh.close.split(':').map(Number);
+            const openMin = openH * 60 + openM;
+            const closeMin = closeH * 60 + closeM;
+            const prepBuffer = branch.prep_time_minutes || 15;
+            if (currentMinutes < openMin || currentMinutes > (closeMin - prepBuffer)) {
+                return res.status(403).json({ error: 'STORE_CLOSED_HOURS', message: 'This store is outside operating hours.' });
+            }
+            if (oh.hasLunchBreak && oh.lunchStart && oh.lunchEnd) {
+                const [lsH, lsM] = oh.lunchStart.split(':').map(Number);
+                const [leH, leM] = oh.lunchEnd.split(':').map(Number);
+                if (currentMinutes >= (lsH * 60 + lsM) && currentMinutes < (leH * 60 + leM)) {
+                    return res.status(403).json({ error: 'STORE_LUNCH_BREAK', message: 'This store is on lunch break.' });
+                }
+            }
+        }
         const orderNumber = `PAS-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
         // Logic Gate: If consumer has already paid, mark as CONFIRMED/READY + isPaid
         let orderStatus;
@@ -1797,8 +1878,39 @@ app.post('/orders', async (req, res) => {
         const orderOtp = otp || Math.floor(1000 + Math.random() * 9000).toString();
         // We will collect low stock alerts during the transaction to fire them after commit
         const lowStockAlerts = [];
+        // ── Layer 4: Idempotency ──────────────────────────────────────────────
+        // If this Razorpay payment already produced an order, return it instead of
+        // creating a duplicate. Makes client auto-retries safe (no double order /
+        // double charge) after a transient failure.
+        if (paymentId) {
+            const existingForPayment = await prisma.order.findFirst({
+                where: { metadata: { path: ['razorpayPaymentId'], equals: paymentId } },
+                include: { items: { include: { storeProduct: { include: { product: true } } } }, store: true },
+            });
+            if (existingForPayment) {
+                console.log(`[POST /orders] Idempotent hit — order already exists for payment ${paymentId}`);
+                return res.status(200).json(existingForPayment);
+            }
+        }
         // Transaction Block: Order Create + Stock Decrement + Notification Create
         const order = await prisma.$transaction(async (tx) => {
+            // ── Layer 2: Guarantee the User row exists (FK target of fk_orders_user) ──
+            // The signup trigger normally creates it; this is the point-of-use backstop so a
+            // missing User row can NEVER fail checkout, regardless of any upstream/DB gap.
+            // upsert: if it exists (normal case) → no-op; if missing → create a minimal
+            // CONSUMER row with a guaranteed-unique synthetic email.
+            await tx.user.upsert({
+                where: { id: userId },
+                update: {},
+                create: {
+                    id: userId,
+                    email: `${userId}@auto.pickatstore.app`,
+                    role: 'CONSUMER',
+                    name: customerName || null,
+                    phone: customerPhone || null,
+                    passwordHash: 'sso_auth_active',
+                },
+            });
             const createdOrder = await tx.order.create({
                 data: {
                     orderNumber,
@@ -1819,6 +1931,9 @@ app.post('/orders', async (req, res) => {
                     guests_count: guestsCount || null,
                     items_count: items.length,
                     amount: totalAmount,
+                    // Parse arrival_time text → absolute UTC timestamp for cron-based slot reminders.
+                    // Returns null if format unrecognized; order just won't get scheduled reminders.
+                    slot_time_at: (0, parseArrivalTime_1.parseArrivalTime)(arrivalTime, new Date()),
                     metadata: paymentId ? { razorpayPaymentId: paymentId, orderRequestId: orderRequestId || null } : undefined,
                     items: {
                         create: items.map((item) => ({
@@ -1900,14 +2015,54 @@ app.post('/orders', async (req, res) => {
             body: `Order #${orderNumber} for ₹${totalAmount}${paid ? ' — Already Paid' : ''}`,
             type: 'NEW_ORDER',
             referenceId: order.id,
+            link: '/(main)/orders',
+            metadata: {
+                orderNumber,
+                totalAmount,
+                isPaid: paid,
+                paymentId: paymentId || null,
+            },
         }).catch(e => console.error('[POST /orders] New order notif failed:', e));
+        // Customer-side notification: branch on order_type
+        // - Dine-in: send DINING_BOOKED (event #12)
+        // - Pickup (paid only): send PAYMENT_SUCCESSFUL (event #2)
+        const customerUserId = order.userId;
+        const createdOrderType = order.order_type;
+        if (customerUserId) {
+            if (createdOrderType === 'dine-in') {
+                notificationService.sendConsumerNotification({
+                    userId: customerUserId,
+                    title: 'Table booked 🍽️',
+                    body: `Your dine-in slot for Order #${orderNumber} is confirmed.`,
+                    type: 'DINING_BOOKED',
+                    referenceId: order.id,
+                    link: `/orders/${order.id}`,
+                    storeId,
+                    metadata: { orderNumber, totalAmount, isPaid: paid },
+                }).catch(e => console.error('[POST /orders] Customer DINING_BOOKED notif failed:', e));
+            }
+            else if (paid) {
+                notificationService.sendConsumerNotification({
+                    userId: customerUserId,
+                    title: 'Payment received ✅',
+                    body: `Order #${orderNumber} for ₹${totalAmount} is being prepared.`,
+                    type: 'PAYMENT_SUCCESSFUL',
+                    referenceId: order.id,
+                    link: `/orders/${order.id}`,
+                    storeId,
+                    metadata: { orderNumber, totalAmount, isPaid: true, paymentId: paymentId || null },
+                }).catch(e => console.error('[POST /orders] Customer PAYMENT_SUCCESSFUL notif failed:', e));
+            }
+        }
         // 1. Fire accumulated low-stock alerts
         for (const alert of lowStockAlerts) {
             notificationService.sendMerchantNotification({
                 storeId,
                 title: alert.title,
                 body: alert.body,
-                type: 'LOW_STOCK'
+                type: 'LOW_STOCK',
+                link: '/(main)/inventory',
+                metadata: alert.metadata ?? null,
             }).catch(e => console.error('[POST /orders] Low stock notif failed:', e));
         }
         // 2. Broadcast to merchants via Socket.IO
@@ -1915,9 +2070,30 @@ app.post('/orders', async (req, res) => {
         res.status(201).json(order);
     }
     catch (error) {
+        // Full detail to server logs only — never leak DB/Prisma internals to the client.
         console.error('Create Order Error:', error);
-        const message = error instanceof Error ? error.message : String(error);
-        res.status(500).json({ error: 'Failed to create order', details: message });
+        const raw = error instanceof Error ? error.message : String(error);
+        const isStock = /stock/i.test(raw);
+        const wasPaid = !!(req.body?.paid && req.body?.paymentId);
+        // ── Layer 4: orphaned-payment safety ──
+        // Payment captured but order not created → money taken with nothing to show.
+        // Emit a loud, structured ALERT so ops/Sentry can reconcile + refund. (Auto-refund
+        // wiring is a fast-follow once Razorpay refunds are enabled/tested.)
+        if (wasPaid) {
+            console.error(`[POST /orders][ORPHANED-PAYMENT][ALERT] payment=${req.body.paymentId} user=${req.body.userId} amount=${req.body.totalAmount} store=${req.body.storeId} reason="${raw}"`);
+        }
+        res.status(isStock ? 409 : 500).json({
+            error: isStock ? 'OUT_OF_STOCK' : 'ORDER_CREATE_FAILED',
+            message: wasPaid
+                // Charged but no order → never tell them to "try again & pay"; reassure + reconcile.
+                ? "Your payment went through, but we couldn't place the order. Your money is safe — we're reconciling it and you'll be refunded automatically if it can't be completed. Our team has been alerted."
+                : isStock
+                    ? 'One of your items just went out of stock. Please remove it and try again.'
+                    : "We couldn't place your order just now. Please try again.",
+            // Non-stock failures are transient + idempotent → safe to auto-retry (Layer 2 makes
+            // the FK cause impossible, so a retry succeeds). Stock won't resolve on retry.
+            retryable: !isStock,
+        });
     }
 });
 // Create Order Requests (from Consumer App) with Merchant Notification
@@ -1925,14 +2101,33 @@ app.post('/order-requests', async (req, res) => {
     try {
         const authHeader = req.headers.authorization;
         const token = authHeader?.replace('Bearer ', '');
-        if (!token)
+        if (!token) {
+            console.warn('[POST /order-requests] 401 — No auth token provided');
             return res.status(401).json({ error: 'Unauthorized' });
-        const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-        if (authError || !user)
+        }
+        const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+        if (authError || !user) {
+            console.warn('[POST /order-requests] 401 — Invalid token:', authError?.message || 'no user');
             return res.status(401).json({ error: 'Invalid token' });
+        }
         const { requests } = req.body;
         if (!Array.isArray(requests) || requests.length === 0) {
+            console.warn(`[POST /order-requests] 400 — Missing/empty requests array | user=${user.id}`);
             return res.status(400).json({ error: 'Missing or empty requests array' });
+        }
+        // ── Store Status Gate: reject requests for offline/closed branches ──
+        for (const reqRow of requests) {
+            const branch = await prisma.merchantBranch.findUnique({
+                where: { id: reqRow.branch_id },
+                select: { isActive: true }
+            });
+            if (branch && !branch.isActive) {
+                console.warn(`[POST /order-requests] 403 — Store offline | branch=${reqRow.branch_id} store="${reqRow.store_name}" user=${user.id}`);
+                return res.status(403).json({
+                    error: 'STORE_OFFLINE',
+                    message: `${reqRow.store_name || 'This store'} is currently offline and not accepting orders.`
+                });
+            }
         }
         // Execute sequentially in a transaction to ensure either all succeed or all fail
         const notificationsToDispatch = [];
@@ -1947,6 +2142,9 @@ app.post('/order-requests', async (req, res) => {
                 const customerName = profile?.fullName || 'Guest';
                 // Compute expires_at server-side to prevent client clock drift
                 const expiresAt = new Date(Date.now() + 2 * 60 * 1000); // 2 minutes from now
+                // Parse the human-readable arrival_time into an absolute UTC timestamp for cron-based reminders.
+                // Returns null if format is unrecognized; that's fine — the order just won't get reminders.
+                const slotTimeAt = (0, parseArrivalTime_1.parseArrivalTime)(reqRow.arrival_time, new Date());
                 // 2. Insert the order request
                 const created = await tx.order_requests.create({
                     data: {
@@ -1960,7 +2158,8 @@ app.post('/order-requests', async (req, res) => {
                         arrival_time: reqRow.arrival_time || null,
                         order_type: reqRow.order_type || null,
                         guests_count: reqRow.guests_count || null,
-                        expires_at: expiresAt
+                        expires_at: expiresAt,
+                        slot_time_at: slotTimeAt
                         // Do not trust client's created_at/updated_at
                     }
                 });
@@ -1975,6 +2174,13 @@ app.post('/order-requests', async (req, res) => {
                     body: `${customerName} · ₹${reqRow.subtotal} · ${totalItems} item${totalItems !== 1 ? 's' : ''} · 2 min to accept`,
                     type: 'NEW_ORDER_REQUEST',
                     referenceId: created.id,
+                    link: '/(main)/orders',
+                    metadata: {
+                        customerName,
+                        subtotal: reqRow.subtotal,
+                        itemCount: totalItems,
+                        orderType: reqRow.order_type || null,
+                    },
                 });
                 results.push(created);
             }
@@ -2017,7 +2223,50 @@ app.patch('/order-requests/:id/status', async (req, res) => {
                 body: `Customer cancelled their order request (₹${updated.subtotal})`,
                 type: 'ORDER_CANCELLED',
                 referenceId: updated.id,
+                link: '/(main)/orders',
+                metadata: {
+                    subtotal: updated.subtotal,
+                    reason: reason || null,
+                },
             }).catch(e => console.error('[PATCH /order-requests] Notif failed:', e));
+        }
+        // Customer-side notification:
+        // - ACCEPTED: merchant accepted the request (event #1)
+        // - REJECTED: merchant declined the request (subset of event #11)
+        // - CANCELLED: customer's own action — skip (no need to notify them of their own cancel)
+        const requestCustomerUserId = updated.consumer_user_id;
+        if (requestCustomerUserId) {
+            if (status === 'ACCEPTED') {
+                notificationService.sendConsumerNotification({
+                    userId: requestCustomerUserId,
+                    title: 'Order accepted 🎉',
+                    body: `Your order has been accepted. Tap to complete payment.`,
+                    type: 'ORDER_CONFIRMED',
+                    referenceId: updated.id,
+                    link: `/orders/${updated.id}`,
+                    storeId: updated.branch_id,
+                    metadata: {
+                        subtotal: updated.subtotal,
+                    },
+                }).catch(e => console.error('[PATCH /order-requests] Customer ORDER_CONFIRMED notif failed:', e));
+            }
+            else if (status === 'REJECTED') {
+                notificationService.sendConsumerNotification({
+                    userId: requestCustomerUserId,
+                    title: 'Order request declined',
+                    body: reason
+                        ? `The merchant declined your request. Reason: ${reason}`
+                        : `The merchant declined your request.`,
+                    type: 'ORDER_CANCELLED',
+                    referenceId: updated.id,
+                    link: `/orders/${updated.id}`,
+                    storeId: updated.branch_id,
+                    metadata: {
+                        subtotal: updated.subtotal,
+                        reason: reason || null,
+                    },
+                }).catch(e => console.error('[PATCH /order-requests] Customer ORDER_CANCELLED (REJECTED) notif failed:', e));
+            }
         }
         res.json(updated);
     }
@@ -2091,7 +2340,11 @@ app.patch('/orders/:id/status', async (req, res) => {
                 title: 'Order Cancelled',
                 body: `Order #${order.orderNumber} was cancelled by the customer.`,
                 type: 'CANCELLED',
-                referenceId: id
+                referenceId: id,
+                link: '/(main)/orders',
+                metadata: {
+                    orderNumber: order.orderNumber,
+                },
             });
         }
         else if (status === 'RIDER_ARRIVED') {
@@ -2100,7 +2353,11 @@ app.patch('/orders/:id/status', async (req, res) => {
                 title: 'Rider Waiting',
                 body: `Rider is at the store to pickup Order #${order.orderNumber}.`,
                 type: 'RIDER_ARRIVED',
-                referenceId: id
+                referenceId: id,
+                link: '/(main)/orders',
+                metadata: {
+                    orderNumber: order.orderNumber,
+                },
             });
         }
         else {
@@ -2109,8 +2366,66 @@ app.patch('/orders/:id/status', async (req, res) => {
                 title: `Order ${status.replace('_', ' ')}`,
                 body: `Order #${order.orderNumber} status updated to ${status}`,
                 type: 'ORDER_UPDATE',
-                referenceId: id
+                referenceId: id,
+                link: '/(main)/orders',
+                metadata: {
+                    orderNumber: order.orderNumber,
+                    newStatus: status,
+                },
             });
+        }
+        // Customer-side notification:
+        // - CANCELLED: order cancelled at this stage — notify customer (event #11)
+        // - READY pickup: order packed, ready for pickup (event #3)
+        // - READY dine-in: customer's food/table ready (event #7)
+        const orderCustomerUserId = order.userId;
+        const ordOrderType = order.order_type;
+        if (orderCustomerUserId) {
+            if (status === 'CANCELLED') {
+                notificationService.sendConsumerNotification({
+                    userId: orderCustomerUserId,
+                    title: 'Order cancelled',
+                    body: reason
+                        ? `Order #${order.orderNumber} was cancelled. Reason: ${reason}`
+                        : `Order #${order.orderNumber} was cancelled.`,
+                    type: 'ORDER_CANCELLED',
+                    referenceId: id,
+                    link: `/orders/${id}`,
+                    storeId: ordStoreId,
+                    metadata: {
+                        orderNumber: order.orderNumber,
+                        reason: reason || null,
+                    },
+                }).catch(e => console.error('[PATCH /orders/:id/status] Customer ORDER_CANCELLED notif failed:', e));
+            }
+            else if (status === 'READY' && ordOrderType === 'pickup') {
+                notificationService.sendConsumerNotification({
+                    userId: orderCustomerUserId,
+                    title: 'Order ready for pickup 🛍️',
+                    body: `Order #${order.orderNumber} is packed. Show your OTP to pick it up.`,
+                    type: 'ORDER_READY',
+                    referenceId: id,
+                    link: `/orders/${id}`,
+                    storeId: ordStoreId,
+                    metadata: {
+                        orderNumber: order.orderNumber,
+                    },
+                }).catch(e => console.error('[PATCH /orders/:id/status] Customer ORDER_READY notif failed:', e));
+            }
+            else if (status === 'READY' && ordOrderType === 'dine-in') {
+                notificationService.sendConsumerNotification({
+                    userId: orderCustomerUserId,
+                    title: 'Your table is ready 🍽️',
+                    body: `Order #${order.orderNumber} is ready. Please head to the restaurant.`,
+                    type: 'DINING_READY',
+                    referenceId: id,
+                    link: `/orders/${id}`,
+                    storeId: ordStoreId,
+                    metadata: {
+                        orderNumber: order.orderNumber,
+                    },
+                }).catch(e => console.error('[PATCH /orders/:id/status] Customer DINING_READY notif failed:', e));
+            }
         }
         if (order.user?.phone) {
             const smsStatusMap = {
@@ -2251,8 +2566,28 @@ app.post('/orders/:id/verify-otp', async (req, res) => {
                 title: 'Order Completed',
                 body: `Order #${updatedOrder.orderNumber} has been picked up and verified.`,
                 type: 'COMPLETED',
-                referenceId: id
+                referenceId: id,
+                link: '/(main)/orders',
+                metadata: {
+                    orderNumber: updatedOrder.orderNumber,
+                },
             });
+        }
+        // Customer-side notification: order picked up (event #6 in user's list)
+        const otpVerifyCustomerUserId = updatedOrder.userId;
+        if (otpVerifyCustomerUserId) {
+            notificationService.sendConsumerNotification({
+                userId: otpVerifyCustomerUserId,
+                title: 'Enjoy your order! 🎉',
+                body: `Order #${updatedOrder.orderNumber} has been picked up. Hope you love it!`,
+                type: 'ORDER_COMPLETED',
+                referenceId: id,
+                link: `/orders/${id}`,
+                storeId: updatedOrder.storeId,
+                metadata: {
+                    orderNumber: updatedOrder.orderNumber,
+                },
+            }).catch(e => console.error('[OTP verify] Customer ORDER_COMPLETED notif failed:', e));
         }
         res.json({ success: true, order: updatedOrder });
     }
@@ -2747,8 +3082,17 @@ app.post('/auth/send-otp', async (req, res) => {
     }
     try {
         const { phone, isSignup, isLogin } = req.body;
+        const purpose = req.body.purpose;
         if (!phone || !/^91\d{10}$/.test(phone)) {
             return res.status(400).json({ error: 'Valid Indian phone number required (format: 91XXXXXXXXXX)' });
+        }
+        // Admin login: only allowlisted phones may request an admin OTP.
+        // Merchant / consumer flows (no `purpose`) are unaffected.
+        if (purpose === 'admin') {
+            const allow = await prisma.adminAllowlist.findFirst({ where: { phone, isActive: true } });
+            if (!allow) {
+                return res.status(403).json({ error: 'This number is not authorized for admin access.' });
+            }
         }
         // Early duplicate/lookup checks to save WATI costs
         const barePhone = phone.replace(/^91/, '');
@@ -2805,8 +3149,14 @@ app.post('/auth/send-otp', async (req, res) => {
         res.json({ success: true, message: 'OTP sent via WhatsApp' });
     }
     catch (error) {
-        console.error('[Auth] Send OTP Error:', error);
-        res.status(500).json({ error: 'Internal Server Error' });
+        console.error('[Auth] Send OTP Error:', error?.message, '\nStack:', error?.stack, '\nFull:', error);
+        // Temporary verbose-error response to diagnose iOS Send OTP 500 — strip after fix
+        res.status(500).json({
+            error: 'Internal Server Error',
+            detail: (error?.message || String(error) || 'unknown').slice(0, 500),
+            code: error?.code,
+            meta: error?.meta,
+        });
     }
 });
 /**
@@ -2858,6 +3208,15 @@ app.post('/auth/verify-otp', async (req, res) => {
         }
         else {
             console.log(`[Auth] Reviewer bypass active for phone: ${phone}`);
+        }
+        // Admin login gate: only allowlisted phones may complete an admin verify.
+        // (Defense in depth — send-otp already gates admin OTP requests.)
+        const isAdminLogin = req.body.purpose === 'admin';
+        if (isAdminLogin) {
+            const allow = await prisma.adminAllowlist.findFirst({ where: { phone, isActive: true } });
+            if (!allow) {
+                return res.status(403).json({ error: 'This number is not authorized for admin access.' });
+            }
         }
         // Format phone for Supabase (needs +91 prefix)
         const formattedPhone = `+${phone}`;
@@ -2958,6 +3317,24 @@ app.post('/auth/verify-otp', async (req, res) => {
             return res.status(500).json({ error: 'Failed to create session. Please try again.' });
         }
         console.log(`[Auth] User ${existingUser.id} authenticated (isNew: ${isNewUser})`);
+        // Admin login: stamp the durable isAdmin flag (survives the JIT role
+        // overwrite above). Upsert because non-merchant admins have no User row yet.
+        if (isAdminLogin) {
+            const allow = await prisma.adminAllowlist.findFirst({ where: { phone, isActive: true } });
+            await prisma.user.upsert({
+                where: { id: existingUser.id },
+                update: { isAdmin: true },
+                create: {
+                    id: existingUser.id,
+                    email: existingUser.email || syntheticEmail,
+                    phone: formattedPhone,
+                    role: 'CONSUMER',
+                    isAdmin: true,
+                    name: allow?.name ?? null,
+                },
+            });
+            console.log(`[Auth] Admin isAdmin flag set for ${existingUser.id}`);
+        }
         res.json({
             success: true,
             session: {
@@ -2978,6 +3355,43 @@ app.post('/auth/verify-otp', async (req, res) => {
     catch (error) {
         console.error('[Auth] Verify OTP Error:', error);
         res.status(500).json({ error: 'OTP verification failed' });
+    }
+});
+/**
+ * POST /admin/allowlist
+ * Add (or re-activate) an authorized admin phone. Admin-only.
+ * Body: { phone: "9XXXXXXXXX" | "91XXXXXXXXXX", name?: string }
+ */
+app.post('/admin/allowlist', async (req, res) => {
+    try {
+        const caller = await getAuthUser(req);
+        const callerProfile = await prisma.user.findUnique({
+            where: { id: caller.id },
+            select: { isAdmin: true, role: true },
+        });
+        const callerIsAdmin = !!callerProfile && (callerProfile.isAdmin === true || callerProfile.role === 'SUPER_ADMIN');
+        if (!callerIsAdmin) {
+            return res.status(403).json({ error: 'Admin access required' });
+        }
+        const digits = String(req.body?.phone || '').replace(/\D/g, '');
+        const normalized = digits.length === 10 ? `91${digits}` : digits;
+        if (!/^91\d{10}$/.test(normalized)) {
+            return res.status(400).json({ error: 'A valid 10-digit Indian phone number is required' });
+        }
+        const name = req.body?.name ? String(req.body.name).trim() : null;
+        const created = await prisma.adminAllowlist.upsert({
+            where: { phone: normalized },
+            update: { isActive: true, ...(name ? { name } : {}) },
+            create: { phone: normalized, name, isActive: true },
+        });
+        return res.json({ success: true, admin: { phone: created.phone, name: created.name } });
+    }
+    catch (e) {
+        if (e?.message === 'Missing or invalid token' || e?.message === 'Unauthorized') {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+        console.error('[Admin] add allowlist error:', e);
+        return res.status(500).json({ error: 'Failed to add admin' });
     }
 });
 // =====================================================================
@@ -3250,6 +3664,12 @@ app.patch('/auth/merchant/draft', async (req, res) => {
             }
             if (payload.storePhotos)
                 updateData.storePhotos = payload.storePhotos;
+            if (payload.cuisines !== undefined)
+                updateData.cuisines = payload.cuisines;
+            if (payload.isVeg !== undefined)
+                updateData.isVeg = payload.isVeg;
+            if (payload.restaurantType !== undefined)
+                updateData.restaurantType = payload.restaurantType;
             if (payload.finalize) {
                 updateData.status = 'inactive';
                 updateData.kycStatus = 'pending';
@@ -3287,6 +3707,8 @@ app.patch('/auth/merchant/draft', async (req, res) => {
                             name: payload.storeName,
                             cityId: cityRecord.id,
                             address: payload.address,
+                            latitude: payload.latitude ?? null,
+                            longitude: payload.longitude ?? null,
                             image: storeImage,
                             active: false, // Ensure it stays inactive during updates until re-approved
                             updatedAt: new Date()
@@ -3295,14 +3717,56 @@ app.patch('/auth/merchant/draft', async (req, res) => {
                 }
                 else {
                     await tx.store.create({
-                        data: { id: userId, managerId: userId, name: payload.storeName, cityId: cityRecord.id, address: payload.address, active: false, image: storeImage, updatedAt: new Date() }
+                        data: { id: userId, managerId: userId, name: payload.storeName, cityId: cityRecord.id, address: payload.address, latitude: payload.latitude ?? null, longitude: payload.longitude ?? null, active: false, image: storeImage, updatedAt: new Date() }
                     });
                 }
-                if (payload.hasBranches && payload.branches) {
-                    await tx.merchantBranch.deleteMany({ where: { merchantId: userId } });
+                // ALWAYS (re)create the merchant's MAIN branch (id == merchant_id) carrying the
+                // store's coordinates. This is what customer discovery (get_nearby_stores) reads,
+                // and it's the FK target for StoreProduct.branch_id. Mirrors the legacy
+                // /auth/merchant/signup behaviour. Runs regardless of hasBranches so single-store
+                // merchants are still geo-located and findable. (Fix: stores were invisible because
+                // the old code only created added branches and deleted the main one.)
+                const mainBranchData = {
+                    branchName: payload.storeName || 'Main Branch',
+                    managerName: payload.ownerName,
+                    phone: payload.phone,
+                    address: payload.address,
+                    city: payload.city ?? null,
+                    latitude: payload.latitude ?? null,
+                    longitude: payload.longitude ?? null,
+                    isActive: true,
+                    cuisines: payload.cuisines || [],
+                    isVeg: payload.isVeg ?? null,
+                    restaurantType: payload.restaurantType || null,
+                    branchPhotos: payload.storePhotos || [],
+                };
+                await tx.merchantBranch.upsert({
+                    where: { id: userId },
+                    update: mainBranchData,
+                    create: { id: userId, merchantId: userId, ...mainBranchData },
+                });
+                // Additional branches: replace only the NON-main branches (never the main),
+                // and persist each branch's own coordinates (sent by the signup form).
+                await tx.merchantBranch.deleteMany({ where: { merchantId: userId, id: { not: userId } } });
+                if (payload.hasBranches && payload.branches && payload.branches.length > 0) {
                     await tx.merchantBranch.createMany({
-                        data: payload.branches.map((b) => ({
-                            merchantId: userId, branchName: b.name || 'Main Branch', managerName: b.manager_name, phone: b.phone, address: b.address, isActive: true
+                        data: payload.branches
+                            // guard against a duplicate of the main branch's name (unique merchantId+branchName)
+                            .filter((b) => (b.name || 'Branch') !== (payload.storeName || 'Main Branch'))
+                            .map((b) => ({
+                            merchantId: userId,
+                            branchName: b.name || 'Branch',
+                            managerName: b.manager_name,
+                            phone: b.phone,
+                            address: b.address,
+                            city: b.city ?? payload.city ?? null,
+                            latitude: b.latitude ?? null,
+                            longitude: b.longitude ?? null,
+                            isActive: true,
+                            cuisines: b.cuisines || [],
+                            isVeg: b.is_veg ?? null,
+                            restaurantType: b.restaurant_type || null,
+                            branchPhotos: b.branch_photos || [],
                         }))
                     });
                 }
@@ -3397,11 +3861,14 @@ const merchantSignupSchema = zod_1.z.object({
     email: zod_1.z.string().email("Valid email is required"),
     phone: zod_1.z.string().min(10, "Valid phone is required"),
     storeName: zod_1.z.string().min(2, "Store name is required"),
-    category: zod_1.z.string().min(2, "Category is required"), // Maps roughly to our vertical logic
+    verticalId: zod_1.z.string().uuid("Valid vertical ID is required"),
     city: zod_1.z.string().min(2, "City is required"),
     address: zod_1.z.string().min(5, "Address is required"),
     latitude: zod_1.z.number(),
     longitude: zod_1.z.number(),
+    cuisines: zod_1.z.array(zod_1.z.string()).optional().default([]),
+    isVeg: zod_1.z.boolean().optional().default(false),
+    restaurantType: zod_1.z.string().optional().nullable(),
     hasBranches: zod_1.z.boolean().default(false),
     status: zod_1.z.string().default('inactive'),
     kycStatus: zod_1.z.string().default('pending'),
@@ -3472,8 +3939,19 @@ app.post('/auth/merchant/signup', async (req, res) => {
             }
         });
         const cityId = cityRecord.id;
-        // Assigning a generic UUID for the vertical_id fallback (since schema depends on it)
-        const verticalId = 'c307b78e-b924-47a1-a5a7-4405777fa50c';
+        // Validate the vertical exists
+        const GROCERY_FALLBACK = 'c307b78e-b924-47a1-a5a7-4405777fa50c';
+        let verticalId = payload.verticalId;
+        if (verticalId) {
+            const verticalExists = await prisma.vertical.findUnique({ where: { id: verticalId } });
+            if (!verticalExists) {
+                console.warn(`[Signup] Invalid verticalId ${verticalId}, falling back to Grocery`);
+                verticalId = GROCERY_FALLBACK;
+            }
+        }
+        else {
+            verticalId = GROCERY_FALLBACK;
+        }
         // 5. ACID Transaction
         try {
             await prisma.$transaction(async (tx) => {
@@ -3540,19 +4018,51 @@ app.post('/auth/merchant/signup', async (req, res) => {
                         fssaiNumber: payload.fssaiNumber || '',
                         fssaiCertificateUrl: payload.docUrls.fssai || null,
                         storePhotos: payload.storePhotos,
+                        cuisines: payload.cuisines || [],
+                        isVeg: payload.isVeg ?? false,
+                        restaurantType: payload.restaurantType || null,
                         verticalId: verticalId
                     }
                 });
-                // 5d. Insert Branches (Atomic, relying on Prisma to generate UUID keys)
+                // 5d. ALWAYS create a default branch for the merchant's primary location.
+                // Uses merchant_id as branch_id so single-store merchants have a valid
+                // FK target for StoreProduct.branch_id, and the StoreContext fallback
+                // (activeStoreId = merchant_id) resolves correctly. Without this, new
+                // merchants who don't toggle "multi-branch" can't add products because
+                // fk_storeproduct_branch fails on first save. (Bug fixed May 20, 2026.)
+                await tx.merchantBranch.create({
+                    data: {
+                        id: userId, // critical: same UUID as merchant_id
+                        merchantId: userId,
+                        branchName: payload.storeName || 'Main Branch',
+                        managerName: payload.ownerName,
+                        phone: payload.phone,
+                        address: payload.address,
+                        city: payload.city,
+                        latitude: payload.latitude,
+                        longitude: payload.longitude,
+                        isActive: true,
+                        cuisines: payload.cuisines || [],
+                        isVeg: payload.isVeg ?? null,
+                        restaurantType: payload.restaurantType || null,
+                        branchPhotos: payload.storePhotos || [],
+                    }
+                });
+                // 5e. Insert ADDITIONAL branches if the merchant declared multi-store.
+                // (Atomic, relying on Prisma to generate UUID keys for these.)
                 if (payload.hasBranches && payload.branches && payload.branches.length > 0) {
                     await tx.merchantBranch.createMany({
                         data: payload.branches.map((b) => ({
                             merchantId: userId,
-                            branchName: b.name || 'Main Branch',
+                            branchName: b.name || 'Branch',
                             managerName: b.manager_name,
                             phone: b.phone,
                             address: b.address,
-                            isActive: true
+                            isActive: true,
+                            cuisines: b.cuisines || [],
+                            isVeg: b.is_veg ?? null,
+                            restaurantType: b.restaurant_type || null,
+                            branchPhotos: b.branch_photos || [],
                         }))
                     });
                 }

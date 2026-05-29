@@ -3,18 +3,23 @@ import {
     View, Text, TouchableOpacity, Modal, ScrollView,
     Dimensions, Pressable
 } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { X, RotateCcw } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import RangeSlider from './RangeSlider';
+import type { SortOption } from '../utils/filterConfig';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export interface StoreModalFilters {
-    sortBy: 'relevance' | 'rating' | 'distance' | 'most_items';
+    sortBy: 'relevance' | 'rating' | 'distance' | 'most_items' | 'prep_time';
     minRating: number | null;       // null = any, 3.5, 4.0, 4.5
-    maxDistance: number | null;      // null = any, 1, 2, 5 (km)
+    maxDistance: number | null;      // null = any, 1, 3, 5, 10 (km)
     openNow: boolean;
-    priceRange: 'any' | 'budget' | 'mid' | 'premium';
+    priceMin: number;
+    priceMax: number;
     pureVeg: boolean;
+    brands: string[];
 }
 
 export const DEFAULT_MODAL_FILTERS: StoreModalFilters = {
@@ -22,15 +27,31 @@ export const DEFAULT_MODAL_FILTERS: StoreModalFilters = {
     minRating: null,
     maxDistance: null,
     openNow: false,
-    priceRange: 'any',
+    priceMin: 0,
+    priceMax: 1000,
     pureVeg: false,
+    brands: [],
 };
+
+const ALL_SORT_OPTIONS: { id: SortOption; label: string }[] = [
+    { id: 'relevance', label: 'Relevance' },
+    { id: 'rating', label: 'Rating: High to Low' },
+    { id: 'distance', label: 'Distance: Nearest' },
+    { id: 'most_items', label: 'Most Items' },
+    { id: 'prep_time', label: 'Prep Time: Fastest' },
+];
 
 interface Props {
     visible: boolean;
     filters: StoreModalFilters;
     onApply: (filters: StoreModalFilters) => void;
     onClose: () => void;
+    showBrands?: boolean;
+    availableBrands?: string[];
+    showRatings?: boolean;
+    showDietary?: boolean;
+    showPriceRange?: boolean;
+    showSortOptions?: SortOption[];
 }
 
 // ─── Chip Component ───
@@ -69,7 +90,15 @@ const SectionHeader = ({ title }: { title: string }) => (
     <Text className="text-[15px] font-bold text-gray-900 mb-3 mt-5">{title}</Text>
 );
 
-export default function StoreFilterModal({ visible, filters, onApply, onClose }: Props) {
+export default function StoreFilterModal({
+    visible, filters, onApply, onClose,
+    showBrands = false,
+    availableBrands,
+    showRatings = false,
+    showDietary = false,
+    showPriceRange = true,
+    showSortOptions,
+}: Props) {
     const [draft, setDraft] = useState<StoreModalFilters>(filters);
 
     // Sync draft when modal opens
@@ -92,17 +121,25 @@ export default function StoreFilterModal({ visible, filters, onApply, onClose }:
         onClose();
     };
 
+    // Filter sort options based on what the parent wants to show
+    const sortOptions = showSortOptions
+        ? ALL_SORT_OPTIONS.filter(opt => showSortOptions.includes(opt.id))
+        : ALL_SORT_OPTIONS.filter(opt => opt.id !== 'prep_time'); // default: hide prep_time
+
+    // Only count filters from visible sections
     const activeCount = [
         draft.sortBy !== 'relevance',
-        draft.minRating !== null,
+        showRatings && draft.minRating !== null,
         draft.maxDistance !== null,
         draft.openNow,
-        draft.priceRange !== 'any',
-        draft.pureVeg,
+        showPriceRange && (draft.priceMin > 0 || draft.priceMax < 1000),
+        showDietary && draft.pureVeg,
+        showBrands && draft.brands.length > 0,
     ].filter(Boolean).length;
 
     return (
         <Modal visible={visible} animationType="slide" transparent statusBarTranslucent>
+          <GestureHandlerRootView style={{ flex: 1 }}>
             {/* Backdrop */}
             <Pressable
                 className="flex-1 bg-black/50"
@@ -133,12 +170,7 @@ export default function StoreFilterModal({ visible, filters, onApply, onClose }:
                     {/* ── Sort By ── */}
                     <SectionHeader title="Sort By" />
                     <View className="flex-row flex-wrap">
-                        {([
-                            { id: 'relevance', label: 'Relevance' },
-                            { id: 'rating', label: 'Rating: High → Low' },
-                            { id: 'distance', label: 'Distance: Nearest' },
-                            { id: 'most_items', label: 'Most Items' },
-                        ] as const).map(opt => (
+                        {sortOptions.map(opt => (
                             <Chip
                                 key={opt.id}
                                 label={opt.label}
@@ -148,23 +180,27 @@ export default function StoreFilterModal({ visible, filters, onApply, onClose }:
                         ))}
                     </View>
 
-                    {/* ── Rating ── */}
-                    <SectionHeader title="Rating" />
-                    <View className="flex-row flex-wrap">
-                        {([
-                            { value: null, label: 'Any' },
-                            { value: 3.5, label: '3.5+' },
-                            { value: 4.0, label: '4.0+' },
-                            { value: 4.5, label: '4.5+' },
-                        ] as const).map(opt => (
-                            <Chip
-                                key={String(opt.value)}
-                                label={opt.label}
-                                active={draft.minRating === opt.value}
-                                onPress={() => update({ minRating: opt.value })}
-                            />
-                        ))}
-                    </View>
+                    {/* ── Rating (conditional) ── */}
+                    {showRatings && (
+                        <>
+                            <SectionHeader title="Rating" />
+                            <View className="flex-row flex-wrap">
+                                {([
+                                    { value: null, label: 'Any' },
+                                    { value: 3.5, label: '3.5+' },
+                                    { value: 4.0, label: '4.0+' },
+                                    { value: 4.5, label: '4.5+' },
+                                ] as const).map(opt => (
+                                    <Chip
+                                        key={String(opt.value)}
+                                        label={opt.label}
+                                        active={draft.minRating === opt.value}
+                                        onPress={() => update({ minRating: opt.value })}
+                                    />
+                                ))}
+                            </View>
+                        </>
+                    )}
 
                     {/* ── Distance ── */}
                     <SectionHeader title="Distance" />
@@ -172,8 +208,9 @@ export default function StoreFilterModal({ visible, filters, onApply, onClose }:
                         {([
                             { value: null, label: 'Any' },
                             { value: 1, label: 'Under 1 km' },
-                            { value: 2, label: 'Under 2 km' },
+                            { value: 3, label: 'Under 3 km' },
                             { value: 5, label: 'Under 5 km' },
+                            { value: 10, label: 'Under 10 km' },
                         ] as const).map(opt => (
                             <Chip
                                 key={String(opt.value)}
@@ -192,31 +229,55 @@ export default function StoreFilterModal({ visible, filters, onApply, onClose }:
                         onPress={() => update({ openNow: !draft.openNow })}
                     />
 
-                    {/* ── Price Range ── */}
-                    <SectionHeader title="Price Range (Avg. Product Price)" />
-                    <View className="flex-row flex-wrap">
-                        {([
-                            { id: 'any', label: 'Any' },
-                            { id: 'budget', label: 'Budget (< ₹100)' },
-                            { id: 'mid', label: 'Mid-range (₹100–₹300)' },
-                            { id: 'premium', label: 'Premium (₹300+)' },
-                        ] as const).map(opt => (
-                            <Chip
-                                key={opt.id}
-                                label={opt.label}
-                                active={draft.priceRange === opt.id}
-                                onPress={() => update({ priceRange: opt.id })}
+                    {/* ── Price Range — Drag Slider (conditional) ── */}
+                    {showPriceRange && (
+                        <>
+                            <SectionHeader title="Price Range (Avg. Product Price)" />
+                            <RangeSlider
+                                min={0}
+                                max={1000}
+                                step={50}
+                                lowValue={draft.priceMin}
+                                highValue={draft.priceMax}
+                                onValueChange={(low, high) => update({ priceMin: low, priceMax: high })}
+                                formatLabel={(v) => v >= 1000 ? '₹1000+' : `₹${v}`}
                             />
-                        ))}
-                    </View>
+                        </>
+                    )}
 
-                    {/* ── Dietary ── */}
-                    <SectionHeader title="Dietary" />
-                    <Toggle
-                        label="Pure Veg Only"
-                        active={draft.pureVeg}
-                        onPress={() => update({ pureVeg: !draft.pureVeg })}
-                    />
+                    {/* ── Dietary (conditional) ── */}
+                    {showDietary && (
+                        <>
+                            <SectionHeader title="Dietary" />
+                            <Toggle
+                                label="Pure Veg Only"
+                                active={draft.pureVeg}
+                                onPress={() => update({ pureVeg: !draft.pureVeg })}
+                            />
+                        </>
+                    )}
+
+                    {/* ── Brands (conditional) ── */}
+                    {showBrands && availableBrands && availableBrands.length > 0 && (
+                        <>
+                            <SectionHeader title="Brands" />
+                            <View className="flex-row flex-wrap">
+                                {availableBrands.map(brand => (
+                                    <Chip
+                                        key={brand}
+                                        label={brand}
+                                        active={draft.brands.includes(brand)}
+                                        onPress={() => {
+                                            const next = draft.brands.includes(brand)
+                                                ? draft.brands.filter(b => b !== brand)
+                                                : [...draft.brands, brand];
+                                            update({ brands: next });
+                                        }}
+                                    />
+                                ))}
+                            </View>
+                        </>
+                    )}
                 </ScrollView>
 
                 {/* Footer */}
@@ -239,6 +300,7 @@ export default function StoreFilterModal({ visible, filters, onApply, onClose }:
                     </TouchableOpacity>
                 </View>
             </View>
+          </GestureHandlerRootView>
         </Modal>
     );
 }

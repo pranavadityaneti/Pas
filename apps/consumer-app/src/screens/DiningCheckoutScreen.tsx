@@ -1,3 +1,11 @@
+// @lock — DO NOT EDIT WITHOUT EXPLICIT USER PERMISSION.
+// Dining Checkout — multiple approved layers (cumulative, latest May 19, 2026):
+//   1. Sticky header/CTA, non-absolute bottom button, Android time picker dismiss
+//      handling, iOS-only spinner guard (original layout fix).
+//   2. handlePaymentSuccess session-recovery: refreshSession before reading
+//      getSession to defeat Razorpay WebView session eviction.
+// Any modification to the checkout flow or session handling REQUIRES the user's
+// explicit chat-confirmed approval. Hard lock.
 // Dining Pre-order Checkout: Restaurant info → Arrival details → Order summary → Pay & Confirm.
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
@@ -132,16 +140,20 @@ export default function DiningCheckoutScreen() {
     useEffect(() => {
         if (!restaurantId) return;
         setBranchLoading(true);
-        supabase
-            .from('merchant_branches')
-            .select('address, operating_hours, prep_time_minutes')
-            .eq('id', restaurantId)
-            .single()
-            .then(({ data }) => {
+        (async () => {
+            try {
+                const { data } = await supabase
+                    .from('merchant_branches')
+                    .select('address, operating_hours, prep_time_minutes')
+                    .eq('id', restaurantId)
+                    .single();
                 if (data) setBranchData(data);
-            })
-            .catch(err => console.error('[DiningCheckout] Branch fetch error:', err))
-            .finally(() => setBranchLoading(false));
+            } catch (err) {
+                console.error('[DiningCheckout] Branch fetch error:', err);
+            } finally {
+                setBranchLoading(false);
+            }
+        })();
     }, [restaurantId]);
 
     const restaurantAddress = branchData?.address || '';
@@ -304,22 +316,32 @@ export default function DiningCheckoutScreen() {
     };
 
     const onDateChange = (event: any, selectedDate?: Date) => {
+        // Android: native dialog auto-closes on any action, always reset state
+        if (Platform.OS === 'android') {
+            setShowDatePicker(false);
+            if (event.type === 'set' && selectedDate) {
+                setDate(selectedDate);
+            }
+            return;
+        }
+        // iOS: inline spinner, update temp value for Cancel/Done toolbar
         if (selectedDate) {
             setTempDate(selectedDate);
-            if (Platform.OS === 'android' && event.type === 'set') {
-                setDate(selectedDate);
-                setShowDatePicker(false);
-            }
         }
     };
 
     const onTimeChange = (event: any, selectedTime?: Date) => {
+        // Android: native dialog auto-closes on any action, always reset state
+        if (Platform.OS === 'android') {
+            setShowTimePicker(false);
+            if (event.type === 'set' && selectedTime) {
+                setTime(selectedTime);
+            }
+            return;
+        }
+        // iOS: inline spinner, update temp value for Cancel/Done toolbar
         if (selectedTime) {
             setTempTime(selectedTime);
-            if (Platform.OS === 'android' && event.type === 'set') {
-                setTime(selectedTime);
-                setShowTimePicker(false);
-            }
         }
     };
 
@@ -352,7 +374,7 @@ export default function DiningCheckoutScreen() {
 
         try {
             await createRequests([{
-                storeId: restaurantId,
+                storeId: restaurantId!,
                 storeName: restaurantName,
                 items: items,
                 total: subtotal,
@@ -361,8 +383,10 @@ export default function DiningCheckoutScreen() {
                 guestsCount: guestCount
             }]);
             setStep('waiting');
-        } catch (e) {
-            Alert.alert('Error', 'Failed to submit order request. Please try again.');
+        } catch (e: any) {
+            console.error('[DiningCheckout] Request booking failed:', e);
+            const msg = e?.message || String(e) || 'Unknown error';
+            Alert.alert('Booking Failed', msg.length > 300 ? msg.substring(0, 300) + '...' : msg);
         }
     };
 
@@ -379,7 +403,9 @@ export default function DiningCheckoutScreen() {
         try {
             const apiUrl = process.env.EXPO_PUBLIC_API_URL;
             console.log('[DiningCheckout] API URL:', apiUrl, 'amount:', total);
-            const { data: { user } } = await supabase.auth.getUser();
+            // Use getSession() — supabase.auth.getUser() hangs on this project (see supabase.ts:43-54)
+            const { data: { session: authSession } } = await supabase.auth.getSession();
+            const user = authSession?.user;
             console.log('[DiningCheckout] User:', user?.id);
             const res = await fetch(`${apiUrl}/payments/create-order`, {
                 method: 'POST',
@@ -435,8 +461,21 @@ export default function DiningCheckoutScreen() {
                 return;
             }
 
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
+            // ANDROID DEMO HOTFIX (May 19, 2026): refresh the Supabase session first
+            // in case the Razorpay WebView evicted it. Then read user from session.
+            try { await supabase.auth.refreshSession(); } catch (e) { console.warn('[DiningCheckout] refreshSession failed', e); }
+            // IMPORTANT: Do NOT call supabase.auth.getUser() — it hits GET /auth/v1/user
+            // which is known to hang on this project (see supabase.ts:43-54). Use
+            // getSession() instead and read user from the session object.
+            const { data: { session: authSession } } = await supabase.auth.getSession();
+            const user = authSession?.user;
+            if (!user) {
+                console.error('[DiningCheckout] No auth session during payment success');
+                Alert.alert('Session Issue', 'Your payment succeeded but we could not link it to your account. Please contact support with this Payment ID: ' + id);
+                setStep('error');
+                return;
+            }
+            {
                 const otp = Math.floor(1000 + Math.random() * 9000).toString();
 
                 // Create order via API instead of direct Supabase insert
@@ -446,42 +485,61 @@ export default function DiningCheckoutScreen() {
                 const correctStoreId = acceptedReq?.store_id || String(restaurantId);
                 const correctBranchId = acceptedReq?.branch_id || String(restaurantId);
 
-                const orderRes = await fetch(`${apiUrl}/orders`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        userId: user.id,
-                        storeId: correctStoreId,
-                        branchId: correctBranchId,
-                        items: items.map(item => ({
-                            storeProductId: null,
-                            name: item.name,
-                            isVeg: item.isVeg,
-                            quantity: item.quantity,
-                            price: item.price
-                        })),
-                        totalAmount: finalTotalToPay || total,
-                        paid: true,
-                        paymentId: id,
-                            orderRequestId: acceptedRequests[0]?.id,
-                        customerName: user.user_metadata?.full_name || user.email?.split('@')[0],
-                        customerPhone: user.phone || '',
-                        storeName: restaurantName,
-                        specialInstructions: '',
-                        arrivalTime: combinedArrivalTime,
-                        otp,
-                        orderType: 'dine-in',
-                        guestsCount: guestCount
-                    })
-                });
+                const orderPayload = {
+                    userId: user.id,
+                    storeId: correctStoreId,
+                    branchId: correctBranchId,
+                    items: items.map(item => ({
+                        storeProductId: null,
+                        name: item.name,
+                        isVeg: item.isVeg,
+                        quantity: item.quantity,
+                        price: item.price
+                    })),
+                    totalAmount: finalTotalToPay || total,
+                    paid: true,
+                    paymentId: id,
+                    orderRequestId: acceptedRequests[0]?.id,
+                    customerName: user.user_metadata?.full_name || user.email?.split('@')[0],
+                    customerPhone: user.phone || '',
+                    storeName: restaurantName,
+                    specialInstructions: '',
+                    arrivalTime: combinedArrivalTime,
+                    otp,
+                    orderType: 'dine-in',
+                    guestsCount: guestCount
+                };
 
-                if (!orderRes.ok) {
-                    const errorBody = await orderRes.text();
-                    console.error('[DiningCheckout] API order creation failed:', orderRes.status, errorBody);
-                    throw new Error('Order creation failed');
+                // Idempotent on paymentId → safe to auto-retry transient failures.
+                let createdOrder: any = {};
+                for (let attempt = 1; attempt <= 3; attempt++) {
+                    const orderRes = await fetch(`${apiUrl}/orders`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(orderPayload)
+                    });
+
+                    if (orderRes.ok) {
+                        try { createdOrder = await orderRes.json(); } catch { createdOrder = {}; }
+                        break;
+                    }
+
+                    let errBody: any = {};
+                    try { errBody = await orderRes.json(); } catch { errBody = {}; }
+                    console.error(`[DiningCheckout] order attempt ${attempt}/3 failed:`, orderRes.status, JSON.stringify(errBody));
+
+                    if (['STORE_OFFLINE', 'STORE_CLOSED_TODAY', 'STORE_CLOSED_HOURS', 'STORE_LUNCH_BREAK'].includes(errBody.error)) {
+                        Alert.alert('Store Unavailable', errBody.message || 'This store is currently not accepting orders. Your payment will be refunded.');
+                        throw new Error(errBody.message || 'Store unavailable');
+                    }
+
+                    if (errBody.retryable && attempt < 3) {
+                        await new Promise(r => setTimeout(r, 1200 * attempt));
+                        continue;
+                    }
+
+                    throw new Error(errBody.message || "We couldn't place your order. Your payment is safe — we'll reconcile or refund it automatically.");
                 }
-
-                const createdOrder = await orderRes.json();
                 
                 // Capture all needed data before clearing cart
                 setConfirmedOrderData({
@@ -854,15 +912,15 @@ export default function DiningCheckoutScreen() {
     // ==================== MAIN FORM ====================
     return (
         <SafeAreaView className="flex-1 bg-gray-50">
-            <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
-                {/* Header */}
-                <View className="flex-row items-center px-5 py-4 bg-white border-b border-gray-100">
-                    <TouchableOpacity onPress={() => navigation.goBack()} className="mr-4">
-                        <ArrowLeftCircle size={28} color="#1F2937" fill="white" />
-                    </TouchableOpacity>
-                    <Text className="text-[20px] font-bold text-gray-900">Confirm Dining Order</Text>
-                </View>
+            {/* Fixed Header */}
+            <View className="flex-row items-center px-5 py-4 bg-white border-b border-gray-100">
+                <TouchableOpacity onPress={() => navigation.goBack()} className="mr-4">
+                    <ArrowLeftCircle size={28} color="#1F2937" fill="white" />
+                </TouchableOpacity>
+                <Text className="text-[20px] font-bold text-gray-900">Confirm Dining Order</Text>
+            </View>
 
+            <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
                 {/* Restaurant Card */}
                 <View className="mx-5 mt-6 bg-white rounded-[20px] border border-gray-100 p-5 shadow-sm">
                     <Text className="text-[17px] font-extrabold text-[#111827] leading-tight">{restaurantName}</Text>
@@ -948,8 +1006,8 @@ export default function DiningCheckoutScreen() {
                         </View>
                     </View>
 
-                    {/* Enhanced Picker with Confirmation Toolbar (iOS) */}
-                    {(showDatePicker || (showTimePicker && Platform.OS === 'ios')) && (
+                    {/* Enhanced Picker with Confirmation Toolbar (iOS only) */}
+                    {Platform.OS === 'ios' && (showDatePicker || showTimePicker) && (
                         <View className="bg-gray-50 border-t border-gray-100 pb-4">
                             <View className="flex-row justify-between items-center px-6 py-3 border-b border-gray-100">
                                 <TouchableOpacity onPress={handleCancelPicker} className="w-10 h-10 items-center justify-center rounded-full bg-gray-200/50">
@@ -1067,11 +1125,10 @@ export default function DiningCheckoutScreen() {
                     </View>
                 </View>
 
-                <View style={{ height: 120 }} />
             </ScrollView>
 
-            {/* Bottom CTA */}
-            <View className="absolute bottom-0 left-0 right-0 px-4 bg-white border-t border-gray-50 pt-4 pb-[110px]">
+            {/* Bottom CTA — sits below ScrollView in flex layout, pb clears the absolute tab bar */}
+            <View className="px-4 bg-white border-t border-gray-50 pt-4 pb-[100px]">
                 <TouchableOpacity
                     onPress={handleRequestOrder}
                     className={`w-full bg-[#212121] rounded-[20px] items-center justify-center ${(showDatePicker || showTimePicker) ? 'opacity-50' : ''}`}

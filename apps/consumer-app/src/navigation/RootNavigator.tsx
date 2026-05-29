@@ -6,16 +6,14 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as SecureStore from 'expo-secure-store';
 
 import MainTabNavigator from './MainTabNavigator';
-import StorefrontScreen from '../screens/StorefrontScreen';
 import LocationPickerScreen from '../screens/LocationPickerScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import AuthScreen from '../screens/AuthScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import ProfileSetupScreen from '../screens/ProfileSetupScreen';
 import OffersScreen from '../screens/OffersScreen';
-import SpotlightDetailScreen from '../screens/SpotlightDetailScreen';
-import CategoryDetailScreen from '../screens/CategoryDetailScreen';
 import YourOrdersScreen from '../screens/YourOrdersScreen';
+import NotificationsScreen from '../screens/NotificationsScreen';
 import CartScreen from '../screens/CartScreen';
 import FavoritesScreen from '../screens/FavoritesScreen';
 import PaymentMethodsScreen from '../screens/PaymentMethodsScreen';
@@ -99,9 +97,6 @@ export default function RootNavigator() {
                 <Stack.Screen name="Auth" component={AuthScreen} options={{ presentation: 'modal' }} />
 
                 {/* Browsable screens — no session required */}
-                <Stack.Screen name="Storefront" component={StorefrontScreen} />
-                <Stack.Screen name="CategoryDetail" component={CategoryDetailScreen} />
-                <Stack.Screen name="SpotlightDetail" component={SpotlightDetailScreen} />
                 <Stack.Screen name="LocationPicker" component={LocationPickerScreen} options={{ presentation: 'fullScreenModal' }} />
 
                 {/* Auth-gated screens — individual screens handle auth checks */}
@@ -109,6 +104,7 @@ export default function RootNavigator() {
                 <Stack.Screen name="Profile" component={ProfileScreen} />
                 <Stack.Screen name="Offers" component={OffersScreen} />
                 <Stack.Screen name="YourOrders" component={YourOrdersScreen} />
+                <Stack.Screen name="Notifications" component={NotificationsScreen} />
                 <Stack.Screen name="Favorites" component={FavoritesScreen} />
                 <Stack.Screen name="Support" component={SupportScreen} />
                 <Stack.Screen name="PaymentMethods" component={PaymentMethodsScreen} />

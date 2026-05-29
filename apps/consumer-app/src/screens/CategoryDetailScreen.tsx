@@ -1,13 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import {
     View, Text, ScrollView, Image, TouchableOpacity,
-    Dimensions, TextInput, ActivityIndicator, Modal
+    Dimensions, TextInput, ActivityIndicator
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
     ArrowLeft, Search, Star, ShoppingBag,
     ChevronRight, MapPin, Store as StoreIcon, Filter,
-    MapPinOff, WifiOff, RefreshCcw, X, Check, Clock
+    MapPinOff, WifiOff, RefreshCcw, X
 } from 'lucide-react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -23,6 +23,8 @@ import { useSubCategories } from '../hooks/useSubCategories';
 import { useCategoryItems } from '../hooks/useCategoryItems';
 import { useNearbyStores } from '../hooks/useNearbyStores';
 import { useLocation } from '../context/LocationContext';
+import StoreFilterModal, { StoreModalFilters, DEFAULT_MODAL_FILTERS } from '../components/StoreFilterModal';
+import { getFilterConfig } from '../utils/filterConfig';
 
 const { width } = Dimensions.get('window');
 
@@ -85,8 +87,21 @@ export default function CategoryDetailScreen() {
 
     // ── Filter Modal State ──
     const [isFilterModalVisible, setFilterModalVisible] = useState(false);
-    const [modalSortBy, setModalSortBy] = useState<'distance' | 'prep_time'>('distance');
-    const [modalRadius, setModalRadius] = useState(10000);
+    const [storeFilters, setStoreFilters] = useState<StoreModalFilters>({ ...DEFAULT_MODAL_FILTERS });
+
+    // ── Dynamic filter config based on category ──
+    const filterConfig = useMemo(() => getFilterConfig(categoryName), [categoryName]);
+
+    // ── Available brands from category items ──
+    const availableBrands = useMemo(() => {
+        if (!filterConfig.showBrands) return [];
+        const brands = [...new Set(
+            categoryItems
+                .map(item => (item.product as any)?.brand)
+                .filter(Boolean)
+        )].sort();
+        return brands as string[];
+    }, [categoryItems, filterConfig.showBrands]);
 
     // ── Data: Filter stores by vertical name matching categoryName ──
     const categoryStores = useMemo(() => {
@@ -111,14 +126,31 @@ export default function CategoryDetailScreen() {
             list = list.filter(s => s.name.toLowerCase().includes(q));
         }
 
-        // ── Modal filters (applied before quick filters) ──
-        // Radius filter from Bottom Modal
-        list = list.filter(s => s.rawDist <= modalRadius);
+        // ── StoreFilterModal filters (applied before quick filters) ──
+        if (storeFilters.maxDistance) list = list.filter(s => s.rawDist <= storeFilters.maxDistance! * 1000);
+        if (storeFilters.openNow) list = list.filter(s => s.isOpen);
+        if (storeFilters.pureVeg) list = list.filter(s => (s as any).isVeg);
+        if (storeFilters.priceMin > 0 || storeFilters.priceMax < 1000) {
+            const storeIdsInPriceRange = new Set(
+                categoryItems
+                    .filter(item => item.price >= storeFilters.priceMin && item.price <= storeFilters.priceMax)
+                    .map(item => item.store_id)
+            );
+            list = list.filter(s => storeIdsInPriceRange.has(s.id));
+        }
+        if (storeFilters.brands.length > 0) {
+            const storeIdsWithBrand = new Set(
+                categoryItems
+                    .filter(item => storeFilters.brands.includes((item.product as any)?.brand))
+                    .map(item => item.store_id)
+            );
+            list = list.filter(s => storeIdsWithBrand.has(s.id));
+        }
 
         // Modal sort
-        if (modalSortBy === 'distance') {
+        if (storeFilters.sortBy === 'distance') {
             list.sort((a, b) => a.rawDist - b.rawDist);
-        } else if (modalSortBy === 'prep_time') {
+        } else if (storeFilters.sortBy === 'prep_time') {
             list.sort((a, b) => (parseInt(a.prepTime || '99') || 99) - (parseInt(b.prepTime || '99') || 99));
         }
 
@@ -144,7 +176,7 @@ export default function CategoryDetailScreen() {
         }
 
         return list;
-    }, [stores, categoryName, searchText, nearbyStoreIds, distanceMap, activeSubCategory, categoryItems, activeQuickFilter, modalSortBy, modalRadius]);
+    }, [stores, categoryName, searchText, nearbyStoreIds, distanceMap, activeSubCategory, categoryItems, activeQuickFilter, storeFilters]);
 
     const heroImage = currentVertical?.banner_url || DEFAULT_HERO;
 
@@ -227,7 +259,13 @@ export default function CategoryDetailScreen() {
                             placeholderTextColor="#9CA3AF"
                             value={searchText}
                             onChangeText={setSearchText}
+                            style={{ textAlignVertical: 'center', paddingVertical: 0, includeFontPadding: false }}
                         />
+                        {searchText.length > 0 && (
+                            <TouchableOpacity onPress={() => setSearchText('')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                                <X size={18} color="#6B7280" />
+                            </TouchableOpacity>
+                        )}
                     </View>
                 </View>
 
@@ -342,107 +380,19 @@ export default function CategoryDetailScreen() {
 
             {getTotal() > 0 && <CartSummaryBar itemCount={items.length} totalAmount={getTotal()} />}
 
-            {/* ═══════ FILTER BOTTOM SHEET MODAL ═══════ */}
-            <Modal
+            {/* ═══════ FILTER MODAL (Dynamic per category) ═══════ */}
+            <StoreFilterModal
                 visible={isFilterModalVisible}
-                animationType="slide"
-                transparent={true}
-                onRequestClose={() => setFilterModalVisible(false)}
-            >
-                <View className="flex-1 justify-end" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-                    <View className="bg-white rounded-t-[32px] overflow-hidden shadow-2xl">
-                        {/* Modal Header */}
-                        <View className="px-6 pt-6 pb-4 flex-row justify-between items-center border-b border-gray-50">
-                            <View>
-                                <Text className="text-gray-900 text-lg font-bold">Filters</Text>
-                                <Text className="text-gray-400 text-[10px] font-semibold uppercase tracking-widest mt-0.5">Refine your results</Text>
-                            </View>
-                            <TouchableOpacity
-                                onPress={() => setFilterModalVisible(false)}
-                                className="bg-gray-100 p-2 rounded-full"
-                            >
-                                <X size={18} color="#6B7280" />
-                            </TouchableOpacity>
-                        </View>
-
-                        <View className="px-6 pt-5 pb-3">
-                            {/* ── Section 1: Sort By ── */}
-                            <Text className="text-[13px] font-bold text-gray-500 uppercase tracking-wider mb-3">Sort By</Text>
-
-                            <TouchableOpacity
-                                onPress={() => {
-                                    setModalSortBy('distance');
-                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                }}
-                                className={`flex-row items-center p-3.5 rounded-2xl mb-2 border-2 ${modalSortBy === 'distance' ? 'border-[#B52725] bg-red-50' : 'border-gray-100 bg-white'}`}
-                                activeOpacity={0.8}
-                            >
-                                <View className={`w-9 h-9 rounded-xl items-center justify-center ${modalSortBy === 'distance' ? 'bg-[#B52725]' : 'bg-gray-50'}`}>
-                                    <MapPin size={16} color={modalSortBy === 'distance' ? 'white' : '#9CA3AF'} />
-                                </View>
-                                <View className="ml-3 flex-1">
-                                    <Text className={`text-[14px] font-bold ${modalSortBy === 'distance' ? 'text-gray-900' : 'text-gray-600'}`}>Distance (Nearest First)</Text>
-                                    <Text className="text-[10px] text-gray-400 font-medium">Show closest stores at the top</Text>
-                                </View>
-                                {modalSortBy === 'distance' && <Check size={18} color="#B52725" />}
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                onPress={() => {
-                                    setModalSortBy('prep_time');
-                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                }}
-                                className={`flex-row items-center p-3.5 rounded-2xl mb-2 border-2 ${modalSortBy === 'prep_time' ? 'border-[#B52725] bg-red-50' : 'border-gray-100 bg-white'}`}
-                                activeOpacity={0.8}
-                            >
-                                <View className={`w-9 h-9 rounded-xl items-center justify-center ${modalSortBy === 'prep_time' ? 'bg-[#B52725]' : 'bg-gray-50'}`}>
-                                    <Clock size={16} color={modalSortBy === 'prep_time' ? 'white' : '#9CA3AF'} />
-                                </View>
-                                <View className="ml-3 flex-1">
-                                    <Text className={`text-[14px] font-bold ${modalSortBy === 'prep_time' ? 'text-gray-900' : 'text-gray-600'}`}>Prep Time (Fastest First)</Text>
-                                    <Text className="text-[10px] text-gray-400 font-medium">Prioritize quick turnaround stores</Text>
-                                </View>
-                                {modalSortBy === 'prep_time' && <Check size={18} color="#B52725" />}
-                            </TouchableOpacity>
-
-                            {/* ── Section 2: Distance ── */}
-                            <Text className="text-[13px] font-bold text-gray-500 uppercase tracking-wider mt-5 mb-3">Distance</Text>
-                            <View className="flex-row" style={{ gap: 10 }}>
-                                {[
-                                    { label: '< 1 km', value: 1000 },
-                                    { label: '< 3 km', value: 3000 },
-                                    { label: '< 10 km', value: 10000 },
-                                ].map(opt => {
-                                    const isActive = modalRadius === opt.value;
-                                    return (
-                                        <TouchableOpacity
-                                            key={opt.value}
-                                            onPress={() => {
-                                                setModalRadius(opt.value);
-                                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                            }}
-                                            className={`flex-1 py-3 rounded-2xl border-2 items-center ${isActive ? 'border-[#B52725] bg-red-50' : 'border-gray-100 bg-white'}`}
-                                        >
-                                            <Text className={`text-[14px] font-bold ${isActive ? 'text-[#B52725]' : 'text-gray-600'}`}>{opt.label}</Text>
-                                        </TouchableOpacity>
-                                    );
-                                })}
-                            </View>
-
-                            {/* ── Apply Button ── */}
-                            <TouchableOpacity
-                                onPress={() => {
-                                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                                    setFilterModalVisible(false);
-                                }}
-                                className="bg-[#B52725] py-4 rounded-2xl items-center mt-6 mb-2 shadow-md"
-                            >
-                                <Text className="text-white font-bold uppercase tracking-widest text-[13px]">Apply Filters</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
+                filters={storeFilters}
+                onApply={(f) => setStoreFilters(f)}
+                onClose={() => setFilterModalVisible(false)}
+                showDietary={filterConfig.showDietary}
+                showBrands={filterConfig.showBrands}
+                availableBrands={availableBrands}
+                showRatings={filterConfig.showRatings}
+                showPriceRange={filterConfig.showPriceRange}
+                showSortOptions={filterConfig.showSortOptions}
+            />
 
         </SafeAreaView>
     );

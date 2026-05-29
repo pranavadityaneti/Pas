@@ -1,6 +1,6 @@
 export type RootStackParamList = {
     Main: undefined;
-    Storefront: { storeId: string };
+    Storefront: { storeId: string; highlightProductId?: string; orderMode?: 'pickup' | 'dining' };
     Checkout: {
         selectedCoupon?: { code: string; discount: number },
         specialInstructions?: string
@@ -18,6 +18,7 @@ export type RootStackParamList = {
     SpotlightDetail: { spotlightId: string };
     CategoryDetail: { categoryId: string; categoryName: string };
     YourOrders: undefined;
+    Notifications: undefined;
     Cart: undefined;
     Favorites: undefined;
     PaymentMethods: undefined;

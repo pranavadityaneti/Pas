@@ -4,6 +4,7 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
@@ -18,10 +19,37 @@ Notifications.setNotificationHandler({
     }),
 });
 
+// Map a notification's data payload to an in-app route.
+// Types match the canonical UPPERCASE set the server emits.
+// If the server has populated a `link` field (Phase B3), it takes precedence.
+// Exported so the in-app notifications list can share the same routing logic.
+export function routeForNotification(data: any): string | null {
+    if (!data) return null;
+    if (typeof data.link === 'string' && data.link.startsWith('/')) {
+        return data.link;
+    }
+    const type = String(data.type || '').toUpperCase();
+    switch (type) {
+        case 'NEW_ORDER':
+        case 'NEW_ORDER_REQUEST':
+        case 'ORDER_CANCELLED':
+        case 'CANCELLED':
+        case 'RIDER_ARRIVED':
+        case 'ORDER_UPDATE':
+        case 'COMPLETED':
+            return '/(main)/orders';
+        case 'LOW_STOCK':
+            return '/(main)/inventory';
+        default:
+            return '/(main)/notifications';
+    }
+}
+
 export function usePushNotifications() {
     const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
     const [permissionStatus, setPermissionStatus] = useState<string | null>(null);
     const registrationAttempted = useRef(false);
+    const router = useRouter();
 
     useEffect(() => {
         // Prevent duplicate registration on re-renders
@@ -30,6 +58,45 @@ export function usePushNotifications() {
 
         registerForPushNotifications();
     }, []);
+
+    // Notification-tap handler — routes the merchant to the right screen based on
+    // the notification's data payload. Covers:
+    //   - Foreground taps (banner shown while app is open)
+    //   - Background taps (notification tray while app is backgrounded)
+    //   - Cold-start taps (app fully killed, launched by tapping a notification)
+    useEffect(() => {
+        const subscription = Notifications.addNotificationResponseReceivedListener(response => {
+            const data = response.notification.request.content.data;
+            const route = routeForNotification(data);
+            console.log('[Push] Tap received, type=', data?.type, 'referenceId=', data?.referenceId, '→ route', route);
+            if (route) {
+                try {
+                    router.push(route as any);
+                } catch (e: any) {
+                    console.warn('[Push] Navigation failed:', e?.message || e);
+                }
+            }
+        });
+
+        // Cold-start: if the app was launched by tapping a notification, route to the right place
+        Notifications.getLastNotificationResponseAsync()
+            .then(response => {
+                if (!response) return;
+                const data = response.notification.request.content.data;
+                const route = routeForNotification(data);
+                console.log('[Push] Cold-start launch by tap, type=', data?.type, '→ route', route);
+                if (route) {
+                    try {
+                        router.push(route as any);
+                    } catch (e: any) {
+                        console.warn('[Push] Cold-start navigation failed:', e?.message || e);
+                    }
+                }
+            })
+            .catch(e => console.warn('[Push] getLastNotificationResponseAsync failed:', e?.message || e));
+
+        return () => subscription.remove();
+    }, [router]);
 
     async function registerForPushNotifications() {
         try {
@@ -98,6 +165,11 @@ export function usePushNotifications() {
                 return;
             }
 
+            // Capture deviceId for multi-device dedupe — `Device.osBuildId` is stable per device
+            // and survives app reinstalls; falls back to model name + osVersion if unavailable.
+            const deviceId = Device.osBuildId
+                || `${Device.modelName ?? 'unknown'}-${Device.osVersion ?? 'unknown'}`;
+
             const response = await fetch(`${API_URL}/push-tokens/register`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -105,6 +177,7 @@ export function usePushNotifications() {
                     userId: user.id,
                     expoPushToken: token,
                     platform: Platform.OS,
+                    deviceId,
                 }),
             });
 

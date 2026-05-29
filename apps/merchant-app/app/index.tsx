@@ -4,7 +4,7 @@ import { Colors } from '../constants/Colors';
 import { useStore } from '../src/context/StoreContext';
 
 export default function Index() {
-    const { store, loading } = useStore();
+    const { store, loading, isApproved } = useStore();
 
     // If the context is still loading data, show a spinner
     if (loading) {
@@ -21,6 +21,16 @@ export default function Index() {
         return <Redirect href="/(auth)/login" />;
     }
 
-    // Store exists, redirect to dashboard
+    // Approval gate: a Store row exists during signup (created at the draft step,
+    // BEFORE payment/approval). Only admin-approved merchants (Store.active=true)
+    // may enter the app. Drafts / awaiting-approval are routed to the pending screen,
+    // which offers a path back into signup. Prevents accessing/editing a store
+    // without completing + paying for onboarding.
+    if (!isApproved) {
+        console.log('[Index] Store not approved (draft/pending), routing to pending');
+        return <Redirect href="/(auth)/pending" />;
+    }
+
+    // Approved store, redirect to dashboard
     return <Redirect href="/(main)/dashboard" />;
 }

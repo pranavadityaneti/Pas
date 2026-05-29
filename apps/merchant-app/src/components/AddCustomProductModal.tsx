@@ -25,7 +25,7 @@ interface AddCustomProductModalProps {
 }
 
 export default function AddCustomProductModal({ visible, onClose, onSuccess, storeId, initialName, itemToEdit, verticalPills = [] }: AddCustomProductModalProps) {
-    const { activeRole } = useStore();
+    const { activeRole, hasRealBranch } = useStore();
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const [loading, setLoading] = useState(false);
@@ -346,6 +346,16 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
     };
 
     const handleSave = async () => {
+        // Layer 3 defense (May 20, 2026): refuse to write StoreProduct rows when
+        // no real merchant_branches row exists for this merchant.
+        if (!hasRealBranch) {
+            Alert.alert(
+                'Set up your branch first',
+                'You need to add at least one branch before adding products. Go to Settings → Branches → Add Branch.',
+            );
+            return;
+        }
+
         // Validation
         const parsedMrp = parseFloat(mrp);
         const parsedSellingPrice = parseFloat(sellingPrice || mrp);

@@ -91,6 +91,7 @@ export default function SupportScreen() {
             value={searchQuery}
             onChangeText={setSearchQuery}
             className="flex-1 py-3.5 text-white font-bold text-base"
+            style={{ textAlignVertical: 'center', includeFontPadding: false }}
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => setSearchQuery('')} className="px-3">

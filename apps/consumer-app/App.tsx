@@ -8,22 +8,30 @@ import { CartProvider } from './src/context/CartContext';
 import { CategoryProvider } from './src/context/CategoryContext';
 
 import { AuthProvider } from './src/context/AuthContext';
+import { NotificationProvider } from './src/context/NotificationContext';
+import { ToastContainer } from './src/components/NotificationToast';
 import { navigationRef } from './src/navigation/navigationRef';
+import PushNotificationRegistrar from './src/components/PushNotificationRegistrar';
 
 export default function App() {
     return (
         <SafeAreaProvider>
             <AuthProvider>
-                <CategoryProvider>
-                    <LocationProvider>
-                        <CartProvider>
-                            <NavigationContainer ref={navigationRef}>
-                                <RootNavigator />
-                            </NavigationContainer>
-                        </CartProvider>
-                    </LocationProvider>
-                </CategoryProvider>
+                <PushNotificationRegistrar />
+                <NotificationProvider>
+                    <CategoryProvider>
+                        <LocationProvider>
+                            <CartProvider>
+                                <NavigationContainer ref={navigationRef}>
+                                    <RootNavigator />
+                                </NavigationContainer>
+                            </CartProvider>
+                        </LocationProvider>
+                    </CategoryProvider>
+                </NotificationProvider>
             </AuthProvider>
+            {/* Mounted once at root; module-level ref lets useNotifications() fire it. */}
+            <ToastContainer />
         </SafeAreaProvider>
     );
 }

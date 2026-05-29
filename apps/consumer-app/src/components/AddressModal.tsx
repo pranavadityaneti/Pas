@@ -170,6 +170,7 @@ export default function AddressModal({ visible, onClose, onSelect }: AddressModa
                                 placeholder="Search building, area or street..."
                                 value={searchQuery}
                                 onChangeText={searchPlaces}
+                                style={{ textAlignVertical: 'center', paddingVertical: 0, includeFontPadding: false }}
                             />
                             {(searchQuery.length > 0 || isSearching) && (
                                 <TouchableOpacity onPress={() => setSearchQuery('')}>

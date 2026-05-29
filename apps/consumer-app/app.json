@@ -23,11 +23,12 @@
       },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSLocationWhenInUseUsageDescription": "Pick at Store requires access to your location to discover nearby grocery stores, bakeries, and calculate accurate delivery ETAs for your orders."
+        "NSLocationWhenInUseUsageDescription": "Pick at Store requires access to your location to discover nearby grocery stores, bakeries, and calculate accurate delivery ETAs for your orders.",
+        "UIBackgroundModes": ["remote-notification"]
       }
     },
     "android": {
-      "versionCode": 3,
+      "versionCode": 7,
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyAQAg7zpYvmd2BJGCGmf1opDLDC4KXbKUg"
@@ -43,7 +44,8 @@
       "predictiveBackGestureEnabled": false,
       "package": "io.pickatstore.consumer",
       "privacyPolicyUrl": "https://www.pickatstore.io/privacypolicy",
-      "usesCleartextTraffic": true
+      "usesCleartextTraffic": true,
+      "permissions": ["android.permission.POST_NOTIFICATIONS"]
     },
     "web": {
       "output": "static",
@@ -91,6 +93,12 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location to find nearby stores and calculate delivery times.",
           "locationWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location to find nearby stores."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "sounds": []
         }
       ]
     ],

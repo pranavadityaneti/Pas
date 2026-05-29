@@ -1,3 +1,10 @@
+// @lock — DO NOT EDIT THE INVOICE-RELATED SECTIONS WITHOUT EXPLICIT USER PERMISSION.
+// V1 invoice modal approved May 19, 2026. Locked sections:
+//   - The `fetchOrders` Supabase select (must keep the `branch.merchant.gst_number` join)
+//   - The order card's onPress handler that opens InvoiceModal
+//   - The <InvoiceModal /> render at the bottom of the JSX tree
+//   - The `selectedOrder` / `invoiceVisible` state
+// Other parts of this screen (card layout, statuses, refresh logic) remain freely editable.
 import React, { useEffect, useState } from 'react';
 import {
     View, Text, TouchableOpacity, ScrollView,
@@ -13,12 +20,15 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { supabase } from '../lib/supabase';
 import * as Haptics from 'expo-haptics';
+import InvoiceModal from '../components/InvoiceModal';
 
 export default function YourOrdersScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const [orders, setOrders] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
+    const [invoiceVisible, setInvoiceVisible] = useState(false);
 
     useEffect(() => {
         fetchOrders();
@@ -66,7 +76,10 @@ export default function YourOrdersScreen() {
                 .select(`
                     *,
                     order_items (*),
-                    branch:merchant_branches(address, city, phone, manager_name)
+                    branch:merchant_branches(
+                        address, city, phone, manager_name,
+                        merchant:merchants(gst_number, store_name)
+                    )
                 `)
                 .eq('user_id', user.id)
                 .order('created_at', { ascending: false });
@@ -174,6 +187,11 @@ export default function YourOrdersScreen() {
                             key={order.id}
                             className="bg-white rounded-3xl p-5 mb-5 border border-gray-100 shadow-sm"
                             activeOpacity={0.7}
+                            onPress={() => {
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                setSelectedOrder(order);
+                                setInvoiceVisible(true);
+                            }}
                         >
                             {/* Block 1: Header */}
                             <View className="bg-[#B52725] rounded-xl p-4 flex-row items-center justify-between mb-4">
@@ -281,6 +299,11 @@ export default function YourOrdersScreen() {
                     })
                 )}
             </ScrollView>
+            <InvoiceModal
+                visible={invoiceVisible}
+                order={selectedOrder}
+                onClose={() => setInvoiceVisible(false)}
+            />
         </SafeAreaView>
     );
 }

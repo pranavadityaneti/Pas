@@ -1,3 +1,14 @@
+// @lock — DO NOT EDIT WITHOUT EXPLICIT USER PERMISSION.
+// Pickup Checkout — multiple approved layers (cumulative, latest May 19, 2026 demo crisis):
+//   1. Non-absolute bottom CTA with pb-[100px] for tab bar clearance (original layout fix).
+//   2. handlePaymentSuccess session-recovery block: refresh + getSession to recover
+//      from Razorpay WebView session eviction (uses `effectiveUser`, not `user`, for
+//      both /payments/verify and /orders calls).
+//   3. errorDiagnostic state + on-screen red diagnostic box that shows the actual
+//      exception message (e.g. Prisma FK violations) — this is what surfaced the
+//      missing-Prisma-User-row bug during the live demo.
+// Any modification to the checkout flow, error UI, or session-handling logic
+// REQUIRES the user's explicit chat-confirmed approval. Hard lock.
 // Confirm Pre-order Screen: Order review with arrival details → Order confirmed with OTP.
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
@@ -82,6 +93,7 @@ export default function CheckoutScreen() {
     } = useOrderRequests();
 
     const [step, setStep] = useState<'form' | 'waiting' | 'results' | 'confirmed' | 'error'>('form');
+    const [errorDiagnostic, setErrorDiagnostic] = useState<string>('');
     const [finalTotalToPay, setFinalTotalToPay] = useState(0);
     const [finalGstToPay, setFinalGstToPay] = useState(0);
     const [selectedTime, setSelectedTime] = useState<Record<string, string>>({});
@@ -467,8 +479,14 @@ export default function CheckoutScreen() {
                 orderType: 'pickup' as const
             })));
             setStep('waiting');
-        } catch (e) {
-            Alert.alert('Error', 'Failed to submit order requests. Please try again.');
+        } catch (e: any) {
+            console.error('[Checkout] Order request failed:', e?.message || e);
+            const msg = e?.message?.includes('offline')
+                ? e.message
+                : e?.message?.includes('session')
+                    ? 'Your session has expired. Please sign out and sign in again.'
+                    : 'Failed to submit order requests. Please try again.';
+            Alert.alert('Error', msg);
         }
     };
 
@@ -477,6 +495,18 @@ export default function CheckoutScreen() {
         setShowPayment(false);
 
         try {
+            // ANDROID DEMO HOTFIX (May 19, 2026, v2):
+            // Razorpay WebView can evict the Supabase session, especially on Android.
+            // If the cached useAuth user is null after payment, refresh + read from
+            // getSession (NOT getUser — getUser hangs on GET /auth/v1/user, per supabase.ts).
+            let effectiveUser: any = user;
+            if (!effectiveUser) {
+                try { await supabase.auth.refreshSession(); } catch (e) { console.warn('[Checkout] refreshSession failed', e); }
+                const { data: { session: refreshedSession } } = await supabase.auth.getSession();
+                effectiveUser = refreshedSession?.user || null;
+                console.log('[Checkout] Session recovery attempt — user:', effectiveUser?.id || 'still null');
+            }
+
             // Step 1: Verify Razorpay Signature
             const apiUrl = process.env.EXPO_PUBLIC_API_URL;
             const verifyRes = await fetch(`${apiUrl}/payments/verify`, {
@@ -489,16 +519,16 @@ export default function CheckoutScreen() {
                 })
             });
             const verifyData = await verifyRes.json();
-            
+
             if (!verifyData.success) {
                 Alert.alert('Security Error', 'Payment signature could not be verified. Please contact support.');
                 return;
             }
 
             // Step 2: Create orders via Backend API (NOT direct Supabase)
-            // Use the cached `user` from useAuth() context instead of calling
-            // supabase.auth.getUser() — the Razorpay WebView can evict the session.
-            if (!user) throw new Error('User not authenticated');
+            // Use effectiveUser (cached or session-refresh recovered) — the Razorpay
+            // WebView can evict the live useAuth context on Android.
+            if (!effectiveUser) throw new Error('User not authenticated');
 
             const actualSubtotal = acceptedRequests.reduce((sum: number, r: any) => sum + r.subtotal, 0);
             const createdOrders: any[] = [];
@@ -513,44 +543,64 @@ export default function CheckoutScreen() {
                 const storeIdStr = String(req.store_id);
                 const storeOtp = storeOtps[storeIdStr] || Math.floor(1000 + Math.random() * 9000).toString();
 
-                // Route through Backend API — triggers notifications, stock, and socket broadcasts
-                const orderRes = await fetch(`${apiUrl}/orders`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        userId: user.id,
-                        storeId: req.store_id,
-                        branchId: req.branch_id,
-                        totalAmount: groupFinalTotal,
-                        paid: true,
-                        paymentId: id,
-                        orderRequestId: req.id,
-                        customerName: pickupMode === 'myself'
-                            ? (user.user_metadata?.full_name || user.email?.split('@')[0] || 'Guest')
-                            : pickupName,
-                        customerPhone: pickupMode === 'myself'
-                            ? (user.phone || '')
-                            : pickupPhone,
-                        storeName: req.store_name,
-                        specialInstructions: specialInstructions,
-                        arrivalTime: selectedTime[req.branch_id] || selectedTime[req.store_id] || 'ASAP',
-                        otp: storeOtp,
-                        items: req.items.map((item: any) => ({
-                            name: item.name,
-                            quantity: item.quantity,
-                            price: item.price,
-                            storeProductId: item.id || item.storeProductId || null
-                        }))
-                    })
-                });
+                // Route through Backend API — triggers notifications, stock, and socket broadcasts.
+                // The endpoint is IDEMPOTENT on paymentId, so we can safely auto-retry transient
+                // failures (e.g. cold network) without risking a duplicate order or double charge.
+                const orderPayload = {
+                    userId: effectiveUser.id,
+                    storeId: req.store_id,
+                    branchId: req.branch_id,
+                    totalAmount: groupFinalTotal,
+                    paid: true,
+                    paymentId: id,
+                    orderRequestId: req.id,
+                    customerName: pickupMode === 'myself'
+                        ? (effectiveUser.user_metadata?.full_name || effectiveUser.email?.split('@')[0] || 'Guest')
+                        : pickupName,
+                    customerPhone: pickupMode === 'myself'
+                        ? (effectiveUser.phone || '')
+                        : pickupPhone,
+                    storeName: req.store_name,
+                    specialInstructions: specialInstructions,
+                    arrivalTime: selectedTime[req.branch_id] || selectedTime[req.store_id] || 'ASAP',
+                    otp: storeOtp,
+                    items: req.items.map((item: any) => ({
+                        name: item.name,
+                        quantity: item.quantity,
+                        price: item.price,
+                        storeProductId: item.id || item.storeProductId || null
+                    }))
+                };
 
-                if (!orderRes.ok) {
-                    const errBody = await orderRes.json().catch(() => ({}));
-                    console.error(`[CheckoutScreen] API order creation failed for ${req.store_name}:`, JSON.stringify(errBody));
-                    throw new Error(errBody.details || errBody.error || 'Failed to create order on server');
+                let orderData: any = null;
+                for (let attempt = 1; attempt <= 3; attempt++) {
+                    const orderRes = await fetch(`${apiUrl}/orders`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(orderPayload)
+                    });
+
+                    if (orderRes.ok) { orderData = await orderRes.json(); break; }
+
+                    const errBody: any = await orderRes.json().catch(() => ({}));
+                    console.error(`[CheckoutScreen] order attempt ${attempt}/3 failed for ${req.store_name}:`, JSON.stringify(errBody));
+
+                    // Store-availability errors: don't retry — surface clearly (payment will be refunded).
+                    if (['STORE_OFFLINE', 'STORE_CLOSED_TODAY', 'STORE_CLOSED_HOURS', 'STORE_LUNCH_BREAK'].includes(errBody.error)) {
+                        Alert.alert('Store Unavailable', errBody.message || 'This store is currently not accepting orders. Your payment will be refunded.');
+                        throw new Error(errBody.message || 'Store unavailable');
+                    }
+
+                    // Retry only transient/retryable failures (idempotent on paymentId).
+                    if (errBody.retryable && attempt < 3) {
+                        await new Promise(r => setTimeout(r, 1200 * attempt));
+                        continue;
+                    }
+
+                    // Out of retries → surface the API's friendly, money-safe message (never raw internals).
+                    throw new Error(errBody.message || "We couldn't place your order. Your payment is safe — we'll reconcile or refund it automatically.");
                 }
 
-                const orderData = await orderRes.json();
                 console.log(`[CheckoutScreen] ✅ Order created via API: ${orderData.orderNumber}`);
                 createdOrders.push({ ...orderData, localOtp: storeOtp });
             }
@@ -572,8 +622,10 @@ export default function CheckoutScreen() {
                 };
             }));
             clearCart();
-        } catch (error) {
-            console.error('[CheckoutScreen] Failed to create order via API:', error);
+        } catch (error: any) {
+            // Full detail to logs only — never surface raw DB/internal errors to the customer.
+            console.error('[CheckoutScreen] Failed to create order via API:', error, '| user=', user?.id ? 'present' : 'NULL');
+            setErrorDiagnostic(error?.message || "We couldn't place your order. Your payment is safe — we'll reconcile or refund it automatically, and our team has been alerted.");
             setStep('error');
             return;
         }
@@ -601,9 +653,14 @@ export default function CheckoutScreen() {
             <SafeAreaView className="flex-1 bg-white items-center justify-center p-8">
                 <XCircle size={60} color="#EF4444" className="mb-6" />
                 <Text className="text-[24px] font-bold text-gray-900 text-center mb-3">Order Sync Failed</Text>
-                <Text className="text-[14px] text-gray-500 text-center mb-8">
+                <Text className="text-[14px] text-gray-500 text-center mb-3">
                     Your payment (ID: {paymentId}) was successful, but we encountered a network error sending your order to the restaurant.
                 </Text>
+                {errorDiagnostic ? (
+                    <Text selectable className="text-[11px] font-mono text-red-600 text-center bg-red-50 p-3 rounded-lg mb-8">
+                        {errorDiagnostic}
+                    </Text>
+                ) : <View className="mb-8" />}
                 <TouchableOpacity onPress={handleBackToHome} className="w-full bg-[#B52725] rounded-2xl items-center justify-center" style={{ height: 56 }}>
                     <Text className="text-[15px] font-bold text-white">Back to Home</Text>
                 </TouchableOpacity>
@@ -1085,12 +1142,12 @@ export default function CheckoutScreen() {
                         <View className="space-y-3">
                             <View className="flex-row items-center border border-gray-200 rounded-xl px-4 py-3.5 bg-gray-50/50">
                                 <User size={18} color="#9CA3AF" />
-                                <TextInput className="flex-1 ml-3 text-[15px] font-bold text-[#111827]" placeholder="Enter Name" value={pickupName} onChangeText={setPickupName} placeholderTextColor="#9CA3AF" />
+                                <TextInput className="flex-1 ml-3 text-[15px] font-bold text-[#111827]" placeholder="Enter Name" value={pickupName} onChangeText={setPickupName} placeholderTextColor="#9CA3AF" style={{ textAlignVertical: 'center', paddingVertical: 0, includeFontPadding: false }} />
                             </View>
                             <View className="flex-row items-center justify-between border border-gray-200 rounded-xl px-4 py-3.5 mt-3 bg-gray-50/50">
                                 <View className="flex-row items-center flex-1">
                                     <Text className="text-[15px] font-bold text-gray-500 mr-2">+91</Text>
-                                    <TextInput className="flex-1 text-[15px] font-bold text-[#111827]" placeholder="Mobile Number" value={pickupPhone.replace('+91', '').trim()} onChangeText={(t) => setPickupPhone('+91 ' + t)} keyboardType="phone-pad" placeholderTextColor="#9CA3AF" />
+                                    <TextInput className="flex-1 text-[15px] font-bold text-[#111827]" placeholder="Mobile Number" value={pickupPhone.replace('+91', '').trim()} onChangeText={(t) => setPickupPhone('+91 ' + t)} keyboardType="phone-pad" placeholderTextColor="#9CA3AF" style={{ textAlignVertical: 'center', paddingVertical: 0, includeFontPadding: false }} />
                                 </View>
                                 <TouchableOpacity className="bg-white border border-gray-200 p-2 rounded-lg shadow-sm" onPress={selectContact}><Search size={16} color="#4B5563" /></TouchableOpacity>
                             </View>
@@ -1108,10 +1165,10 @@ export default function CheckoutScreen() {
                     <View className="border-t border-gray-100 my-3" />
                     <View className="flex-row justify-between items-center"><Text className="text-[15px] text-gray-900 font-bold">To Pay</Text><Text className="text-[18px] text-gray-900 font-bold">₹{total.toFixed(2)}</Text></View>
                 </View>
-                <View style={{ height: 100 }} />
             </ScrollView>
 
-            <View className="absolute bottom-0 left-0 right-0 px-4 bg-white border-t border-gray-50 pt-4 pb-[110px]">
+            {/* Bottom CTA — sits below ScrollView in flex layout, pb clears the absolute tab bar */}
+            <View className="px-4 bg-white border-t border-gray-50 pt-4 pb-[100px]">
                 <TouchableOpacity onPress={handlePayConfirm} disabled={loading} className={`w-full rounded-[20px] items-center justify-between flex-row px-6 ${loading ? 'bg-gray-400' : 'bg-[#212121]'}`} style={{ height: 60 }}>
                     <Text className="text-[16px] font-bold text-white">{loading ? 'Processing...' : 'Place Order'}</Text>
                     {!loading && <Text className="text-[16px] font-bold text-white">₹{total.toFixed(2)}</Text>}
@@ -1132,6 +1189,7 @@ export default function CheckoutScreen() {
                                 value={contactSearchText}
                                 onChangeText={setContactSearchText}
                                 autoCorrect={false}
+                                style={{ textAlignVertical: 'center', paddingVertical: 0, includeFontPadding: false }}
                             />
                             {contactSearchText.length > 0 && (
                                 <TouchableOpacity onPress={() => setContactSearchText('')}>

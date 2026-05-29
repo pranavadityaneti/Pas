@@ -15,6 +15,9 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 // Custom storage adapter for React Native using SecureStore
+// NOTE: catches log errors but preserve original behavior (getItem returns null;
+// setItem/removeItem swallow). This makes silent keychain failures observable —
+// see Phase 2A of signout-fix plan (forlater.md / SESSION_LOG.md).
 const ExpoSecureStoreAdapter = {
     getItem: async (key: string): Promise<string | null> => {
         try {
@@ -22,7 +25,8 @@ const ExpoSecureStoreAdapter = {
                 return localStorage.getItem(key);
             }
             return await SecureStore.getItemAsync(key);
-        } catch {
+        } catch (e: any) {
+            console.warn('[SecureStore] getItem failed for key=' + key + ':', e?.message || e);
             return null;
         }
     },
@@ -33,8 +37,8 @@ const ExpoSecureStoreAdapter = {
                 return;
             }
             await SecureStore.setItemAsync(key, value);
-        } catch {
-            // Ignore errors
+        } catch (e: any) {
+            console.warn('[SecureStore] setItem failed for key=' + key + ':', e?.message || e);
         }
     },
     removeItem: async (key: string): Promise<void> => {
@@ -44,8 +48,8 @@ const ExpoSecureStoreAdapter = {
                 return;
             }
             await SecureStore.deleteItemAsync(key);
-        } catch {
-            // Ignore errors
+        } catch (e: any) {
+            console.warn('[SecureStore] removeItem failed for key=' + key + ':', e?.message || e);
         }
     },
 };

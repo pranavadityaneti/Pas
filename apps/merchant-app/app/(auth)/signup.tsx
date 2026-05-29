@@ -10,9 +10,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { decode } from 'base64-arraybuffer';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import axios from 'axios';
 import { supabase, setSessionFromTokens } from '../../src/lib/supabase';
 import { Colors } from '../../constants/Colors';
@@ -29,6 +30,16 @@ if (Constants.appOwnership !== 'expo') {
 }
 
 
+// Helper to extract city from Google Places address_components
+function extractCity(details: any): string {
+    const component = details?.address_components?.find((c: any) =>
+        c.types.includes('locality')
+    );
+    return component?.long_name || '';
+}
+
+const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyAQAg7zpYvmd2BJGCGmf1opDLDC4KXbKUg';
+
 const STEPS = ['Identity', 'Store', 'Photos', 'Branches', 'KYC', 'Subscription', 'Review'];
 
 interface Vertical {
@@ -36,13 +47,21 @@ interface Vertical {
     name: string;
     requiresFssai: boolean;
     isPremium: boolean;
+    isDining?: boolean;
 }
 
 interface Branch {
     name: string;
     address: string;
+    latitude: number | null;
+    longitude: number | null;
+    city: string;
     manager_name: string;
     phone: string;
+    cuisines: string[];
+    isVeg: boolean;
+    restaurantType: string;
+    photos: string[];
 }
 
 export default function SignupScreen() {
@@ -82,12 +101,6 @@ export default function SignupScreen() {
             throw error;
         }
     };
-
-    // TEMPORARY WIPE DIRECTIVE
-    useEffect(() => {
-        AsyncStorage.removeItem('@merchant_signup_draft').catch();
-        setStep(1);
-    }, []);
 
     useEffect(() => {
         if (resendTimer > 0) {
@@ -191,6 +204,9 @@ export default function SignupScreen() {
         address: '',
         latitude: 17.385,
         longitude: 78.4867,
+        cuisines: [] as string[],
+        isVeg: false,
+        restaurantType: '',
     });
     const [showCategoryPicker, setShowCategoryPicker] = useState(false);
 
@@ -298,6 +314,9 @@ export default function SignupScreen() {
                             ...parsed.store,
                             categoryId: parsed.store.categoryId || '',
                             categoryName: parsed.store.categoryName || parsed.store.category || '',
+                            cuisines: parsed.store.cuisines || [],
+                            isVeg: parsed.store.isVeg ?? false,
+                            restaurantType: parsed.store.restaurantType || '',
                         });
                     }
                     if (parsed.hasBranches !== undefined) setHasBranches(parsed.hasBranches);
@@ -395,6 +414,21 @@ export default function SignupScreen() {
             if (storePhotos.length < 2) {
                 Alert.alert('Error', 'Please upload at least 2 store photos');
                 return false;
+            }
+        }
+        if (step === 4) {
+            if (hasBranches && branches.length > 0) {
+                for (let i = 0; i < branches.length; i++) {
+                    const b = branches[i];
+                    if (!b.name || !b.manager_name || !b.phone) {
+                        Alert.alert('Error', `Please fill name, manager and phone for Branch ${i + 1}.`);
+                        return false;
+                    }
+                    if (b.latitude === null || b.longitude === null) {
+                        Alert.alert('Location Required', `Please search and select an address for Branch ${i + 1} so it can be placed on the map.`);
+                        return false;
+                    }
+                }
             }
         }
         if (step === 5) {
@@ -677,6 +711,17 @@ export default function SignupScreen() {
 
         const storePhotoUrls = await Promise.all(storePhotos.map((uri, idx) => uploadFile(uri, `${userId}/store_photo_${idx}.jpg`)));
 
+        // Upload branch photos
+        const branchPhotoUrls = await Promise.all(
+            branches.map(async (branch, bIdx) => {
+                if (!branch.photos || branch.photos.length === 0) return [];
+                const urls = await Promise.all(
+                    branch.photos.map((uri, pIdx) => uploadFile(uri, `${userId}/branch_${bIdx}/photo_${pIdx}.jpg`))
+                );
+                return urls.filter(u => u !== null) as string[];
+            })
+        );
+
         const payload = {
             ownerName: identity.ownerName,
             email: identity.email,
@@ -688,6 +733,9 @@ export default function SignupScreen() {
             latitude: store.latitude,
             longitude: store.longitude,
             hasBranches: hasBranches,
+            cuisines: store.cuisines,
+            isVeg: store.isVeg,
+            restaurantType: store.restaurantType,
             panNumber: kyc.panNumber,
             aadharNumber: kyc.aadharNumber,
             msmeNumber: kyc.msmeNumber,
@@ -699,7 +747,19 @@ export default function SignupScreen() {
             fssaiNumber: kyc.fssaiNumber,
             docUrls: docUrlsLocal,
             storePhotos: storePhotoUrls.filter(url => url !== null),
-            branches: hasBranches ? branches : [],
+            branches: hasBranches ? branches.map((b, i) => ({
+                name: b.name,
+                address: b.address,
+                latitude: b.latitude,
+                longitude: b.longitude,
+                city: b.city || store.city,
+                manager_name: b.manager_name,
+                phone: b.phone,
+                cuisines: b.cuisines || [],
+                is_veg: b.isVeg || false,
+                restaurant_type: b.restaurantType || null,
+                branch_photos: branchPhotoUrls[i] || [],
+            })) : [],
             finalize,
             subscription: paymentOverrides
         };
@@ -757,11 +817,11 @@ export default function SignupScreen() {
         else router.back();
     };
 
-    const addBranch = () => setBranches([...branches, { name: '', address: '', manager_name: '', phone: '' }]);
+    const addBranch = () => setBranches([...branches, { name: '', address: '', latitude: null, longitude: null, city: '', manager_name: '', phone: '', cuisines: [], isVeg: false, restaurantType: '', photos: [] }]);
     const removeBranch = (i: number) => setBranches(branches.filter((_, idx) => idx !== i));
-    const updateBranch = (i: number, field: keyof Branch, value: string) => {
+    const updateBranch = (i: number, field: keyof Branch, value: any) => {
         const updated = [...branches];
-        updated[i][field] = value;
+        (updated[i] as any)[field] = value;
         setBranches(updated);
     };
 
@@ -1054,19 +1114,159 @@ export default function SignupScreen() {
                                 📍 {store.latitude.toFixed(5)}, {store.longitude.toFixed(5)}
                             </Text>
 
-                            <View style={styles.inputGroup}>
+                            <View style={[styles.inputGroup, { zIndex: 9999 }]}>
                                 <Text style={styles.label}>Full Address</Text>
-                                <TextInput
-                                    style={[styles.input, styles.textArea]}
-                                    placeholder="Shop No, Street, Landmark..."
-                                    placeholderTextColor="#9CA3AF"
-                                    multiline
-                                    numberOfLines={3}
-                                    value={store.address}
-                                    onChangeText={(t) => setStore({ ...store, address: t })}
+                                <GooglePlacesAutocomplete
+                                    placeholder="Search store address..."
+                                    fetchDetails={true}
+                                    onPress={(data, details = null) => {
+                                        const city = extractCity(details);
+                                        setStore((prev) => ({
+                                            ...prev,
+                                            address: details?.formatted_address || data.description,
+                                            latitude: details?.geometry?.location?.lat ?? prev.latitude,
+                                            longitude: details?.geometry?.location?.lng ?? prev.longitude,
+                                            city: city || prev.city,
+                                        }));
+                                    }}
+                                    onFail={(error) => {
+                                        console.error('Google API Error:', error);
+                                    }}
+                                    textInputProps={{
+                                        onChangeText: (text: string) => {
+                                            setStore((prev) => ({ ...prev, address: text }));
+                                        },
+                                        placeholderTextColor: '#9CA3AF',
+                                    }}
+                                    query={{
+                                        key: GOOGLE_MAPS_API_KEY,
+                                        language: 'en',
+                                        components: 'country:in',
+                                    }}
+                                    styles={{
+                                        container: { flex: 0, width: '100%', zIndex: 9999 },
+                                        textInput: {
+                                            borderWidth: 1,
+                                            borderColor: '#E5E7EB',
+                                            borderRadius: 8,
+                                            height: 50,
+                                            paddingHorizontal: 16,
+                                            backgroundColor: '#F9FAFB',
+                                            fontSize: 16,
+                                            color: '#000',
+                                        },
+                                        listView: {
+                                            position: 'absolute',
+                                            top: 50,
+                                            zIndex: 10000,
+                                            elevation: 10000,
+                                            backgroundColor: 'white',
+                                            shadowColor: '#000',
+                                            shadowOffset: { width: 0, height: 2 },
+                                            shadowOpacity: 0.25,
+                                            shadowRadius: 3.84,
+                                            borderRadius: 8,
+                                        },
+                                        row: { paddingVertical: 12, paddingHorizontal: 12 },
+                                        description: { fontSize: 14, color: '#374151' },
+                                        separator: { height: 1, backgroundColor: '#F3F4F6' },
+                                    }}
+                                    enablePoweredByContainer={false}
+                                    debounce={300}
+                                    minLength={3}
+                                    nearbyPlacesAPI="GooglePlacesSearch"
                                 />
                             </View>
                         </View>
+
+                        {selectedVertical?.isDining && (
+                            <View style={styles.card}>
+                                <View style={styles.cardHeader}>
+                                    <Ionicons name="restaurant-outline" size={20} color={Colors.primary} />
+                                    <Text style={styles.cardTitle}>Restaurant Details</Text>
+                                </View>
+
+                                <View style={styles.inputGroup}>
+                                    <Text style={styles.label}>Restaurant Type</Text>
+                                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                                        {['Casual Dining', 'Fine Dining', 'Cafe', 'Quick Service', 'Dhaba', 'Cloud Kitchen'].map((t) => (
+                                            <TouchableOpacity
+                                                key={t}
+                                                onPress={() => setStore({ ...store, restaurantType: t })}
+                                                style={{
+                                                    paddingHorizontal: 14,
+                                                    paddingVertical: 8,
+                                                    borderRadius: 20,
+                                                    borderWidth: 1,
+                                                    borderColor: store.restaurantType === t ? Colors.primary : '#E5E7EB',
+                                                    backgroundColor: store.restaurantType === t ? Colors.primary : '#FFFFFF',
+                                                }}
+                                            >
+                                                <Text style={{ fontSize: 13, fontWeight: '600', color: store.restaurantType === t ? '#FFFFFF' : '#374151' }}>{t}</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                </View>
+
+                                <View style={styles.inputGroup}>
+                                    <Text style={styles.label}>Cuisines (select all that apply)</Text>
+                                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                                        {['North Indian', 'South Indian', 'Chinese', 'Street Food', 'Mughlai', 'Continental', 'Italian', 'Multi-Cuisine'].map((c) => {
+                                            const selected = store.cuisines.includes(c);
+                                            return (
+                                                <TouchableOpacity
+                                                    key={c}
+                                                    onPress={() => {
+                                                        const next = selected
+                                                            ? store.cuisines.filter(x => x !== c)
+                                                            : [...store.cuisines, c];
+                                                        setStore({ ...store, cuisines: next });
+                                                    }}
+                                                    style={{
+                                                        paddingHorizontal: 14,
+                                                        paddingVertical: 8,
+                                                        borderRadius: 20,
+                                                        borderWidth: 1,
+                                                        borderColor: selected ? Colors.primary : '#E5E7EB',
+                                                        backgroundColor: selected ? Colors.primary : '#FFFFFF',
+                                                    }}
+                                                >
+                                                    <Text style={{ fontSize: 13, fontWeight: '600', color: selected ? '#FFFFFF' : '#374151' }}>{c}</Text>
+                                                </TouchableOpacity>
+                                            );
+                                        })}
+                                    </View>
+                                </View>
+
+                                <View style={styles.inputGroup}>
+                                    <TouchableOpacity
+                                        onPress={() => setStore({ ...store, isVeg: !store.isVeg })}
+                                        style={{
+                                            flexDirection: 'row',
+                                            alignItems: 'center',
+                                            padding: 14,
+                                            borderRadius: 12,
+                                            borderWidth: 1,
+                                            borderColor: store.isVeg ? '#10B981' : '#E5E7EB',
+                                            backgroundColor: store.isVeg ? '#ECFDF5' : '#FFFFFF',
+                                        }}
+                                    >
+                                        <View style={{
+                                            width: 20, height: 20, borderRadius: 4, borderWidth: 2,
+                                            borderColor: store.isVeg ? '#10B981' : '#9CA3AF',
+                                            backgroundColor: store.isVeg ? '#10B981' : 'transparent',
+                                            alignItems: 'center', justifyContent: 'center', marginRight: 12,
+                                        }}>
+                                            {store.isVeg && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827' }}>Pure Vegetarian Restaurant</Text>
+                                            <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>We do not serve any non-vegetarian items</Text>
+                                        </View>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        )}
                     </>
                 )}
 
@@ -1146,13 +1346,76 @@ export default function SignupScreen() {
                                                 value={branch.name}
                                                 onChangeText={(t) => updateBranch(i, 'name', t)}
                                             />
-                                            <TextInput
-                                                style={[styles.input, { marginTop: 8 }]}
-                                                placeholder="Branch Address"
-                                                placeholderTextColor="#9CA3AF"
-                                                value={branch.address}
-                                                onChangeText={(t) => updateBranch(i, 'address', t)}
-                                            />
+                                            <View style={{ marginTop: 8, zIndex: 9000 - i }}>
+                                                <GooglePlacesAutocomplete
+                                                    placeholder="Search branch address..."
+                                                    fetchDetails={true}
+                                                    onPress={(data, details = null) => {
+                                                        const city = extractCity(details);
+                                                        setBranches((prev) => prev.map((b, idx) => idx === i ? {
+                                                            ...b,
+                                                            address: details?.formatted_address || data.description,
+                                                            latitude: details?.geometry?.location?.lat ?? null,
+                                                            longitude: details?.geometry?.location?.lng ?? null,
+                                                            city: city || b.city,
+                                                        } : b));
+                                                    }}
+                                                    onFail={(error) => {
+                                                        console.error('Google API Error:', error);
+                                                    }}
+                                                    textInputProps={{
+                                                        onChangeText: (text: string) => {
+                                                            setBranches((prev) => prev.map((b, idx) => idx === i ? { ...b, address: text, latitude: null, longitude: null } : b));
+                                                        },
+                                                        placeholderTextColor: '#9CA3AF',
+                                                    }}
+                                                    query={{
+                                                        key: GOOGLE_MAPS_API_KEY,
+                                                        language: 'en',
+                                                        components: 'country:in',
+                                                    }}
+                                                    styles={{
+                                                        container: { flex: 0, width: '100%', zIndex: 9000 - i },
+                                                        textInput: {
+                                                            borderWidth: 1,
+                                                            borderColor: '#E5E7EB',
+                                                            borderRadius: 8,
+                                                            height: 50,
+                                                            paddingHorizontal: 16,
+                                                            backgroundColor: '#F9FAFB',
+                                                            fontSize: 16,
+                                                            color: '#000',
+                                                        },
+                                                        listView: {
+                                                            position: 'absolute',
+                                                            top: 50,
+                                                            zIndex: 10000,
+                                                            elevation: 10000,
+                                                            backgroundColor: 'white',
+                                                            shadowColor: '#000',
+                                                            shadowOffset: { width: 0, height: 2 },
+                                                            shadowOpacity: 0.25,
+                                                            shadowRadius: 3.84,
+                                                            borderRadius: 8,
+                                                        },
+                                                        row: { paddingVertical: 12, paddingHorizontal: 12 },
+                                                        description: { fontSize: 14, color: '#374151' },
+                                                        separator: { height: 1, backgroundColor: '#F3F4F6' },
+                                                    }}
+                                                    enablePoweredByContainer={false}
+                                                    debounce={300}
+                                                    minLength={3}
+                                                    nearbyPlacesAPI="GooglePlacesSearch"
+                                                />
+                                                {branch.latitude !== null && branch.longitude !== null && (
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 }}>
+                                                        <Ionicons name="location" size={12} color="#10B981" />
+                                                        <Text style={{ fontSize: 12, color: '#10B981', fontWeight: '600' }}>
+                                                            📍 {branch.latitude.toFixed(5)}, {branch.longitude.toFixed(5)}
+                                                        </Text>
+                                                    </View>
+                                                )}
+                                            </View>
                                             <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                                                 <TextInput
                                                     style={[styles.input, { flex: 1 }]}
@@ -1169,6 +1432,72 @@ export default function SignupScreen() {
                                                     value={branch.phone}
                                                     onChangeText={(t) => updateBranch(i, 'phone', t)}
                                                 />
+                                            </View>
+
+                                            {/* Dining fields per branch */}
+                                            {selectedVertical?.isDining && (
+                                                <View style={{ marginTop: 12 }}>
+                                                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#374151', marginBottom: 6 }}>Restaurant Type</Text>
+                                                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                                                        {['Casual Dining', 'Fine Dining', 'Cafe', 'Quick Service', 'Dhaba', 'Cloud Kitchen'].map(t => (
+                                                            <TouchableOpacity key={t} onPress={() => updateBranch(i, 'restaurantType', branch.restaurantType === t ? '' : t)}
+                                                                style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: branch.restaurantType === t ? Colors.primary : '#E5E7EB', backgroundColor: branch.restaurantType === t ? Colors.primary : '#fff' }}>
+                                                                <Text style={{ fontSize: 12, fontWeight: '600', color: branch.restaurantType === t ? '#fff' : '#374151' }}>{t}</Text>
+                                                            </TouchableOpacity>
+                                                        ))}
+                                                    </View>
+
+                                                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#374151', marginTop: 12, marginBottom: 6 }}>Cuisines</Text>
+                                                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                                                        {['North Indian', 'South Indian', 'Chinese', 'Street Food', 'Mughlai', 'Continental', 'Italian', 'Multi-Cuisine'].map(c => {
+                                                            const sel = branch.cuisines?.includes(c);
+                                                            return (
+                                                                <TouchableOpacity key={c} onPress={() => {
+                                                                    const next = sel ? branch.cuisines.filter(x => x !== c) : [...(branch.cuisines || []), c];
+                                                                    updateBranch(i, 'cuisines', next);
+                                                                }}
+                                                                    style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: sel ? Colors.primary : '#E5E7EB', backgroundColor: sel ? Colors.primary : '#fff' }}>
+                                                                    <Text style={{ fontSize: 12, fontWeight: '600', color: sel ? '#fff' : '#374151' }}>{c}</Text>
+                                                                </TouchableOpacity>
+                                                            );
+                                                        })}
+                                                    </View>
+
+                                                    <TouchableOpacity onPress={() => updateBranch(i, 'isVeg', !branch.isVeg)}
+                                                        style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, padding: 10, borderRadius: 10, borderWidth: 1, borderColor: branch.isVeg ? '#10B981' : '#E5E7EB', backgroundColor: branch.isVeg ? '#ECFDF5' : '#fff' }}>
+                                                        <View style={{ width: 18, height: 18, borderRadius: 4, borderWidth: 2, borderColor: branch.isVeg ? '#10B981' : '#9CA3AF', backgroundColor: branch.isVeg ? '#10B981' : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
+                                                            {branch.isVeg && <Ionicons name="checkmark" size={12} color="#fff" />}
+                                                        </View>
+                                                        <Text style={{ fontSize: 13, fontWeight: '600', color: '#111827' }}>Pure Vegetarian</Text>
+                                                    </TouchableOpacity>
+                                                </View>
+                                            )}
+
+                                            {/* Branch Photos */}
+                                            <View style={{ marginTop: 12 }}>
+                                                <Text style={{ fontSize: 12, fontWeight: '600', color: '#374151', marginBottom: 6 }}>Photos ({branch.photos?.length || 0}/5)</Text>
+                                                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                                    {(branch.photos || []).map((photo, pIdx) => (
+                                                        <View key={pIdx} style={{ width: 64, height: 64, borderRadius: 8, marginRight: 8, position: 'relative' }}>
+                                                            <Image source={{ uri: photo }} style={{ width: 64, height: 64, borderRadius: 8, backgroundColor: '#F3F4F6' }} />
+                                                            <TouchableOpacity onPress={() => updateBranch(i, 'photos', branch.photos.filter((_: any, pi: number) => pi !== pIdx))} style={{ position: 'absolute', top: -4, right: -4 }}>
+                                                                <Ionicons name="close-circle" size={18} color="#EF4444" />
+                                                            </TouchableOpacity>
+                                                        </View>
+                                                    ))}
+                                                    {(branch.photos?.length || 0) < 5 && (
+                                                        <TouchableOpacity
+                                                            onPress={async () => {
+                                                                const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsMultipleSelection: true, selectionLimit: 5 - (branch.photos?.length || 0), quality: 0.7 });
+                                                                if (!result.canceled && result.assets) {
+                                                                    updateBranch(i, 'photos', [...(branch.photos || []), ...result.assets.map(a => a.uri)].slice(0, 5));
+                                                                }
+                                                            }}
+                                                            style={{ width: 64, height: 64, borderRadius: 8, borderWidth: 1, borderStyle: 'dashed', borderColor: '#D1D5DB', alignItems: 'center', justifyContent: 'center' }}>
+                                                            <Ionicons name="camera-outline" size={20} color="#9CA3AF" />
+                                                        </TouchableOpacity>
+                                                    )}
+                                                </ScrollView>
                                             </View>
                                         </View>
                                     ))

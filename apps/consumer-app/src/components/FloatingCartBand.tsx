@@ -82,7 +82,7 @@ export default function FloatingCartBand() {
                 onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                     if (navigationRef.isReady()) {
-                        navigationRef.navigate('Cart' as any);
+                        navigationRef.navigate('Main', { screen: 'Cart', params: { screen: 'CartMain' } } as any);
                     }
                 }}
                 style={{

@@ -1,4 +1,4 @@
-// @lock — Do NOT overwrite. Approved layout as of Mar 12, 2026.
+// @lock — Do NOT overwrite. Keyboard fix approved May 19, 2026. KAV behavior="padding" (regular screen, not Modal).
 // Auth Screen: Bottom-sheet auth with Phone OTP (Wati) + Email fallback.
 // Replaces previous full-page email/password auth.
 
@@ -284,7 +284,7 @@ export default function AuthScreen() {
                     onChangeText={setPhoneNumber}
                     autoFocus
                     textAlignVertical="center"
-                    style={{ includeFontPadding: false }}
+                    style={{ paddingVertical: 0, includeFontPadding: false }}
                 />
             </View>
 
@@ -341,7 +341,7 @@ export default function AuthScreen() {
                         onKeyPress={(e) => handleOtpKeyPress(e, i)}
                         autoFocus={i === 0}
                         textAlignVertical="center"
-                        style={{ color: '#B52725' }}
+                        style={{ color: '#B52725', paddingVertical: 0, includeFontPadding: false }}
                     />
                 ))}
             </View>
@@ -403,9 +403,10 @@ export default function AuthScreen() {
             {/* Dark Overlay for readability */}
             <View style={{ position: 'absolute', width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.6)' }} />
 
-            {/* Primary Interactive Layer */}
+            {/* Primary Interactive Layer — KAV works here (regular screen, not Modal) */}
             <KeyboardAvoidingView
                 behavior="padding"
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
                 className="flex-1"
             >
                 <View className="flex-1 items-center justify-center">

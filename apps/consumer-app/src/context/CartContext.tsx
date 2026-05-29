@@ -1,4 +1,4 @@
-// @lock — Do NOT overwrite. Approved config as of May 1, 2026.
+// @lock — Do NOT overwrite. Cart merge fix approved May 19, 2026. Auth listener merges guest cart on any first-session event (SIGNED_IN or TOKEN_REFRESHED).
 // CartContext: Global cart state management with Supabase persistence and strict validation.
 import React, { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
 import { Alert } from 'react-native';
@@ -44,20 +44,35 @@ export function CartProvider({ children }: { children: ReactNode }) {
         return acc;
     }, {} as Record<string, CartItem[]>);
 
+    // Keep a ref to the latest items so the auth listener always sees current cart
+    const itemsRef = useRef<CartItem[]>(items);
+    useEffect(() => { itemsRef.current = items; }, [items]);
+
+    // Track whether cloud load has completed to prevent sync-back loops
+    const isLoadingFromCloud = useRef(false);
+    const hasLoadedCloud = useRef(false);
+
     // Initial load and Auth Listener
     useEffect(() => {
         let mounted = true;
 
-        // Listen for login/logout to sync local items to cloud
+        // Listen for login/logout to sync local items to cloud.
+        // Merge guest cart on SIGNED_IN or any first-time session load (!hasLoadedCloud).
+        // This covers refreshSession() which fires TOKEN_REFRESHED instead of SIGNED_IN.
         const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
             if (!mounted) return;
+            console.log(`[CartContext] Auth event: ${event}, hasLoadedCloud: ${hasLoadedCloud.current}, localItems: ${itemsRef.current.length}`);
             if (session?.user) {
-                // If we had local items, merge them up to the cloud.
-                // Fire and forget without awaiting to avoid GoTrue deadlock!
-                loadCartFromSupabase(session.user.id, items).catch(e => console.error(e));
+                if (event === 'SIGNED_IN' || !hasLoadedCloud.current) {
+                    // Fresh login OR first session load — always merge local guest cart.
+                    // Covers both SIGNED_IN and TOKEN_REFRESHED (fired by refreshSession()).
+                    // When itemsRef.current is [] (e.g. app restart), merge is a no-op.
+                    loadCartFromSupabase(session.user.id, itemsRef.current).catch(e => console.error(e));
+                }
             } else if (event === 'SIGNED_OUT') {
                 setItems([]);
                 setCartId(null);
+                hasLoadedCloud.current = false;
             } else {
                 setIsInitialized(true);
             }
@@ -67,10 +82,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
             mounted = false;
             authListener.subscription.unsubscribe();
         };
-    }, []); // Run once on mount
+    }, []); // Run once on mount — itemsRef ensures fresh items value
 
-    // Continuous cloud sync whenever items change (if initialized and user is logged in)
-    // We use a ref to prevent infinite loops from the initial load
+    // Continuous cloud sync whenever items change (if initialized and user is logged in).
+    // Skip syncing when loadCartFromSupabase is the source of the items change
+    // to prevent a feedback loop (cloud load → setItems → sync back → load again).
     const isFirstRender = useRef(true);
     useEffect(() => {
         if (isFirstRender.current) {
@@ -78,18 +94,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
             return;
         }
 
+        // Don't sync back to cloud while we're loading FROM cloud
+        if (isLoadingFromCloud.current) return;
+
         const syncToCloud = async () => {
-            if (isInitialized) {
-                if (cartId) {
-                    await syncCartToSupabase(cartId, items);
-                } else {
-                    // User might be logged in but we don't have a cartId yet due to race condition
-                    // Let's check auth and ensure a cart exists
-                    const { data: { session } } = await supabase.auth.getSession();
-                    if (session?.user) {
-                        await loadCartFromSupabase(session.user.id, items);
-                    }
-                }
+            if (isInitialized && cartId) {
+                await syncCartToSupabase(cartId, items);
             }
         };
 
@@ -100,6 +110,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     // ------ Supabase Handlers ------
 
     const loadCartFromSupabase = async (userId: string, localItemsToMerge: CartItem[] = []) => {
+        isLoadingFromCloud.current = true;
         try {
             // Find existing cart
             let { data: cartData, error: cartError } = await supabase
@@ -126,8 +137,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
             setCartId(cartData.id);
 
-            // Merge logic
-            let mergedItems: CartItem[] = [];
+            // Map cloud items
             const cloudItems: CartItem[] = cartData.cart_items.map((ci: any) => ({
                 id: String(ci.product_id),
                 name: ci.product_name,
@@ -140,13 +150,17 @@ export function CartProvider({ children }: { children: ReactNode }) {
                 isVeg: ci.is_veg ?? true
             }));
 
+            // Merge logic: for duplicate items, take the HIGHER quantity (not sum).
+            // Only merge local guest items on SIGNED_IN; otherwise just use cloud state.
+            let mergedItems: CartItem[] = [];
             if (localItemsToMerge.length > 0) {
-                // Combine cloud and local, local overriding quantities for simplicity
                 const itemMap = new Map();
                 cloudItems.forEach(i => itemMap.set(i.id, i));
                 localItemsToMerge.forEach(i => {
                     if (itemMap.has(i.id)) {
-                        itemMap.set(i.id, { ...itemMap.get(i.id), quantity: itemMap.get(i.id).quantity + i.quantity });
+                        // Take the higher quantity — don't sum, which would inflate
+                        const existing = itemMap.get(i.id);
+                        itemMap.set(i.id, { ...existing, quantity: Math.max(existing.quantity, i.quantity) });
                     } else {
                         itemMap.set(i.id, i);
                     }
@@ -158,12 +172,18 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
             setItems(mergedItems);
             setIsInitialized(true);
+            hasLoadedCloud.current = true;
 
-            // If we did a merge, the next useEffect trigger will natively push it back to the cloud.
+            // If we merged guest items, sync the merged result back to cloud
+            if (localItemsToMerge.length > 0 && mergedItems.length > 0) {
+                await syncCartToSupabase(cartData.id, mergedItems);
+            }
 
         } catch (error) {
             console.error("Failed to load cart", error);
             setIsInitialized(true); // Failsafe
+        } finally {
+            isLoadingFromCloud.current = false;
         }
     };
 

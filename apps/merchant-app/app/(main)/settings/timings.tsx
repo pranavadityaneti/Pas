@@ -14,6 +14,11 @@ export default function TimingsScreen() {
     const { store, loading: storeLoading, updateStoreDetails } = useStoreContext();
     const [saving, setSaving] = useState(false);
 
+    // Service Modes
+    const [servicePickup, setServicePickup] = useState(true);
+    const [serviceDinein, setServiceDinein] = useState(true);
+    const [serviceTableBooking, setServiceTableBooking] = useState(false);
+
     const [selectedDays, setSelectedDays] = useState<number[]>([0, 1, 2, 3, 4, 5]);
     const [openTime, setOpenTime] = useState(new Date(2022, 0, 1, 9, 0));
     const [closeTime, setCloseTime] = useState(new Date(2022, 0, 1, 21, 0));
@@ -29,6 +34,9 @@ export default function TimingsScreen() {
     const [pickerMode, setPickerMode] = useState<'open' | 'close' | 'lunchStart' | 'lunchEnd'>('open');
 
     useEffect(() => {
+        if (store?.service_pickup !== undefined) setServicePickup(store.service_pickup!);
+        if (store?.service_dinein !== undefined) setServiceDinein(store.service_dinein!);
+        if (store?.service_table_booking !== undefined) setServiceTableBooking(store.service_table_booking!);
         if (store?.prep_time_minutes) setPrepTime(store.prep_time_minutes);
 
         if (store?.operating_hours && Object.keys(store.operating_hours).length > 0) {
@@ -102,6 +110,11 @@ export default function TimingsScreen() {
             if (formatTime(lunchEnd) !== (oh.lunchEnd || '')) return true;
         }
 
+        // Check service modes
+        if (servicePickup !== (store?.service_pickup ?? true)) return true;
+        if (serviceDinein !== (store?.service_dinein ?? true)) return true;
+        if (serviceTableBooking !== (store?.service_table_booking ?? false)) return true;
+
         return false;
     })();
 
@@ -120,10 +133,15 @@ export default function TimingsScreen() {
 
         try {
             // Use Context for Optimistic Update
-            const { success, error } = await updateStoreDetails({ 
+            const { success, error } = await updateStoreDetails({
                 operating_hours: payload,
-                prep_time_minutes: prepTime
-            });
+                prep_time_minutes: prepTime,
+                service_pickup: servicePickup,
+                // Non-dining verticals can never offer dine-in / table booking, regardless
+                // of the (hidden) toggle defaults — persist them as off.
+                service_dinein: store?.isDining ? serviceDinein : false,
+                service_table_booking: store?.isDining ? serviceTableBooking : false,
+            } as any);
 
             if (!success) throw new Error(error);
 
@@ -156,6 +174,64 @@ export default function TimingsScreen() {
             </View>
 
             <ScrollView contentContainerStyle={styles.content}>
+                {/* Service Modes */}
+                <View style={styles.card}>
+                    <View style={styles.cardHeader}>
+                        <View style={styles.iconCircle}>
+                            <Ionicons name="restaurant" size={24} color={Colors.white} />
+                        </View>
+                        <View>
+                            <Text style={styles.cardTitle}>Service Modes</Text>
+                            <Text style={styles.cardSubtitle}>Choose how customers can order</Text>
+                        </View>
+                    </View>
+
+                    <View style={styles.rowBetween}>
+                        <View>
+                            <Text style={{ fontSize: 15, fontWeight: '600', color: Colors.text }}>Pickup</Text>
+                            <Text style={{ fontSize: 12, color: Colors.textSecondary }}>Customers collect orders</Text>
+                        </View>
+                        <Switch
+                            value={servicePickup}
+                            onValueChange={setServicePickup}
+                            trackColor={{ false: Colors.border, true: Colors.primary }}
+                            thumbColor={Colors.white}
+                        />
+                    </View>
+                    {/* Dine-in & Table Booking are dining-only service modes. Pickup/retail
+                        verticals (pharmacy, grocery, etc.) only ever offer Pickup. */}
+                    {store?.isDining && (
+                        <>
+                            <View style={[styles.divider, { marginVertical: 12 }]} />
+                            <View style={styles.rowBetween}>
+                                <View>
+                                    <Text style={{ fontSize: 15, fontWeight: '600', color: Colors.text }}>Dine-in</Text>
+                                    <Text style={{ fontSize: 12, color: Colors.textSecondary }}>Customers eat at the restaurant</Text>
+                                </View>
+                                <Switch
+                                    value={serviceDinein}
+                                    onValueChange={setServiceDinein}
+                                    trackColor={{ false: Colors.border, true: Colors.primary }}
+                                    thumbColor={Colors.white}
+                                />
+                            </View>
+                            <View style={[styles.divider, { marginVertical: 12 }]} />
+                            <View style={styles.rowBetween}>
+                                <View>
+                                    <Text style={{ fontSize: 15, fontWeight: '600', color: Colors.text }}>Table Booking</Text>
+                                    <Text style={{ fontSize: 12, color: Colors.textSecondary }}>Customers reserve tables in advance</Text>
+                                </View>
+                                <Switch
+                                    value={serviceTableBooking}
+                                    onValueChange={setServiceTableBooking}
+                                    trackColor={{ false: Colors.border, true: Colors.primary }}
+                                    thumbColor={Colors.white}
+                                />
+                            </View>
+                        </>
+                    )}
+                </View>
+
                 <View style={styles.card}>
                     <View style={styles.cardHeader}>
                         <View style={styles.iconCircle}>
@@ -277,9 +353,9 @@ const styles = StyleSheet.create({
     header: { flexDirection: 'row', alignItems: 'center', padding: 16, backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.border },
     backButton: { marginRight: 16 },
     headerTitle: { fontSize: 20, fontWeight: 'bold', color: Colors.text },
-    content: { padding: 16 },
+    content: { padding: 16, paddingBottom: 100 },
 
-    card: { backgroundColor: Colors.white, borderRadius: 20, padding: 24, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
+    card: { backgroundColor: Colors.white, borderRadius: 20, padding: 24, marginBottom: 16, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
     cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 24 },
     iconCircle: { width: 48, height: 48, borderRadius: 24, backgroundColor: Colors.primary, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
     cardTitle: { fontSize: 18, fontWeight: 'bold', color: Colors.text },

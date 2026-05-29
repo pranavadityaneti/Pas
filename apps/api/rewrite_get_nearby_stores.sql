@@ -11,10 +11,9 @@ AS $function$
             ST_MakePoint(user_lon, user_lat)::geography
         ) AS distance_meters
     FROM "public"."merchant_branches" mb
-    -- Only return branches where both lat/lng exist and are active
-    WHERE mb.latitude IS NOT NULL 
+    -- Only return branches where lat/lng exist (active + inactive — client handles offline overlay)
+    WHERE mb.latitude IS NOT NULL
       AND mb.longitude IS NOT NULL
-      AND mb.is_active = true
       -- Perform the spherical distance check
       AND ST_DWithin(
         ST_MakePoint(mb.longitude, mb.latitude)::geography,

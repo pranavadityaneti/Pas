@@ -64,6 +64,15 @@ export default function PendingScreen() {
                     </Text>
                 </View>
 
+                {/* Escape hatch: a not-yet-approved merchant may have an incomplete
+                    (unpaid) application. Let them resume signup — the form restores their
+                    saved draft, and signup's remote-subscription guard prevents double
+                    payment if they've already paid. Without this, gated drafts are trapped. */}
+                <TouchableOpacity style={styles.resumeButton} onPress={() => router.replace('/(auth)/signup')}>
+                    <Ionicons name="arrow-forward-circle-outline" size={20} color="#FFFFFF" />
+                    <Text style={styles.resumeButtonText}>Continue Application</Text>
+                </TouchableOpacity>
+
                 <TouchableOpacity style={styles.contactButton} onPress={() => Linking.openURL('mailto:support@pickatstore.io?subject=Merchant%20Application%20Inquiry')}>
                     <Ionicons name="mail-outline" size={20} color={Colors.primary} />
                     <Text style={styles.contactButtonText}>Contact Support</Text>
@@ -167,6 +176,22 @@ const styles = StyleSheet.create({
         color: '#6B7280',
         marginLeft: 12,
         lineHeight: 20,
+    },
+    resumeButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '100%',
+        paddingVertical: 16,
+        borderRadius: 12,
+        backgroundColor: Colors.primary,
+        marginBottom: 12,
+    },
+    resumeButtonText: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#FFFFFF',
+        marginLeft: 8,
     },
     contactButton: {
         flexDirection: 'row',

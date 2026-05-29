@@ -230,6 +230,24 @@ export default function SettingsScreen() {
             permissionKey: 'store_timings.view',
         },
         {
+            icon: 'table-chair',
+            label: 'Table Booking Slots',
+            subtitle: 'Configure slot capacity & timing',
+            route: '/(main)/settings/slot-config',
+            iconType: 'MaterialCommunityIcons',
+            permissionKey: 'store_timings.view',
+            diningOnly: true,
+        },
+        {
+            icon: 'calendar-check-outline',
+            label: "Today's Bookings",
+            subtitle: 'View & manage table reservations',
+            route: '/(main)/settings/bookings',
+            iconType: 'MaterialCommunityIcons',
+            permissionKey: 'store_timings.view',
+            diningOnly: true,
+        },
+        {
             icon: 'account-group-outline',
             label: 'Staff Management',
             subtitle: 'Add or remove employees',
@@ -305,7 +323,11 @@ export default function SettingsScreen() {
         return val === true;
     };
 
-    const menuItems = allMenuItems.filter(item => checkPermission(item.permissionKey));
+    // Vertical gating: table-booking entries are only relevant to dining stores.
+    // Non-dining verticals (pharmacy, grocery, retail, etc.) never see them.
+    const menuItems = allMenuItems.filter(item =>
+        checkPermission(item.permissionKey) && (!(item as any).diningOnly || store?.isDining)
+    );
 
     return (
         <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>

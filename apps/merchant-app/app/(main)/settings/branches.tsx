@@ -1,12 +1,13 @@
 
-import React, { useState, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, TextInput, ScrollView, ActivityIndicator, LogBox } from 'react-native';
+import React, { useState, useRef, useEffect } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, TextInput, ScrollView, ActivityIndicator, LogBox, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import uuid from 'react-native-uuid';
+import * as ImagePicker from 'expo-image-picker';
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
-import { useUser } from '../../../src/context/UserContext'; 
+import { useUser } from '../../../src/context/UserContext';
 import { useStore } from '../../../src/context/StoreContext';
 import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
 import { supabase } from '../../../src/lib/supabase';
@@ -23,7 +24,14 @@ LogBox.ignoreLogs(['VirtualizedLists should never be nested']);interface Branch 
     manager_name: string | null;
     phone: string | null;
     is_active: boolean;
+    cuisines?: string[];
+    is_veg?: boolean;
+    restaurant_type?: string;
+    branch_photos?: string[];
 }
+
+const RESTAURANT_TYPES = ['Casual Dining', 'Fine Dining', 'Cafe', 'Quick Service', 'Dhaba', 'Cloud Kitchen'];
+const CUISINE_OPTIONS = ['North Indian', 'South Indian', 'Chinese', 'Street Food', 'Mughlai', 'Continental', 'Italian', 'Multi-Cuisine'];
 
 // Helper to extract city from Google Places address_components
 function extractCity(details: any): string {
@@ -38,14 +46,38 @@ const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIza
 export default function BranchesScreen() {
     const router = useRouter();
     const { user } = useUser();
-    const { refreshStore } = useStore();
+    const { refreshStore, merchantId } = useStore();
+    const [isDining, setIsDining] = useState(false);
+
+    // Lookup whether this merchant's vertical is dining
+    useEffect(() => {
+        const targetId = merchantId || user?.id;
+        if (!targetId) return;
+        (async () => {
+            const { data: mData } = await supabase
+                .from('merchants')
+                .select('vertical_id')
+                .eq('id', targetId)
+                .single();
+            console.log('[Branches] merchant lookup:', { targetId, mData });
+            if (mData?.vertical_id) {
+                const { data: vData } = await supabase
+                    .from('Vertical')
+                    .select('isDining')
+                    .eq('id', mData.vertical_id)
+                    .single();
+                console.log('[Branches] vertical lookup:', vData);
+                if (vData) setIsDining(!!(vData as any).isDining);
+            }
+        })();
+    }, [merchantId, user?.id]);
 
     // Fetch branches from DB
     const { data: branches, loading, error, setData: setBranches } = useRealtimeTable({
         tableName: 'merchant_branches',
         select: '*',
-        filter: user?.id ? `merchant_id=eq.${user.id}` : undefined,
-        enabled: !!user?.id
+        filter: (merchantId || user?.id) ? `merchant_id=eq.${merchantId || user?.id}` : undefined,
+        enabled: !!(merchantId || user?.id)
     });
 
     // Modal State
@@ -63,13 +95,16 @@ export default function BranchesScreen() {
         longitude: null as number | null,
         city: '',
         manager: '',
-        phone: ''
+        phone: '',
+        cuisines: [] as string[],
+        isVeg: false,
+        restaurantType: '',
+        branchPhotos: [] as string[],
     });
 
     const openAddModal = () => {
         setEditingBranch(null);
-        setForm({ name: '', address: '', latitude: null, longitude: null, city: '', manager: '', phone: '' });
-        // Reset the autocomplete text after a brief delay (component needs to mount first)
+        setForm({ name: '', address: '', latitude: null, longitude: null, city: '', manager: '', phone: '', cuisines: [], isVeg: false, restaurantType: '', branchPhotos: [] });
         setTimeout(() => placesRef.current?.setAddressText(''), 100);
         setModalVisible(true);
     };
@@ -83,21 +118,67 @@ export default function BranchesScreen() {
             longitude: branch.longitude ?? null,
             city: '',
             manager: branch.manager_name || '',
-            phone: branch.phone || ''
+            phone: branch.phone || '',
+            cuisines: branch.cuisines || [],
+            isVeg: branch.is_veg ?? false,
+            restaurantType: branch.restaurant_type || '',
+            branchPhotos: branch.branch_photos || [],
         });
-        // Pre-fill the autocomplete text
         setTimeout(() => placesRef.current?.setAddressText(branch.address || ''), 100);
         setModalVisible(true);
     };
 
+    const pickPhotos = async () => {
+        if (form.branchPhotos.length >= 5) {
+            Alert.alert('Limit Reached', 'Maximum 5 photos per branch.');
+            return;
+        }
+        const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsMultipleSelection: true,
+            selectionLimit: 5 - form.branchPhotos.length,
+            quality: 0.7,
+        });
+        if (!result.canceled && result.assets) {
+            const newUris = result.assets.map(a => a.uri);
+            setForm(prev => ({ ...prev, branchPhotos: [...prev.branchPhotos, ...newUris].slice(0, 5) }));
+        }
+    };
+
+    const removePhoto = (idx: number) => {
+        setForm(prev => ({ ...prev, branchPhotos: prev.branchPhotos.filter((_, i) => i !== idx) }));
+    };
+
+    const uploadBranchPhotos = async (branchId: string, photos: string[]): Promise<string[]> => {
+        const uploaded: string[] = [];
+        for (let i = 0; i < photos.length; i++) {
+            const uri = photos[i];
+            // Skip already-uploaded paths (not local URIs)
+            if (!uri.startsWith('file://') && !uri.startsWith('content://')) {
+                uploaded.push(uri);
+                continue;
+            }
+            const ext = uri.split('.').pop() || 'jpg';
+            const path = `branches/${branchId}/photo_${i}.${ext}`;
+            const response = await fetch(uri);
+            const blob = await response.blob();
+            const arrayBuffer = await new Response(blob).arrayBuffer();
+            const { error } = await supabase.storage
+                .from('merchant-assets')
+                .upload(path, arrayBuffer, { contentType: `image/${ext}`, upsert: true });
+            if (!error) uploaded.push(path);
+        }
+        return uploaded;
+    };
+
     const handleSave = async () => {
-        if (!user?.id) return;
+        const targetMerchantId = merchantId || user?.id;
+        if (!targetMerchantId) return;
         if (!form.name.trim() || !form.address.trim() || !form.manager.trim() || !form.phone.trim()) {
             Alert.alert('Error', 'All fields are mandatory. Please fill in all details.');
             return;
         }
 
-        // Validate that coordinates were captured from place selection
         if (form.address.trim() && (form.latitude === null || form.longitude === null)) {
             Alert.alert(
                 'Select Address',
@@ -109,8 +190,8 @@ export default function BranchesScreen() {
         setSaving(true);
         try {
             let finalBranchId = editingBranch?.id;
-            const payload = {
-                merchant_id: user.id,
+            const payload: any = {
+                merchant_id: targetMerchantId,
                 branch_name: form.name.trim(),
                 address: form.address.trim() || null,
                 latitude: form.latitude,
@@ -121,8 +202,17 @@ export default function BranchesScreen() {
                 is_active: true
             };
 
+            if (isDining) {
+                payload.cuisines = form.cuisines;
+                payload.is_veg = form.isVeg;
+                payload.restaurant_type = form.restaurantType || null;
+            }
+
             if (editingBranch) {
-                // Update
+                // Upload photos
+                const photoPaths = await uploadBranchPhotos(editingBranch.id, form.branchPhotos);
+                payload.branch_photos = photoPaths;
+
                 const { data: updatedBranch, error: updateError } = await supabase
                     .from('merchant_branches')
                     .update(payload)
@@ -131,25 +221,22 @@ export default function BranchesScreen() {
                     .single();
 
                 if (updateError) throw updateError;
-
-                // Instant Update
                 if (updatedBranch) {
                     setBranches(prev => prev.map(b => b.id === updatedBranch.id ? updatedBranch : b));
                 }
             } else {
-                // Insert
+                const newId = uuid.v4() as string;
+                // Upload photos
+                const photoPaths = await uploadBranchPhotos(newId, form.branchPhotos);
+                payload.branch_photos = photoPaths;
+
                 const { data: newBranch, error: insertError } = await supabase
                     .from('merchant_branches')
-                    .insert({
-                        ...payload,
-                        id: uuid.v4() // Explicitly generate ID to avoid null constraint error
-                    })
+                    .insert({ ...payload, id: newId })
                     .select()
                     .single();
 
                 if (insertError) throw insertError;
-
-                // Instant Add
                 if (newBranch) {
                     finalBranchId = newBranch.id;
                     setBranches(prev => [newBranch, ...prev]);
@@ -171,7 +258,9 @@ export default function BranchesScreen() {
                     'The branch details were saved successfully, but we failed to create or update the manager account. Please try again from Staff Management if needed.'
                 );
             }
-            // --- END RBAC WIRING ---
+
+            // Refresh the StoreContext so the new branch appears in the store switcher immediately
+            await refreshStore();
 
             setModalVisible(false);
             Alert.alert('Success', `Branch ${editingBranch ? 'updated' : 'added'} successfully`);
@@ -190,17 +279,14 @@ export default function BranchesScreen() {
                 text: 'Delete',
                 style: 'destructive',
                 onPress: async () => {
-                    // Optimistic Delete
                     const previousBranches = branches;
                     setBranches(prev => prev.filter(b => b.id !== id));
 
                     const { error } = await supabase.from('merchant_branches').delete().eq('id', id);
                     if (error) {
-                        // Revert on error
                         setBranches(previousBranches);
                         Alert.alert('Error', error.message);
                     } else {
-                        // Success: Cascade delete staff and refresh context
                         await supabase.from('store_staff').delete().eq('store_id', id);
                         await refreshStore();
                     }
@@ -276,7 +362,6 @@ export default function BranchesScreen() {
                                 )}
                             </View>
                         </View>
-
                         <View style={styles.cardActions}>
                             <TouchableOpacity style={styles.actionBtn} onPress={() => openEditModal(item)}>
                                 <Text style={styles.actionText}>Edit</Text>
@@ -295,132 +380,211 @@ export default function BranchesScreen() {
                 onClose={() => setModalVisible(false)}
                 title={editingBranch ? "Edit Branch" : "Add New Branch"}
             >
-                <View style={styles.form}>
-                    <View style={styles.inputGroup}>
-                        <Text style={styles.label}>Branch Name <Text style={{ color: '#EF4444' }}>*</Text></Text>
-                        <TextInput
-                            style={styles.input}
-                            placeholder="e.g. Kondapur Branch"
-                            value={form.name}
-                            onChangeText={t => setForm({ ...form, name: t })}
-                        />
-                    </View>
-
-                    <View style={[styles.inputGroup, { zIndex: 9999 }]}>
-                        <Text style={styles.label}>Address <Text style={{ color: '#EF4444' }}>*</Text></Text>
-                        {GOOGLE_MAPS_API_KEY ? (
-                            <GooglePlacesAutocomplete
-                                ref={placesRef}
-                                placeholder="Search address..."
-                                fetchDetails={true}
-                                onPress={(data, details = null) => {
-                                    const city = extractCity(details);
-                                    setForm(prev => ({
-                                        ...prev,
-                                        address: details?.formatted_address || data.description,
-                                        latitude: details?.geometry?.location?.lat ?? null,
-                                        longitude: details?.geometry?.location?.lng ?? null,
-                                        city: city || prev.city,
-                                    }));
-                                }}
-                                onFail={(error) => {
-                                    console.error('Google API Error:', error);
-                                    Alert.alert('Google Maps Error', String(error) || 'Check terminal for details');
-                                }}
-                                textInputProps={{
-                                    onChangeText: (text: string) => {
-                                        setForm(prev => ({ ...prev, address: text, latitude: null, longitude: null }));
-                                    },
-                                    placeholderTextColor: '#9CA3AF',
-                                }}
-                                query={{
-                                    key: GOOGLE_MAPS_API_KEY,
-                                    language: 'en',
-                                    components: 'country:in',
-                                }}
-                                styles={{
-                                    container: { flex: 0, width: '100%', zIndex: 9999 },
-                                    textInput: {
-                                        borderWidth: 1,
-                                        borderColor: '#E5E7EB',
-                                        borderRadius: 8,
-                                        height: 50,
-                                        paddingHorizontal: 16,
-                                        backgroundColor: '#F9FAFB',
-                                        fontSize: 16,
-                                        color: '#000',
-                                    },
-                                    listView: {
-                                        position: 'absolute',
-                                        top: 50,
-                                        zIndex: 10000,
-                                        elevation: 10000,
-                                        backgroundColor: 'white',
-                                        shadowColor: '#000',
-                                        shadowOffset: { width: 0, height: 2 },
-                                        shadowOpacity: 0.25,
-                                        shadowRadius: 3.84,
-                                        borderRadius: 8,
-                                    },
-                                    row: { paddingVertical: 12, paddingHorizontal: 12 },
-                                    description: { fontSize: 14, color: '#374151' },
-                                    separator: { height: 1, backgroundColor: '#F3F4F6' },
-                                }}
-                                enablePoweredByContainer={false}
-                                debounce={300}
-                                minLength={3}
-                                nearbyPlacesAPI="GooglePlacesSearch"
-                            />
-                        ) : (
+                <ScrollView style={{ maxHeight: 500 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+                    <View style={styles.form}>
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.label}>Branch Name <Text style={{ color: '#EF4444' }}>*</Text></Text>
                             <TextInput
-                                style={[styles.input, { height: 80 }]}
-                                placeholder="Full address (API key missing)"
-                                multiline
-                                value={form.address}
-                                onChangeText={t => setForm({ ...form, address: t })}
+                                style={styles.input}
+                                placeholder="e.g. Kondapur Branch"
+                                value={form.name}
+                                onChangeText={t => setForm({ ...form, name: t })}
                             />
-                        )}
-                        {form.latitude !== null && (
-                            <View style={styles.coordsBadge}>
-                                <Ionicons name="location" size={12} color="#10B981" />
-                                <Text style={styles.coordsText}>
-                                    📍 {form.latitude.toFixed(5)}, {form.longitude?.toFixed(5)}
-                                </Text>
+                        </View>
+
+                        <View style={[styles.inputGroup, { zIndex: 9999 }]}>
+                            <Text style={styles.label}>Address <Text style={{ color: '#EF4444' }}>*</Text></Text>
+                            {GOOGLE_MAPS_API_KEY ? (
+                                <GooglePlacesAutocomplete
+                                    ref={placesRef}
+                                    placeholder="Search address..."
+                                    fetchDetails={true}
+                                    onPress={(data, details = null) => {
+                                        const city = extractCity(details);
+                                        setForm(prev => ({
+                                            ...prev,
+                                            address: details?.formatted_address || data.description,
+                                            latitude: details?.geometry?.location?.lat ?? null,
+                                            longitude: details?.geometry?.location?.lng ?? null,
+                                            city: city || prev.city,
+                                        }));
+                                    }}
+                                    onFail={(error) => {
+                                        console.error('Google API Error:', error);
+                                        Alert.alert('Google Maps Error', String(error) || 'Check terminal for details');
+                                    }}
+                                    textInputProps={{
+                                        onChangeText: (text: string) => {
+                                            setForm(prev => ({ ...prev, address: text, latitude: null, longitude: null }));
+                                        },
+                                        placeholderTextColor: '#9CA3AF',
+                                    }}
+                                    query={{
+                                        key: GOOGLE_MAPS_API_KEY,
+                                        language: 'en',
+                                        components: 'country:in',
+                                    }}
+                                    styles={{
+                                        container: { flex: 0, width: '100%', zIndex: 9999 },
+                                        textInput: {
+                                            borderWidth: 1,
+                                            borderColor: '#E5E7EB',
+                                            borderRadius: 8,
+                                            height: 50,
+                                            paddingHorizontal: 16,
+                                            backgroundColor: '#F9FAFB',
+                                            fontSize: 16,
+                                            color: '#000',
+                                        },
+                                        listView: {
+                                            position: 'absolute',
+                                            top: 50,
+                                            zIndex: 10000,
+                                            elevation: 10000,
+                                            backgroundColor: 'white',
+                                            shadowColor: '#000',
+                                            shadowOffset: { width: 0, height: 2 },
+                                            shadowOpacity: 0.25,
+                                            shadowRadius: 3.84,
+                                            borderRadius: 8,
+                                        },
+                                        row: { paddingVertical: 12, paddingHorizontal: 12 },
+                                        description: { fontSize: 14, color: '#374151' },
+                                        separator: { height: 1, backgroundColor: '#F3F4F6' },
+                                    }}
+                                    enablePoweredByContainer={false}
+                                    debounce={300}
+                                    minLength={3}
+                                    nearbyPlacesAPI="GooglePlacesSearch"
+                                />
+                            ) : (
+                                <TextInput
+                                    style={[styles.input, { height: 80 }]}
+                                    placeholder="Full address (API key missing)"
+                                    multiline
+                                    value={form.address}
+                                    onChangeText={t => setForm({ ...form, address: t })}
+                                />
+                            )}
+                            {form.latitude !== null && (
+                                <View style={styles.coordsBadge}>
+                                    <Ionicons name="location" size={12} color="#10B981" />
+                                    <Text style={styles.coordsText}>
+                                        📍 {form.latitude.toFixed(5)}, {form.longitude?.toFixed(5)}
+                                    </Text>
+                                </View>
+                            )}
+                        </View>
+
+                        <View style={styles.row}>
+                            <View style={[styles.inputGroup, { flex: 1 }]}>
+                                <Text style={styles.label}>Manager Name <Text style={{ color: '#EF4444' }}>*</Text></Text>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="Store Manager"
+                                    value={form.manager}
+                                    onChangeText={t => setForm({ ...form, manager: t })}
+                                />
                             </View>
+                            <View style={{ width: 12 }} />
+                            <View style={[styles.inputGroup, { flex: 1 }]}>
+                                <Text style={styles.label}>Phone <Text style={{ color: '#EF4444' }}>*</Text></Text>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="Contact Number"
+                                    keyboardType="phone-pad"
+                                    value={form.phone}
+                                    onChangeText={t => setForm({ ...form, phone: t })}
+                                />
+                            </View>
+                        </View>
+
+                        {/* Dining-specific fields */}
+                        {isDining && (
+                            <>
+                                <View style={styles.inputGroup}>
+                                    <Text style={styles.label}>Restaurant Type</Text>
+                                    <View style={styles.chipContainer}>
+                                        {RESTAURANT_TYPES.map(t => (
+                                            <TouchableOpacity
+                                                key={t}
+                                                onPress={() => setForm(prev => ({ ...prev, restaurantType: prev.restaurantType === t ? '' : t }))}
+                                                style={[styles.chip, form.restaurantType === t && styles.chipActive]}
+                                            >
+                                                <Text style={[styles.chipText, form.restaurantType === t && styles.chipTextActive]}>{t}</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                </View>
+
+                                <View style={styles.inputGroup}>
+                                    <Text style={styles.label}>Cuisines</Text>
+                                    <View style={styles.chipContainer}>
+                                        {CUISINE_OPTIONS.map(c => {
+                                            const selected = form.cuisines.includes(c);
+                                            return (
+                                                <TouchableOpacity
+                                                    key={c}
+                                                    onPress={() => {
+                                                        const next = selected
+                                                            ? form.cuisines.filter(x => x !== c)
+                                                            : [...form.cuisines, c];
+                                                        setForm(prev => ({ ...prev, cuisines: next }));
+                                                    }}
+                                                    style={[styles.chip, selected && styles.chipActive]}
+                                                >
+                                                    <Text style={[styles.chipText, selected && styles.chipTextActive]}>{c}</Text>
+                                                </TouchableOpacity>
+                                            );
+                                        })}
+                                    </View>
+                                </View>
+
+                                <TouchableOpacity
+                                    onPress={() => setForm(prev => ({ ...prev, isVeg: !prev.isVeg }))}
+                                    style={[styles.vegToggle, form.isVeg && styles.vegToggleActive]}
+                                >
+                                    <View style={[styles.vegCheck, form.isVeg && styles.vegCheckActive]}>
+                                        {form.isVeg && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827' }}>Pure Vegetarian</Text>
+                                        <Text style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>No non-veg items served</Text>
+                                    </View>
+                                </TouchableOpacity>
+                            </>
                         )}
-                    </View>
 
-                    <View style={styles.row}>
-                        <View style={[styles.inputGroup, { flex: 1 }]}>
-                            <Text style={styles.label}>Manager Name <Text style={{ color: '#EF4444' }}>*</Text></Text>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="Store Manager"
-                                value={form.manager}
-                                onChangeText={t => setForm({ ...form, manager: t })}
-                            />
+                        {/* Branch Photos */}
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.label}>Branch Photos ({form.branchPhotos.length}/5)</Text>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+                                {form.branchPhotos.map((photo, idx) => (
+                                    <View key={idx} style={styles.photoThumb}>
+                                        <Image source={{ uri: photo.startsWith('branches/') || photo.startsWith('http') ? `https://llhxkonraqaxtradyycj.supabase.co/storage/v1/object/public/merchant-assets/${photo}` : photo }} style={styles.photoImg} />
+                                        <TouchableOpacity style={styles.photoRemove} onPress={() => removePhoto(idx)}>
+                                            <Ionicons name="close-circle" size={20} color="#EF4444" />
+                                        </TouchableOpacity>
+                                    </View>
+                                ))}
+                                {form.branchPhotos.length < 5 && (
+                                    <TouchableOpacity style={styles.photoAdd} onPress={pickPhotos}>
+                                        <Ionicons name="camera-outline" size={24} color="#9CA3AF" />
+                                        <Text style={{ fontSize: 10, color: '#9CA3AF', marginTop: 4 }}>Add</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </ScrollView>
                         </View>
-                        <View style={{ width: 12 }} />
-                        <View style={[styles.inputGroup, { flex: 1 }]}>
-                            <Text style={styles.label}>Phone <Text style={{ color: '#EF4444' }}>*</Text></Text>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="Contact Number"
-                                keyboardType="phone-pad"
-                                value={form.phone}
-                                onChangeText={t => setForm({ ...form, phone: t })}
-                            />
-                        </View>
-                    </View>
 
-                    <TouchableOpacity
-                        style={[styles.saveButton, saving && { opacity: 0.7 }]}
-                        onPress={handleSave}
-                        disabled={saving}
-                    >
-                        {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Save Branch</Text>}
-                    </TouchableOpacity>
-                </View>
+                        <TouchableOpacity
+                            style={[styles.saveButton, saving && { opacity: 0.7 }]}
+                            onPress={handleSave}
+                            disabled={saving}
+                        >
+                            {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Save Branch</Text>}
+                        </TouchableOpacity>
+                    </View>
+                </ScrollView>
             </BottomModal>
         </SafeAreaView>
     );
@@ -461,6 +625,22 @@ const styles = StyleSheet.create({
     label: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 },
     input: { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, padding: 12, fontSize: 15, backgroundColor: '#fff' },
     row: { flexDirection: 'row' },
+
+    chipContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#FFFFFF' },
+    chipActive: { borderColor: Colors.primary, backgroundColor: Colors.primary },
+    chipText: { fontSize: 13, fontWeight: '600', color: '#374151' },
+    chipTextActive: { color: '#FFFFFF' },
+
+    vegToggle: { flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#FFFFFF', marginBottom: 16 },
+    vegToggleActive: { borderColor: '#10B981', backgroundColor: '#ECFDF5' },
+    vegCheck: { width: 20, height: 20, borderRadius: 4, borderWidth: 2, borderColor: '#9CA3AF', backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+    vegCheckActive: { borderColor: '#10B981', backgroundColor: '#10B981' },
+
+    photoThumb: { width: 80, height: 80, borderRadius: 10, marginRight: 10, position: 'relative' },
+    photoImg: { width: 80, height: 80, borderRadius: 10, backgroundColor: '#F3F4F6' },
+    photoRemove: { position: 'absolute', top: -6, right: -6 },
+    photoAdd: { width: 80, height: 80, borderRadius: 10, borderWidth: 1, borderStyle: 'dashed', borderColor: '#D1D5DB', alignItems: 'center', justifyContent: 'center' },
 
     saveButton: { backgroundColor: Colors.primary, padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 8 },
     saveButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },

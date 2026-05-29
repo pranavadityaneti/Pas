@@ -198,6 +198,7 @@ export default function OffersScreen() {
                             autoCapitalize="characters"
                             value={manualCode}
                             onChangeText={setManualCode}
+                            style={{ textAlignVertical: 'center', paddingVertical: 0, includeFontPadding: false }}
                         />
                         <TouchableOpacity
                             disabled={!manualCode}

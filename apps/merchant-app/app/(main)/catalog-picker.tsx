@@ -1,3 +1,10 @@
+// @lock — DO NOT EDIT THE FilterModal INVOCATION OR DEFAULT_FILTERS WITHOUT EXPLICIT USER PERMISSION.
+// FilterModal Pass 3 approved May 19, 2026.
+// `DEFAULT_FILTERS` MUST stay in sync with `FilterState` in `src/components/FilterModal.tsx`
+// (must include menuSections, dietaryTags, spiceLevels) or TypeScript will break.
+// The `isGlobalInventory` + `verticalPills` props on FilterModal are the reason this catalog
+// flow renders the vertical-UUID category pills (instead of the per-store name-string options).
+// Edits to other parts of this screen are fine.
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, TextInput, ActivityIndicator, Alert, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,6 +28,9 @@ const DEFAULT_FILTERS: FilterState = {
     onlyDiscounted: false,
     showInactive: false,
     isBestSeller: false,
+    menuSections: [],
+    dietaryTags: [],
+    spiceLevels: [],
 };
 
 export default function CatalogPicker() {

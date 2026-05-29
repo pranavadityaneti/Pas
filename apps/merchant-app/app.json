@@ -36,7 +36,8 @@
         "NSCameraUsageDescription": "Camera access is required to capture and upload KYC documents for account verification.",
         "NSPhotoLibraryUsageDescription": "Photo library access is needed to select and upload stored KYC documents for merchant verification.",
         "NSMicrophoneUsageDescription": "Microphone access is required to capture audio when recording videos for store verification.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": ["remote-notification"]
       },
       "config": {
         "googleMapsApiKey": "AIzaSyAZPXR9kkXQj_JkrLM2V8L1qvBYwoI5bN4"
@@ -60,7 +61,8 @@
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.POST_NOTIFICATIONS"
       ],
       "softwareKeyboardLayoutMode": "resize"
     },

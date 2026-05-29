@@ -7,18 +7,28 @@ import { useRouter } from 'expo-router';
 import { useNotificationContext } from '../../src/context/NotificationContext';
 import { useStore } from '../../src/hooks/useStore';
 import { parseUtc } from '../../src/utils/dateFormat';
+import { routeForNotification } from '../../src/hooks/usePushNotifications';
+import type { Notification } from '../../src/hooks/useNotifications';
 
 export default function NotificationsScreen() {
     const router = useRouter();
     const { notifications, loading, markAsRead, markAllAsRead } = useNotificationContext();
     const { activeStoreId, merchantId } = useStore();
 
-    const getIcon = (type: string) => {
-        switch (type) {
-            case 'order': return 'receipt';
-            case 'stock': return 'warning';
-            case 'payout': return 'wallet';
-            default: return 'notifications';
+    // Canonical UPPERCASE notification types — matches what the server emits.
+    // Keep in sync with TYPE_CONFIG in NotificationToast.tsx and NotificationType in useNotifications.ts.
+    const getIcon = (type: string): keyof typeof Ionicons.glyphMap => {
+        switch ((type || '').toUpperCase()) {
+            case 'NEW_ORDER':         return 'receipt';
+            case 'NEW_ORDER_REQUEST': return 'file-tray';
+            case 'ORDER_CANCELLED':   return 'close-circle';
+            case 'CANCELLED':         return 'close-circle';
+            case 'RIDER_ARRIVED':     return 'bicycle';
+            case 'ORDER_UPDATE':      return 'refresh-circle';
+            case 'COMPLETED':         return 'checkmark-circle';
+            case 'READY':             return 'bag-check';
+            case 'LOW_STOCK':         return 'warning';
+            default:                  return 'notifications';
         }
     };
 
@@ -35,21 +45,32 @@ export default function NotificationsScreen() {
         return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
     };
 
-    const handleNotificationPress = async (notificationId: string, is_read: boolean, link?: string, notifStoreId?: string) => {
-        if (!is_read) {
-            await markAsRead(notificationId);
+    const handleNotificationPress = async (notif: Notification) => {
+        // 1. Mark as read first (regardless of whether we navigate)
+        if (!notif.is_read) {
+            await markAsRead(notif.id);
         }
-        if (link) {
-            // Guard: ensure notification belongs to the currently active store
-            const currentStore = activeStoreId || merchantId;
-            if (notifStoreId && currentStore && notifStoreId !== currentStore) {
-                Alert.alert('Wrong Branch', 'Please switch to the correct branch to view this item.');
-                return;
-            }
-            if (link.startsWith('/')) {
-                router.push(link as any);
-            } else {
-                console.log("External link:", link);
+
+        // 2. Wrong-branch guard — if this notification belongs to a different active store
+        //    than the merchant currently has selected, ask them to switch before opening
+        const currentStore = activeStoreId || merchantId;
+        const notifStoreId = (notif as any).storeId || (notif as any).store_id;
+        if (notifStoreId && currentStore && notifStoreId !== currentStore) {
+            Alert.alert('Wrong Branch', 'Please switch to the correct branch to view this item.');
+            return;
+        }
+
+        // 3. Resolve route using the shared helper (also used by OS push taps in usePushNotifications)
+        const route = routeForNotification({
+            type: notif.type,
+            link: notif.link,
+            referenceId: (notif as any).reference_id || (notif as any).referenceId,
+        });
+        if (route) {
+            try {
+                router.push(route as any);
+            } catch (e: any) {
+                console.warn('[Notif tap] Navigation failed:', e?.message || e);
             }
         }
     };
@@ -96,7 +117,7 @@ export default function NotificationsScreen() {
                         <TouchableOpacity
                             key={notif.id}
                             style={[styles.notifCard, !notif.is_read && styles.unread]}
-                            onPress={() => handleNotificationPress(notif.id, notif.is_read, notif.link, notif.storeId)}
+                            onPress={() => handleNotificationPress(notif)}
                         >
                             <View style={[styles.iconCircle, !notif.is_read && styles.iconCircleUnread]}>
                                 <Ionicons name={getIcon(notif.type) as any} size={20} color={notif.is_read ? '#6B7280' : Colors.primary} />
@@ -104,7 +125,7 @@ export default function NotificationsScreen() {
                             <View style={styles.notifContent}>
                                 <Text style={styles.notifTitle}>{notif.title}</Text>
                                 <Text style={styles.notifMessage}>{notif.message}</Text>
-                                <Text style={styles.notifTime}>{formatTime(notif.createdAt)}</Text>
+                                <Text style={styles.notifTime}>{formatTime(notif.created_at)}</Text>
                             </View>
                             {!notif.is_read && <View style={styles.unreadDot} />}
                         </TouchableOpacity>

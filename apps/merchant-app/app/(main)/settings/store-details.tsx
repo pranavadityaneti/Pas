@@ -31,9 +31,13 @@ export default function StoreDetailsScreen() {
         address: '',
         cityId: '',
         category: '',
-        photos: [] as string[]
+        photos: [] as string[],
+        cuisines: [] as string[],
+        isVeg: false,
+        restaurantType: '',
     });
     const [initialDetails, setInitialDetails] = useState<typeof details | null>(null);
+    const [isDining, setIsDining] = useState(false);
 
     // Step 1: Fix Fetch Logic
     const targetId = store?.id;
@@ -49,7 +53,7 @@ export default function StoreDetailsScreen() {
     // Realtime Merchant Extras (Signup Data)
     const { data: merchantDataList, loading: merchantLoading } = useRealtimeTable({
         tableName: 'merchants',
-        select: 'city, vertical_id',
+        select: 'city, vertical_id, cuisines, is_veg, restaurant_type',
         filter: targetId ? `id.eq.${targetId}` : undefined,
         enabled: !!targetId
     });
@@ -85,10 +89,20 @@ export default function StoreDetailsScreen() {
                 address: sData?.address || '',
                 category: label,
                 photos: photosArray,
-                cityId: mData?.city || ''
+                cityId: mData?.city || '',
+                cuisines: mData?.cuisines || [],
+                isVeg: mData?.is_veg ?? false,
+                restaurantType: mData?.restaurant_type || '',
             };
             setDetails(newDetails);
             setInitialDetails(newDetails);
+
+            // Lookup Vertical.isDining to gate dining-specific fields
+            if (mData?.vertical_id) {
+                supabase.from('Vertical').select('isDining').eq('id', mData.vertical_id).single().then(({ data }) => {
+                    if (data) setIsDining(!!(data as any).isDining);
+                });
+            }
         }
         setLoading(false);
     }, [storeDataList, merchantDataList, storeLoading, merchantLoading]);
@@ -107,20 +121,29 @@ export default function StoreDetailsScreen() {
 
         setSaving(true);
         try {
-            // Updated to use Supabase directly (Fixing localhost issue)
             const { error } = await supabase
                 .from('Store')
                 .update({
                     name: details.name,
                     address: details.address,
-                    // cityId and category are read-only or managed elsewhere
-                    // photos: details.photos // Photos update logic might need storage upload, skipped for now as per UI
                 })
                 .eq('id', store.id);
 
             if (error) throw error;
 
-            setInitialDetails(details); // Update initial state on success
+            if (isDining) {
+                const { error: mError } = await supabase
+                    .from('merchants')
+                    .update({
+                        cuisines: details.cuisines,
+                        is_veg: details.isVeg,
+                        restaurant_type: details.restaurantType,
+                    })
+                    .eq('id', store.id);
+                if (mError) throw mError;
+            }
+
+            setInitialDetails(details);
             Alert.alert('Success', 'Store details updated successfully', [
                 { text: 'OK', onPress: () => router.back() }
             ]);
@@ -223,6 +246,83 @@ export default function StoreDetailsScreen() {
                         )}
                     </ScrollView>
                 </View>
+
+                {isDining && (
+                    <>
+                        <View style={styles.formGroup}>
+                            <Text style={styles.label}>Restaurant Type</Text>
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                                {['Casual Dining', 'Fine Dining', 'Cafe', 'Quick Service', 'Dhaba', 'Cloud Kitchen'].map((t) => (
+                                    <TouchableOpacity
+                                        key={t}
+                                        onPress={() => setDetails({ ...details, restaurantType: t })}
+                                        style={{
+                                            paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+                                            borderWidth: 1,
+                                            borderColor: details.restaurantType === t ? Colors.primary : '#E5E7EB',
+                                            backgroundColor: details.restaurantType === t ? Colors.primary : '#FFFFFF',
+                                        }}
+                                    >
+                                        <Text style={{ fontSize: 13, fontWeight: '600', color: details.restaurantType === t ? '#FFFFFF' : '#374151' }}>{t}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </View>
+
+                        <View style={styles.formGroup}>
+                            <Text style={styles.label}>Cuisines (select all that apply)</Text>
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                                {['North Indian', 'South Indian', 'Chinese', 'Street Food', 'Mughlai', 'Continental', 'Italian', 'Multi-Cuisine'].map((c) => {
+                                    const selected = details.cuisines.includes(c);
+                                    return (
+                                        <TouchableOpacity
+                                            key={c}
+                                            onPress={() => {
+                                                const next = selected
+                                                    ? details.cuisines.filter(x => x !== c)
+                                                    : [...details.cuisines, c];
+                                                setDetails({ ...details, cuisines: next });
+                                            }}
+                                            style={{
+                                                paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+                                                borderWidth: 1,
+                                                borderColor: selected ? Colors.primary : '#E5E7EB',
+                                                backgroundColor: selected ? Colors.primary : '#FFFFFF',
+                                            }}
+                                        >
+                                            <Text style={{ fontSize: 13, fontWeight: '600', color: selected ? '#FFFFFF' : '#374151' }}>{c}</Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+                        </View>
+
+                        <View style={styles.formGroup}>
+                            <TouchableOpacity
+                                onPress={() => setDetails({ ...details, isVeg: !details.isVeg })}
+                                style={{
+                                    flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: 12,
+                                    borderWidth: 1,
+                                    borderColor: details.isVeg ? '#10B981' : '#E5E7EB',
+                                    backgroundColor: details.isVeg ? '#ECFDF5' : '#FFFFFF',
+                                }}
+                            >
+                                <View style={{
+                                    width: 20, height: 20, borderRadius: 4, borderWidth: 2,
+                                    borderColor: details.isVeg ? '#10B981' : '#9CA3AF',
+                                    backgroundColor: details.isVeg ? '#10B981' : 'transparent',
+                                    alignItems: 'center', justifyContent: 'center', marginRight: 12,
+                                }}>
+                                    {details.isVeg && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827' }}>Pure Vegetarian Restaurant</Text>
+                                    <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>We do not serve any non-vegetarian items</Text>
+                                </View>
+                            </TouchableOpacity>
+                        </View>
+                    </>
+                )}
 
                 <View style={styles.formGroup}>
                     <Text style={[styles.label, { color: '#999' }]}>City (Read Only)</Text>
