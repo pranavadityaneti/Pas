@@ -1,7 +1,11 @@
-import { useState } from 'react';
-import { Lock, Mail, Loader2, AlertCircle, ArrowLeft, CheckCircle, MessageCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Lock, Check, Mail, Loader2, AlertCircle, ArrowLeft, CheckCircle, Instagram, ArrowRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabaseClient';
+import loginBg from '../assets/Admin Dashboard Login BG.jpg';
+import pasLogo from '../assets/PAS_Logo-Horizontal-White.png';
+
+const BRAND_RED = '#b42926';
 
 export function Login() {
   const { login, sendAdminOtp, loginWithOtp, loading: authLoading } = useAuth();
@@ -13,6 +17,7 @@ export function Login() {
   const [phone, setPhone] = useState('');     // 10 digits (no country code)
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
+  const [resendTimer, setResendTimer] = useState(0);
 
   // Email fallback state
   const [email, setEmail] = useState('');
@@ -29,9 +34,17 @@ export function Login() {
   const [resetError, setResetError] = useState<string | null>(null);
 
   const fullPhone = () => `91${phone.replace(/\D/g, '')}`;
+  const phoneComplete = phone.replace(/\D/g, '').length === 10;
+  const otpComplete = otp.replace(/\D/g, '').length === 6;
 
-  const handleSendOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    if (resendTimer <= 0) return;
+    const t = setTimeout(() => setResendTimer((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendTimer]);
+
+  const handleSendOtp = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     setError(null);
     const digits = phone.replace(/\D/g, '');
     if (digits.length !== 10) {
@@ -41,21 +54,31 @@ export function Login() {
     setIsSubmitting(true);
     const { error } = await sendAdminOtp(fullPhone());
     if (error) setError(error);
-    else setOtpSent(true);
+    else { setOtpSent(true); setResendTimer(30); }
     setIsSubmitting(false);
   };
 
-  const handleVerifyOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleVerifyOtp = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     setError(null);
-    if (otp.replace(/\D/g, '').length < 4) {
-      setError('Enter the OTP sent to your WhatsApp');
+    if (otp.replace(/\D/g, '').length < 6) {
+      setError('Enter the 6-digit OTP sent to your WhatsApp');
       return;
     }
     setIsSubmitting(true);
     const { error } = await loginWithOtp(fullPhone(), otp.replace(/\D/g, ''));
     if (error) setError(error);
     setIsSubmitting(false);
+  };
+
+  // Routes Enter / form submit to the right action for the current stage.
+  const handleOtpFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otpSent) {
+      if (phoneComplete) handleSendOtp();
+    } else if (otpComplete) {
+      handleVerifyOtp();
+    }
   };
 
   const handleEmailLogin = async (e: React.FormEvent) => {
@@ -71,18 +94,19 @@ export function Login() {
     e.preventDefault();
     setResetError(null);
     setResetLoading(true);
-
     const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
-
-    if (error) {
-      setResetError(error.message);
-    } else {
-      setResetSent(true);
-    }
-
+    if (error) setResetError(error.message);
+    else setResetSent(true);
     setResetLoading(false);
+  };
+
+  const onPhoneChange = (value: string) => {
+    const v = value.replace(/\D/g, '').slice(0, 10);
+    setPhone(v);
+    setError(null);
+    if (otpSent) { setOtpSent(false); setOtp(''); setResendTimer(0); }
   };
 
   const backToLogin = () => {
@@ -97,284 +121,234 @@ export function Login() {
     setError(null);
     setOtpSent(false);
     setOtp('');
+    setResendTimer(0);
   };
 
-  if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
-      </div>
-    );
-  }
+  // Shared field styling — rounded-square white field that floats on the photo.
+  const pill =
+    'h-[52px] rounded-2xl bg-white shadow-[0_10px_34px_rgba(0,0,0,0.22)] ' +
+    'border border-white/50 outline-none text-[15px] text-gray-800 placeholder:text-gray-400 ' +
+    'focus:ring-2 focus:ring-white/80 focus:border-transparent transition-all';
 
   return (
-    <div className="min-h-screen flex bg-gray-100 p-4 lg:p-6">
-      {/* Left Panel - Gradient with Brand */}
-      <div
-        className="hidden lg:flex lg:w-1/2 relative overflow-hidden rounded-3xl m-2"
-        style={{
-          background: 'linear-gradient(135deg, #ff6b35 0%, #f7931e 25%, #ffcc33 50%, #ff6b35 75%, #e55d30 100%)',
-        }}
-      >
-        <div className="absolute top-20 left-20 w-96 h-96 bg-white/10 rounded-full blur-3xl"></div>
-        <div className="absolute bottom-20 right-20 w-80 h-80 bg-orange-300/20 rounded-full blur-3xl"></div>
-        <div className="absolute top-1/2 left-1/3 w-64 h-64 bg-yellow-200/15 rounded-full blur-2xl"></div>
+    <div
+      className="min-h-screen w-full relative flex flex-col items-center justify-center overflow-hidden"
+      style={{ backgroundImage: `url(${loginBg})`, backgroundSize: 'cover', backgroundPosition: 'center' }}
+    >
+      {/* Blackened blur layer — subtle 15% darkening + blur over the photo */}
+      <div className="absolute inset-0 bg-black/15 backdrop-blur-md" />
 
-        <div className="relative z-10 flex flex-col justify-between p-12 text-white">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
-              <span className="text-2xl font-bold">P</span>
+      {authLoading ? (
+        <Loader2 className="w-9 h-9 animate-spin text-white relative z-10" />
+      ) : (
+        <div className="relative z-10 w-full max-w-3xl px-6 flex flex-col items-center">
+          {/* Logo */}
+          <img
+            src={pasLogo}
+            alt="Pick At Store"
+            className="h-12 md:h-14 w-auto mb-14 drop-shadow-[0_2px_16px_rgba(0,0,0,0.55)] select-none"
+            draggable={false}
+          />
+
+          {/* Inline error */}
+          {error && (
+            <div className="mb-6 flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-red-500/90 backdrop-blur-sm shadow-lg">
+              <AlertCircle className="w-4 h-4 text-white flex-shrink-0" />
+              <p className="text-sm text-white font-medium">{error}</p>
             </div>
-            <span className="text-2xl font-semibold">PickAtStore</span>
-          </div>
-
-          <div className="max-w-lg">
-            <p className="text-white/80 text-base mb-4">Super Admin Portal</p>
-            <h1 className="text-5xl font-bold leading-tight mb-6">
-              Command your retail ecosystem with precision.
-            </h1>
-            <p className="text-white/70 text-xl">
-              Manage merchants, monitor orders, and drive growth from one powerful dashboard.
-            </p>
-          </div>
-
-          <p className="text-white/60 text-sm">
-            © 2024 PickAtStore. All rights reserved.
-          </p>
-        </div>
-      </div>
-
-      {/* Right Panel - Login Form */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 lg:p-12 bg-white rounded-3xl m-2 shadow-sm">
-        <div className="w-full max-w-lg">
-          {/* Mobile Logo */}
-          <div className="lg:hidden flex items-center gap-3 mb-10">
-            <div className="w-12 h-12 bg-gradient-to-br from-orange-500 to-yellow-500 rounded-xl flex items-center justify-center">
-              <span className="text-2xl font-bold text-white">P</span>
-            </div>
-            <span className="text-2xl font-semibold text-gray-900">PickAtStore</span>
-          </div>
+          )}
 
           {showForgotPassword ? (
-            // Forgot Password Form (email fallback only)
-            <div>
-              <button
-                onClick={backToLogin}
-                className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-8 transition-colors"
-              >
-                <ArrowLeft className="w-5 h-5" />
-                <span>Back to login</span>
-              </button>
-
+            /* ---------- Forgot password ---------- */
+            <div className="w-full max-w-md flex flex-col items-center">
               {resetSent ? (
-                <div className="text-center py-8">
-                  <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                    <CheckCircle className="w-10 h-10 text-green-600" />
+                <div className="text-center">
+                  <div className="w-16 h-16 rounded-2xl bg-white/95 flex items-center justify-center mx-auto mb-5 shadow-lg">
+                    <CheckCircle className="w-8 h-8 text-green-600" />
                   </div>
-                  <h2 className="text-3xl font-bold text-gray-900 mb-3">Check your email</h2>
-                  <p className="text-gray-500 text-lg mb-8">
-                    We've sent a password reset link to<br />
-                    <strong className="text-gray-700">{resetEmail}</strong>
+                  <h2 className="text-2xl font-semibold text-white mb-2 drop-shadow">Check your email</h2>
+                  <p className="text-white/80 mb-6 drop-shadow">
+                    Reset link sent to <strong className="text-white">{resetEmail}</strong>
                   </p>
-                  <button onClick={backToLogin} className="text-orange-600 hover:text-orange-700 font-medium text-lg">
+                  <button onClick={backToLogin} className="text-white font-medium underline underline-offset-4 hover:opacity-80">
                     Return to login
                   </button>
                 </div>
               ) : (
                 <>
-                  <div className="w-14 h-14 bg-gradient-to-br from-orange-500 to-yellow-500 rounded-2xl flex items-center justify-center mb-8">
-                    <Mail className="w-7 h-7 text-white" />
-                  </div>
-                  <h2 className="text-3xl font-bold text-gray-900 mb-3">Forgot password?</h2>
-                  <p className="text-gray-500 text-lg mb-10">No worries, we'll send you reset instructions.</p>
-
-                  {resetError && (
-                    <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3">
-                      <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
-                      <p className="text-sm text-red-700">{resetError}</p>
-                    </div>
-                  )}
-
-                  <form onSubmit={handleForgotPassword} className="space-y-6">
-                    <div>
-                      <label className="block text-base font-medium text-gray-700 mb-3">Email address</label>
-                      <div className="relative">
-                        <Mail className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                        <input
-                          type="email"
-                          value={resetEmail}
-                          onChange={(e) => setResetEmail(e.target.value)}
-                          placeholder="admin@pickatstore.com"
-                          className="w-full pl-12 pr-4 py-4 text-lg border border-gray-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none bg-gray-50/50 transition-all"
-                          required
-                          disabled={resetLoading}
-                        />
-                      </div>
+                  <h2 className="text-2xl font-semibold text-white mb-2 drop-shadow">Reset password</h2>
+                  <p className="text-white/80 mb-7 text-center drop-shadow">We'll email you reset instructions.</p>
+                  {resetError && <p className="mb-4 text-sm text-red-200">{resetError}</p>}
+                  <form onSubmit={handleForgotPassword} className="w-full flex flex-col items-center gap-3">
+                    <div className="relative w-full">
+                      <Mail className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <input
+                        type="email"
+                        value={resetEmail}
+                        onChange={(e) => setResetEmail(e.target.value)}
+                        placeholder="admin@pickatstore.io"
+                        className={`${pill} w-full pl-12 pr-5`}
+                        required
+                        disabled={resetLoading}
+                      />
                     </div>
                     <button
                       type="submit"
                       disabled={resetLoading}
-                      className="w-full bg-gray-900 text-white py-4 rounded-xl hover:bg-gray-800 transition-all font-medium text-lg disabled:opacity-50 flex items-center justify-center gap-2"
+                      className="h-[52px] w-full rounded-2xl text-white font-semibold shadow-lg disabled:opacity-60 flex items-center justify-center gap-2 transition-all"
+                      style={{ backgroundColor: BRAND_RED }}
                     >
-                      {resetLoading ? (<><Loader2 className="w-5 h-5 animate-spin" />Sending...</>) : 'Send reset link'}
+                      {resetLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Send reset link'}
                     </button>
                   </form>
+                  <button onClick={backToLogin} className="mt-6 flex items-center gap-1.5 text-white/75 hover:text-white text-sm transition-colors">
+                    <ArrowLeft className="w-4 h-4" /> Back to login
+                  </button>
                 </>
               )}
             </div>
-          ) : (
-            // Login Form
+          ) : mode === 'otp' ? (
+            /* ---------- WhatsApp OTP (primary) ---------- */
             <>
-              <div className="w-14 h-14 bg-gradient-to-br from-orange-500 to-yellow-500 rounded-2xl flex items-center justify-center mb-8">
-                <span className="text-2xl">✦</span>
-              </div>
-              <h2 className="text-4xl font-bold text-gray-900 mb-3">Welcome back</h2>
-              <p className="text-gray-500 text-lg mb-10">Log in to access your admin dashboard</p>
-
-              {error && (
-                <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3">
-                  <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
-                  <p className="text-sm text-red-700">{error}</p>
+              <form onSubmit={handleOtpFormSubmit} className="flex items-center justify-center gap-3">
+                {/* Phone pill */}
+                <div className={`relative transition-all duration-500 ${phoneComplete ? 'w-52' : 'w-80'}`}>
+                  <span className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-500 text-[15px] select-none">+91</span>
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    autoFocus
+                    value={phone}
+                    onChange={(e) => onPhoneChange(e.target.value)}
+                    placeholder="WhatsApp number"
+                    className={`${pill} w-full pl-14 pr-5 tracking-wide`}
+                    disabled={isSubmitting}
+                  />
                 </div>
-              )}
 
-              {mode === 'otp' ? (
-                // --- WhatsApp OTP (primary) ---
-                !otpSent ? (
-                  <form onSubmit={handleSendOtp} className="space-y-6">
-                    <div>
-                      <label htmlFor="phone" className="block text-base font-medium text-gray-700 mb-3">WhatsApp number</label>
-                      <div className="relative flex items-center">
-                        <span className="absolute left-4 text-gray-500 text-lg select-none">+91</span>
-                        <input
-                          id="phone"
-                          type="tel"
-                          inputMode="numeric"
-                          value={phone}
-                          onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                          placeholder="9876543210"
-                          className="w-full pl-16 pr-4 py-4 text-lg border border-gray-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none bg-gray-50/50 transition-all tracking-wide"
-                          required
-                          disabled={isSubmitting}
-                        />
-                      </div>
-                      <p className="text-xs text-gray-400 mt-2">We'll send a one-time code to your WhatsApp.</p>
-                    </div>
-                    <button
-                      type="submit"
-                      disabled={isSubmitting}
-                      className="w-full bg-gray-900 text-white py-4 rounded-xl hover:bg-gray-800 transition-all font-medium text-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                    >
-                      {isSubmitting ? (<><Loader2 className="w-5 h-5 animate-spin" />Sending OTP...</>) : 'Send OTP'}
-                    </button>
-                  </form>
-                ) : (
-                  <form onSubmit={handleVerifyOtp} className="space-y-6">
-                    <div>
-                      <label htmlFor="otp" className="block text-base font-medium text-gray-700 mb-3">
-                        Enter OTP <span className="text-gray-400 font-normal">(sent to +91 {phone})</span>
-                      </label>
-                      <div className="relative">
-                        <MessageCircle className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                        <input
-                          id="otp"
-                          type="tel"
-                          inputMode="numeric"
-                          value={otp}
-                          onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                          placeholder="6-digit code"
-                          className="w-full pl-12 pr-4 py-4 text-lg border border-gray-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none bg-gray-50/50 transition-all tracking-[0.3em]"
-                          required
-                          autoFocus
-                          disabled={isSubmitting}
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => { setOtpSent(false); setOtp(''); setError(null); }}
-                        className="text-sm text-orange-600 hover:text-orange-700 font-medium mt-2"
-                      >
-                        Change number / resend
-                      </button>
-                    </div>
-                    <button
-                      type="submit"
-                      disabled={isSubmitting}
-                      className="w-full bg-gray-900 text-white py-4 rounded-xl hover:bg-gray-800 transition-all font-medium text-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                    >
-                      {isSubmitting ? (<><Loader2 className="w-5 h-5 animate-spin" />Verifying...</>) : 'Verify & Log in'}
-                    </button>
-                  </form>
-                )
-              ) : (
-                // --- Email / password (fallback) ---
-                <form onSubmit={handleEmailLogin} className="space-y-6">
-                  <div>
-                    <label htmlFor="email" className="block text-base font-medium text-gray-700 mb-3">Your email</label>
-                    <div className="relative">
-                      <Mail className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                      <input
-                        id="email"
-                        type="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        placeholder="admin@pickatstore.com"
-                        className="w-full pl-12 pr-4 py-4 text-lg border border-gray-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none bg-gray-50/50 transition-all"
-                        required
-                        disabled={isSubmitting}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label htmlFor="password" className="block text-base font-medium text-gray-700 mb-3">Password</label>
-                    <div className="relative">
-                      <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                      <input
-                        id="password"
-                        type="password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder="••••••••"
-                        className="w-full pl-12 pr-4 py-4 text-lg border border-gray-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none bg-gray-50/50 transition-all"
-                        required
-                        disabled={isSubmitting}
-                      />
-                    </div>
-                  </div>
+                {/* OTP + submit — slides in once the number is complete */}
+                <div
+                  className={`flex items-center gap-3 transition-all duration-500 ${
+                    phoneComplete
+                      ? 'opacity-100 translate-x-0 max-w-[260px]'
+                      : 'opacity-0 -translate-x-4 max-w-0 overflow-hidden pointer-events-none'
+                  }`}
+                >
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    value={otp}
+                    onChange={(e) => { setOtp(e.target.value.replace(/\D/g, '').slice(0, 6)); setError(null); }}
+                    placeholder={otpSent ? 'Code' : 'OTP'}
+                    className={`${pill} w-44 px-5 ${otp ? 'tracking-[0.35em]' : 'tracking-normal'} text-center placeholder:tracking-normal`}
+                    disabled={!otpSent || isSubmitting}
+                  />
                   <button
                     type="submit"
-                    disabled={isSubmitting}
-                    className="w-full bg-gray-900 text-white py-4 rounded-xl hover:bg-gray-800 transition-all font-medium text-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    aria-label="Verify and log in"
+                    disabled={!otpSent || !otpComplete || isSubmitting}
+                    className="h-[52px] w-[52px] rounded-2xl flex items-center justify-center text-white shadow-[0_8px_30px_rgba(0,0,0,0.3)] transition-all disabled:cursor-not-allowed"
+                    style={{ backgroundColor: !otpSent || !otpComplete || isSubmitting ? 'rgba(255,255,255,0.35)' : BRAND_RED }}
                   >
-                    {isSubmitting ? (<><Loader2 className="w-5 h-5 animate-spin" />Signing in...</>) : 'Log in'}
+                    {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : otpComplete ? <Check className="w-5 h-5" /> : <Lock className="w-4 h-4" />}
                   </button>
-                  <div className="text-center">
-                    <button
-                      type="button"
-                      onClick={() => setShowForgotPassword(true)}
-                      className="text-base text-orange-600 hover:text-orange-700 font-medium"
-                    >
-                      Forgot your password?
-                    </button>
-                  </div>
-                </form>
-              )}
+                </div>
+              </form>
 
-              {/* Method toggle */}
-              <div className="mt-8 text-center border-t border-gray-100 pt-6">
-                {mode === 'otp' ? (
-                  <button onClick={() => switchMode('email')} className="text-sm text-gray-500 hover:text-gray-700 font-medium">
-                    Use email &amp; password instead
-                  </button>
-                ) : (
-                  <button onClick={() => switchMode('otp')} className="text-sm text-gray-500 hover:text-gray-700 font-medium">
-                    Use WhatsApp OTP instead
+              {/* Send / resend affordance */}
+              <div className="h-6 mt-5 flex items-center justify-center">
+                {phoneComplete && !otpSent && (
+                  <button
+                    onClick={() => handleSendOtp()}
+                    disabled={isSubmitting}
+                    className="flex items-center gap-1.5 text-white font-semibold text-sm hover:opacity-80 disabled:opacity-50 drop-shadow"
+                  >
+                    {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Send code <ArrowRight className="w-4 h-4" /></>}
                   </button>
                 )}
+                {otpSent && (
+                  <p className="text-white/80 text-sm drop-shadow">
+                    Code sent to +91 {phone}.{' '}
+                    {resendTimer > 0 ? (
+                      <span className="text-white/55">Resend in {resendTimer}s</span>
+                    ) : (
+                      <button onClick={() => handleSendOtp()} className="text-white font-semibold underline underline-offset-4 hover:opacity-80">
+                        Resend
+                      </button>
+                    )}
+                  </p>
+                )}
               </div>
+
+              {/* Email fallback */}
+              <button
+                onClick={() => switchMode('email')}
+                className="mt-8 text-white/70 hover:text-white text-sm transition-colors drop-shadow"
+              >
+                Prefer email? <span className="underline underline-offset-4">Sign in with email</span>
+              </button>
             </>
+          ) : (
+            /* ---------- Email / password (fallback) ---------- */
+            <form onSubmit={handleEmailLogin} className="w-full max-w-md flex flex-col items-center gap-3">
+              <div className="relative w-full">
+                <Mail className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="admin@pickatstore.io"
+                  className={`${pill} w-full pl-12 pr-5`}
+                  required
+                  disabled={isSubmitting}
+                />
+              </div>
+              <div className="relative w-full">
+                <Lock className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Password"
+                  className={`${pill} w-full pl-12 pr-5`}
+                  required
+                  disabled={isSubmitting}
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="h-[52px] w-full rounded-2xl text-white font-semibold shadow-lg disabled:opacity-60 flex items-center justify-center gap-2 transition-all"
+                style={{ backgroundColor: BRAND_RED }}
+              >
+                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Log in'}
+              </button>
+              <div className="flex items-center gap-4 mt-2">
+                <button type="button" onClick={() => switchMode('otp')} className="text-white/70 hover:text-white text-sm transition-colors drop-shadow">
+                  Use WhatsApp OTP
+                </button>
+                <span className="text-white/40">·</span>
+                <button type="button" onClick={() => setShowForgotPassword(true)} className="text-white/70 hover:text-white text-sm transition-colors drop-shadow">
+                  Forgot password?
+                </button>
+              </div>
+            </form>
           )}
         </div>
+      )}
+
+      {/* Footer */}
+      <div className="absolute bottom-7 left-0 right-0 z-10 flex flex-col items-center gap-3">
+        <a
+          href="https://www.instagram.com/pickatstore.in/"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Pick At Store on Instagram"
+          className="w-9 h-9 rounded-2xl bg-white/15 backdrop-blur-sm flex items-center justify-center text-white/85 hover:bg-white/25 hover:text-white transition-all"
+        >
+          <Instagram className="w-4 h-4" />
+        </a>
+        <p className="text-white/65 text-xs tracking-wide drop-shadow">© 2026 PAS Retail Networks</p>
       </div>
     </div>
   );
