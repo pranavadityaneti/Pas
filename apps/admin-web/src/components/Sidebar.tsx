@@ -98,6 +98,14 @@ export function Sidebar() {
                 </NavLink>
               </SidebarMenuButton>
             </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild isActive={pathname.startsWith("/marketing")} tooltip="Marketing">
+                <NavLink to="/marketing">
+                  <Megaphone />
+                  <span>Marketing</span>
+                </NavLink>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
 

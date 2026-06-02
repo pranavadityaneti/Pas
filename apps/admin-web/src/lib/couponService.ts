@@ -1,119 +1,99 @@
-import { supabase } from './supabaseClient';
+import api from './api';
 
-// Types matching the Prisma schema
+// Coupons go through the Express API (apps/api) — the coupon engine — NOT Supabase directly.
+// The API validates input, dedupes codes, and (consumer-side) handles validate/redeem.
+// Field names mirror the API response, which is Prisma camelCase.
+
+export type DiscountType = 'PERCENTAGE' | 'FLAT' | 'BOGO';
+export type FundingSource = 'PLATFORM' | 'MERCHANT';
+export type TargetAudience = 'ALL' | 'NEW_USERS' | 'INACTIVE_USERS';
+// Mirror of CouponTheme in CouponCard.tsx (single source of truth for theme ids).
+// The API persists this as a single string column on `coupons.theme`.
+export type CouponTheme = 'classic' | 'bold' | 'modern' | 'festive';
+
 export interface Coupon {
     id: string;
     code: string;
-    discount_type: 'PERCENTAGE' | 'FLAT';
-    discount_value: number;
-    max_discount_cap: number | null;
-    funding_source: 'PLATFORM' | 'MERCHANT';
-    target_audience: 'ALL' | 'NEW_USERS' | 'INACTIVE_USERS';
-    store_id: string | null;
-    is_active: boolean;
-    usage_limit: number | null;
-    used_count: number;
-    start_date: string;
-    end_date: string | null;
-    created_at: string;
-    updated_at: string;
+    discountType: DiscountType;
+    discountValue: number;
+    maxDiscountCap: number | null;
+    fundingSource: FundingSource;
+    targetAudience: TargetAudience;
+    storeId: string | null;
+    isActive: boolean;
+    usageLimit: number | null;
+    usedCount: number;
+    startDate: string;
+    endDate: string | null;
+    // Coupon-engine fields (design: docs/coupon-feature-spec.md)
+    minOrder: number | null;
+    perCustomerLimit: number | null;
+    bogoBuy: number | null;
+    bogoGet: number | null;
+    title: string | null;
+    brandName: string | null;
+    description: string | null;
+    showLogo: boolean;
+    logoUrl: string | null;
+    autoCode: boolean;
+    theme: CouponTheme;
+    createdAt: string;
+    updatedAt: string;
 }
 
 export interface CreateCouponInput {
     code: string;
-    discountType: 'PERCENTAGE' | 'FLAT';
-    discountValue: number;
-    maxDiscountCap: number | null;
-    fundingSource: 'PLATFORM' | 'MERCHANT';
-    targetAudience: 'ALL' | 'NEW_USERS' | 'INACTIVE_USERS';
-    storeId: string | null;
-    usageLimit: number | null;
-    startDate: string;
-    endDate: string | null;
+    discountType: DiscountType;
+    discountValue?: number;
+    maxDiscountCap?: number | null;
+    fundingSource: FundingSource;
+    targetAudience: TargetAudience;
+    storeId?: string | null;
+    usageLimit?: number | null;
+    startDate?: string;
+    endDate?: string | null;
+    minOrder?: number | null;
+    perCustomerLimit?: number | null;
+    bogoBuy?: number | null;
+    bogoGet?: number | null;
+    title?: string | null;
+    brandName?: string | null;
+    description?: string | null;
+    showLogo?: boolean;
+    logoUrl?: string | null;
+    autoCode?: boolean;
+    theme?: CouponTheme;
 }
 
-// Fetch all coupons (with optional filters)
-export async function fetchCoupons(filters?: { storeId?: string; isActive?: boolean }) {
-    let query = supabase
-        .from('coupons')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-    if (filters?.storeId) {
-        query = query.eq('store_id', filters.storeId);
-    }
-    if (filters?.isActive !== undefined) {
-        query = query.eq('is_active', filters.isActive);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-        console.error('Fetch coupons error:', error);
-        throw error;
-    }
-
-    return data as Coupon[];
+// Fetch coupons (optional filters: storeId, isActive, fundingSource, search)
+export async function fetchCoupons(filters?: {
+    storeId?: string; isActive?: boolean; fundingSource?: string; search?: string;
+}): Promise<Coupon[]> {
+    const { data } = await api.get('/coupons', { params: filters });
+    return (data?.data ?? []) as Coupon[];
 }
 
-// Create a new coupon
-export async function createCoupon(input: CreateCouponInput) {
-    const { data, error } = await supabase
-        .from('coupons')
-        .insert({
-            code: input.code.toUpperCase(),
-            discount_type: input.discountType,
-            discount_value: input.discountValue,
-            max_discount_cap: input.maxDiscountCap,
-            funding_source: input.fundingSource,
-            target_audience: input.targetAudience,
-            store_id: input.storeId,
-            usage_limit: input.usageLimit,
-            start_date: input.startDate || new Date().toISOString(),
-            end_date: input.endDate,
-        })
-        .select()
-        .single();
-
-    if (error) {
-        console.error('Create coupon error:', error);
-        throw error;
-    }
-
+// Create a coupon (API enforces code uniqueness + BOGO/discountValue rules)
+export async function createCoupon(input: CreateCouponInput): Promise<Coupon> {
+    const { data } = await api.post('/coupon', { ...input, code: input.code.toUpperCase() });
     return data as Coupon;
 }
 
-// Update an existing coupon
-export async function updateCoupon(id: string, updates: Partial<Record<string, any>>) {
-    const { data, error } = await supabase
-        .from('coupons')
-        .update(updates)
-        .eq('id', id)
-        .select()
-        .single();
-
-    if (error) {
-        console.error('Update coupon error:', error);
-        throw error;
-    }
-
+// Update a coupon (partial; the API whitelists editable fields)
+export async function updateCoupon(
+    id: string,
+    updates: Partial<CreateCouponInput> & { isActive?: boolean }
+): Promise<Coupon> {
+    const { data } = await api.patch(`/coupon/${id}`, updates);
     return data as Coupon;
 }
 
 // Delete a coupon
-export async function deleteCoupon(id: string) {
-    const { error } = await supabase
-        .from('coupons')
-        .delete()
-        .eq('id', id);
-
-    if (error) {
-        console.error('Delete coupon error:', error);
-        throw error;
-    }
+export async function deleteCoupon(id: string): Promise<void> {
+    await api.delete(`/coupon/${id}`);
 }
 
-// Toggle coupon active status
-export async function toggleCouponStatus(id: string, isActive: boolean) {
-    return updateCoupon(id, { is_active: isActive });
+// Toggle active status
+export async function toggleCouponStatus(id: string, isActive: boolean): Promise<Coupon> {
+    return updateCoupon(id, { isActive });
 }
