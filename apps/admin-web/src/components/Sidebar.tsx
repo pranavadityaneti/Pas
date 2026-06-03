@@ -58,8 +58,9 @@ const OPERATIONS_ITEMS: NavItem[] = [
 const FINANCE_ITEMS: NavItem[] = [
   // Maps to existing FinanceHub (SettlementsManager + InvoiceRepository tabs)
   { to: "/finance",   label: "Settlements", icon: Wallet,         requires: "settlements.verify" },
-  // Maps to existing AnalyticsHub (AnalyticsDashboard + AuditLog tabs)
-  { to: "/analytics", label: "Reports",     icon: FileBarChart2,  requires: "reports.financial.generate" },
+  // Maps to AnalyticsHub (Reports tab = AnalyticsDashboard, then Global Config, Audit Logs).
+  // 2026-06-03: route renamed /analytics → /reports so the URL matches the visible name.
+  { to: "/reports",   label: "Reports",     icon: FileBarChart2,  requires: "reports.financial.generate" },
 ];
 
 const ADMIN_ITEMS: NavItem[] = [

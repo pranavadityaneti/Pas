@@ -14,7 +14,8 @@ export function AnalyticsHub() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg">
+          {/* 2026-06-03: replaced cyan→blue decorative gradient with solid brand red. */}
+          <div className="w-14 h-14 rounded-xl bg-[#B52725] flex items-center justify-center shadow-lg">
             <LineChart className="w-7 h-7 text-white" />
           </div>
           <div>
@@ -32,7 +33,7 @@ export function AnalyticsHub() {
               "gap-2 rounded-lg transition-all",
               activeTab === 'reports'
                 ? "bg-gray-900 text-white hover:bg-gray-800 shadow-md"
-                : "text-gray-600 hover:text-cyan-600 hover:bg-gray-50"
+                : "text-gray-600 hover:text-[#B52725] hover:bg-gray-50"
             )}
             onClick={() => setActiveTab('reports')}
           >
@@ -47,7 +48,7 @@ export function AnalyticsHub() {
               "gap-2 rounded-lg transition-all",
               activeTab === 'config'
                 ? "bg-gray-900 text-white hover:bg-gray-800 shadow-md"
-                : "text-gray-600 hover:text-cyan-600 hover:bg-gray-50"
+                : "text-gray-600 hover:text-[#B52725] hover:bg-gray-50"
             )}
             onClick={() => setActiveTab('config')}
           >
@@ -62,7 +63,7 @@ export function AnalyticsHub() {
               "gap-2 rounded-lg transition-all",
               activeTab === 'audit'
                 ? "bg-gray-900 text-white hover:bg-gray-800 shadow-md"
-                : "text-gray-600 hover:text-cyan-600 hover:bg-gray-50"
+                : "text-gray-600 hover:text-[#B52725] hover:bg-gray-50"
             )}
             onClick={() => setActiveTab('audit')}
           >

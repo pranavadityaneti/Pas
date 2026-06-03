@@ -77,6 +77,9 @@ export default function App() {
         <Route path="engagement" element={<EngagementHub />} />
         <Route path="geography" element={<CityManager />} />
         <Route path="finance" element={<FinanceHub />} />
+        {/* 2026-06-03: renamed /analytics → /reports — URL now matches the tab name. */}
+        <Route path="reports" element={<AnalyticsHub />} />
+        {/* Backwards-compat: old bookmarks to /analytics still resolve. */}
         <Route path="analytics" element={<AnalyticsHub />} />
         <Route path="settings" element={<SettingsHub />} />
         {/* Added 2026-06-02 per RBAC doc */}

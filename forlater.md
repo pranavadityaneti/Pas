@@ -52,6 +52,10 @@
 - **Verify:** `SELECT count(*) FROM profiles p LEFT JOIN "User" u ON u.id=p.id WHERE u.id IS NULL;` → must stay **0**.
 - **Note:** API changes are live but uncommitted in git (consistent with EB shipping the working-tree `dist`). Originated from a founder-reported screenshot.
 
+### 2026-05-29 late-night updates
+- ✅ **Razorpay refunds tested + working** (Pranav confirmed in test mode) → **WS2 unblocked**: cancel/return refunds + the order-FK auto-refund fast-follow can now actually fire (`razorpayInstance.payments.refund(...)`).
+- ⚠️ **Razorpay X does NOT support our business type** → **Settlement/Payout is blocked on a payout-vendor alternative.** Research: Cashfree Payouts, Open Money, Decentro, or similar. Decide vendor before building the merchant Settlement screen. (Was tagged Phase 1; now gated on vendor selection.)
+
 ### Notifications (both apps)
 - **Merchant in-app + push notifications:** finish Phase B (B2 + B3 pending) + Phase C (cleanup of dead `NotificationCenter.tsx`, send `deviceId`). Plus the native build needs to ship B1 (Android 13+ permission + iOS background mode) which is already in `app.json` waiting for build. Plus the notification sound bundling work (forlater item — see "Notification sounds" below).
 - **Customer in-app + push notifications:** full Phase 1 of forlater #22 (push infrastructure + 7 immediate events: order confirmed/payment success/order packed/order picked up/order cancelled/dine-in booked/dining ready). Includes building customer-side push token registration + bell icon + notifications screen + realtime subscription. **(Steps 4+5 DONE on disk 2026-05-28 — inbox, bell+badge, realtime toast, tap deep-link.)**
@@ -70,10 +74,71 @@
 - **Settlement / payout history:** new screen surfacing Razorpay Route payout data (or whatever Razorpay's settlement API exposes). Probably under Earnings & Reports.
 - **Merchant signup flow redesign:** the existing notes are in `docs/signup-flow-redesign-notes.md` per CLAUDE.md. Full rework — atomic creation of merchants + Store + branch + store_staff + User rows (triggers already help). Founders need to confirm the new step-by-step flow (founder question).
 
+### ✅ RESOLVED 2026-05-30 — Frequent signouts (refresh-token rotation race)
+- **Symptom:** founder hit forced logouts on BOTH apps across 3 timings (relaunch after a while / few-min background / mid-session no trigger). NOT post-login.
+- **Root cause (confirmed via Supabase Auth Logs):** concurrent `refreshSession()` callers in the apps caused two `/token` POSTs at the same timestamp; second one used the already-rotated refresh_token → Supabase reuse detection revoked the whole token family → permanent purge in consumer api.ts → SIGNED_OUT and unable to recover. Log evidence: paired rows at `12:44:12` — one `request completed`, one `400: Invalid Refresh Token: Refresh Token Not Found`.
+- **Concurrency sources counted:** consumer had 7 explicit `refreshSession()` call sites (api.ts 401 interceptor + CheckoutScreen + DiningCheckoutScreen + BookingModal x2 + useOrderRequests + supabase.ts setSessionFromTokens). Merchant had 1 + uses `setSession()` (separate concern, not changed tonight).
+- **Fix shipped (two layers):**
+  1. **Dashboard (Pranav):** Supabase → Auth → Sessions → Refresh Token Reuse Interval `10s → 60s`. Live for all users instantly, no deploy.
+  2. **Code (OTA pushed):** monkey-patched `supabase.auth.refreshSession` in both apps' `supabase.ts` so concurrent callers share a single in-flight Promise. Consumer `@lock` (May 1 approved config) overridden with Pranav explicit approval; override documented in file header. Internal supabase-js auto-refresh uses a private path and is unaffected.
+- **Shipped:**
+  - Consumer OTA `6dd7d98f-ed88-4ab7-aba0-dfac619d54b7` (runtime 1.1.1, iOS + Android)
+  - Merchant OTA `75197597-6d15-4ad9-8add-a2f96494f29b` (runtime 1.2.3, iOS + Android)
+- **Verify:** founder relaunches both apps → forced-logout rate should drop ~to zero. If any logout still occurs, capture the Auth Logs row at that timestamp — should now be a single `/token request completed` (no paired error), and any residual logout has a different root cause.
+- **Phase 2A/2B/2C status:** Phase 1 (May 26) + Phase 2A (May 26) + the rotation-race fix (tonight) collectively cover the main signout failure modes. Phase 2C extras (merchant AppState gating + `setSession→refreshSession` switch + Phase 3 SecureStore→AsyncStorage migration) remain in the plan as **optional further hardening** if any residual logouts surface.
+- **OTP ban removed 2026-05-30** (`apps/api/src/index.ts` ~3483) — was blocking founder testing; verify-OTP attempt limit retained. TODO: replace with per-IP throttle + Wati cost cap before scale.
+
+### 💰 HIGH PRIORITY — Real merchant payout formula (replace the `× 0.98` placeholder)
+- **Symptom that surfaced this:** founder screenshot 2026-05-30 — merchant dashboard "Estimated Payout (Today)" shows a float-spill (`₹6.8599999999999999` for revenue `₹7`). Display rounding was fixed tonight (`apps/merchant-app/app/(main)/dashboard.tsx:104-110`). **The float artifact is incidental — the real problem is the math itself.**
+- **Current code (`apps/merchant-app/src/hooks/useEarnings.ts:86`):**
+  ```ts
+  estimatedPayout: todaySum * 0.98 // 2% platform fee simulation
+  ```
+  This is explicitly a **placeholder**, not real business logic. It deducts a flat 2% and calls it the merchant's payout. That is wrong for at least 5 reasons (see table below).
+- **What the real payout must consider:**
+
+  | Component | Typical real value | Notes |
+  |---|---|---|
+  | Razorpay payment-gateway fee | UPI 0% · cards 2-3% · wallets 2% · netbanking ~1-2% | Founder confirmed Razorpay refunds work; gateway fees vary by payment method, need method-aware logic |
+  | GST on the gateway fee | 18% of the fee | Standard Indian e-com practice |
+  | **Platform commission (PAS)** | TBD — needs founder decision | Could be flat % (e.g. 5/10/15), tiered by category, or tiered by merchant plan |
+  | Refunds / chargebacks netted off | Variable | Settlement should be net of refunds in the same window |
+  | TDS (sec 194-O) | 1% of gross sale | E-commerce operator obligation; applies above certain thresholds |
+  | Settlement frequency | T+1 / T+2 / weekly | Affects what "Today's payout" actually means displayed-to-merchant |
+
+- **Decisions needed from founder before coding:**
+  1. PAS platform commission structure (flat / tiered / category-based / merchant-plan-based)
+  2. Pre-fee or post-fee display to the merchant (gross expected payout vs net after deductions)
+  3. Whether "Today's Estimated Payout" includes refunds/chargebacks pending in the same window
+  4. TDS handling — deduct at source and show net, or show gross and note TDS separately
+  5. Settlement frequency that maps to merchant expectation of "today"
+
+- **Where to wire it:**
+  - **Backend:** payout calc must live in `apps/api` (single source of truth), exposed as `GET /merchant/:id/payout/today` (or similar). The merchant app must NOT compute this client-side.
+  - **Frontend:** `useEarnings.ts` becomes a thin API call instead of the multiplication.
+  - Settlement screen / payout flow is gated on the payout-vendor selection (Cashfree / Open / Decentro — Razorpay X doesn't support our business type; separate forlater item).
+- **Risk if left as-is:** merchants make commercial decisions based on a fake number. Real bank credits won't match the dashboard "Estimated Payout" → trust erosion + support tickets.
+- **Date added:** 2026-05-30
+- **Originated from:** founder dashboard screenshot during testing; Pranav's question "how did you decide on `todaySum * 0.98`?" — honest answer: I didn't, that 0.98 was already in code as a labeled simulation that had been overlooked.
+
 ### Admin Dashboard changes
+- **✅ RESOLVED 2026-05-31 — Coupon consumer-side wire-up (checkout cards + tap-to-apply + redemption).** End-to-end live: admin publishes a themed coupon → it appears as a real ticket on the customer checkout (pickup + dining) → tap applies discount → on payment success a `POST /coupons/redeem` fires fire-and-forget (idempotent on orderId) → admin list shows `usedCount` increment. **What shipped:**
+  - **API** (live on EB): new `requireUser` helper; new `GET /coupons/available` (filters `isActive` + validity window + audience match — NEW_USERS only if user has 0 orders; INACTIVE_USERS if last order > 30 days; respects storeId scope + `usageLimit`); `requireUser` lock on `POST /checkout/validate-coupon` and `POST /coupons/redeem`, deriving `userId` from the verified token (closes the spoofing hole tracked separately as 🔒).
+  - **Consumer (Consumer OTA `f91396bc-e159-4062-be17-63efca31f1f8`, runtime 1.1.1, iOS+Android):** new `apps/consumer-app/src/components/CouponCard.tsx` (RN port of the 4 admin themes; perforation via absolute-positioned dots; digit-aware auto-shrink mirrors web heuristic); new `CouponsSection.tsx` (horizontal carousel, loading + empty states, tap → validate → onApply); hard-locked `CheckoutScreen.tsx` + `DiningCheckoutScreen.tsx` got scoped lock-override comments documenting the 2026-05-31 add-only edits; dead `AVAILABLE_COUPONS` hardcoded array deleted from CheckoutScreen.
+  - **Untouched:** `handlePaymentSuccess` session-recovery (`effectiveUser`, refresh+getSession), `errorDiagnostic` UI, sticky CTA layout, Android picker dismiss, May 19 demo recovery layers — all preserved verbatim. Lock-override scope was 7 edits in CheckoutScreen + 5 in DiningCheckoutScreen, all add-only.
+  - **Open follow-up:** `OffersScreen.tsx` still has its own hardcoded `AVAILABLE_COUPONS` (line 12) and a manual code-entry path. The checkout-cards path makes it largely moot for the customer journey, but `OffersScreen` will silently fall behind reality until it's switched to `GET /coupons/available` too. Track as a low-priority cleanup. Also: `CartScreen` (locked) wasn't touched — its coupon math still works because checkout sets the same state shape it expects.
+  - **Plan doc:** `docs/coupon-consumer-wireup-plan.md` kept as historical reference; phases 1-7 all complete; Phase 5 (theme rendering on customer) achieved via the RN CouponCard port, not via the planned "extend OfferCard" shortcut.
+- **🔒 Consumer-side coupon routes still open** (`POST /checkout/validate-coupon`, `POST /coupons/redeem` in `apps/api/src/index.ts`). Tonight (2026-05-30) we closed the 4 admin-management routes with `requireAdmin`; the 2 consumer routes were left untouched because we hadn't verified whether the consumer app sends a Bearer token on those calls. Fix: confirm consumer-app api client injects the Supabase JWT (it almost certainly does — the rest of the consumer flow uses it), then add `const u = await requireUser(req, res); if (!u) return;` (helper to be added next to `requireAdmin` at ~line 79). Verify validate + redeem still work for a logged-in consumer. Then redeploy. Added 2026-05-30.
+- **Coupon card visual-style tweaks — DECISION REVERSED 2026-05-30: shipped preset themes.** Initial decision was "platform defaults only" but on seeing the builder Pranav requested style options visible in preview. Picked the *lighter-persistence* path: single `coupons.theme` text column (one of `classic` / `bold` / `modern` / `festive`) instead of 5 free fields. Each theme maps in code to a curated combination of `cardStyle / shape / accent / radius / density` (see `COUPON_THEMES` in `apps/admin-web/src/components/modules/marketing/CouponCard.tsx`). Migration `20260530120000_coupon_theme`. API POST/PATCH validate against the allowed list with silent fallback to `classic`. Adding/removing themes later is a code-only change (no DB migration), because the column is plain text validated app-side. **Open follow-up:** consumer app must read `coupon.theme` and pass the same preset to its own CouponCard render when the customer-view ships.
+- **Coupon card overlap fix (shipped 2026-05-30):** value-text auto-shrinks via `Math.min(1, 3.6/len)` when amount has 4+ chars; row container has `minWidth:0 + overflow:hidden` so any residual extreme case clips instead of overlapping the logo. Covers `Fixed amount` + `Percentage`; BOGO is fixed-width. Lives in `apps/admin-web/src/components/modules/marketing/CouponCard.tsx`.
+- **Coupon fonts:** design calls for `Hanken Grotesk` (body) + `Space Mono` (redeem code). Not loaded in admin-web `index.html` (uses Nunito Sans + a monospace fallback). If exact typography matters, add the Google Fonts `<link>` to `apps/admin-web/index.html` (shared file — left untouched for scope). Added 2026-05-30.
+- **`coupon_redemptions` GRANTs:** the new table (migration `20260530100000`) must include explicit `GRANT`s per the Oct 30 Supabase item below if the apps ever read it via the Data API (currently only the API/service_role touches it). Added 2026-05-30.
 - **Order / refund / dispute resolution queue:** unified view of stranded payments, customer complaints (escalated from Wati), pending refunds. Needs Wati+Razorpay integration into the admin dashboard so the support team can see context.
 - **Cross-merchant analytics dashboard:** GMV, top stores, top products, geographic trends. Date-range filters. For founder visibility + investor decks.
-- **Reports / data exports (CSV/Excel):** downloadable order reports, refund reports, GST reports, payout reports. Likely a "Reports" tab with date pickers + export buttons.
+  - **🟡 PARTIAL 2026-06-03 — Analytics v1 shipped** (`apps/admin-web/src/components/modules/analytics/AnalyticsDashboard.tsx`): date-range chips (Today/7d/30d/90d/Custom), KPI strip (GMV, Orders, AOV, Cancellation Rate), Revenue Trend area chart, Order Volume line chart, Order Status pie, sortable Top Stores (5/10/25), CSV export of the current view.
+  - **🔧 Pending DB step:** `docs/migrations-pending-2026-06-03.sql` — `get_super_admin_stats_in_range(from_date, to_date)` RPC. Without it, the date chips fall back to the legacy 30-day window (UI shows an amber banner). Apply via Supabase SQL Editor — idempotent CREATE OR REPLACE.
+  - **Still deferred (honest non-scope):** top SKUs / category breakdown (needs OrderItem joins), city / geo breakdown (needs branch-join aggregation), compare-vs-previous-period delta tiles (needs RPC extension to return prior-window numbers).
+- **Reports / data exports (CSV/Excel):** downloadable order reports, refund reports, GST reports, payout reports. Likely a "Reports" tab with date pickers + export buttons. (Analytics-page CSV shipped 2026-06-03 — see above. Order/refund/GST/payout reports still pending.)
 - **Multi-admin RBAC:** roles like `founder`, `support`, `ops`, `viewer`. Permission middleware on admin routes. Each role sees what it should.
 - **Audit log of team and admin actions:** every admin/support action (approve merchant, issue refund, contact customer) logged with actor + timestamp + reason. Schema: `audit_log` table + middleware.
 
