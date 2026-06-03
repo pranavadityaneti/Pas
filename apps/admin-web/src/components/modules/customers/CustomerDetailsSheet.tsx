@@ -30,7 +30,7 @@ import {
 } from "lucide-react";
 import { Customer, isSyntheticEmail } from "../../../hooks/useCustomers";
 import { useEffect, useState } from "react";
-import { supabase } from "../../../lib/supabaseClient";
+import api from "../../../lib/api";
 import { Link } from "react-router-dom";
 
 interface CustomerDetailsSheetProps {
@@ -69,20 +69,20 @@ export function CustomerDetailsSheet({ customer, isOpen, onClose }: CustomerDeta
     let cancelled = false;
     (async () => {
       setLoading(true);
-      // 2026-06-03: was `.from('orders')` — wrong table name. Real table is `Order`.
-      const { data, error } = await supabase
-        .from('Order')
-        .select('id, order_number, store_name, total_amount, status, created_at')
-        .eq('user_id', customer.id)
-        .order('created_at', { ascending: false });
-      if (cancelled) return;
-      if (error) {
-        console.error('CustomerDetailsSheet: failed to load orders', error);
-        setOrders([]);
-      } else {
-        setOrders((data ?? []) as OrderRow[]);
+      try {
+        // 2026-06-03 night: switched from supabase.from('Order') (PostgREST
+        // + schema-cache + RLS jungle) to the admin API endpoint that uses
+        // Prisma server-side.
+        const { data } = await api.get<{ orders: OrderRow[] }>(
+          `/admin/customers/${customer.id}/orders`
+        );
+        if (!cancelled) setOrders(data.orders ?? []);
+      } catch (err) {
+        console.error('CustomerDetailsSheet: failed to load orders', err);
+        if (!cancelled) setOrders([]);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      setLoading(false);
     })();
     return () => { cancelled = true; };
   }, [customer, isOpen]);

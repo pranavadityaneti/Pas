@@ -56,13 +56,13 @@ export function SupportHome() {
       ] = await Promise.all([
         supabase.from('wati_inbox').select('id', { count: 'exact', head: true }).eq('is_read', false),
         supabase.from('wati_inbox').select('id', { count: 'exact', head: true }),
-        supabase.from('Order').select('id', { count: 'exact', head: true })
+        supabase.from('orders').select('id', { count: 'exact', head: true })
           .eq('status', 'CANCELLED').gte('created_at', sinceMidnight.toISOString()),
         supabase.from('wati_inbox')
           .select('id, contact_name, wa_phone, body, received_at, is_read, status')
           .order('received_at', { ascending: false })
           .limit(12),
-        supabase.from('Order')
+        supabase.from('orders')
           .select('id, order_number, customer_name, customer_phone, total_amount, created_at, cancelled_reason')
           .eq('status', 'CANCELLED')
           .order('created_at', { ascending: false })

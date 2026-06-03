@@ -83,7 +83,7 @@ export function FinanceHome() {
 
       // Refund-status orders as a refund-pressure proxy (real refunds table not yet wired)
       const { count: refundLikeCount } = await supabase
-        .from('Order').select('id', { count: 'exact', head: true })
+        .from('orders').select('id', { count: 'exact', head: true })
         .in('status', ['CANCELLED', 'REFUNDED']);
 
       if (cancelled) return;

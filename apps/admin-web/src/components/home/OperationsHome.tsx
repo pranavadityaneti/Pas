@@ -64,15 +64,15 @@ export function OperationsHome() {
         inboxRows,
         todaysOrders,
       ] = await Promise.all([
-        supabase.from('Order').select('id', { count: 'exact', head: true })
+        supabase.from('orders').select('id', { count: 'exact', head: true })
           .in('status', ['PENDING', 'CONFIRMED', 'READY']),
-        supabase.from('Merchant').select('id', { count: 'exact', head: true })
+        supabase.from('merchants').select('id', { count: 'exact', head: true })
           .eq('kyc_status', 'pending'),
         supabase.from('wati_inbox').select('id', { count: 'exact', head: true })
           .eq('is_read', false),
         supabase.from('merchant_branches').select('id', { count: 'exact', head: true })
           .eq('is_active', true),
-        supabase.from('Merchant')
+        supabase.from('merchants')
           .select('id, store_name, created_at, kyc_status')
           .eq('kyc_status', 'pending')
           .order('created_at', { ascending: false })
@@ -81,7 +81,7 @@ export function OperationsHome() {
           .select('id, contact_name, wa_phone, body, received_at, is_read')
           .order('received_at', { ascending: false })
           .limit(8),
-        supabase.from('Order')
+        supabase.from('orders')
           .select('created_at')
           .gte('created_at', sinceMidnight.toISOString()),
       ]);

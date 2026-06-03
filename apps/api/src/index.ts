@@ -5059,6 +5059,234 @@ app.get('/wati/inbox', async (req, res) => {
     }
 });
 
+// ────────────────────────────────────────────────────────────────────────────
+// Admin reads — proper architecture (added 2026-06-03 night)
+//
+// Why these exist:
+//   admin-web's Customers + Orders pages were reading directly from Supabase
+//   via PostgREST (.from('orders'), .from('User'), etc.). That repeatedly
+//   hit "table not in schema cache" / RLS-blocked-row issues — admin-tier
+//   users have no implicit read access to the production tables, and adding
+//   table-by-table RLS policies for the admin UI is fragile.
+//
+//   These endpoints use Prisma (direct PG connection, service_role-equivalent)
+//   gated by requireRole. Clean: auth at the API layer, RBAC enforced, no
+//   PostgREST cache surprises, no RLS policy management for admin UIs.
+//
+// Roles allowed: SUPER_ADMIN + OPERATIONS + FINANCE + SUPPORT (all admin tiers).
+//   Routes do not return raw passwords or sensitive auth fields.
+// ────────────────────────────────────────────────────────────────────────────
+
+const ANY_ADMIN_TIER = ['SUPER_ADMIN', 'OPERATIONS', 'FINANCE', 'SUPPORT'] as const;
+
+/**
+ * GET /admin/customers
+ *
+ * Returns every consumer + their orders (aggregated client-side for
+ * LTV / AOV / recency) + a branch→city map so the UI can derive the
+ * customer's location from their most recent order's branch.
+ *
+ * Shape (kept stable with the prior useCustomers hook so the client
+ * mapping logic stays unchanged):
+ *   {
+ *     customers: [
+ *       { id, name, email, phone, status, createdAt,
+ *         orders: [{ total_amount, created_at, branch_id, status }] }
+ *     ],
+ *     branchCityMap: { [branchId]: city }
+ *   }
+ */
+app.get('/admin/customers', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER as any); if (!caller) return;
+    try {
+        const users = await prisma.user.findMany({
+            where: { role: 'CONSUMER' },
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                phone: true,
+                status: true,
+                createdAt: true,
+                orders: {
+                    select: {
+                        totalAmount: true,
+                        createdAt:   true,
+                        branchId:    true,
+                        status:      true,
+                    },
+                },
+            },
+        });
+
+        // Collect unique branch IDs across every customer's orders → look up city.
+        const branchIds = new Set<string>();
+        users.forEach(u => u.orders.forEach(o => { if (o.branchId) branchIds.add(o.branchId); }));
+
+        let branchCityMap: Record<string, string> = {};
+        if (branchIds.size > 0) {
+            const branches = await prisma.merchantBranch.findMany({
+                where: { id: { in: Array.from(branchIds) } },
+                select: { id: true, city: true },
+            });
+            branches.forEach(b => { if (b?.id && b?.city) branchCityMap[b.id] = b.city; });
+        }
+
+        // Reshape to snake_case for the client (matches the previous PostgREST shape).
+        const customers = users.map(u => ({
+            id:        u.id,
+            name:      u.name,
+            email:     u.email,
+            phone:     u.phone,
+            status:    u.status,
+            createdAt: u.createdAt,
+            orders: u.orders.map(o => ({
+                total_amount: o.totalAmount,
+                created_at:   o.createdAt,
+                branch_id:    o.branchId,
+                status:       o.status,
+            })),
+        }));
+
+        res.json({ customers, branchCityMap });
+    } catch (e: any) {
+        console.error('[admin/customers] list error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to fetch customers' });
+    }
+});
+
+/**
+ * GET /admin/orders
+ *
+ * Returns recent orders for the /orders Admin page. Optional `userId`
+ * query param filters to a single customer's orders — used by the
+ * "View orders" deep link from the Customers page.
+ *
+ * Shape mirrors the previous Supabase .from('orders') columns so the
+ * OrderManager UI doesn't have to change beyond switching its data
+ * source.
+ */
+app.get('/admin/orders', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER as any); if (!caller) return;
+    try {
+        const userId    = typeof req.query.userId    === 'string' ? req.query.userId    : undefined;
+        const limit     = Math.min(parseInt((req.query.limit as string) || '500', 10) || 500, 1000);
+
+        const rows = await prisma.order.findMany({
+            where: userId ? { userId } : undefined,
+            orderBy: { createdAt: 'desc' },
+            take: limit,
+            select: {
+                id:              true,
+                orderNumber:     true,
+                customer_name:   true,
+                customer_phone:  true,
+                storeId:         true,
+                store_name:      true,
+                userId:          true,
+                branchId:        true,
+                status:          true,
+                totalAmount:     true,
+                items_count:     true,
+                order_type:      true,
+                cancelledReason: true,
+                createdAt:       true,
+            },
+        });
+
+        // Reshape to snake_case for the client.
+        const orders = rows.map(o => ({
+            id:               o.id,
+            order_number:     o.orderNumber,
+            customer_name:    o.customer_name,
+            customer_phone:   o.customer_phone,
+            store_id:         o.storeId,
+            store_name:       o.store_name,
+            user_id:          o.userId,
+            branch_id:        o.branchId,
+            status:           o.status,
+            total_amount:     o.totalAmount,
+            items_count:      o.items_count,
+            order_type:       o.order_type,
+            cancelled_reason: o.cancelledReason,
+            created_at:       o.createdAt,
+        }));
+
+        res.json({ orders, count: orders.length });
+    } catch (e: any) {
+        console.error('[admin/orders] list error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to fetch orders' });
+    }
+});
+
+/**
+ * PATCH /admin/orders/:id
+ *
+ * Used by OrderManager's "Force complete" / "Force cancel" actions.
+ * Status must be a valid OrderStatus enum value (uppercase).
+ *
+ * Restricted to SUPER_ADMIN + OPERATIONS (FINANCE/SUPPORT are view-only
+ * for order status — they go through /refunds-disputes for refunds).
+ */
+app.patch('/admin/orders/:id', async (req, res) => {
+    const caller = await requireRole(req, res, ['SUPER_ADMIN', 'OPERATIONS']); if (!caller) return;
+    try {
+        const { id } = req.params;
+        const { status, cancelledReason } = req.body ?? {};
+        const VALID: ReadonlyArray<string> = ['PENDING','CONFIRMED','READY','COMPLETED','CANCELLED','REFUNDED'];
+        if (!status || !VALID.includes(status)) {
+            return res.status(400).json({ error: `status must be one of ${VALID.join(', ')}` });
+        }
+        const updated = await prisma.order.update({
+            where: { id },
+            data: {
+                status,
+                ...(cancelledReason ? { cancelledReason } : {}),
+            },
+            select: { id: true, status: true },
+        });
+        res.json({ ok: true, order: updated });
+    } catch (e: any) {
+        console.error('[admin/orders] patch error:', e?.message || e);
+        if (e?.code === 'P2025') return res.status(404).json({ error: 'Order not found' });
+        res.status(500).json({ error: 'Failed to update order' });
+    }
+});
+
+/**
+ * GET /admin/customers/:id/orders
+ *
+ * Order history for the CustomerDetailsSheet drawer. Same role gate
+ * as /admin/customers.
+ */
+app.get('/admin/customers/:id/orders', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER as any); if (!caller) return;
+    try {
+        const { id } = req.params;
+        const rows = await prisma.order.findMany({
+            where: { userId: id },
+            orderBy: { createdAt: 'desc' },
+            take: 200,
+            select: {
+                id: true, orderNumber: true, store_name: true,
+                totalAmount: true, status: true, createdAt: true,
+            },
+        });
+        const orders = rows.map(o => ({
+            id:           o.id,
+            order_number: o.orderNumber,
+            store_name:   o.store_name,
+            total_amount: o.totalAmount,
+            status:       o.status,
+            created_at:   o.createdAt,
+        }));
+        res.json({ orders });
+    } catch (e: any) {
+        console.error('[admin/customers/:id/orders] error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to fetch customer orders' });
+    }
+});
+
 // --- 404 Handler ---
 app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
     res.status(404).json({ error: 'Endpoint not found', path: req.path });

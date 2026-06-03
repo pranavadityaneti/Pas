@@ -1,33 +1,26 @@
 /**
- * useOrders — order-list hook for the admin Orders page (/orders).
+ * useOrders — order-list hook for the admin /orders page.
  *
- * 2026-06-03 (night): SECOND smoking-gun fix from the founder audit.
+ * 2026-06-03 (LATE night): switched from Supabase direct .from() to the
+ * admin API endpoints (`GET /admin/orders` and `PATCH /admin/orders/:id`)
+ * for the same reason as useCustomers — PostgREST cache / RLS / table-
+ * name surprises made direct reads fragile. Now uses Prisma server-side
+ * via the API, gated by requireRole. See the apps/api/src/index.ts
+ * comment block "Admin reads — proper architecture".
  *
- * Same bug class as useCustomers: this hook was querying the LOWERCASE
- * `orders` table (a stale demo seed from apps/api/create_orders.sql)
- * instead of the production `"Order"` table where every real order lives.
+ * Realtime subscription dropped — was subscribing to a Supabase channel
+ * that doesn't reflect Prisma writes by default. If you want push-based
+ * order updates later, the cleanest path is server-sent events from the
+ * API or a polling refresh button (already wired).
  *
- * What changed:
- *   - `.from('orders')` → `.from('Order')` — production table.
- *   - Order type rebuilt against the real schema:
- *       order_number, total_amount, user_id, branch_id, items_count,
- *       cancelled_reason, order_type, and the real OrderStatus enum
- *       (PENDING / CONFIRMED / READY / COMPLETED / CANCELLED / REFUNDED).
- *   - sla_minutes + the lowercase `disputed` status removed entirely.
- *     Production has no SLA tracking and no `disputed` status — refund/
- *     dispute workflows live on /refunds-disputes.
- *   - Realtime subscription channel updated to `public:Order`.
- *   - updateOrderStatus writes to `"Order"` with UPPERCASE enum values.
- *
- * NOT touched: the consumer-side `POST /orders` flow in apps/api/src/
- * index.ts, including the 4-layer FK-race hardening landed 2026-05-29.
- * This file is admin-read/admin-write only — no production-create paths
- * altered.
+ *   API endpoints used:
+ *     GET   /admin/orders           — list (optional ?userId=X)
+ *     PATCH /admin/orders/:id       — Force Complete / Force Cancel
  */
 
-import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
+import api from '../lib/api';
 
 export type OrderStatus =
   | 'PENDING'    // payment captured, store not yet confirmed
@@ -54,92 +47,41 @@ export type Order = {
   created_at:       string;
 };
 
-export function useOrders() {
+export function useOrders(userIdFilter?: string | null) {
   const [orders,  setOrders]  = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchOrders();
-
-    // Realtime: subscribe to the REAL Order table, not the legacy lowercase one.
-    const subscription = supabase
-      .channel('public:Order')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'Order' },
-        (payload) => handleRealtimeUpdate(payload),
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(subscription);
-    };
-  }, []);
-
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('Order')
-        .select(`
-          id,
-          order_number,
-          customer_name,
-          customer_phone,
-          store_id,
-          store_name,
-          user_id,
-          branch_id,
-          status,
-          total_amount,
-          items_count,
-          order_type,
-          cancelled_reason,
-          created_at
-        `)
-        .order('created_at', { ascending: false })
-        .limit(500);  // admin view — cap to avoid pulling thousands at once
-
-      if (error) throw error;
-      setOrders((data ?? []) as Order[]);
-    } catch (error: any) {
-      console.error('useOrders error:', error);
+      const params: Record<string, string> = {};
+      if (userIdFilter) params.userId = userIdFilter;
+      const { data } = await api.get<{ orders: Order[]; count: number }>('/admin/orders', { params });
+      setOrders(data.orders ?? []);
+    } catch (err: any) {
+      console.error('useOrders error:', err);
       toast.error('Failed to load orders', {
-        description: error?.message ?? 'Network or permission error.',
+        description: err?.response?.data?.error ?? err?.message ?? 'Network error.',
       });
       setOrders([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [userIdFilter]);
 
-  const handleRealtimeUpdate = (payload: any) => {
-    if (payload.eventType === 'INSERT') {
-      setOrders(prev => [payload.new as Order, ...prev]);
-      const ordNum = payload.new?.order_number ?? String(payload.new?.id ?? '').slice(0, 8);
-      toast.info('New order received', { description: `#${ordNum}` });
-    } else if (payload.eventType === 'UPDATE') {
-      setOrders(prev => prev.map(o => o.id === payload.new.id ? (payload.new as Order) : o));
-    } else if (payload.eventType === 'DELETE') {
-      setOrders(prev => prev.filter(o => o.id !== payload.old.id));
-    }
-  };
+  useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
   const updateOrderStatus = async (id: string, status: OrderStatus) => {
     // Optimistic UI
     setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
     try {
-      const { error } = await supabase
-        .from('Order')
-        .update({ status })
-        .eq('id', id);
-      if (error) throw error;
+      await api.patch(`/admin/orders/${id}`, { status });
       toast.success(`Order updated → ${status}`);
-    } catch (error: any) {
+    } catch (err: any) {
       // Roll back optimistic state by re-fetching authoritative data
       fetchOrders();
-      toast.error('Failed to update order status', {
-        description: error?.message ?? 'Try again.',
+      toast.error('Failed to update order', {
+        description: err?.response?.data?.error ?? err?.message ?? 'Try again.',
       });
     }
   };

@@ -88,10 +88,10 @@ export function SuperAdminHome() {
           .eq('role', 'CONSUMER').gte('createdAt', since.toISOString()),
         supabase.from('merchant_branches').select('id', { count: 'exact', head: true })
           .eq('is_active', true),
-        supabase.from('Order')
+        supabase.from('orders')
           .select('id, order_number, customer_name, total_amount, status, created_at')
           .order('created_at', { ascending: false }).limit(10),
-        supabase.from('Merchant')
+        supabase.from('merchants')
           .select('id, store_name, status, created_at')
           .order('created_at', { ascending: false }).limit(5),
       ]);

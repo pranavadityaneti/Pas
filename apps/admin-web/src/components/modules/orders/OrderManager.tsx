@@ -88,9 +88,12 @@ function statusMatches(status: OrderStatus, tab: TabKey): boolean {
 }
 
 export function OrderManager() {
-  const { orders, loading, fetchOrders, updateOrderStatus } = useOrders();
   const [searchParams] = useSearchParams();
   const userIdFilter = searchParams.get('userId');
+
+  // 2026-06-03 night: useOrders now hits GET /admin/orders. Server-side
+  // userId filter so we don't pull the whole table just to slice on client.
+  const { orders, loading, fetchOrders, updateOrderStatus } = useOrders(userIdFilter);
 
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isSheetOpen,   setIsSheetOpen]   = useState(false);
@@ -101,16 +104,15 @@ export function OrderManager() {
     setIsSheetOpen(true);
   };
 
-  const filteredOrders = useMemo(() => {
-    return orders.filter(o =>
-      statusMatches(o.status, activeTab)
-      && (!userIdFilter || o.user_id === userIdFilter)
-    );
-  }, [orders, activeTab, userIdFilter]);
+  const filteredOrders = useMemo(() =>
+    orders.filter(o => statusMatches(o.status, activeTab)),
+    [orders, activeTab],
+  );
 
-  // Counts per tab (for the badges)
+  // Counts per tab (for the badges) — the userId filter is already applied
+  // server-side so we only filter by status here.
   const tabCount = (tab: TabKey) =>
-    orders.filter(o => statusMatches(o.status, tab) && (!userIdFilter || o.user_id === userIdFilter)).length;
+    orders.filter(o => statusMatches(o.status, tab)).length;
 
   return (
     <div className="h-full flex flex-col bg-gray-50 px-6 pt-10 pb-6 space-y-6">
