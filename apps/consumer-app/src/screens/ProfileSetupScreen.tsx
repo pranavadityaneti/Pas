@@ -144,6 +144,32 @@ export default function ProfileSetupScreen() {
                 throw new Error(profileError.message || 'Failed to save profile details.');
             }
 
+            // 2026-06-04 (Option A — additive, no UI/layout change per @lock):
+            // The profiles upsert above writes to public.profiles.full_name only.
+            // The admin Customers page reads public."User".name — which stays
+            // NULL otherwise. POST /me/profile mirrors the name + profile fields
+            // into the public.User row in the same transaction (server-side).
+            // Failure here is intentionally non-fatal: the profile is already
+            // saved in `profiles`, and the admin read-fallback (profiles.full_name)
+            // covers display until the mirror lands.
+            try {
+                const { apiClient } = await import('../lib/api');
+                const resp = await apiClient.fetch('/me/profile', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        name:        fullName,
+                        email:       email.trim() || null,
+                        dateOfBirth: dbDob,
+                        avatarUrl:   uploadedAvatarUrl,
+                    }),
+                });
+                if (!resp.ok) {
+                    console.warn('[ProfileSetup] /me/profile mirror returned', resp.status);
+                }
+            } catch (mirrorErr: any) {
+                console.warn('[ProfileSetup] /me/profile mirror failed:', mirrorErr?.message || mirrorErr);
+            }
+
             // NOTE (PM Fixed): Removed aggressive background Location Permission prompt here.
             // Asking for OS permissions while the screen is unmounting/transitioning to Main
             // causes UI freezes and jarring UX. Location fetching is properly deferred to Main/LocationPicker.
