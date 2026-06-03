@@ -16,8 +16,8 @@
  *   `Order` table bug. See header comment in that file.
  */
 
-import { useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useMemo, useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   Search, Filter, MoreHorizontal, History, Ban, MapPin, Users, Download,
   ChevronDown, MessageCircle, ShoppingBag, CheckCircle2, Eye,
@@ -100,6 +100,26 @@ export function CustomerDatabase() {
   const { customers, loading, fetchCustomers, blockCustomer, unblockCustomer } = useCustomers();
   const [searchTerm,       setSearchTerm]       = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+
+  // 2026-06-04 (Q1 fix): deep-link support for /customers?id=<userId>.
+  // Used by OrderManager's "Open customer" dropdown action so clicking it
+  // actually pops the drawer instead of just landing on the list page.
+  // After we open the drawer we replace the URL to drop the param — that
+  // way closing the drawer leaves the user on a clean /customers, and a
+  // refresh doesn't auto-reopen.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const idFromUrl = searchParams.get('id');
+    if (!idFromUrl || customers.length === 0) return;
+    const match = customers.find(c => c.id === idFromUrl);
+    if (match) {
+      setSelectedCustomer(match);
+      // Replace history so the param is gone but back/forward still works.
+      setSearchParams({}, { replace: true });
+    }
+    // If no match (e.g. the customer was suspended into a different bucket or
+    // doesn't exist), we silently ignore — page still shows the list.
+  }, [searchParams, customers, setSearchParams]);
 
   // Filter state (each a Set of selected bucket keys)
   const [filterStatus,   setFilterStatus]   = useState<string[]>([]);
