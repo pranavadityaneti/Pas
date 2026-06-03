@@ -20,6 +20,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabaseClient';
+import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import {
   Wallet, Activity, AlertTriangle, Store as StoreIcon,
@@ -81,14 +82,18 @@ export function FinanceHome() {
         if (!cancelled) setUsingFallback(true);
       }
 
-      // Refund-status orders as a refund-pressure proxy (real refunds table not yet wired)
-      const { count: refundLikeCount } = await supabase
-        .from('orders').select('id', { count: 'exact', head: true })
-        .in('status', ['CANCELLED', 'REFUNDED']);
+      // 2026-06-04: routed refund-pressure count through API (was RLS-blocked direct read).
+      let refundLikeCount: number | null = null;
+      try {
+        const r = await api.get<{ refundLike: number }>('/admin/home/finance');
+        refundLikeCount = r.data.refundLike;
+      } catch (err) {
+        console.error('FinanceHome refund-pressure count failed:', err);
+      }
 
       if (cancelled) return;
       setStats(data);
-      setRefundLike(refundLikeCount ?? null);
+      setRefundLike(refundLikeCount);
       setLoading(false);
     })();
     return () => { cancelled = true; };

@@ -19,7 +19,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { supabase } from '../../lib/supabaseClient';
+import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import {
   MessageSquare, AlertTriangle, Inbox, Mail,
@@ -44,38 +44,27 @@ export function SupportHome() {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const sinceMidnight = new Date();
-      sinceMidnight.setHours(0, 0, 0, 0);
+      try {
+        // 2026-06-04: routed through /admin/home/support — see endpoint comment.
+        const { data } = await api.get<{
+          inboxUnread: number;
+          inboxTotal: number;
+          cancelledToday: number;
+          recentMessages: InboxMessage[];
+          recentCancellations: CancelledOrder[];
+        }>('/admin/home/support');
 
-      const [
-        { count: unreadCount },
-        { count: totalCount },
-        { count: cancelTodayCount },
-        inboxRows,
-        cancelledOrders,
-      ] = await Promise.all([
-        supabase.from('wati_inbox').select('id', { count: 'exact', head: true }).eq('is_read', false),
-        supabase.from('wati_inbox').select('id', { count: 'exact', head: true }),
-        supabase.from('orders').select('id', { count: 'exact', head: true })
-          .eq('status', 'CANCELLED').gte('created_at', sinceMidnight.toISOString()),
-        supabase.from('wati_inbox')
-          .select('id, contact_name, wa_phone, body, received_at, is_read, status')
-          .order('received_at', { ascending: false })
-          .limit(12),
-        supabase.from('orders')
-          .select('id, order_number, customer_name, customer_phone, total_amount, created_at, cancelled_reason')
-          .eq('status', 'CANCELLED')
-          .order('created_at', { ascending: false })
-          .limit(8),
-      ]);
-
-      if (cancelled) return;
-      setUnread(unreadCount ?? 0);
-      setTotalInbox(totalCount ?? 0);
-      setCancelledToday(cancelTodayCount ?? 0);
-      setMessages((inboxRows.data ?? []) as InboxMessage[]);
-      setCancelled((cancelledOrders.data ?? []) as CancelledOrder[]);
-      setLoading(false);
+        if (cancelled) return;
+        setUnread(data.inboxUnread);
+        setTotalInbox(data.inboxTotal);
+        setCancelledToday(data.cancelledToday);
+        setMessages(data.recentMessages ?? []);
+        setCancelled(data.recentCancellations ?? []);
+      } catch (err) {
+        console.error('SupportHome load error:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     })();
     return () => { cancelled = true; };
   }, []);

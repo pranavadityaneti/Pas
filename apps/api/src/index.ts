@@ -5080,6 +5080,52 @@ app.get('/wati/inbox', async (req, res) => {
 const ANY_ADMIN_TIER = ['SUPER_ADMIN', 'OPERATIONS', 'FINANCE', 'SUPPORT'] as const;
 
 /**
+ * recordAdminAudit — best-effort audit-trail writer.
+ *
+ * Writes to `public.admin_audit_log` (see docs/migrations-pending-2026-06-04.sql
+ * for the schema). Wrapped in try/catch so it NEVER fails the user-facing
+ * action — if the table doesn't exist yet (founder hasn't applied the
+ * migration), the audit attempt silently no-ops and the response still
+ * returns 200. Once the migration is applied, entries land without further
+ * code changes.
+ *
+ * Uses $executeRaw with parameter binding (not template substitution) so
+ * this works without adding the table to schema.prisma.
+ */
+async function recordAdminAudit(req: express.Request, opts: {
+    actorId: string;
+    action: string;
+    targetTable: string;
+    targetId: string;
+    before?: any;
+    after?: any;
+    reason?: string;
+}) {
+    try {
+        await prisma.$executeRaw`
+            INSERT INTO public.admin_audit_log (
+                actor_id, action, target_table, target_id,
+                before_value, after_value, reason,
+                ip_address, user_agent
+            ) VALUES (
+                ${opts.actorId}::uuid,
+                ${opts.action},
+                ${opts.targetTable},
+                ${opts.targetId},
+                ${opts.before ? JSON.stringify(opts.before) : null}::jsonb,
+                ${opts.after  ? JSON.stringify(opts.after)  : null}::jsonb,
+                ${opts.reason ?? null},
+                ${(req.headers['x-forwarded-for'] as string) || req.ip || null},
+                ${(req.headers['user-agent'] as string) || null}
+            )
+        `;
+    } catch (e: any) {
+        // Common case before migration applied: relation "admin_audit_log" does not exist.
+        console.warn('[audit] entry not written:', e?.message || String(e));
+    }
+}
+
+/**
  * GET /admin/customers
  *
  * Returns every consumer + their orders (aggregated client-side for
@@ -5099,25 +5145,38 @@ const ANY_ADMIN_TIER = ['SUPER_ADMIN', 'OPERATIONS', 'FINANCE', 'SUPPORT'] as co
 app.get('/admin/customers', async (req, res) => {
     const caller = await requireRole(req, res, ANY_ADMIN_TIER as any); if (!caller) return;
     try {
-        const users = await prisma.user.findMany({
-            where: { role: 'CONSUMER' },
-            select: {
-                id: true,
-                name: true,
-                email: true,
-                phone: true,
-                status: true,
-                createdAt: true,
-                orders: {
-                    select: {
-                        totalAmount: true,
-                        createdAt:   true,
-                        branchId:    true,
-                        status:      true,
+        // 2026-06-04: paginated. Default page = 500 customers, cap = 2000.
+        // Client doesn't yet have a load-more UI; this is server-side hardening
+        // so the endpoint can't be made to return 100k rows + their order arrays
+        // in one shot as the consumer base grows.
+        const limit  = Math.min(parseInt((req.query.limit  as string) || '500', 10) || 500, 2000);
+        const offset = Math.max(parseInt((req.query.offset as string) || '0',   10) || 0,   0);
+
+        const [users, totalCount] = await Promise.all([
+            prisma.user.findMany({
+                where: { role: 'CONSUMER' },
+                orderBy: { createdAt: 'desc' },
+                take: limit,
+                skip: offset,
+                select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                    phone: true,
+                    status: true,
+                    createdAt: true,
+                    orders: {
+                        select: {
+                            totalAmount: true,
+                            createdAt:   true,
+                            branchId:    true,
+                            status:      true,
+                        },
                     },
                 },
-            },
-        });
+            }),
+            prisma.user.count({ where: { role: 'CONSUMER' } }),
+        ]);
 
         // Collect unique branch IDs across every customer's orders → look up city.
         const branchIds = new Set<string>();
@@ -5148,7 +5207,12 @@ app.get('/admin/customers', async (req, res) => {
             })),
         }));
 
-        res.json({ customers, branchCityMap });
+        res.json({
+            customers, branchCityMap,
+            total:    totalCount,
+            limit, offset,
+            hasMore:  offset + customers.length < totalCount,
+        });
     } catch (e: any) {
         console.error('[admin/customers] list error:', e?.message || e);
         res.status(500).json({ error: 'Failed to fetch customers' });
@@ -5243,6 +5307,11 @@ app.patch('/admin/orders/:id', async (req, res) => {
         if (!status || !VALID.includes(status)) {
             return res.status(400).json({ error: `status must be one of ${VALID.join(', ')}` });
         }
+        // Snapshot before-state for the audit log.
+        const before = await prisma.order.findUnique({
+            where: { id },
+            select: { status: true, cancelledReason: true },
+        });
         const updated = await prisma.order.update({
             where: { id },
             data: {
@@ -5250,6 +5319,17 @@ app.patch('/admin/orders/:id', async (req, res) => {
                 ...(cancelledReason ? { cancelledReason } : {}),
             },
             select: { id: true, status: true },
+        });
+        // Best-effort audit — fire-and-forget pattern, but awaited so any
+        // db connection errors get logged on this turn rather than orphaned.
+        await recordAdminAudit(req, {
+            actorId:     caller.id,
+            action:      'order.status_change',
+            targetTable: 'orders',
+            targetId:    id,
+            before:      before ? { status: before.status, cancelledReason: before.cancelledReason } : null,
+            after:       { status: updated.status, cancelledReason: cancelledReason ?? null },
+            reason:      cancelledReason,
         });
         res.json({ ok: true, order: updated });
     } catch (e: any) {
@@ -5290,6 +5370,211 @@ app.get('/admin/customers/:id/orders', async (req, res) => {
     } catch (e: any) {
         console.error('[admin/customers/:id/orders] error:', e?.message || e);
         res.status(500).json({ error: 'Failed to fetch customer orders' });
+    }
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// Admin home dashboards — one endpoint per role-home (added 2026-06-04)
+//
+// The home dashboards under apps/admin-web/src/components/home/ were still
+// reading via supabase.from() directly for KPI counts. RLS blocks those for
+// admin-tier JWTs, so the tiles silently returned 0. Per the "admin reads
+// go through API" architectural rule, each home now has a dedicated
+// endpoint that aggregates everything it needs server-side via Prisma.
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * GET /admin/home/super-admin
+ *   Platform-wide overview tiles + Recent Activity feed.
+ *   Range: 24h | 7d | 30d (default 30d) — for the "new customers in range" tile.
+ */
+app.get('/admin/home/super-admin', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER as any); if (!caller) return;
+    try {
+        const range = (typeof req.query.range === 'string' ? req.query.range : '30d') as '24h' | '7d' | '30d';
+        const days  = range === '24h' ? 1 : range === '7d' ? 7 : 30;
+        const since = new Date(); since.setDate(since.getDate() - days);
+
+        const [newCustomers, activeBranches, recentOrders, recentMerchants] = await Promise.all([
+            prisma.user.count({ where: { role: 'CONSUMER', createdAt: { gte: since } } }),
+            prisma.merchantBranch.count({ where: { isActive: true } }),
+            prisma.order.findMany({
+                orderBy: { createdAt: 'desc' },
+                take: 10,
+                select: {
+                    id: true, orderNumber: true, customer_name: true,
+                    totalAmount: true, status: true, createdAt: true,
+                },
+            }),
+            prisma.merchant.findMany({
+                orderBy: { createdAt: 'desc' },
+                take: 5,
+                select: { id: true, storeName: true, status: true, createdAt: true },
+            }),
+        ]);
+
+        res.json({
+            newCustomers,
+            activeBranches,
+            recentOrders: recentOrders.map(o => ({
+                id: o.id, order_number: o.orderNumber, customer_name: o.customer_name,
+                total_amount: o.totalAmount, status: o.status, created_at: o.createdAt,
+            })),
+            recentMerchants: recentMerchants.map(m => ({
+                id: m.id, store_name: m.storeName, status: m.status, created_at: m.createdAt,
+            })),
+        });
+    } catch (e: any) {
+        console.error('[admin/home/super-admin] error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to load super-admin home' });
+    }
+});
+
+/**
+ * GET /admin/home/operations
+ *   Queue depths + today's order momentum (hourly buckets) + KYC + inbox feeds.
+ */
+app.get('/admin/home/operations', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER as any); if (!caller) return;
+    try {
+        const sinceMidnight = new Date(); sinceMidnight.setHours(0, 0, 0, 0);
+
+        // Include the new PREPARING status in the "active queue" count (was missing
+        // pre-2026-06-04). Cast to any so we don't need to import the Prisma enum here.
+        const ACTIVE_FOR_QUEUE = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY'] as any[];
+
+        const [
+            pendingOrders, kycPending, inboxUnread, activeBranches,
+            pendingKycList, recentInboxRows, todaysOrders,
+        ] = await Promise.all([
+            prisma.order.count({ where: { status: { in: ACTIVE_FOR_QUEUE } } }),
+            prisma.merchant.count({ where: { kycStatus: 'pending' } }),
+            prisma.watiInbox.count({ where: { isRead: false } }),
+            prisma.merchantBranch.count({ where: { isActive: true } }),
+            prisma.merchant.findMany({
+                where: { kycStatus: 'pending' },
+                orderBy: { createdAt: 'desc' },
+                take: 8,
+                select: { id: true, storeName: true, kycStatus: true, createdAt: true },
+            }),
+            prisma.watiInbox.findMany({
+                orderBy: { receivedAt: 'desc' },
+                take: 8,
+                select: {
+                    id: true, contactName: true, waPhone: true, body: true,
+                    receivedAt: true, isRead: true,
+                },
+            }),
+            prisma.order.findMany({
+                where: { createdAt: { gte: sinceMidnight } },
+                select: { createdAt: true },
+            }),
+        ]);
+
+        // Bucket today's orders into hours (server-side — was client-side before).
+        const buckets: Record<number, number> = {};
+        todaysOrders.forEach(o => {
+            const h = new Date(o.createdAt).getHours();
+            buckets[h] = (buckets[h] ?? 0) + 1;
+        });
+        const todaysOrdersHourly: { hour: string; orders: number }[] = [];
+        const nowHour = new Date().getHours();
+        for (let h = 0; h <= nowHour; h++) {
+            todaysOrdersHourly.push({
+                hour: `${h.toString().padStart(2, '0')}:00`,
+                orders: buckets[h] ?? 0,
+            });
+        }
+
+        res.json({
+            pendingOrders, kycPending, inboxUnread, activeBranches,
+            pendingKycList: pendingKycList.map(m => ({
+                id: m.id, store_name: m.storeName,
+                kyc_status: m.kycStatus, created_at: m.createdAt,
+            })),
+            recentInboxMessages: recentInboxRows.map(r => ({
+                id: r.id, contact_name: r.contactName, wa_phone: r.waPhone,
+                body: r.body, received_at: r.receivedAt, is_read: r.isRead,
+            })),
+            todaysOrdersHourly,
+        });
+    } catch (e: any) {
+        console.error('[admin/home/operations] error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to load operations home' });
+    }
+});
+
+/**
+ * GET /admin/home/support
+ *   Inbox + cancellation tiles + recent inbox/cancellations.
+ */
+app.get('/admin/home/support', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER as any); if (!caller) return;
+    try {
+        const sinceMidnight = new Date(); sinceMidnight.setHours(0, 0, 0, 0);
+
+        const [
+            inboxUnread, inboxTotal, cancelledToday,
+            recentMessages, recentCancellations,
+        ] = await Promise.all([
+            prisma.watiInbox.count({ where: { isRead: false } }),
+            prisma.watiInbox.count(),
+            prisma.order.count({
+                where: { status: 'CANCELLED', createdAt: { gte: sinceMidnight } },
+            }),
+            prisma.watiInbox.findMany({
+                orderBy: { receivedAt: 'desc' },
+                take: 12,
+                select: {
+                    id: true, contactName: true, waPhone: true, body: true,
+                    receivedAt: true, isRead: true, status: true,
+                },
+            }),
+            prisma.order.findMany({
+                where: { status: 'CANCELLED' },
+                orderBy: { createdAt: 'desc' },
+                take: 8,
+                select: {
+                    id: true, orderNumber: true, customer_name: true,
+                    customer_phone: true, totalAmount: true,
+                    createdAt: true, cancelledReason: true,
+                },
+            }),
+        ]);
+
+        res.json({
+            inboxUnread, inboxTotal, cancelledToday,
+            recentMessages: recentMessages.map(r => ({
+                id: r.id, contact_name: r.contactName, wa_phone: r.waPhone,
+                body: r.body, received_at: r.receivedAt, is_read: r.isRead, status: r.status,
+            })),
+            recentCancellations: recentCancellations.map(o => ({
+                id: o.id, order_number: o.orderNumber, customer_name: o.customer_name,
+                customer_phone: o.customer_phone, total_amount: o.totalAmount,
+                created_at: o.createdAt, cancelled_reason: o.cancelledReason,
+            })),
+        });
+    } catch (e: any) {
+        console.error('[admin/home/support] error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to load support home' });
+    }
+});
+
+/**
+ * GET /admin/home/finance
+ *   Refund-pressure count. The rest of the Finance home uses
+ *   get_super_admin_stats_in_range RPC which already works.
+ */
+app.get('/admin/home/finance', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER as any); if (!caller) return;
+    try {
+        const refundLike = await prisma.order.count({
+            where: { status: { in: ['CANCELLED', 'REFUNDED'] } },
+        });
+        res.json({ refundLike });
+    } catch (e: any) {
+        console.error('[admin/home/finance] error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to load finance home' });
     }
 });
 

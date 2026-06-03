@@ -23,6 +23,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabaseClient';
+import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import {
   Wallet, ShoppingBag, Users, Store as StoreIcon, Activity, AlertTriangle,
@@ -73,49 +74,43 @@ export function SuperAdminHome() {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      // Main stats — single RPC, same as the legacy Dashboard
-      const { data, error } = await supabase.rpc('get_super_admin_stats');
-      if (!cancelled && !error) setStats(data as Stats);
+      try {
+        // Main stats stay on the RPC (SECURITY DEFINER, bypasses RLS, works fine).
+        const rpcRes = await supabase.rpc('get_super_admin_stats');
+        if (!cancelled && !rpcRes.error) setStats(rpcRes.data as Stats);
 
-      // Range-specific extras — light direct reads, in parallel
-      const since = new Date();
-      if (preset === '24h')  since.setDate(since.getDate() - 1);
-      if (preset === '7d')   since.setDate(since.getDate() - 7);
-      if (preset === '30d')  since.setDate(since.getDate() - 30);
+        // 2026-06-04: range-specific extras + Recent Activity feed routed
+        // through the API (was supabase.from() direct reads — RLS-blocked).
+        const { data } = await api.get<{
+          newCustomers:    number;
+          activeBranches:  number;
+          recentOrders:    RecentOrder[];
+          recentMerchants: RecentMerchant[];
+        }>('/admin/home/super-admin', { params: { range: preset } });
 
-      const [{ count: nc }, { count: as }, recentOrders, recentMerchants] = await Promise.all([
-        supabase.from('User').select('id', { count: 'exact', head: true })
-          .eq('role', 'CONSUMER').gte('createdAt', since.toISOString()),
-        supabase.from('merchant_branches').select('id', { count: 'exact', head: true })
-          .eq('is_active', true),
-        supabase.from('orders')
-          .select('id, order_number, customer_name, total_amount, status, created_at')
-          .order('created_at', { ascending: false }).limit(10),
-        supabase.from('merchants')
-          .select('id, store_name, status, created_at')
-          .order('created_at', { ascending: false }).limit(5),
-      ]);
+        if (cancelled) return;
+        setNewCust(data.newCustomers);
+        setActiveStr(data.activeBranches);
 
-      if (cancelled) return;
-      setNewCust(nc ?? null);
-      setActiveStr(as ?? null);
-
-      // Merge into a single time-ordered activity feed
-      const events: ActivityItem[] = [];
-      (recentOrders.data ?? []).forEach((o: RecentOrder) => events.push({
-        kind: 'order', ts: o.created_at,
-        title: `Order ${o.order_number ?? o.id.slice(0,8)} — ${o.status}`,
-        meta:  `${o.customer_name ?? 'Unknown'} · ${fmtINR(o.total_amount)}`,
-      }));
-      (recentMerchants.data ?? []).forEach((m: RecentMerchant) => events.push({
-        kind: 'merchant', ts: m.created_at,
-        title: `New merchant: ${m.store_name ?? '(unnamed)'}`,
-        meta:  `Status: ${m.status ?? 'pending'}`,
-      }));
-      events.sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
-      setActivity(events.slice(0, 12));
-
-      setLoading(false);
+        // Merge into a single time-ordered activity feed
+        const events: ActivityItem[] = [];
+        (data.recentOrders ?? []).forEach(o => events.push({
+          kind: 'order', ts: o.created_at,
+          title: `Order ${o.order_number ?? o.id.slice(0, 8)} — ${o.status}`,
+          meta:  `${o.customer_name ?? 'Unknown'} · ${fmtINR(o.total_amount)}`,
+        }));
+        (data.recentMerchants ?? []).forEach(m => events.push({
+          kind: 'merchant', ts: m.created_at,
+          title: `New merchant: ${m.store_name ?? '(unnamed)'}`,
+          meta:  `Status: ${m.status ?? 'pending'}`,
+        }));
+        events.sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+        setActivity(events.slice(0, 12));
+      } catch (err) {
+        console.error('SuperAdminHome load error:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     })();
     return () => { cancelled = true; };
   }, [preset]);

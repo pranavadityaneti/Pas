@@ -19,7 +19,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { supabase } from '../../lib/supabaseClient';
+import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import {
   ShoppingBag, ClipboardCheck, MessageSquare, Building2,
@@ -52,65 +52,32 @@ export function OperationsHome() {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const sinceMidnight = new Date();
-      sinceMidnight.setHours(0, 0, 0, 0);
+      try {
+        // 2026-06-04: switched from supabase.from() direct reads (which were
+        // RLS-blocked for the authenticated JWT) to the dedicated home endpoint.
+        const { data } = await api.get<{
+          pendingOrders: number;
+          kycPending: number;
+          inboxUnread: number;
+          activeBranches: number;
+          pendingKycList: PendingMerchant[];
+          recentInboxMessages: InboxMessage[];
+          todaysOrdersHourly: HourBucket[];
+        }>('/admin/home/operations');
 
-      const [
-        { count: pendingOrdersCount },
-        { count: kycPendingCount },
-        { count: inboxUnreadCount },
-        { count: activeStoresCount },
-        kycRows,
-        inboxRows,
-        todaysOrders,
-      ] = await Promise.all([
-        supabase.from('orders').select('id', { count: 'exact', head: true })
-          .in('status', ['PENDING', 'CONFIRMED', 'READY']),
-        supabase.from('merchants').select('id', { count: 'exact', head: true })
-          .eq('kyc_status', 'pending'),
-        supabase.from('wati_inbox').select('id', { count: 'exact', head: true })
-          .eq('is_read', false),
-        supabase.from('merchant_branches').select('id', { count: 'exact', head: true })
-          .eq('is_active', true),
-        supabase.from('merchants')
-          .select('id, store_name, created_at, kyc_status')
-          .eq('kyc_status', 'pending')
-          .order('created_at', { ascending: false })
-          .limit(8),
-        supabase.from('wati_inbox')
-          .select('id, contact_name, wa_phone, body, received_at, is_read')
-          .order('received_at', { ascending: false })
-          .limit(8),
-        supabase.from('orders')
-          .select('created_at')
-          .gte('created_at', sinceMidnight.toISOString()),
-      ]);
-
-      if (cancelled) return;
-
-      setPendingOrders(pendingOrdersCount ?? 0);
-      setKycCount(kycPendingCount ?? 0);
-      setUnreadInbox(inboxUnreadCount ?? 0);
-      setActiveStores(activeStoresCount ?? 0);
-      setPendingMerchants((kycRows.data ?? []) as PendingMerchant[]);
-      setRecentMessages((inboxRows.data ?? []) as InboxMessage[]);
-
-      // Bucket today's orders into hours
-      const buckets: Record<number, number> = {};
-      (todaysOrders.data ?? []).forEach((o: { created_at: string }) => {
-        const h = new Date(o.created_at).getHours();
-        buckets[h] = (buckets[h] ?? 0) + 1;
-      });
-      const hours: HourBucket[] = [];
-      const nowHour = new Date().getHours();
-      for (let h = 0; h <= nowHour; h++) {
-        hours.push({
-          hour: `${h.toString().padStart(2, '0')}:00`,
-          orders: buckets[h] ?? 0,
-        });
+        if (cancelled) return;
+        setPendingOrders(data.pendingOrders);
+        setKycCount(data.kycPending);
+        setUnreadInbox(data.inboxUnread);
+        setActiveStores(data.activeBranches);
+        setPendingMerchants(data.pendingKycList ?? []);
+        setRecentMessages(data.recentInboxMessages ?? []);
+        setHourBuckets(data.todaysOrdersHourly ?? []);
+      } catch (err) {
+        console.error('OperationsHome load error:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      setHourBuckets(hours);
-      setLoading(false);
     })();
     return () => { cancelled = true; };
   }, []);
