@@ -148,7 +148,17 @@ export function SuperAdminHome() {
         name={user?.name}
         role={user?.role}
         subtitle="Platform overview — live numbers across every store and consumer."
-        right={<PresetChips value={preset} onChange={setPreset} />}
+        right={
+          <div className="flex items-center gap-3 flex-wrap justify-end">
+            <PresetChips value={preset} onChange={setPreset} />
+            <QuickActions actions={[
+              { to: '/merchants',        label: 'Merchants',    icon: StoreIcon       },
+              { to: '/orders',           label: 'Orders',       icon: ShoppingBag     },
+              { to: '/reports',          label: 'Reports',      icon: FileBarChart2   },
+              { to: '/customer-support', label: 'Inbox',        icon: MessageSquare   },
+            ]} />
+          </div>
+        }
       />
 
       {/* ─── Primary KPI strip ─── */}
@@ -262,17 +272,8 @@ export function SuperAdminHome() {
         </SectionCard>
       </div>
 
-      {/* ─── Quick actions ─── */}
-      <div className="pt-2 pb-6">
-        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Quick actions</h3>
-        <QuickActions actions={[
-          { to: '/merchants',  label: 'Merchants',       icon: StoreIcon       },
-          { to: '/orders',     label: 'Orders',          icon: ShoppingBag     },
-          { to: '/merchants',  label: 'KYC Queue',       icon: ClipboardCheck  },
-          { to: '/customer-support', label: 'Support Inbox', icon: MessageSquare },
-          { to: '/reports',    label: 'Reports',         icon: FileBarChart2   },
-        ]} />
-      </div>
+      {/* Quick Actions moved to the header (2026-06-03) so they sit next to the date chips,
+          matching the "actions beside filter" pattern Pranav requested. */}
     </div>
   );
 }

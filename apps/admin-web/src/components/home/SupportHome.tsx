@@ -95,6 +95,14 @@ export function SupportHome() {
         name={user?.name}
         role={user?.role}
         subtitle="Today's inbound — messages to answer, problems to fix."
+        right={
+          <QuickActions actions={[
+            { to: '/customer-support',  label: 'Inbox',    icon: MessageSquare },
+            { to: '/refunds-disputes',  label: 'Refunds',  icon: Wallet        },
+            { to: '/customers',         label: 'Customers',icon: Activity      },
+            { to: '/orders',            label: 'Orders',   icon: ShoppingBag   },
+          ]} />
+        }
       />
 
       {/* ─── KPI strip ─── */}
@@ -162,16 +170,7 @@ export function SupportHome() {
         )}
       </SectionCard>
 
-      {/* ─── Quick actions ─── */}
-      <div className="pt-2 pb-6">
-        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Quick actions</h3>
-        <QuickActions actions={[
-          { to: '/customer-support', label: 'WhatsApp Inbox',    icon: MessageSquare },
-          { to: '/refunds-disputes',label: 'Refunds & Disputes', icon: Wallet        },
-          { to: '/customers',       label: 'Customers',          icon: Activity      },
-          { to: '/orders',          label: 'Orders',             icon: ShoppingBag   },
-        ]} />
-      </div>
+      {/* Quick Actions moved to the header (2026-06-03) per founder request. */}
     </div>
   );
 }

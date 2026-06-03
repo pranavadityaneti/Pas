@@ -123,7 +123,16 @@ export function FinanceHome() {
         name={user?.name}
         role={user?.role}
         subtitle="Money in, money out — revenue, refund pressure, and merchant payouts."
-        right={<PresetChips value={preset} onChange={setPreset} />}
+        right={
+          <div className="flex items-center gap-3 flex-wrap justify-end">
+            <PresetChips value={preset} onChange={setPreset} />
+            <QuickActions actions={[
+              { to: '/finance',   label: 'Settlements', icon: Wallet        },
+              { to: '/reports',   label: 'Reports',     icon: FileBarChart2 },
+              { to: '/merchants', label: 'Merchants',   icon: Building2     },
+            ]} />
+          </div>
+        }
       />
 
       {usingFallback && (
@@ -205,16 +214,7 @@ export function FinanceHome() {
         </SectionCard>
       </div>
 
-      {/* ─── Quick actions ─── */}
-      <div className="pt-2 pb-6">
-        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Quick actions</h3>
-        <QuickActions actions={[
-          { to: '/finance',    label: 'Settlements',  icon: Wallet         },
-          { to: '/reports',    label: 'Full Reports', icon: FileBarChart2  },
-          { to: '/merchants',  label: 'Merchants',    icon: Building2      },
-          { to: '/orders',     label: 'Orders',       icon: Activity       },
-        ]} />
-      </div>
+      {/* Quick Actions moved to the header (2026-06-03) per founder request. */}
 
       <span className="hidden">{StoreIcon ? '' : ''}</span>
     </div>

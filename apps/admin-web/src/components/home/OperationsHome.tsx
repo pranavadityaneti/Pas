@@ -130,6 +130,14 @@ export function OperationsHome() {
         name={user?.name}
         role={user?.role}
         subtitle="Today's queues — what needs your attention now."
+        right={
+          <QuickActions actions={[
+            { to: '/orders',           label: 'Orders',     icon: ShoppingBag    },
+            { to: '/merchants',        label: 'KYC',        icon: ClipboardCheck },
+            { to: '/customer-support', label: 'Inbox',      icon: MessageSquare  },
+            { to: '/reports',          label: 'Reports',    icon: FileBarChart2  },
+          ]} />
+        }
       />
 
       {/* ─── KPI strip — queue depths ─── */}
@@ -205,20 +213,10 @@ export function OperationsHome() {
         </SectionCard>
       </div>
 
-      {/* ─── Quick actions ─── */}
-      <div className="pt-2 pb-6">
-        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Quick actions</h3>
-        <QuickActions actions={[
-          { to: '/orders',     label: 'Orders Queue',  icon: ShoppingBag    },
-          { to: '/merchants',  label: 'KYC Reviews',   icon: ClipboardCheck },
-          { to: '/customer-support', label: 'WhatsApp Inbox', icon: MessageSquare },
-          { to: '/merchants',  label: 'All Merchants', icon: StoreIcon      },
-          { to: '/reports',    label: 'Reports',       icon: FileBarChart2  },
-        ]} />
-      </div>
+      {/* Quick Actions moved to the header (2026-06-03) per founder request. */}
 
-      {/* Unused-import safety — keeps fmtINR available if future tiles need ₹ formatting */}
-      <span className="hidden">{fmtINR(0)}</span>
+      {/* Unused-import safety — keeps fmtINR + StoreIcon available for future tiles */}
+      <span className="hidden">{fmtINR(0)}{StoreIcon ? '' : ''}</span>
     </div>
   );
 }
