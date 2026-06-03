@@ -5233,7 +5233,13 @@ app.patch('/admin/orders/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const { status, cancelledReason } = req.body ?? {};
-        const VALID: ReadonlyArray<string> = ['PENDING','CONFIRMED','READY','COMPLETED','CANCELLED','REFUNDED'];
+        // 2026-06-04: full 10-value OrderStatus enum. Was missing PREPARING +
+        // RETURN_REQUESTED + RETURN_APPROVED + RETURN_REJECTED — admin
+        // overrides to those states would 400 even though they're valid.
+        const VALID: ReadonlyArray<string> = [
+            'PENDING','CONFIRMED','PREPARING','READY','COMPLETED','CANCELLED',
+            'RETURN_REQUESTED','RETURN_APPROVED','RETURN_REJECTED','REFUNDED',
+        ];
         if (!status || !VALID.includes(status)) {
             return res.status(400).json({ error: `status must be one of ${VALID.join(', ')}` });
         }

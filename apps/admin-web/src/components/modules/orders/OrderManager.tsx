@@ -42,7 +42,7 @@ import { useMemo, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import {
   Download, MoreHorizontal, Clock, CheckCircle, XCircle, User,
-  RefreshCcw, ShoppingCart, Package, MessageCircle,
+  RefreshCcw, ShoppingCart, Package, MessageCircle, RotateCcw, ChefHat,
 } from 'lucide-react';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -56,7 +56,11 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import { cn } from '../../ui/utils';
-import { useOrders, Order, OrderStatus } from '../../../hooks/useOrders';
+import {
+  useOrders, Order, OrderStatus,
+  ACTIVE_STATUSES as ACTIVE_STATUS_LIST,
+  RETURN_STATUSES as RETURN_STATUS_LIST,
+} from '../../../hooks/useOrders';
 
 const BRAND_RED = '#B52725';
 
@@ -74,14 +78,19 @@ const getTimeAgo = (dateStr: string) => {
 
 const fmtINR = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
 
-type TabKey = 'all' | 'active' | 'completed' | 'cancelled' | 'refunded';
+type TabKey = 'all' | 'active' | 'completed' | 'returns' | 'cancelled' | 'refunded';
 
-const ACTIVE_STATUSES = new Set<OrderStatus>(['PENDING', 'CONFIRMED', 'READY']);
+// 2026-06-04: extended to cover the full OrderStatus enum (10 values).
+// `active`  → PENDING + CONFIRMED + PREPARING + READY
+// `returns` → RETURN_REQUESTED + RETURN_APPROVED + RETURN_REJECTED
+const ACTIVE_STATUSES = new Set<OrderStatus>(ACTIVE_STATUS_LIST);
+const RETURN_STATUSES = new Set<OrderStatus>(RETURN_STATUS_LIST);
 
 function statusMatches(status: OrderStatus, tab: TabKey): boolean {
   if (tab === 'all')        return true;
   if (tab === 'active')     return ACTIVE_STATUSES.has(status);
   if (tab === 'completed')  return status === 'COMPLETED';
+  if (tab === 'returns')    return RETURN_STATUSES.has(status);
   if (tab === 'cancelled')  return status === 'CANCELLED';
   if (tab === 'refunded')   return status === 'REFUNDED';
   return false;
@@ -143,6 +152,7 @@ export function OrderManager() {
               { k: 'all',       label: 'All' },
               { k: 'active',    label: 'Active' },
               { k: 'completed', label: 'Completed' },
+              { k: 'returns',   label: 'Returns' },
               { k: 'cancelled', label: 'Cancelled' },
               { k: 'refunded',  label: 'Refunded' },
             ] as { k: TabKey; label: string }[]).map((t, i) => (
@@ -424,25 +434,42 @@ export function OrderManager() {
 // ───────────────────────────────────────────────────────────── Status pill
 
 function StatusPill({ status }: { status: OrderStatus }) {
+  // 2026-06-04: extended to the full 10-value OrderStatus enum. Previously
+  // missing PREPARING + RETURN_REQUESTED + RETURN_APPROVED + RETURN_REJECTED
+  // would crash on render (Icon = undefined → React "Element type invalid").
+  // Falls back to a neutral PENDING-style pill for any future enum value
+  // that lands before we update this map.
   const styles: Record<OrderStatus, string> = {
-    PENDING:   'bg-gray-100 text-gray-700 border-gray-200',
-    CONFIRMED: 'bg-blue-50 text-blue-700 border-blue-200',
-    READY:     'bg-emerald-50 text-emerald-700 border-emerald-200',
-    COMPLETED: 'bg-amber-50 text-amber-700 border-amber-200',
-    CANCELLED: 'bg-rose-50 text-rose-700 border-rose-200',
-    REFUNDED:  'bg-violet-50 text-violet-700 border-violet-200',
+    PENDING:          'bg-gray-100 text-gray-700 border-gray-200',
+    CONFIRMED:        'bg-blue-50 text-blue-700 border-blue-200',
+    PREPARING:        'bg-indigo-50 text-indigo-700 border-indigo-200',
+    READY:            'bg-emerald-50 text-emerald-700 border-emerald-200',
+    COMPLETED:        'bg-amber-50 text-amber-700 border-amber-200',
+    CANCELLED:        'bg-rose-50 text-rose-700 border-rose-200',
+    RETURN_REQUESTED: 'bg-orange-50 text-orange-700 border-orange-200',
+    RETURN_APPROVED:  'bg-teal-50 text-teal-700 border-teal-200',
+    RETURN_REJECTED:  'bg-red-50 text-red-700 border-red-200',
+    REFUNDED:         'bg-violet-50 text-violet-700 border-violet-200',
   };
   const icons: Record<OrderStatus, typeof Clock> = {
-    PENDING:   Clock,
-    CONFIRMED: CheckCircle,
-    READY:     CheckCircle,
-    COMPLETED: CheckCircle,
-    CANCELLED: XCircle,
-    REFUNDED:  RefreshCcw,
+    PENDING:          Clock,
+    CONFIRMED:        CheckCircle,
+    PREPARING:        ChefHat,
+    READY:            CheckCircle,
+    COMPLETED:        CheckCircle,
+    CANCELLED:        XCircle,
+    RETURN_REQUESTED: RotateCcw,
+    RETURN_APPROVED:  CheckCircle,
+    RETURN_REJECTED:  XCircle,
+    REFUNDED:         RefreshCcw,
   };
-  const Icon = icons[status];
-  const cls  = styles[status];
-  const label = status.charAt(0) + status.slice(1).toLowerCase();
+  // Defensive fallback in case the API ever returns a new enum value we
+  // haven't styled yet — keeps the page rendering instead of crashing.
+  const cls   = styles[status] ?? styles.PENDING;
+  const Icon  = icons[status]  ?? Clock;
+  // "RETURN_REQUESTED" → "Return requested"
+  const label = (status as string).charAt(0)
+              + (status as string).slice(1).toLowerCase().replace(/_/g, ' ');
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${cls}`}>
       <Icon className="w-3.5 h-3.5" />

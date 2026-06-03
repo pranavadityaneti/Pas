@@ -21,14 +21,29 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import api from '../lib/api';
+import { supabase } from '../lib/supabaseClient';
 
 export type OrderStatus =
-  | 'PENDING'    // payment captured, store not yet confirmed
-  | 'CONFIRMED'  // store accepted
-  | 'READY'      // ready for pickup
-  | 'COMPLETED'  // picked up / closed out
-  | 'CANCELLED'  // cancelled (by either side)
-  | 'REFUNDED';  // refund issued
+  | 'PENDING'          // payment captured, store not yet confirmed
+  | 'CONFIRMED'        // store accepted
+  | 'PREPARING'        // store actively preparing the order
+  | 'READY'            // ready for pickup
+  | 'COMPLETED'        // picked up / closed out
+  | 'CANCELLED'        // cancelled (by either side)
+  | 'RETURN_REQUESTED' // customer asked to return
+  | 'RETURN_APPROVED'  // return greenlit
+  | 'RETURN_REJECTED'  // return denied
+  | 'REFUNDED';        // refund issued
+
+/** Active-tab grouping — pre-fulfillment statuses that need ops attention. */
+export const ACTIVE_STATUSES: ReadonlyArray<OrderStatus> = [
+  'PENDING', 'CONFIRMED', 'PREPARING', 'READY',
+];
+
+/** Returns-tab grouping — anything in the return lifecycle (pre-refund). */
+export const RETURN_STATUSES: ReadonlyArray<OrderStatus> = [
+  'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED',
+];
 
 export type Order = {
   id:               string;
@@ -70,6 +85,45 @@ export function useOrders(userIdFilter?: string | null) {
   }, [userIdFilter]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
+
+  // ── Realtime: live updates when orders are inserted / updated / deleted ──
+  //
+  // Subscribes to Postgres CDC on the lowercase `orders` table (the real
+  // production table that Prisma `Order` maps to via @@map). Supabase
+  // Realtime listens to the WAL regardless of who wrote the row — so
+  // Prisma writes from the consumer/merchant apps still emit events.
+  //
+  // Caveat: Realtime payloads are RLS-filtered. If the admin's JWT does
+  // not have a SELECT policy on `orders`, the event arrives with `new`/
+  // `old` set to {} and we ignore it. Manual Refresh is the authoritative
+  // fallback in that case (button already wired). When admin RLS policies
+  // are added later, this code starts streaming live without further changes.
+  useEffect(() => {
+    const channel = supabase
+      .channel('admin-orders-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'orders' },
+        (payload: any) => {
+          const isEmpty = (o: any) => !o || typeof o !== 'object' || Object.keys(o).length === 0;
+
+          if (payload.eventType === 'INSERT' && !isEmpty(payload.new)) {
+            // Respect server-side userId filter — don't surface other customers' orders.
+            if (userIdFilter && payload.new.user_id !== userIdFilter) return;
+            setOrders(prev => [payload.new as Order, ...prev]);
+            const label = payload.new?.order_number ?? String(payload.new?.id ?? '').slice(0, 8);
+            toast.info('New order received', { description: `#${label}` });
+          } else if (payload.eventType === 'UPDATE' && !isEmpty(payload.new)) {
+            setOrders(prev => prev.map(o => o.id === payload.new.id ? (payload.new as Order) : o));
+          } else if (payload.eventType === 'DELETE' && !isEmpty(payload.old)) {
+            setOrders(prev => prev.filter(o => o.id !== payload.old.id));
+          }
+        },
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [userIdFilter]);
 
   const updateOrderStatus = async (id: string, status: OrderStatus) => {
     // Optimistic UI
