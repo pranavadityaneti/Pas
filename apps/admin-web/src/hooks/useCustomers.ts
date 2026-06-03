@@ -22,13 +22,15 @@ import api from '../lib/api';
 
 export type Customer = {
   id: string;
-  /** Real name from User.name. NULL when the user has not set a profile name. */
+  /** Real name from User.name (with profiles.full_name fallback applied server-side). NULL when neither is set. */
   name: string | null;
   email: string;
   phone: string;
   city: string;
   ltv: number;
   status: 'active' | 'suspended';
+  /** User.role — typically CONSUMER but MERCHANT-tier users who also placed orders surface here too. */
+  role: string;
   avatar_url: string | null;
   created_at: string;
   order_count:            number;
@@ -53,6 +55,7 @@ interface RawApiUser {
   email:     string | null;
   phone:     string | null;
   status:    string | null;
+  role:      string | null;
   createdAt: string;
   orders:    RawOrder[];
 }
@@ -116,6 +119,7 @@ export function useCustomers() {
           city,
           ltv,
           status:                (u.status === 'suspended' ? 'suspended' : 'active') as 'active' | 'suspended',
+          role:                  u.role ?? 'CONSUMER',
           avatar_url:            null,
           created_at:            u.createdAt,
           order_count:           orderCount,

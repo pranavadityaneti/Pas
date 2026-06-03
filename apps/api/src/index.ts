@@ -2256,6 +2256,16 @@ app.post('/orders', async (req, res) => {
             },
         }).catch(e => console.error('[POST /orders] New order notif failed:', e));
 
+        // 2026-06-04 (Option B): backfill User.name from this order's
+        // customer_name when the user has never provided a profile name.
+        // Fire-and-forget — never block order success on a profile write.
+        if (userId && typeof customerName === 'string' && customerName.trim().length >= 2) {
+            prisma.user.updateMany({
+                where: { id: userId, name: null },
+                data: { name: customerName.trim() },
+            }).catch(e => console.warn('[POST /orders] User.name backfill failed:', e?.message || e));
+        }
+
         // Customer-side notification: branch on order_type
         // - Dine-in: send DINING_BOOKED (event #12)
         // - Pickup (paid only): send PAYMENT_SUCCESSFUL (event #2)
@@ -5152,9 +5162,21 @@ app.get('/admin/customers', async (req, res) => {
         const limit  = Math.min(parseInt((req.query.limit  as string) || '500', 10) || 500, 2000);
         const offset = Math.max(parseInt((req.query.offset as string) || '0',   10) || 0,   0);
 
+        // 2026-06-04 (Q2/Q3 fix): widened from `role: 'CONSUMER'` to "anyone who
+        // signed up as a consumer OR has placed at least one order, regardless of
+        // role". Pranav's audit showed 35/48 test orders (73%) were sitting under
+        // MERCHANT-role users (phone matched a branch → JIT promoted to MERCHANT
+        // at OTP-verify) so the prior filter hid them entirely.
+        const customersWhere = {
+            OR: [
+                { role: 'CONSUMER' as const },
+                { orders: { some: {} } },
+            ],
+        };
+
         const [users, totalCount] = await Promise.all([
             prisma.user.findMany({
-                where: { role: 'CONSUMER' },
+                where: customersWhere,
                 orderBy: { createdAt: 'desc' },
                 take: limit,
                 skip: offset,
@@ -5164,6 +5186,7 @@ app.get('/admin/customers', async (req, res) => {
                     email: true,
                     phone: true,
                     status: true,
+                    role: true,
                     createdAt: true,
                     orders: {
                         select: {
@@ -5175,8 +5198,22 @@ app.get('/admin/customers', async (req, res) => {
                     },
                 },
             }),
-            prisma.user.count({ where: { role: 'CONSUMER' } }),
+            prisma.user.count({ where: customersWhere }),
         ]);
+
+        // Name fallback: for users with NULL User.name, look up profiles.full_name
+        // (the consumer app's ProfileSetupScreen writes to public.profiles.full_name,
+        // not User.name — that's the architectural split we're patching at the read
+        // layer for now; Option A below writes User.name on future setups).
+        const userIdsWithNullName = users.filter(u => !u.name).map(u => u.id);
+        const profileNameMap: Record<string, string> = {};
+        if (userIdsWithNullName.length > 0) {
+            const profiles = await prisma.profile.findMany({
+                where: { id: { in: userIdsWithNullName } },
+                select: { id: true, fullName: true },
+            });
+            profiles.forEach(p => { if (p.fullName) profileNameMap[p.id] = p.fullName; });
+        }
 
         // Collect unique branch IDs across every customer's orders → look up city.
         const branchIds = new Set<string>();
@@ -5194,10 +5231,11 @@ app.get('/admin/customers', async (req, res) => {
         // Reshape to snake_case for the client (matches the previous PostgREST shape).
         const customers = users.map(u => ({
             id:        u.id,
-            name:      u.name,
+            name:      u.name ?? profileNameMap[u.id] ?? null,
             email:     u.email,
             phone:     u.phone,
             status:    u.status,
+            role:      u.role,
             createdAt: u.createdAt,
             orders: u.orders.map(o => ({
                 total_amount: o.totalAmount,
@@ -5575,6 +5613,82 @@ app.get('/admin/home/finance', async (req, res) => {
     } catch (e: any) {
         console.error('[admin/home/finance] error:', e?.message || e);
         res.status(500).json({ error: 'Failed to load finance home' });
+    }
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// Self-profile update — consumer-side (added 2026-06-04, Option A)
+//
+// The consumer app's ProfileSetupScreen currently writes the user's name to
+// public.profiles.full_name only. Our admin UI reads from public."User".name.
+// Result: every user who completed profile-setup still showed "(no name)"
+// in admin because the two columns were never synced.
+//
+// This endpoint accepts the same payload the screen already builds and
+// writes to BOTH tables in a single Prisma transaction. The consumer app
+// is being updated to call this instead of the direct supabase.from()
+// upsert; the existing screen code path stays around as a fallback during
+// the OTA rollout window.
+// ────────────────────────────────────────────────────────────────────────────
+
+app.post('/me/profile', async (req, res) => {
+    const caller = await requireUser(req, res); if (!caller) return;
+    try {
+        const { name, email, dateOfBirth, avatarUrl } = req.body ?? {};
+
+        if (!name || typeof name !== 'string' || name.trim().length < 2) {
+            return res.status(400).json({ error: 'name must be a string with at least 2 characters' });
+        }
+        const cleanName = name.trim();
+
+        // Resolve a phone if we already have one on the User row — needed only
+        // when we create a fresh User (consumer JIT case).
+        const existing = await prisma.user.findUnique({
+            where: { id: caller.id },
+            select: { id: true, phone: true, email: true },
+        });
+        const fallbackEmail = caller.email
+            || existing?.email
+            || `${caller.id}@user.pickatstore.app`;
+
+        await prisma.$transaction([
+            prisma.user.upsert({
+                where: { id: caller.id },
+                update: { name: cleanName },
+                create: {
+                    id:    caller.id,
+                    email: fallbackEmail,
+                    phone: existing?.phone ?? null,
+                    name:  cleanName,
+                    role:  'CONSUMER',
+                },
+            }),
+            prisma.profile.upsert({
+                where: { id: caller.id },
+                update: {
+                    fullName:         cleanName,
+                    ...(email      ? { email }                                  : {}),
+                    ...(dateOfBirth ? { dateOfBirth: new Date(dateOfBirth) }    : {}),
+                    ...(avatarUrl  ? { avatarUrl }                              : {}),
+                    profileCompleted: true,
+                    updatedAt:        new Date(),
+                },
+                create: {
+                    id:               caller.id,
+                    fullName:         cleanName,
+                    email:            email      ?? null,
+                    dateOfBirth:      dateOfBirth ? new Date(dateOfBirth) : null,
+                    avatarUrl:        avatarUrl  ?? null,
+                    profileCompleted: true,
+                    updatedAt:        new Date(),
+                },
+            }),
+        ]);
+
+        res.json({ ok: true, name: cleanName });
+    } catch (e: any) {
+        console.error('[me/profile] update error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to update profile' });
     }
 });
 
