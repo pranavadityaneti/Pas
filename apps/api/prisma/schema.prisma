@@ -105,6 +105,12 @@ model User {
   name                    String?
   phone                   String?
   isAdmin                 Boolean  @default(false)
+  // Soft-disable for admin users per RBAC doc — 'active' | 'suspended'.
+  // Suspended users are blocked from auth callbacks but data is preserved.
+  // Reversible via Super Admin reactivating from the Roles page.
+  status                  String   @default("active")
+  suspendedAt             DateTime? @map("suspended_at")
+  suspendedReason         String?  @map("suspended_reason")
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
   notificationPreferences Json?    @map("notification_preferences")
@@ -117,6 +123,10 @@ model User {
 model AdminAllowlist {
   phone     String   @id
   name      String?
+  // Role chosen at invite time (when invited by phone). On the invitee's first
+  // phone-OTP login, /auth/verify-otp promotes this onto User.role so the
+  // role-aware sidebar + RBAC gates apply immediately.
+  role      String?
   isActive  Boolean  @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -233,9 +243,38 @@ model Coupon {
   createdAt      DateTime       @default(now()) @map("created_at")
   updatedAt      DateTime       @updatedAt @map("updated_at")
 
+  // Extended for the coupon engine — design spec: docs/coupon-feature-spec.md
+  minOrder         Float?  @map("min_order")
+  perCustomerLimit Int?    @map("per_customer_limit")
+  bogoBuy          Int?    @map("bogo_buy")
+  bogoGet          Int?    @map("bogo_get")
+  title            String?
+  brandName        String? @map("brand_name")
+  description      String?
+  showLogo         Boolean @default(true) @map("show_logo")
+  logoUrl          String? @map("logo_url")
+  autoCode         Boolean @default(false) @map("auto_code")
+  theme            String  @default("classic") // preset id: classic|bold|modern|festive (validated app-side)
+  redemptions      CouponRedemption[]
+
   @@index([code], map: "Coupon_code_idx")
   @@index([storeId], map: "Coupon_store_id_idx")
   @@map("coupons")
+  @@schema("public")
+}
+
+model CouponRedemption {
+  id         String   @id @default(dbgenerated("gen_random_uuid()"))
+  couponId   String   @map("coupon_id")
+  coupon     Coupon   @relation(fields: [couponId], references: [id])
+  userId     String   @map("user_id") @db.Uuid
+  orderId    String?  @map("order_id") @db.Uuid
+  issuedCode String?  @map("issued_code")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([couponId], map: "CouponRedemption_coupon_id_idx")
+  @@index([userId], map: "CouponRedemption_user_id_idx")
+  @@map("coupon_redemptions")
   @@schema("public")
 }
 
@@ -1148,10 +1187,39 @@ model spatial_ref_sys {
   @@schema("public")
 }
 
+// Wati Inbox — captures incoming WhatsApp messages for the admin Customer Support inbox.
+// Activated when Wati dashboard's webhook URL is set to https://api.pickatstore.io/webhooks/wati.
+model WatiInbox {
+  id              String   @id @default(dbgenerated("gen_random_uuid()"))
+  watiMessageId   String?  @unique @map("wati_message_id")
+  waPhone         String   @map("wa_phone")
+  contactName     String?  @map("contact_name")
+  direction       String   @default("inbound")
+  messageType     String   @default("text") @map("message_type")
+  body            String?
+  rawPayload      Json     @map("raw_payload")
+  tag             String?
+  assignedTo      String?  @map("assigned_to") @db.Uuid
+  status          String   @default("open")
+  isRead          Boolean  @default(false) @map("is_read")
+  receivedAt      DateTime @default(now()) @map("received_at") @db.Timestamptz
+  resolvedAt      DateTime? @map("resolved_at") @db.Timestamptz
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([waPhone], map: "wati_inbox_wa_phone_idx")
+  @@index([status], map: "wati_inbox_status_idx")
+  @@index([receivedAt(sort: Desc)], map: "wati_inbox_received_at_idx")
+  @@map("wati_inbox")
+  @@schema("public")
+}
+
 enum Role {
-  SUPER_ADMIN
-  MERCHANT
-  CONSUMER
+  SUPER_ADMIN  // founder / eng — unrestricted (existing)
+  OPERATIONS   // ops team — daily marketplace operations (added 2026-06-02 per RBAC doc)
+  FINANCE      // finance team — settlements, payouts, reconciliation (added 2026-06-02)
+  SUPPORT      // customer support team — view + respond + escalate (added 2026-06-02)
+  MERCHANT     // existing — unchanged
+  CONSUMER     // existing — unchanged
 
   @@schema("public")
 }
@@ -1174,6 +1242,7 @@ enum OrderStatus {
 enum DiscountType {
   PERCENTAGE
   FLAT
+  BOGO
 
   @@schema("public")
 }

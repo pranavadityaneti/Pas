@@ -1,0 +1,7 @@
+[defaults]
+url=https://sentry.io/
+org=pas-retail-networks-pvt-ltd
+project=node-express
+
+# auth.token is intentionally NOT set here — sentry-cli reads it from
+# SENTRY_AUTH_TOKEN env var so the secret never lives in this repo.

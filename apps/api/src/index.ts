@@ -1,6 +1,12 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+// Sentry MUST be initialised before any other module that we want instrumented
+// (express, http, prisma, etc.). The dotenv.config() above must run first so
+// instrument.ts can read SENTRY_DSN from the environment.
+import './instrument';
+import * as Sentry from '@sentry/node';
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -15,7 +21,7 @@ import { z } from 'zod';
 import { smsService } from './services/sms.service';
 import { watiService } from './services/wati.service';
 import { apifyService } from './services/apify.service';
-import { sendApplicationReceivedEmail, sendStoreApprovedEmail, sendStoreRejectedEmail } from './services/email.service';
+import { sendApplicationReceivedEmail, sendStoreApprovedEmail, sendStoreRejectedEmail, sendStoreNeedsInfoEmail, sendAdminInviteEmail } from './services/email.service';
 import { NotificationService } from './services/notification.service';
 import { initScheduledJobs } from './services/scheduled-jobs';
 import { parseArrivalTime } from './utils/parseArrivalTime';
@@ -74,6 +80,93 @@ async function getAuthUser(req: express.Request) {
         throw new Error('Unauthorized');
     }
     return user;
+}
+
+// Guard: admin-only route. Writes 401/403 directly and returns null on failure;
+// caller does `const u = await requireAdmin(req, res); if (!u) return;`.
+// Matches the inline pattern at /admin/allowlist (~3747). Used by coupon admin routes.
+async function requireAdmin(req: express.Request, res: express.Response) {
+    let caller;
+    try {
+        caller = await getAuthUser(req);
+    } catch {
+        res.status(401).json({ error: 'Authentication required' });
+        return null;
+    }
+    const callerProfile = await prisma.user.findUnique({
+        where: { id: caller.id },
+        select: { isAdmin: true, role: true },
+    });
+    // Per the 2026-06-02 RBAC doc, requireAdmin = SUPER_ADMIN only (governance tier).
+    // The legacy isAdmin flag is treated as SUPER_ADMIN equivalent for backwards
+    // compatibility. OPERATIONS / FINANCE / SUPPORT do NOT pass requireAdmin — use
+    // requireRole(['SUPER_ADMIN', 'OPERATIONS', …]) for per-route role checks.
+    const ok =
+        !!callerProfile &&
+        (callerProfile.isAdmin === true || callerProfile.role === 'SUPER_ADMIN');
+    if (!ok) {
+        res.status(403).json({ error: 'Super-admin access required' });
+        return null;
+    }
+    return caller;
+}
+
+/**
+ * Generic RBAC guard. Pass an allowed-roles list; SUPER_ADMIN is always allowed.
+ *
+ *   const u = await requireRole(req, res, ['OPERATIONS', 'FINANCE']); if (!u) return;
+ *
+ * Per the 2026-06-02 RBAC doc:
+ *   SUPER_ADMIN   founder/eng — unrestricted; always passes
+ *   OPERATIONS    daily marketplace ops
+ *   FINANCE       settlements + payouts + reconciliation
+ *   SUPPORT       customer support (mostly view-only)
+ *
+ * The legacy `isAdmin: true` flag is treated as SUPER_ADMIN equivalent for
+ * backwards compatibility with users who pre-date the Role enum.
+ */
+async function requireRole(
+    req: express.Request,
+    res: express.Response,
+    allowedRoles: ReadonlyArray<'SUPER_ADMIN' | 'OPERATIONS' | 'FINANCE' | 'SUPPORT'>,
+) {
+    let caller;
+    try {
+        caller = await getAuthUser(req);
+    } catch {
+        res.status(401).json({ error: 'Authentication required' });
+        return null;
+    }
+    const callerProfile = await prisma.user.findUnique({
+        where: { id: caller.id },
+        select: { isAdmin: true, role: true },
+    });
+    if (!callerProfile) {
+        res.status(403).json({ error: 'Access denied' });
+        return null;
+    }
+    // SUPER_ADMIN always allowed; isAdmin flag treated as SUPER_ADMIN.
+    if (callerProfile.role === 'SUPER_ADMIN' || callerProfile.isAdmin === true) {
+        return caller;
+    }
+    if (callerProfile.role && allowedRoles.includes(callerProfile.role as any)) {
+        return caller;
+    }
+    res.status(403).json({ error: 'Insufficient role for this action' });
+    return null;
+}
+
+// Guard: any logged-in user. Writes 401 directly and returns null on failure;
+// caller does `const u = await requireUser(req, res); if (!u) return;`.
+// Used by consumer-side coupon routes (/coupons/available, validate-coupon, redeem)
+// so we derive userId from the verified token instead of trusting the request body.
+async function requireUser(req: express.Request, res: express.Response) {
+    try {
+        return await getAuthUser(req);
+    } catch {
+        res.status(401).json({ error: 'Authentication required' });
+        return null;
+    }
 }
 
 async function logAudit(productId: string, action: string, field: string | null, oldValue: any, newValue: any, changedBy: string = 'System') {
@@ -3075,12 +3168,14 @@ app.patch('/stores/:id', async (req, res) => {
 // List Coupons (with filtering)
 app.get('/coupons', async (req, res) => {
     try {
+        const caller = await requireAdmin(req, res); if (!caller) return;
         const { storeId, isActive, fundingSource, search } = req.query;
 
         const where: any = {};
-        if (storeId) where.store_id = String(storeId);
-        if (isActive !== undefined) where.is_active = isActive === 'true';
-        if (fundingSource) where.funding_source = String(fundingSource).toUpperCase();
+        // Prisma `where` uses model fields (camelCase), not @map column names.
+        if (storeId) where.storeId = String(storeId);
+        if (isActive !== undefined) where.isActive = isActive === 'true';
+        if (fundingSource) where.fundingSource = String(fundingSource).toUpperCase();
         if (search) {
             where.code = { contains: String(search).toUpperCase(), mode: 'insensitive' };
         }
@@ -3100,6 +3195,7 @@ app.get('/coupons', async (req, res) => {
 // Create Coupon
 app.post('/coupon', async (req, res) => {
     try {
+        const caller = await requireAdmin(req, res); if (!caller) return;
         const {
             code,
             discountType,
@@ -3110,12 +3206,29 @@ app.post('/coupon', async (req, res) => {
             storeId,
             usageLimit,
             startDate,
-            endDate
+            endDate,
+            // coupon-engine fields
+            minOrder, perCustomerLimit, bogoBuy, bogoGet,
+            title, brandName, description, showLogo, logoUrl, autoCode,
+            theme
         } = req.body;
 
+        // theme validation — admin must pick one of the curated presets; default classic.
+        const ALLOWED_THEMES = ['classic', 'bold', 'modern', 'festive'] as const;
+        const themeValue = theme && ALLOWED_THEMES.includes(String(theme) as any)
+            ? String(theme)
+            : 'classic';
+
+        const type = discountType ? String(discountType).toUpperCase() : '';
+
         // Validation
-        if (!code || !discountType || !discountValue || !fundingSource || !targetAudience) {
-            return res.status(400).json({ error: 'Missing required fields: code, discountType, discountValue, fundingSource, targetAudience' });
+        if (!code || !type || !fundingSource || !targetAudience) {
+            return res.status(400).json({ error: 'Missing required fields: code, discountType, fundingSource, targetAudience' });
+        }
+        if (type === 'BOGO') {
+            if (!bogoBuy || !bogoGet) return res.status(400).json({ error: 'BOGO coupons require bogoBuy and bogoGet' });
+        } else if (!discountValue) {
+            return res.status(400).json({ error: 'discountValue is required for PERCENTAGE/FLAT coupons' });
         }
 
         // Check for duplicate code
@@ -3135,15 +3248,26 @@ app.post('/coupon', async (req, res) => {
         const coupon = await prisma.coupon.create({
             data: {
                 code: code.toUpperCase(),
-                discountType: discountType.toUpperCase(),
-                discountValue: Number(discountValue),
+                discountType: type as any,
+                discountValue: discountValue != null ? Number(discountValue) : 0,
                 maxDiscountCap: maxDiscountCap ? Number(maxDiscountCap) : null,
-                fundingSource: fundingSource.toUpperCase(),
-                targetAudience: targetAudience.toUpperCase(),
+                fundingSource: String(fundingSource).toUpperCase() as any,
+                targetAudience: String(targetAudience).toUpperCase() as any,
                 storeId: storeId || null,
                 usageLimit: usageLimit ? parseInt(usageLimit) : null,
                 startDate: startDate ? new Date(startDate) : new Date(),
                 endDate: endDate ? new Date(endDate) : null,
+                minOrder: minOrder != null ? Number(minOrder) : null,
+                perCustomerLimit: perCustomerLimit != null ? parseInt(perCustomerLimit) : null,
+                bogoBuy: bogoBuy != null ? parseInt(bogoBuy) : null,
+                bogoGet: bogoGet != null ? parseInt(bogoGet) : null,
+                title: title || null,
+                brandName: brandName || null,
+                description: description || null,
+                showLogo: showLogo != null ? Boolean(showLogo) : true,
+                logoUrl: logoUrl || null,
+                autoCode: autoCode != null ? Boolean(autoCode) : false,
+                theme: themeValue,
                 updatedAt: new Date(),
             }
         });
@@ -3158,11 +3282,16 @@ app.post('/coupon', async (req, res) => {
 // Update Coupon
 app.patch('/coupon/:id', async (req, res) => {
     try {
+        const caller = await requireAdmin(req, res); if (!caller) return;
         const { id } = req.params;
         const updateData: any = {};
 
         const allowedFields = ['code', 'discountType', 'discountValue', 'maxDiscountCap',
-            'fundingSource', 'targetAudience', 'storeId', 'isActive', 'usageLimit', 'startDate', 'endDate'];
+            'fundingSource', 'targetAudience', 'storeId', 'isActive', 'usageLimit', 'startDate', 'endDate',
+            // coupon-engine fields
+            'minOrder', 'perCustomerLimit', 'bogoBuy', 'bogoGet', 'title', 'brandName', 'description', 'showLogo', 'logoUrl', 'autoCode',
+            'theme'];
+        const ALLOWED_THEMES_PATCH = ['classic', 'bold', 'modern', 'festive'];
 
         for (const field of allowedFields) {
             if (req.body[field] !== undefined) {
@@ -3173,14 +3302,21 @@ app.patch('/coupon/:id', async (req, res) => {
                     value = String(value).toUpperCase();
                 }
                 if (field === 'code') value = String(value).toUpperCase();
-                if (['discountValue', 'maxDiscountCap'].includes(field)) {
+                if (['discountValue', 'maxDiscountCap', 'minOrder'].includes(field)) {
                     value = value === null ? null : parseFloat(value);
                 }
-                if (field === 'usageLimit') {
+                if (['usageLimit', 'perCustomerLimit', 'bogoBuy', 'bogoGet'].includes(field)) {
                     value = value === null ? null : parseInt(value);
+                }
+                if (['showLogo', 'autoCode'].includes(field)) {
+                    value = Boolean(value);
                 }
                 if (['startDate', 'endDate'].includes(field)) {
                     value = value === null ? null : new Date(value);
+                }
+                if (field === 'theme') {
+                    // silently fall back to 'classic' if an unknown theme id sneaks through
+                    value = ALLOWED_THEMES_PATCH.includes(String(value)) ? String(value) : 'classic';
                 }
                 updateData[prismaField] = value;
             }
@@ -3201,6 +3337,7 @@ app.patch('/coupon/:id', async (req, res) => {
 // Delete Coupon
 app.delete('/coupon/:id', async (req, res) => {
     try {
+        const caller = await requireAdmin(req, res); if (!caller) return;
         const { id } = req.params;
         await prisma.coupon.delete({ where: { id } });
         res.json({ message: 'Coupon deleted successfully' });
@@ -3210,10 +3347,64 @@ app.delete('/coupon/:id', async (req, res) => {
     }
 });
 
+// List coupons the logged-in customer is eligible to see on checkout.
+// Filters: active + within validity window + audience matches + store-scope respected.
+// Audience math is done once per request (1 aggregate query for the user) and applied in-memory.
+app.get('/coupons/available', async (req, res) => {
+    try {
+        const u = await requireUser(req, res); if (!u) return;
+        const storeId = typeof req.query.storeId === 'string' && req.query.storeId.length > 0 ? req.query.storeId : null;
+        const now = new Date();
+
+        // Pull every coupon currently in its validity window. Audience filter applied below.
+        const candidates = await prisma.coupon.findMany({
+            where: {
+                isActive: true,
+                startDate: { lte: now },
+                AND: [
+                    { OR: [{ endDate: null }, { endDate: { gt: now } }] },
+                    storeId
+                        ? { OR: [{ storeId: null }, { storeId }] }
+                        : { storeId: null },
+                ],
+            },
+            orderBy: { createdAt: 'desc' },
+        });
+
+        // Determine the caller's audience-eligibility ONCE (avoids N+1 per coupon).
+        const stats = await prisma.order.aggregate({
+            where: { userId: u.id },
+            _count: { _all: true },
+            _max: { createdAt: true },
+        });
+        const orderCount = stats._count._all;
+        const lastOrderAt = stats._max.createdAt;
+        const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        const isNew = orderCount === 0;
+        const isInactive = orderCount > 0 && !!lastOrderAt && lastOrderAt < thirtyDaysAgo;
+
+        // Also respect usageLimit at list-time so we don't show "Sold out" coupons.
+        const eligible = candidates.filter((c) => {
+            if (c.usageLimit !== null && c.usageLimit !== undefined && c.usedCount >= c.usageLimit) return false;
+            if (c.targetAudience === 'ALL') return true;
+            if (c.targetAudience === 'NEW_USERS') return isNew;
+            if (c.targetAudience === 'INACTIVE_USERS') return isInactive;
+            return false;
+        });
+
+        res.json({ data: eligible });
+    } catch (error) {
+        console.error('List Available Coupons Error:', error);
+        res.status(500).json({ error: 'Failed to fetch available coupons' });
+    }
+});
+
 // Validate Coupon (for Consumer Checkout)
 app.post('/checkout/validate-coupon', async (req, res) => {
     try {
-        const { code, cartTotal, storeId, userId } = req.body;
+        const u = await requireUser(req, res); if (!u) return;
+        const { code, cartTotal, storeId } = req.body;
+        const userId = u.id; // derived from verified token, NOT trusted from body
 
         if (!code || !cartTotal) {
             return res.status(400).json({ error: 'code and cartTotal are required' });
@@ -3258,15 +3449,33 @@ app.post('/checkout/validate-coupon', async (req, res) => {
             }
         }
 
+        // Check minimum order value
+        if (coupon.minOrder && Number(cartTotal) < coupon.minOrder) {
+            return res.status(400).json({ valid: false, error: `Minimum order of ₹${coupon.minOrder} required to use this coupon` });
+        }
+
+        // Check per-customer limit (counts this user's prior redemptions)
+        if (coupon.perCustomerLimit && userId) {
+            const usedByUser = await prisma.couponRedemption.count({ where: { couponId: coupon.id, userId } });
+            if (usedByUser >= coupon.perCustomerLimit) {
+                return res.status(400).json({ valid: false, error: 'You have already used this coupon the maximum number of times' });
+            }
+        }
+
         // Calculate discount
         let discount = 0;
+        let bogo: { buy: number; get: number } | null = null;
         if (coupon.discountType === 'PERCENTAGE') {
             discount = (Number(cartTotal) * coupon.discountValue) / 100;
             if (coupon.maxDiscountCap) {
                 discount = Math.min(discount, coupon.maxDiscountCap);
             }
+        } else if (coupon.discountType === 'BOGO') {
+            // BOGO applies at the line-item level (cheapest-free etc.) — surface the rule,
+            // not a flat ₹ off. The cart computes the actual saving from buy/get.
+            bogo = { buy: coupon.bogoBuy ?? 1, get: coupon.bogoGet ?? 1 };
         } else {
-            discount = coupon.discountValue;
+            discount = coupon.discountValue; // FLAT
         }
 
         // Don't let discount exceed cart total
@@ -3280,10 +3489,48 @@ app.post('/checkout/validate-coupon', async (req, res) => {
             discountType: coupon.discountType,
             discountValue: coupon.discountValue,
             maxDiscountCap: coupon.maxDiscountCap,
+            bogo,
+            minOrder: coupon.minOrder ?? null,
         });
     } catch (error) {
         console.error('Validate Coupon Error:', error);
         res.status(500).json({ error: 'Failed to validate coupon' });
+    }
+});
+
+// Redeem a coupon — records the usage atomically. Call this at order placement.
+// Idempotent on orderId so retries (or the webhook backstop) can't double-count.
+app.post('/coupons/redeem', async (req, res) => {
+    try {
+        const u = await requireUser(req, res); if (!u) return;
+        const { code, orderId, issuedCode } = req.body;
+        const userId = u.id; // derived from verified token, NOT trusted from body
+        if (!code) {
+            return res.status(400).json({ error: 'code is required' });
+        }
+
+        const coupon = await prisma.coupon.findUnique({ where: { code: String(code).toUpperCase() } });
+        if (!coupon) return res.status(404).json({ error: 'Invalid coupon code' });
+
+        // Idempotency: if this order already redeemed this coupon, return the existing record.
+        if (orderId) {
+            const existing = await prisma.couponRedemption.findFirst({ where: { couponId: coupon.id, orderId } });
+            if (existing) return res.status(200).json({ redemptionId: existing.id, alreadyRedeemed: true });
+        }
+
+        // Record redemption + bump usedCount in one transaction.
+        const redemption = await prisma.$transaction(async (tx) => {
+            const r = await tx.couponRedemption.create({
+                data: { couponId: coupon.id, userId, orderId: orderId || null, issuedCode: issuedCode || null },
+            });
+            await tx.coupon.update({ where: { id: coupon.id }, data: { usedCount: { increment: 1 } } });
+            return r;
+        });
+
+        res.status(201).json({ redemptionId: redemption.id, couponId: coupon.id });
+    } catch (error) {
+        console.error('Redeem Coupon Error:', error);
+        res.status(500).json({ error: 'Failed to redeem coupon' });
     }
 });
 
@@ -3373,18 +3620,9 @@ app.post('/auth/send-otp', async (req, res) => {
             }
         }
 
-        // Rate limit: max 3 OTPs per phone in 10 minutes
-        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-        const recentCount = await prisma.otpVerification.count({
-            where: {
-                phone,
-                createdAt: { gte: tenMinutesAgo }
-            }
-        });
-
-        if (recentCount >= 3) {
-            return res.status(429).json({ error: 'Too many OTP requests. Please wait 10 minutes.' });
-        }
+        // [2026-05-30] 10-min/3-OTP per-phone ban REMOVED — was blocking founder/legitimate testing.
+        // Per-OTP attempt limit (5 wrong tries on a single record, in /auth/verify-otp) is retained.
+        // TODO (forlater.md): replace with a cheaper per-IP throttle + Wati-cost cap before scale.
 
         // Generate 6-digit OTP
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -3620,21 +3858,42 @@ app.post('/auth/verify-otp', async (req, res) => {
 
         // Admin login: stamp the durable isAdmin flag (survives the JIT role
         // overwrite above). Upsert because non-merchant admins have no User row yet.
+        // 2026-06-03: also promote AdminAllowlist.role onto User.role if the
+        // invitee was given a role at invite time, AND keep their existing User.role
+        // if they already have one of the new admin-tier roles.
         if (isAdminLogin) {
             const allow = await prisma.adminAllowlist.findFirst({ where: { phone, isActive: true } });
+            const allowRole = allow?.role && ['SUPER_ADMIN','OPERATIONS','FINANCE','SUPPORT'].includes(String(allow.role).toUpperCase())
+                ? String(allow.role).toUpperCase()
+                : null;
+
+            const existingProfile = await prisma.user.findUnique({
+                where: { id: existingUser.id },
+                select: { role: true },
+            });
+            const existingRole = existingProfile?.role;
+            // Don't override an existing admin-tier role on each login — that would
+            // wipe Super Admin's manual demotion. Only promote when the user has no
+            // admin role yet (or is still tagged as CONSUMER/MERCHANT).
+            const shouldApplyAllowRole = allowRole && (!existingRole || existingRole === 'CONSUMER' || existingRole === 'MERCHANT');
+            const targetRole = shouldApplyAllowRole ? allowRole : null;
+
             await prisma.user.upsert({
                 where: { id: existingUser.id },
-                update: { isAdmin: true },
+                update: {
+                    isAdmin: true,
+                    ...(targetRole ? { role: targetRole as any } : {}),
+                },
                 create: {
                     id: existingUser.id,
                     email: existingUser.email || syntheticEmail,
                     phone: formattedPhone,
-                    role: 'CONSUMER',
+                    role: (targetRole ?? 'CONSUMER') as any,
                     isAdmin: true,
                     name: allow?.name ?? null,
                 },
             });
-            console.log(`[Auth] Admin isAdmin flag set for ${existingUser.id}`);
+            console.log(`[Auth] Admin isAdmin set for ${existingUser.id}${targetRole ? ` (role=${targetRole} from allowlist)` : ''}`);
         }
 
         res.json({
@@ -4110,12 +4369,17 @@ app.patch('/auth/merchant/draft', async (req, res) => {
  * Sends branded email notification to the merchant.
  */
 app.post('/merchants/:id/kyc-decision', async (req, res) => {
+    // RBAC: OPERATIONS owns KYC review per the 2026-06-02 doc. SUPER_ADMIN
+    // always allowed by requireRole's wildcard.
+    const caller = await requireRole(req, res, ['OPERATIONS']); if (!caller) return;
     try {
         const { id } = req.params;
-        const { decision, rejectionReason } = req.body;
+        // `needsInfoDetails` is the per-merchant message the admin types when picking 'needs_info'
+        // (e.g. "Please re-upload PAN; the file you sent was unreadable.").
+        const { decision, rejectionReason, needsInfoDetails } = req.body;
 
-        if (!decision || !['approve', 'reject'].includes(decision)) {
-            return res.status(400).json({ error: 'Invalid decision. Must be "approve" or "reject".' });
+        if (!decision || !['approve', 'reject', 'needs_info'].includes(decision)) {
+            return res.status(400).json({ error: 'Invalid decision. Must be "approve", "reject", or "needs_info".' });
         }
 
         const merchant = await prisma.merchant.findUnique({ where: { id } });
@@ -4139,6 +4403,19 @@ app.post('/merchants/:id/kyc-decision', async (req, res) => {
                     .catch(err => console.error('[Email] Approval email failed:', err));
             }
             console.log(`[KYC] Approved merchant ${id} (${merchant.storeName})`);
+        } else if (decision === 'needs_info') {
+            // KYC stays in 'pending' / 'needs_info' state — store stays inactive.
+            // The merchant fixes whatever's flagged and the admin re-reviews.
+            await prisma.merchant.update({
+                where: { id },
+                data: { kycStatus: 'needs_info', kycRejectionReason: needsInfoDetails || null }
+            });
+
+            if (merchant.email) {
+                sendStoreNeedsInfoEmail(merchant.email, merchant.ownerName || 'Partner', needsInfoDetails || '')
+                    .catch(err => console.error('[Email] Needs-info email failed:', err));
+            }
+            console.log(`[KYC] Needs more info on merchant ${id} (${merchant.storeName})`);
         } else {
             await prisma.merchant.update({
                 where: { id },
@@ -4459,10 +4736,340 @@ app.get('/auth/me', async (req, res) => {
     }
 });
 
+// --- Sentry test endpoint (admin-gated) ---
+// Throws on purpose. Useful to verify Sentry receives + that source maps are
+// resolving (after the 2026-06-02 wizard pass, stack traces should show real
+// function names). Locked behind requireAdmin so randos can't trigger alerts.
+app.get('/debug-sentry', async (req, res) => {
+    const caller = await requireAdmin(req, res); if (!caller) return;
+    throw new Error(`[Sentry verification] Triggered by admin ${caller.id}`);
+});
+
+// --- Resend test endpoint (admin-gated) ---
+// Sends one of the 4 template emails to a target address. Admin-locked so we
+// can't spam customers + nobody else can fire test sends. Usage:
+//   POST /debug-resend
+//   { to: "you@example.com", template: "received" | "approved" | "rejected" | "needs_info" }
+app.post('/debug-resend', async (req, res) => {
+    const caller = await requireAdmin(req, res); if (!caller) return;
+    const { to, template = 'received' } = req.body || {};
+    if (!to || typeof to !== 'string') {
+        return res.status(400).json({ error: 'Provide { to: "email@domain.com" }' });
+    }
+    try {
+        const name = 'Test Partner';
+        if (template === 'approved') {
+            await sendStoreApprovedEmail(to, name, 'Test Store');
+        } else if (template === 'rejected') {
+            await sendStoreRejectedEmail(to, name, 'Test rejection reason (verification only).');
+        } else if (template === 'needs_info') {
+            await sendStoreNeedsInfoEmail(to, name, 'Please re-upload your GST certificate.\nThis is a test send.');
+        } else {
+            await sendApplicationReceivedEmail(to, name);
+        }
+        res.json({ success: true, to, template, triggeredBy: caller.id });
+    } catch (e: any) {
+        console.error('[debug-resend] Error:', e);
+        res.status(500).json({ error: e?.message || 'Email send failed' });
+    }
+});
+
+// --- Admin: invite a new admin-tier user (Super Admin only) ---
+// Per the 2026-06-02 RBAC doc, only SUPER_ADMIN can create/edit admin accounts.
+//
+// Two paths:
+//   - method: 'email' (default) — server generates a temp password, creates the
+//     Supabase auth user via admin API, inserts User row, emails via Resend.
+//     Invitee logs in with email/password and is force-prompted to change it.
+//   - method: 'phone' — server inserts into AdminAllowlist with the chosen role.
+//     Invitee opens admin.pickatstore.io, switches to phone-OTP login, gets OTP
+//     via Wati (existing flow). On first verify-otp, the User row is JIT-created
+//     and the role is promoted from AdminAllowlist. No template needed.
+app.post('/admin/users/invite', async (req, res) => {
+    const caller = await requireAdmin(req, res); if (!caller) return;
+    try {
+        const { method = 'email', email, phone, name, role } = req.body || {};
+        if (!name || !role) {
+            return res.status(400).json({ error: 'name and role are required' });
+        }
+        const allowedRoles = ['OPERATIONS', 'FINANCE', 'SUPPORT', 'SUPER_ADMIN'];
+        if (!allowedRoles.includes(String(role).toUpperCase())) {
+            return res.status(400).json({ error: `role must be one of: ${allowedRoles.join(', ')}` });
+        }
+        const targetRole = String(role).toUpperCase();
+        const inviterName = (caller as any).email?.split('@')[0] || 'A team member';
+        const labels: Record<string, string> = {
+            SUPER_ADMIN: 'Super Admin',
+            OPERATIONS:  'Operations',
+            FINANCE:     'Finance',
+            SUPPORT:     'Customer Support',
+        };
+
+        // ─── Phone path ──────────────────────────────────────────────────
+        if (method === 'phone') {
+            if (!phone) {
+                return res.status(400).json({ error: 'phone is required when method=phone' });
+            }
+            // Normalize: strip non-digits; require 10 digits; prepend 91 for India.
+            const digits = String(phone).replace(/\D/g, '');
+            if (digits.length < 10) {
+                return res.status(400).json({ error: 'phone must be a 10-digit Indian number' });
+            }
+            const normPhone = digits.length === 10 ? `91${digits}` : digits;
+
+            // Reject if already invited / allowlisted.
+            const existingAllow = await prisma.adminAllowlist.findUnique({ where: { phone: normPhone } });
+            if (existingAllow && existingAllow.isActive) {
+                return res.status(409).json({ error: 'This phone is already in the admin allowlist' });
+            }
+            // Upsert allowlist row carrying the chosen role.
+            await prisma.adminAllowlist.upsert({
+                where: { phone: normPhone },
+                update: { name, role: targetRole, isActive: true },
+                create: { phone: normPhone, name, role: targetRole, isActive: true },
+            });
+            console.log(`[InviteAdmin] Phone allowlist ${normPhone} (role=${targetRole}) (invited by ${caller.id})`);
+            return res.json({
+                success: true,
+                method: 'phone',
+                phone: normPhone,
+                role: targetRole,
+                hint: `Tell ${name} to open admin.pickatstore.io, switch to phone-OTP login, and enter +${normPhone}.`,
+            });
+        }
+
+        // ─── Email path (existing) ───────────────────────────────────────
+        if (!email) {
+            return res.status(400).json({ error: 'email is required when method=email' });
+        }
+        const targetEmail = String(email).trim().toLowerCase();
+        const existing = await prisma.user.findFirst({ where: { email: targetEmail } });
+        if (existing) {
+            return res.status(409).json({ error: 'A user with this email already exists' });
+        }
+
+        const ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+        let tempPassword = '';
+        for (let i = 0; i < 16; i++) tempPassword += ALPHA[Math.floor(Math.random() * ALPHA.length)];
+
+        const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+            email: targetEmail,
+            password: tempPassword,
+            email_confirm: true,
+            user_metadata: { name, mustChangePassword: true, invitedBy: caller.id },
+        });
+        if (createErr || !created?.user) {
+            console.error('[InviteAdmin] createUser failed:', createErr);
+            return res.status(500).json({ error: createErr?.message || 'Failed to create auth user' });
+        }
+        try {
+            await prisma.user.create({
+                data: {
+                    id: created.user.id,
+                    email: targetEmail,
+                    name,
+                    role: targetRole as any,
+                    passwordHash: 'managed-by-supabase-auth',
+                    updatedAt: new Date(),
+                },
+            });
+        } catch (profileErr: any) {
+            console.error('[InviteAdmin] User row insert failed, rolling back auth user:', profileErr);
+            await supabaseAdmin.auth.admin.deleteUser(created.user.id).catch(() => {});
+            return res.status(500).json({ error: profileErr?.message || 'Failed to create user profile' });
+        }
+        try {
+            await sendAdminInviteEmail(targetEmail, name, labels[targetRole] ?? targetRole, tempPassword, inviterName);
+        } catch (mailErr: any) {
+            console.warn('[InviteAdmin] Email send failed (user was still created):', mailErr?.message);
+        }
+        console.log(`[InviteAdmin] Email-created ${targetRole} ${targetEmail} (invited by ${caller.id})`);
+        res.json({ success: true, method: 'email', id: created.user.id, email: targetEmail, role: targetRole });
+    } catch (e: any) {
+        console.error('[InviteAdmin] error:', e);
+        res.status(500).json({ error: e?.message || 'Invite failed' });
+    }
+});
+
+// --- Admin: edit role / status of an existing user (Super Admin only) ---
+//
+// Body: { role?: string, status?: 'active'|'suspended', suspendedReason?: string }
+//
+// Safeguards:
+//   - Self-suspend blocked (can't lock yourself out).
+//   - Last-Super-Admin safeguard: demoting or suspending the only remaining
+//     Super Admin is blocked. "Super Admin" here = role==='SUPER_ADMIN' OR
+//     isAdmin===true (legacy). Counts only active users.
+app.patch('/admin/users/:id', async (req, res) => {
+    const caller = await requireAdmin(req, res); if (!caller) return;
+    try {
+        const { id } = req.params;
+        const { role, status, suspendedReason } = req.body || {};
+
+        if (!role && !status) {
+            return res.status(400).json({ error: 'Provide at least one of: role, status' });
+        }
+
+        const target = await prisma.user.findUnique({ where: { id }, select: { id: true, role: true, isAdmin: true, email: true } });
+        if (!target) return res.status(404).json({ error: 'User not found' });
+
+        // Self-suspend block.
+        if (status === 'suspended' && id === caller.id) {
+            return res.status(400).json({ error: "You can't suspend your own account." });
+        }
+
+        // Last-Super-Admin safeguard.
+        const targetIsCurrentlySuperAdmin = target.role === 'SUPER_ADMIN' || target.isAdmin === true;
+        const isDemoteOrSuspend =
+            (role && String(role).toUpperCase() !== 'SUPER_ADMIN') ||
+            status === 'suspended';
+        if (targetIsCurrentlySuperAdmin && isDemoteOrSuspend) {
+            const otherSuperAdmins = await prisma.user.count({
+                where: {
+                    id: { not: id },
+                    status: { not: 'suspended' },
+                    OR: [{ role: 'SUPER_ADMIN' }, { isAdmin: true }],
+                },
+            });
+            if (otherSuperAdmins === 0) {
+                return res.status(400).json({
+                    error: 'Cannot demote or suspend the only remaining Super Admin. Promote another user first.',
+                });
+            }
+        }
+
+        // Validate role if provided.
+        const allowedRoles = ['SUPER_ADMIN', 'OPERATIONS', 'FINANCE', 'SUPPORT'];
+        const updates: any = { updatedAt: new Date() };
+        if (role) {
+            const normRole = String(role).toUpperCase();
+            if (!allowedRoles.includes(normRole)) {
+                return res.status(400).json({ error: `role must be one of: ${allowedRoles.join(', ')}` });
+            }
+            updates.role = normRole;
+            // If they're being demoted to non-SUPER_ADMIN, also drop the legacy isAdmin flag
+            // so requireAdmin doesn't keep treating them as Super Admin.
+            if (normRole !== 'SUPER_ADMIN') {
+                updates.isAdmin = false;
+            } else {
+                updates.isAdmin = true;
+            }
+        }
+        if (status) {
+            if (status !== 'active' && status !== 'suspended') {
+                return res.status(400).json({ error: "status must be 'active' or 'suspended'" });
+            }
+            updates.status = status;
+            if (status === 'suspended') {
+                updates.suspendedAt = new Date();
+                updates.suspendedReason = suspendedReason ?? null;
+            } else {
+                updates.suspendedAt = null;
+                updates.suspendedReason = null;
+            }
+        }
+
+        const updated = await prisma.user.update({
+            where: { id },
+            data: updates,
+            select: { id: true, email: true, role: true, isAdmin: true, status: true, suspendedAt: true, suspendedReason: true },
+        });
+        console.log(`[AdminEdit] ${target.email}: ${JSON.stringify(updates)} (by ${caller.id})`);
+        res.json({ success: true, user: updated });
+    } catch (e: any) {
+        console.error('[AdminEdit] error:', e);
+        res.status(500).json({ error: e?.message || 'Edit failed' });
+    }
+});
+
+// --- Wati inbound webhook ---
+// Wati sends a POST here every time a customer messages the business number.
+// Activate by setting the webhook URL in Wati dashboard → Settings → Webhooks
+// to: https://api.pickatstore.io/webhooks/wati
+//
+// Wati payload shape varies by message type — we capture the raw payload AND
+// best-effort extract common fields. Admin Customer Support inbox reads from
+// the wati_inbox table downstream.
+//
+// Security: the route is open by design (Wati can't sign requests with our
+// secret), but we de-dup on Wati's own message_id so replay is harmless.
+app.post('/webhooks/wati', async (req, res) => {
+    try {
+        const payload = req.body || {};
+        // Wati v3 webhook common fields — fall back gracefully if shape differs.
+        const watiMessageId = payload.id || payload.messageId || payload.whatsappMessageId || null;
+        const waPhone = String(payload.waId || payload.from || payload.whatsappNumber || '').replace(/^\+/, '');
+        const contactName = payload.senderName || payload.contactName || null;
+        const messageType = payload.type || payload.eventType || 'text';
+        const body =
+            payload.text?.body ??
+            payload.text ??
+            payload.message ??
+            payload.button?.text ??
+            payload.interactive?.button_reply?.title ??
+            null;
+
+        if (!waPhone) {
+            // Not a usable inbound — acknowledge so Wati doesn't retry.
+            console.warn('[wati-webhook] payload missing wa phone; storing raw only', payload);
+        }
+
+        await prisma.watiInbox.create({
+            data: {
+                watiMessageId,
+                waPhone: waPhone || 'unknown',
+                contactName,
+                messageType,
+                body,
+                rawPayload: payload,
+            },
+        }).catch((e: any) => {
+            // Unique-constraint conflict on watiMessageId = duplicate webhook; that's fine.
+            if (e?.code !== 'P2002') {
+                console.error('[wati-webhook] persist error:', e?.message || e);
+            }
+        });
+
+        // Always 200 — never block Wati.
+        res.json({ ok: true });
+    } catch (e: any) {
+        console.error('[wati-webhook] error:', e?.message || e);
+        // Still 200 — we don't want Wati's retry storm even on our errors.
+        res.json({ ok: true, captured: false });
+    }
+});
+
+// --- Wati inbox list ---
+// RBAC: OPERATIONS / FINANCE / SUPPORT all read; SUPER_ADMIN via wildcard.
+// Customer support team is the primary consumer.
+app.get('/wati/inbox', async (req, res) => {
+    const caller = await requireRole(req, res, ['OPERATIONS', 'FINANCE', 'SUPPORT']); if (!caller) return;
+    try {
+        const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+        const limit = Math.min(parseInt((req.query.limit as string) || '50', 10) || 50, 200);
+        const rows = await prisma.watiInbox.findMany({
+            where: status ? { status } : undefined,
+            orderBy: { receivedAt: 'desc' },
+            take: limit,
+        });
+        res.json({ data: rows, count: rows.length });
+    } catch (e: any) {
+        console.error('[wati-inbox] list error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to fetch inbox' });
+    }
+});
+
 // --- 404 Handler ---
 app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
     res.status(404).json({ error: 'Endpoint not found', path: req.path });
 });
+
+// --- Sentry Express error handler ---
+// Per Sentry's Express SDK guidance, this MUST be registered after all
+// controllers + the 404 handler, and BEFORE any other error-handling middleware.
+// It does NOT swallow the error — control flows on to the global error handler
+// below, which still returns the JSON response to the client.
+Sentry.setupExpressErrorHandler(app);
 
 // --- Global Error Handler ---
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

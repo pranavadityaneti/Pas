@@ -9,9 +9,10 @@
  * and at the route level (Super Admin only).
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
 import api from '../../../lib/api';
+import { useAuth } from '../../../context/AuthContext';
 import { Card, CardContent } from '../../ui/card';
 import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
@@ -23,7 +24,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../../ui/select';
-import { ShieldCheck, UserCog, Loader2 } from 'lucide-react';
+import { ShieldCheck, UserCog, Loader2, Pause, Play } from 'lucide-react';
 import { toast } from 'sonner';
 import { ADMIN_ROLES, ROLE_LABEL, capabilitiesFor, type AdminRole } from '../../../lib/rbac';
 
@@ -71,6 +72,37 @@ export function RolesPermissions() {
     const handleInviteSuccess = () => {
         setInviteOpen(false);
         setRefreshTick(t => t + 1);
+    };
+
+    const { user: currentUser } = useAuth();
+
+    // Last-Super-Admin safeguard at the UI level — backend enforces too, but disabling
+    // the controls makes the constraint visible instead of erroring on click.
+    const superAdminCount = useMemo(
+        () => users.filter(u => u.role === 'SUPER_ADMIN' || u.isAdmin === true).filter(u => (u.status ?? 'active') !== 'suspended').length,
+        [users],
+    );
+
+    const [busyId, setBusyId] = useState<string | null>(null);
+
+    const patchUser = async (id: string, body: { role?: string; status?: 'active' | 'suspended'; suspendedReason?: string }, optimistic?: Partial<AdminUserRow>) => {
+        setBusyId(id);
+        // Optimistic UI: apply the change locally; rollback on failure.
+        const prev = users;
+        if (optimistic) {
+            setUsers(prev.map(u => u.id === id ? { ...u, ...optimistic } : u));
+        }
+        try {
+            await api.patch(`/admin/users/${id}`, body);
+            toast.success('Updated');
+            setRefreshTick(t => t + 1);
+        } catch (err: any) {
+            setUsers(prev);
+            const msg = err?.response?.data?.error ?? err?.message ?? 'Update failed';
+            toast.error('Update failed', { description: msg });
+        } finally {
+            setBusyId(null);
+        }
     };
 
     if (loading) {
@@ -148,29 +180,92 @@ export function RolesPermissions() {
                     <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
                         <h2 className="text-base font-bold text-gray-900">Admin users ({users.length})</h2>
                         <span className="text-[11px] text-gray-500 uppercase tracking-wider">
-                            Read-only · edit in next session
+                            Change role inline · suspend with the pause button
                         </span>
                     </div>
 
                     {users.length === 0 ? (
                         <div className="p-10 text-center text-sm text-gray-500">
-                            No admin-tier users found. Assign a role to a user via SQL to get started:
-                            <pre className="mt-3 text-xs bg-gray-50 border border-gray-200 rounded p-2 text-left font-mono inline-block">
-{`UPDATE "User" SET role = 'OPERATIONS' WHERE email = 'someone@pickatstore.io';`}
-                            </pre>
+                            No admin-tier users found. Use Invite Admin above to add one.
                         </div>
                     ) : (
                         <div className="divide-y divide-gray-100">
-                            {users.map((u) => (
-                                <div key={u.id} className="px-5 py-4 flex items-center gap-4 hover:bg-gray-50/50 transition-colors">
-                                    <div className="flex-1 min-w-0">
-                                        <div className="text-sm font-bold text-gray-900 truncate">{u.name ?? u.email.split('@')[0]}</div>
-                                        <div className="text-xs text-gray-500 truncate">{u.email}</div>
+                            {users.map((u) => {
+                                const status = (u.status ?? 'active') as 'active' | 'suspended';
+                                const isSelf = currentUser?.id === u.id;
+                                const isCurrentSuperAdmin = u.role === 'SUPER_ADMIN' || u.isAdmin === true;
+                                // Block demotion/suspension of the only remaining Super Admin.
+                                const isLastSuperAdmin = isCurrentSuperAdmin && superAdminCount <= 1;
+                                const roleDropdownDisabled = busyId === u.id || isLastSuperAdmin;
+                                const suspendDisabled = busyId === u.id || isSelf || (isCurrentSuperAdmin && isLastSuperAdmin);
+
+                                return (
+                                    <div key={u.id} className="px-5 py-4 flex items-center gap-4 hover:bg-gray-50/50 transition-colors">
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-sm font-bold text-gray-900 truncate">
+                                                {u.name ?? u.email.split('@')[0]}
+                                                {isSelf && <span className="text-[10px] font-normal text-gray-500 ml-2 uppercase tracking-wider">(you)</span>}
+                                            </div>
+                                            <div className="text-xs text-gray-500 truncate">{u.email}</div>
+                                        </div>
+
+                                        {/* Role dropdown — auto-save on change */}
+                                        <div className="w-[160px]">
+                                            <Select
+                                                value={u.role}
+                                                disabled={roleDropdownDisabled}
+                                                onValueChange={(newRole) => {
+                                                    if (newRole === u.role) return;
+                                                    patchUser(u.id, { role: newRole }, { role: newRole });
+                                                }}
+                                            >
+                                                <SelectTrigger className="h-8 text-xs" title={isLastSuperAdmin ? 'Cannot demote the only remaining Super Admin' : undefined}>
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="SUPER_ADMIN">Super Admin</SelectItem>
+                                                    <SelectItem value="OPERATIONS">Operations</SelectItem>
+                                                    <SelectItem value="FINANCE">Finance</SelectItem>
+                                                    <SelectItem value="SUPPORT">Customer Support</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        <StatusBadge status={status} />
+
+                                        {/* Suspend / Reactivate */}
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            disabled={suspendDisabled}
+                                            title={
+                                                isSelf ? "You can't suspend your own account"
+                                                : isLastSuperAdmin ? 'Cannot suspend the only remaining Super Admin'
+                                                : status === 'suspended' ? 'Reactivate this user'
+                                                : 'Suspend this user (blocks new logins, keeps data)'
+                                            }
+                                            onClick={() => {
+                                                if (status === 'suspended') {
+                                                    patchUser(u.id, { status: 'active' }, { status: 'active' });
+                                                } else {
+                                                    const reason = window.prompt(`Suspend ${u.email}? Optional reason for audit:`, '');
+                                                    if (reason === null) return; // cancelled
+                                                    patchUser(u.id, { status: 'suspended', suspendedReason: reason }, { status: 'suspended', suspended_reason: reason });
+                                                }
+                                            }}
+                                            className={status === 'suspended' ? 'text-emerald-700 hover:text-emerald-800' : 'text-gray-500 hover:text-red-700'}
+                                        >
+                                            {busyId === u.id ? (
+                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                            ) : status === 'suspended' ? (
+                                                <Play className="w-4 h-4" />
+                                            ) : (
+                                                <Pause className="w-4 h-4" />
+                                            )}
+                                        </Button>
                                     </div>
-                                    <RoleBadge role={u.role} />
-                                    <StatusBadge status={u.status ?? 'active'} />
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                 </CardContent>
@@ -204,21 +299,36 @@ function StatusBadge({ status }: { status: string }) {
  * first login (existing ForcePasswordChange flow).
  */
 function InviteAdminDialog({ onSuccess }: { onSuccess: () => void }) {
-    const [email, setEmail] = useState('');
+    const [method, setMethod] = useState<'phone' | 'email'>('phone');  // Phone = primary per Wati OTP flow
     const [name, setName] = useState('');
+    const [phone, setPhone] = useState('');  // 10 digits, no country code
+    const [email, setEmail] = useState('');
     const [role, setRole] = useState<string>('OPERATIONS');
     const [submitting, setSubmitting] = useState(false);
 
-    const canSubmit = email.includes('@') && name.trim().length > 0 && !submitting;
+    const phoneDigits = phone.replace(/\D/g, '');
+    const phoneValid = phoneDigits.length === 10;
+    const emailValid = email.includes('@');
+    const nameValid = name.trim().length > 0;
+    const canSubmit = nameValid && (method === 'phone' ? phoneValid : emailValid) && !submitting;
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!canSubmit) return;
         setSubmitting(true);
         try {
-            await api.post('/admin/users/invite', { email: email.trim(), name: name.trim(), role });
-            toast.success('Invite sent', { description: `${email} will receive their login email shortly.` });
-            setEmail(''); setName(''); setRole('OPERATIONS');
+            const body: any = { method, name: name.trim(), role };
+            if (method === 'phone') body.phone = phoneDigits;
+            else                    body.email = email.trim();
+            const { data } = await api.post('/admin/users/invite', body);
+            if (method === 'phone') {
+                toast.success('Phone allowlisted', {
+                    description: data?.hint || `Tell ${name} to log in via WhatsApp OTP at admin.pickatstore.io.`,
+                });
+            } else {
+                toast.success('Invite sent', { description: `${email} will receive their login email shortly.` });
+            }
+            setName(''); setPhone(''); setEmail(''); setRole('OPERATIONS');
             onSuccess();
         } catch (err: any) {
             const msg = err?.response?.data?.error ?? err?.message ?? 'Failed to send invite';
@@ -233,19 +343,61 @@ function InviteAdminDialog({ onSuccess }: { onSuccess: () => void }) {
             <DialogHeader>
                 <DialogTitle>Invite an admin</DialogTitle>
                 <DialogDescription>
-                    A temporary password is generated automatically and emailed to the invitee.
-                    They'll be prompted to change it on first login.
+                    Invitees can log in via WhatsApp OTP (phone) or temporary password (email).
                 </DialogDescription>
             </DialogHeader>
+
+            {/* Method toggle */}
+            <div className="flex gap-1 p-1 bg-gray-100 rounded-lg">
+                <button
+                    type="button"
+                    onClick={() => setMethod('phone')}
+                    className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${method === 'phone' ? 'bg-white text-[#B52725] shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+                >
+                    📱 Phone (WhatsApp OTP)
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setMethod('email')}
+                    className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${method === 'email' ? 'bg-white text-[#B52725] shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+                >
+                    ✉️ Email (temp password)
+                </button>
+            </div>
+
             <form onSubmit={handleSubmit} className="space-y-4 py-2">
                 <div className="space-y-1.5">
                     <Label htmlFor="invite-name">Name</Label>
                     <Input id="invite-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" autoFocus />
                 </div>
-                <div className="space-y-1.5">
-                    <Label htmlFor="invite-email">Email</Label>
-                    <Input id="invite-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="someone@pickatstore.io" />
-                </div>
+
+                {method === 'phone' ? (
+                    <div className="space-y-1.5">
+                        <Label htmlFor="invite-phone">Phone (India)</Label>
+                        <div className="flex items-stretch gap-2">
+                            <div className="px-3 flex items-center bg-gray-100 border border-gray-200 rounded-md text-sm text-gray-600 font-mono">+91</div>
+                            <Input
+                                id="invite-phone"
+                                value={phone}
+                                onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                                placeholder="98765 43210"
+                                inputMode="numeric"
+                            />
+                        </div>
+                        <p className="text-[11px] text-gray-500">
+                            They open admin.pickatstore.io → enter this number → receive a WhatsApp OTP → log in.
+                        </p>
+                    </div>
+                ) : (
+                    <div className="space-y-1.5">
+                        <Label htmlFor="invite-email">Email</Label>
+                        <Input id="invite-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="someone@pickatstore.io" />
+                        <p className="text-[11px] text-gray-500">
+                            They'll receive a Resend email with a temp password and be prompted to change it on first login.
+                        </p>
+                    </div>
+                )}
+
                 <div className="space-y-1.5">
                     <Label htmlFor="invite-role">Role</Label>
                     <Select value={role} onValueChange={setRole}>
@@ -259,9 +411,10 @@ function InviteAdminDialog({ onSuccess }: { onSuccess: () => void }) {
                     </Select>
                     <p className="text-[11px] text-gray-500">{capabilitiesFor(role).includes('*' as any) ? 'Wildcard access — no restrictions.' : `${capabilitiesFor(role).length} capabilities`}</p>
                 </div>
+
                 <DialogFooter>
                     <Button type="submit" disabled={!canSubmit} className="bg-[#B52725] hover:bg-[#9a1f1d] text-white gap-2">
-                        {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</> : 'Send invite'}
+                        {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> {method === 'phone' ? 'Allowlisting…' : 'Sending…'}</> : (method === 'phone' ? 'Allowlist phone' : 'Send invite')}
                     </Button>
                 </DialogFooter>
             </form>
