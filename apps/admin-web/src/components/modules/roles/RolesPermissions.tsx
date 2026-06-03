@@ -11,10 +11,20 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
+import api from '../../../lib/api';
 import { Card, CardContent } from '../../ui/card';
 import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
+import { Input } from '../../ui/input';
+import { Label } from '../../ui/label';
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
+} from '../../ui/dialog';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '../../ui/select';
 import { ShieldCheck, UserCog, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { ADMIN_ROLES, ROLE_LABEL, capabilitiesFor, type AdminRole } from '../../../lib/rbac';
 
 interface AdminUserRow {
@@ -32,6 +42,8 @@ export function RolesPermissions() {
     const [users, setUsers] = useState<AdminUserRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [inviteOpen, setInviteOpen] = useState(false);
+    const [refreshTick, setRefreshTick] = useState(0);
 
     useEffect(() => {
         let cancelled = false;
@@ -54,7 +66,12 @@ export function RolesPermissions() {
             }
         })();
         return () => { cancelled = true; };
-    }, []);
+    }, [refreshTick]);
+
+    const handleInviteSuccess = () => {
+        setInviteOpen(false);
+        setRefreshTick(t => t + 1);
+    };
 
     if (loading) {
         return (
@@ -77,9 +94,14 @@ export function RolesPermissions() {
                         <p className="text-sm text-gray-500 mt-0.5">Manage admin-tier users and their access levels</p>
                     </div>
                 </div>
-                <Button disabled className="gap-2 bg-[#B52725] hover:bg-[#9a1f1d] text-white" title="Invite-admin UI ships next session">
-                    <UserCog className="w-4 h-4" /> Invite Admin
-                </Button>
+                <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+                    <DialogTrigger asChild>
+                        <Button className="gap-2 bg-[#B52725] hover:bg-[#9a1f1d] text-white">
+                            <UserCog className="w-4 h-4" /> Invite Admin
+                        </Button>
+                    </DialogTrigger>
+                    <InviteAdminDialog onSuccess={handleInviteSuccess} />
+                </Dialog>
             </div>
 
             {error && (
@@ -173,4 +195,76 @@ function StatusBadge({ status }: { status: string }) {
         return <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">Suspended</Badge>;
     }
     return <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">Active</Badge>;
+}
+
+/**
+ * Invite-Admin dialog. POSTs to /admin/users/invite which creates the Supabase
+ * auth user + User row with the chosen role + emails a temp password via Resend.
+ * The invitee logs in with email/password, gets prompted to change password on
+ * first login (existing ForcePasswordChange flow).
+ */
+function InviteAdminDialog({ onSuccess }: { onSuccess: () => void }) {
+    const [email, setEmail] = useState('');
+    const [name, setName] = useState('');
+    const [role, setRole] = useState<string>('OPERATIONS');
+    const [submitting, setSubmitting] = useState(false);
+
+    const canSubmit = email.includes('@') && name.trim().length > 0 && !submitting;
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!canSubmit) return;
+        setSubmitting(true);
+        try {
+            await api.post('/admin/users/invite', { email: email.trim(), name: name.trim(), role });
+            toast.success('Invite sent', { description: `${email} will receive their login email shortly.` });
+            setEmail(''); setName(''); setRole('OPERATIONS');
+            onSuccess();
+        } catch (err: any) {
+            const msg = err?.response?.data?.error ?? err?.message ?? 'Failed to send invite';
+            toast.error('Invite failed', { description: msg });
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    return (
+        <DialogContent className="sm:max-w-[480px]">
+            <DialogHeader>
+                <DialogTitle>Invite an admin</DialogTitle>
+                <DialogDescription>
+                    A temporary password is generated automatically and emailed to the invitee.
+                    They'll be prompted to change it on first login.
+                </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleSubmit} className="space-y-4 py-2">
+                <div className="space-y-1.5">
+                    <Label htmlFor="invite-name">Name</Label>
+                    <Input id="invite-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" autoFocus />
+                </div>
+                <div className="space-y-1.5">
+                    <Label htmlFor="invite-email">Email</Label>
+                    <Input id="invite-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="someone@pickatstore.io" />
+                </div>
+                <div className="space-y-1.5">
+                    <Label htmlFor="invite-role">Role</Label>
+                    <Select value={role} onValueChange={setRole}>
+                        <SelectTrigger id="invite-role"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="OPERATIONS">Operations</SelectItem>
+                            <SelectItem value="FINANCE">Finance</SelectItem>
+                            <SelectItem value="SUPPORT">Customer Support</SelectItem>
+                            <SelectItem value="SUPER_ADMIN">Super Admin</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-gray-500">{capabilitiesFor(role).includes('*' as any) ? 'Wildcard access — no restrictions.' : `${capabilitiesFor(role).length} capabilities`}</p>
+                </div>
+                <DialogFooter>
+                    <Button type="submit" disabled={!canSubmit} className="bg-[#B52725] hover:bg-[#9a1f1d] text-white gap-2">
+                        {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</> : 'Send invite'}
+                    </Button>
+                </DialogFooter>
+            </form>
+        </DialogContent>
+    );
 }
