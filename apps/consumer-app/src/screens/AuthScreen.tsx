@@ -1,4 +1,7 @@
-// @lock — Do NOT overwrite. Keyboard fix approved May 19, 2026. KAV behavior="padding" (regular screen, not Modal).
+// @lock — Do NOT overwrite. Keyboard fix re-calibrated 2026-06-04 for iOS 17+.
+//        KAV behavior="padding" (regular screen, not Modal). keyboardVerticalOffset=80 on iOS (was 40,
+//        too low — keyboard clipped the Send OTP button on current iOS due to taller home-indicator
+//        + accessory inset). Android offset stays 0.
 // Auth Screen: Bottom-sheet auth with Phone OTP (Wati) + Email fallback.
 // Replaces previous full-page email/password auth.
 
@@ -406,7 +409,7 @@ export default function AuthScreen() {
             {/* Primary Interactive Layer — KAV works here (regular screen, not Modal) */}
             <KeyboardAvoidingView
                 behavior="padding"
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
                 className="flex-1"
             >
                 <View className="flex-1 items-center justify-center">
