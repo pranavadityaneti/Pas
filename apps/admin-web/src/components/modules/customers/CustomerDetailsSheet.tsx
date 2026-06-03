@@ -28,7 +28,7 @@ import {
   ShoppingBag, Package, MapPin, Phone, Mail, Clock, Calendar,
   MessageCircle, History, ChevronRight,
 } from "lucide-react";
-import { Customer } from "../../../hooks/useCustomers";
+import { Customer, isSyntheticEmail } from "../../../hooks/useCustomers";
 import { useEffect, useState } from "react";
 import { supabase } from "../../../lib/supabaseClient";
 import { Link } from "react-router-dom";
@@ -89,7 +89,12 @@ export function CustomerDetailsSheet({ customer, isOpen, onClose }: CustomerDeta
 
   if (!customer) return null;
 
-  const hasPhone = customer.phone && customer.phone !== 'N/A';
+  const hasPhone     = customer.phone && customer.phone.length > 0;
+  // 2026-06-03 (night): Customer.name is now nullable. Show muted placeholder
+  // instead of crashing on .charAt(0) when name is null.
+  const displayName  = customer.name ?? '(no name)';
+  const initial      = customer.name ? customer.name.charAt(0).toUpperCase() : '·';
+  const nameMuted    = customer.name == null;
 
   return (
     <Sheet open={isOpen} onOpenChange={onClose}>
@@ -97,10 +102,12 @@ export function CustomerDetailsSheet({ customer, isOpen, onClose }: CustomerDeta
         <SheetHeader className="mb-6">
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 rounded-full bg-[#B52725]/10 text-[#B52725] flex items-center justify-center text-2xl font-bold">
-              {customer.name.charAt(0).toUpperCase()}
+              {initial}
             </div>
             <div className="flex-1 min-w-0">
-              <SheetTitle className="text-xl truncate">{customer.name}</SheetTitle>
+              <SheetTitle className={`text-xl truncate ${nameMuted ? 'text-gray-400 italic font-medium' : ''}`}>
+                {displayName}
+              </SheetTitle>
               <SheetDescription className="flex items-center gap-2 mt-1 flex-wrap">
                 <Badge variant="outline" className={customer.status === 'active'
                   ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
@@ -162,10 +169,14 @@ export function CustomerDetailsSheet({ customer, isOpen, onClose }: CustomerDeta
                   <Phone className="w-4 h-4 text-gray-400 flex-shrink-0" />
                   <span className="truncate">{customer.phone || 'No phone'}</span>
                 </div>
-                <div className="flex items-center gap-2 text-sm text-gray-700">
-                  <Mail className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                  <span className="truncate">{customer.email || 'No email'}</span>
-                </div>
+                {/* Email row: hide synth `<phone>@phone.pickatstore.in` and UUID-based
+                    auth-filler emails. Show only when we actually have a real one. */}
+                {customer.email && !isSyntheticEmail(customer.email) && (
+                  <div className="flex items-center gap-2 text-sm text-gray-700">
+                    <Mail className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                    <span className="truncate">{customer.email}</span>
+                  </div>
+                )}
               </div>
               <div className="p-4 bg-gray-50 rounded-lg">
                 <div className="text-xs text-gray-500 uppercase font-semibold mb-2">Location & Age</div>

@@ -1,31 +1,19 @@
 /**
  * Customer Database (admin)
  *
- * 2026-06-03: full rewrite to stop showing fake data + make the page
- *             actually useful for support. Founder-approved Phases 1-3.
+ * 2026-06-03 (night): post-audit fixes —
+ *   - Customer column: stop showing synthesized emails / UUIDs as "names".
+ *     Real name → shown. No real name → muted "(no name)" + phone shines
+ *     through in the Contact column.
+ *   - Contact column: phone only. Synthesized emails removed entirely.
+ *   - Expanded filter dropdown — Status / City / Order Activity / Last
+ *     Activity / Spend Tier / Signup Recency / Data Quality.
+ *   - Search no longer matches against the synthesized email; matches
+ *     name + phone + city + ID.
  *
- *   Phase 1 — Stop lying
- *     - Real city (derived from last order's branch, "Unknown" if no orders)
- *     - Real status from User.status (active / suspended)
- *     - Wire Block / Unblock to PATCH /admin/users/:id (existing endpoint)
- *     - Remove fake "Grant Credit" button (no wallets table exists)
- *     - Remove fuchsia → pink decorative gradient, replace with brand red
- *
- *   Phase 2 — Pull richer data
- *     - New columns: Orders, AOV, Last Order (with recency color badge)
- *     - Totals strip: Total / Active / Suspended counts
- *     - Fix last-order sort bug (was un-sorted)
- *
- *   Phase 3 — Actionable support layer
- *     - Per-row dropdown: View Details / Send WhatsApp / View Orders / Block-Unblock
- *     - "Send WhatsApp" opens wa.me click-to-chat (works on web + mobile)
- *     - "View Orders" navigates to /orders (filter param ignored by target page for now;
- *       tracked as a follow-up to make /orders respect ?userId=X)
- *
- * Still deferred (post-launch):
- *   - Wallet balance + Grant Credit (needs wallets table)
- *   - Tags (VIP / At-Risk) (needs customer_tags table)
- *   - LTV percentile + cohort retention
+ *   The "0 orders / ₹0 LTV / Unknown city" issue was fixed at the data
+ *   layer (useCustomers.ts) — it was the lowercase-`orders` vs capital-
+ *   `Order` table bug. See header comment in that file.
  */
 
 import { useState, useMemo } from 'react';
@@ -44,7 +32,6 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
   DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuCheckboxItem,
 } from '../../ui/dropdown-menu';
-import { ImageWithFallback } from '../../figma/ImageWithFallback';
 import { CustomerDetailsSheet } from './CustomerDetailsSheet';
 import { useCustomers, Customer } from '../../../hooks/useCustomers';
 
@@ -55,56 +42,124 @@ function fmtINR(n: number): string {
 }
 
 function recencyBadge(days: number | null): { label: string; classes: string } {
-  if (days == null) return { label: 'No orders',  classes: 'bg-gray-100 text-gray-600 border-gray-200' };
-  if (days === 0)   return { label: 'Today',      classes: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+  if (days == null) return { label: 'No orders',    classes: 'bg-gray-100 text-gray-600 border-gray-200' };
+  if (days === 0)   return { label: 'Today',        classes: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
   if (days <= 7)    return { label: `${days}d ago`, classes: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
   if (days <= 30)   return { label: `${days}d ago`, classes: 'bg-amber-50 text-amber-700 border-amber-200' };
   return                   { label: `${days}d ago`, classes: 'bg-rose-50 text-rose-700 border-rose-200' };
 }
 
 function openWhatsApp(phone: string) {
-  // Strip everything except digits, prepend country code if absent.
   const digits = phone.replace(/\D/g, '');
   if (!digits) return;
   const withCc = digits.length === 10 ? `91${digits}` : digits;
   window.open(`https://wa.me/${withCc}`, '_blank', 'noopener,noreferrer');
 }
 
+// ────────────────────────────────────────── Filter bucket definitions
+
+const ORDER_ACTIVITY_BUCKETS = [
+  { key: 'none',     label: '0 orders',     match: (c: Customer) => c.order_count === 0 },
+  { key: 'low',      label: '1-2 orders',   match: (c: Customer) => c.order_count >= 1 && c.order_count <= 2 },
+  { key: 'mid',      label: '3-10 orders',  match: (c: Customer) => c.order_count >= 3 && c.order_count <= 10 },
+  { key: 'high',     label: '10+ orders',   match: (c: Customer) => c.order_count > 10 },
+] as const;
+
+const LAST_ACTIVITY_BUCKETS = [
+  { key: 'fresh',    label: 'Active (≤7d)',     match: (c: Customer) => c.days_since_last_order != null && c.days_since_last_order <= 7 },
+  { key: 'cooling',  label: 'Cooling (8-30d)',  match: (c: Customer) => c.days_since_last_order != null && c.days_since_last_order > 7 && c.days_since_last_order <= 30 },
+  { key: 'cold',     label: 'At-risk (>30d)',   match: (c: Customer) => c.days_since_last_order != null && c.days_since_last_order > 30 },
+  { key: 'never',    label: 'Never ordered',    match: (c: Customer) => c.days_since_last_order == null },
+] as const;
+
+const SPEND_BUCKETS = [
+  { key: 'zero',     label: '₹0',           match: (c: Customer) => c.ltv === 0 },
+  { key: 'small',    label: '< ₹500',       match: (c: Customer) => c.ltv > 0    && c.ltv < 500 },
+  { key: 'mid',      label: '₹500-2K',      match: (c: Customer) => c.ltv >= 500 && c.ltv < 2000 },
+  { key: 'high',     label: '₹2K-10K',      match: (c: Customer) => c.ltv >= 2000 && c.ltv < 10000 },
+  { key: 'vip',      label: '₹10K+',        match: (c: Customer) => c.ltv >= 10000 },
+] as const;
+
+const SIGNUP_BUCKETS = [
+  { key: 'week',     label: 'This week',          match: (c: Customer) => c.days_since_signup <= 7 },
+  { key: 'month',    label: 'This month',         match: (c: Customer) => c.days_since_signup <= 30 },
+  { key: '3months',  label: 'Last 3 months',      match: (c: Customer) => c.days_since_signup > 30  && c.days_since_signup <= 90 },
+  { key: 'older',    label: 'Older than 3 months',match: (c: Customer) => c.days_since_signup > 90 },
+] as const;
+
+const QUALITY_BUCKETS = [
+  { key: 'named',    label: 'Has name',         match: (c: Customer) => c.name != null && c.name.trim().length > 0 },
+  { key: 'unnamed',  label: 'Missing name',     match: (c: Customer) => c.name == null || c.name.trim().length === 0 },
+  { key: 'hasphone', label: 'Has phone',        match: (c: Customer) => c.phone.length > 0 },
+  { key: 'nophone',  label: 'Missing phone',    match: (c: Customer) => c.phone.length === 0 },
+] as const;
+
+// ──────────────────────────────────────────────────────────────────────
+
 export function CustomerDatabase() {
   const { customers, loading, fetchCustomers, blockCustomer, unblockCustomer } = useCustomers();
-  const [searchTerm,        setSearchTerm]        = useState('');
-  const [selectedCustomer,  setSelectedCustomer]  = useState<Customer | null>(null);
-  const [filterCity,        setFilterCity]        = useState<string[]>([]);
-  const [filterStatus,      setFilterStatus]      = useState<string[]>([]);
+  const [searchTerm,       setSearchTerm]       = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+
+  // Filter state (each a Set of selected bucket keys)
+  const [filterStatus,   setFilterStatus]   = useState<string[]>([]);
+  const [filterCity,     setFilterCity]     = useState<string[]>([]);
+  const [filterActivity, setFilterActivity] = useState<string[]>([]);
+  const [filterRecency,  setFilterRecency]  = useState<string[]>([]);
+  const [filterSpend,    setFilterSpend]    = useState<string[]>([]);
+  const [filterSignup,   setFilterSignup]   = useState<string[]>([]);
+  const [filterQuality,  setFilterQuality]  = useState<string[]>([]);
 
   const cities = useMemo(
     () => [...new Set(customers.map(c => c.city))].filter(Boolean).sort(),
     [customers],
   );
 
-  // Totals strip
-  const totalCount    = customers.length;
-  const activeCount   = customers.filter(c => c.status === 'active').length;
-  const suspendCount  = customers.filter(c => c.status === 'suspended').length;
+  const totalCount   = customers.length;
+  const activeCount  = customers.filter(c => c.status === 'active').length;
+  const suspendCount = customers.filter(c => c.status === 'suspended').length;
 
   const filteredCustomers = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
     return customers.filter(c => {
-      const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase())
-        || c.phone.includes(searchTerm)
-        || c.email.toLowerCase().includes(searchTerm.toLowerCase())
-        || c.id.includes(searchTerm);
-      const matchesCity   = filterCity.length   === 0 || filterCity.includes(c.city);
-      const matchesStatus = filterStatus.length === 0 || filterStatus.includes(c.status);
-      return matchesSearch && matchesCity && matchesStatus;
+      // Search: name + phone + city + ID. Do NOT match against synthesized email.
+      const matchesSearch = !term
+        || (c.name && c.name.toLowerCase().includes(term))
+        || c.phone.includes(term)
+        || c.city.toLowerCase().includes(term)
+        || c.id.toLowerCase().includes(term);
+
+      const matchesStatus   = filterStatus.length   === 0 || filterStatus.includes(c.status);
+      const matchesCity     = filterCity.length     === 0 || filterCity.includes(c.city);
+      const matchesActivity = filterActivity.length === 0 || ORDER_ACTIVITY_BUCKETS.some(b => filterActivity.includes(b.key) && b.match(c));
+      const matchesRecency  = filterRecency.length  === 0 || LAST_ACTIVITY_BUCKETS.some(b => filterRecency.includes(b.key)  && b.match(c));
+      const matchesSpend    = filterSpend.length    === 0 || SPEND_BUCKETS.some(b => filterSpend.includes(b.key) && b.match(c));
+      const matchesSignup   = filterSignup.length   === 0 || SIGNUP_BUCKETS.some(b => filterSignup.includes(b.key) && b.match(c));
+      const matchesQuality  = filterQuality.length  === 0 || QUALITY_BUCKETS.some(b => filterQuality.includes(b.key) && b.match(c));
+
+      return matchesSearch && matchesStatus && matchesCity
+        && matchesActivity && matchesRecency
+        && matchesSpend && matchesSignup && matchesQuality;
     });
-  }, [customers, searchTerm, filterCity, filterStatus]);
+  }, [
+    customers, searchTerm, filterStatus, filterCity,
+    filterActivity, filterRecency, filterSpend, filterSignup, filterQuality,
+  ]);
+
+  const activeFilterCount =
+    filterStatus.length + filterCity.length + filterActivity.length
+    + filterRecency.length + filterSpend.length + filterSignup.length + filterQuality.length;
+
+  const clearAllFilters = () => {
+    setFilterStatus([]); setFilterCity([]); setFilterActivity([]);
+    setFilterRecency([]); setFilterSpend([]); setFilterSignup([]); setFilterQuality([]);
+  };
 
   return (
     <div className="h-full flex flex-col bg-gray-50 px-6 pt-10 pb-6 space-y-6">
       {/* ─── Header ─── */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          {/* 2026-06-03: replaced fuchsia→pink gradient with solid brand red */}
           <div className="w-14 h-14 rounded-xl bg-[#B52725] flex items-center justify-center shadow-lg">
             <Users className="w-7 h-7 text-white" />
           </div>
@@ -131,9 +186,9 @@ export function CustomerDatabase() {
 
       {/* ─── Totals strip ─── */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <TotalsTile label="Total Customers"      value={totalCount}    color="brand" />
-        <TotalsTile label="Active"               value={activeCount}   color="good" />
-        <TotalsTile label="Suspended"            value={suspendCount}  color={suspendCount > 0 ? 'warn' : 'neutral'} />
+        <TotalsTile label="Total Customers" value={totalCount}    color="brand" />
+        <TotalsTile label="Active"          value={activeCount}   color="good" />
+        <TotalsTile label="Suspended"       value={suspendCount}  color={suspendCount > 0 ? 'warn' : 'neutral'} />
       </div>
 
       {/* ─── Table card ─── */}
@@ -144,7 +199,7 @@ export function CustomerDatabase() {
             <div className="relative w-96">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
               <Input
-                placeholder="Search by name, email, phone, or ID…"
+                placeholder="Search by name, phone, city, or ID…"
                 className="pl-10"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -156,46 +211,105 @@ export function CustomerDatabase() {
                 <Button variant="outline" className="gap-2">
                   <Filter className="w-4 h-4" />
                   Filters
-                  {(filterCity.length > 0 || filterStatus.length > 0) && (
+                  {activeFilterCount > 0 && (
                     <Badge variant="secondary" className="ml-1 bg-[#B52725]/10 text-[#B52725]">
-                      {filterCity.length + filterStatus.length}
+                      {activeFilterCount}
                     </Badge>
                   )}
                   <ChevronDown className="w-3 h-3 ml-1" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-56">
+              <DropdownMenuContent align="start" className="w-72 max-h-[480px] overflow-y-auto">
+                {/* Status */}
                 <DropdownMenuLabel>Account Status</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                {(['active', 'suspended'] as const).map(status => (
-                  <DropdownMenuCheckboxItem
-                    key={status}
-                    checked={filterStatus.includes(status)}
-                    onCheckedChange={(checked) => {
-                      setFilterStatus(prev => checked ? [...prev, status] : prev.filter(s => s !== status));
-                    }}
-                    className="capitalize"
-                  >
-                    {status}
+                {(['active', 'suspended'] as const).map(s => (
+                  <DropdownMenuCheckboxItem key={s}
+                    checked={filterStatus.includes(s)}
+                    onCheckedChange={(checked) => setFilterStatus(prev => checked ? [...prev, s] : prev.filter(x => x !== s))}
+                    className="capitalize">
+                    {s}
                   </DropdownMenuCheckboxItem>
                 ))}
 
+                {/* Order Activity */}
                 <DropdownMenuSeparator />
-                <DropdownMenuLabel>Filter by City</DropdownMenuLabel>
-                {cities.length === 0 && (
-                  <div className="px-2 py-1 text-xs text-gray-500">No cities yet</div>
-                )}
-                {cities.map(city => (
-                  <DropdownMenuCheckboxItem
-                    key={city}
-                    checked={filterCity.includes(city)}
-                    onCheckedChange={(checked) => {
-                      setFilterCity(prev => checked ? [...prev, city] : prev.filter(c => c !== city));
-                    }}
-                  >
-                    {city}
+                <DropdownMenuLabel>Order Activity</DropdownMenuLabel>
+                {ORDER_ACTIVITY_BUCKETS.map(b => (
+                  <DropdownMenuCheckboxItem key={b.key}
+                    checked={filterActivity.includes(b.key)}
+                    onCheckedChange={(checked) => setFilterActivity(prev => checked ? [...prev, b.key] : prev.filter(x => x !== b.key))}>
+                    {b.label}
                   </DropdownMenuCheckboxItem>
                 ))}
+
+                {/* Last Activity */}
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Last Activity</DropdownMenuLabel>
+                {LAST_ACTIVITY_BUCKETS.map(b => (
+                  <DropdownMenuCheckboxItem key={b.key}
+                    checked={filterRecency.includes(b.key)}
+                    onCheckedChange={(checked) => setFilterRecency(prev => checked ? [...prev, b.key] : prev.filter(x => x !== b.key))}>
+                    {b.label}
+                  </DropdownMenuCheckboxItem>
+                ))}
+
+                {/* Spend Tier */}
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Spend Tier (LTV)</DropdownMenuLabel>
+                {SPEND_BUCKETS.map(b => (
+                  <DropdownMenuCheckboxItem key={b.key}
+                    checked={filterSpend.includes(b.key)}
+                    onCheckedChange={(checked) => setFilterSpend(prev => checked ? [...prev, b.key] : prev.filter(x => x !== b.key))}>
+                    {b.label}
+                  </DropdownMenuCheckboxItem>
+                ))}
+
+                {/* Signup Recency */}
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Signup Recency</DropdownMenuLabel>
+                {SIGNUP_BUCKETS.map(b => (
+                  <DropdownMenuCheckboxItem key={b.key}
+                    checked={filterSignup.includes(b.key)}
+                    onCheckedChange={(checked) => setFilterSignup(prev => checked ? [...prev, b.key] : prev.filter(x => x !== b.key))}>
+                    {b.label}
+                  </DropdownMenuCheckboxItem>
+                ))}
+
+                {/* Data Quality */}
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Profile Quality</DropdownMenuLabel>
+                {QUALITY_BUCKETS.map(b => (
+                  <DropdownMenuCheckboxItem key={b.key}
+                    checked={filterQuality.includes(b.key)}
+                    onCheckedChange={(checked) => setFilterQuality(prev => checked ? [...prev, b.key] : prev.filter(x => x !== b.key))}>
+                    {b.label}
+                  </DropdownMenuCheckboxItem>
+                ))}
+
+                {/* City */}
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>City</DropdownMenuLabel>
+                {cities.length === 0
+                  ? <div className="px-2 py-1 text-xs text-gray-500">No cities yet</div>
+                  : cities.map(city => (
+                      <DropdownMenuCheckboxItem key={city}
+                        checked={filterCity.includes(city)}
+                        onCheckedChange={(checked) => setFilterCity(prev => checked ? [...prev, city] : prev.filter(c => c !== city))}>
+                        {city}
+                      </DropdownMenuCheckboxItem>
+                    ))
+                }
+
+                {/* Clear */}
+                {activeFilterCount > 0 && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={clearAllFilters} className="text-[#B52725] font-medium">
+                      Clear all filters
+                    </DropdownMenuItem>
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -239,7 +353,9 @@ export function CustomerDatabase() {
                 </TableRow>
               ) : (
                 filteredCustomers.map((customer) => {
-                  const recency = recencyBadge(customer.days_since_last_order);
+                  const recency      = recencyBadge(customer.days_since_last_order);
+                  const displayName  = customer.name ?? '(no name)';
+                  const nameMuted    = customer.name == null;
                   return (
                     <TableRow
                       key={customer.id}
@@ -247,26 +363,23 @@ export function CustomerDatabase() {
                     >
                       <TableCell onClick={() => setSelectedCustomer(customer)} className="cursor-pointer">
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl overflow-hidden border border-gray-200 bg-gray-100 flex items-center justify-center">
-                            {customer.avatar_url ? (
-                              <ImageWithFallback src={customer.avatar_url} alt={customer.name} className="w-full h-full object-cover" />
-                            ) : (
-                              <span className="text-xs font-bold text-gray-400">{customer.name.charAt(0).toUpperCase()}</span>
-                            )}
+                          <div className="w-10 h-10 rounded-xl border border-gray-200 bg-gray-100 flex items-center justify-center">
+                            <span className="text-xs font-bold text-gray-400">
+                              {customer.name ? customer.name.charAt(0).toUpperCase() : '·'}
+                            </span>
                           </div>
                           <div>
-                            <p className="font-semibold text-gray-900">{customer.name}</p>
+                            <p className={`font-semibold ${nameMuted ? 'text-gray-400 italic' : 'text-gray-900'}`}>
+                              {displayName}
+                            </p>
                             <p className="text-[10px] text-gray-400 font-mono">ID: {customer.id.slice(0, 8)}</p>
                           </div>
                         </div>
                       </TableCell>
                       <TableCell onClick={() => setSelectedCustomer(customer)} className="cursor-pointer">
-                        <div className="flex flex-col">
-                          <span className="text-sm text-gray-700">{customer.phone}</span>
-                          {customer.email && (
-                            <span className="text-[11px] text-gray-500 truncate max-w-[180px]">{customer.email}</span>
-                          )}
-                        </div>
+                        {customer.phone
+                          ? <span className="text-sm text-gray-700">{customer.phone}</span>
+                          : <span className="text-xs italic text-gray-400">no phone</span>}
                       </TableCell>
                       <TableCell onClick={() => setSelectedCustomer(customer)} className="cursor-pointer">
                         <div className="flex items-center gap-1.5 text-gray-600 text-sm">
@@ -278,7 +391,7 @@ export function CustomerDatabase() {
                         {customer.order_count.toLocaleString('en-IN')}
                       </TableCell>
                       <TableCell className="text-right text-gray-700">
-                        {customer.order_count > 0 ? fmtINR(customer.aov) : '—'}
+                        {customer.order_count > 0 && customer.aov > 0 ? fmtINR(customer.aov) : '—'}
                       </TableCell>
                       <TableCell className="text-right">
                         <span className="font-bold text-[#B52725]">{fmtINR(customer.ltv)}</span>
@@ -306,12 +419,14 @@ export function CustomerDatabase() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuLabel className="text-[11px] text-gray-500">{customer.name}</DropdownMenuLabel>
+                            <DropdownMenuLabel className="text-[11px] text-gray-500">
+                              {customer.name ?? customer.phone ?? customer.id.slice(0, 8)}
+                            </DropdownMenuLabel>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={() => setSelectedCustomer(customer)}>
                               <Eye className="w-4 h-4 mr-2" /> View details
                             </DropdownMenuItem>
-                            {customer.phone && customer.phone !== 'N/A' && (
+                            {customer.phone && (
                               <DropdownMenuItem onClick={() => openWhatsApp(customer.phone)}>
                                 <MessageCircle className="w-4 h-4 mr-2" /> Send WhatsApp
                               </DropdownMenuItem>
@@ -321,11 +436,13 @@ export function CustomerDatabase() {
                                 <ShoppingBag className="w-4 h-4 mr-2" /> View orders
                               </Link>
                             </DropdownMenuItem>
-                            <DropdownMenuItem asChild>
-                              <Link to={`/customer-support?phone=${encodeURIComponent(customer.phone)}`}>
-                                <History className="w-4 h-4 mr-2" /> Wati history
-                              </Link>
-                            </DropdownMenuItem>
+                            {customer.phone && (
+                              <DropdownMenuItem asChild>
+                                <Link to={`/customer-support?phone=${encodeURIComponent(customer.phone)}`}>
+                                  <History className="w-4 h-4 mr-2" /> Wati history
+                                </Link>
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuSeparator />
                             {customer.status === 'active' ? (
                               <DropdownMenuItem
@@ -360,7 +477,6 @@ export function CustomerDatabase() {
         onClose={() => setSelectedCustomer(null)}
       />
 
-      {/* keep unused-import safety */}
       <span className="hidden">{BRAND_RED}</span>
     </div>
   );
