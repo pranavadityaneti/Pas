@@ -91,35 +91,46 @@ export function useCustomers() {
   const fetchCustomers = async () => {
     setLoading(true);
     try {
-      // ── 1. Pull consumers + their REAL orders. ──────────────────────────
-      // The embed alias `orders:Order!fk_orders_user` is critical:
-      //   - `Order`           → target the capital-O production table (not
-      //                          the lowercase legacy `orders` from demo SQL).
-      //   - `!fk_orders_user` → explicit FK hint so PostgREST doesn't have
-      //                          to guess between `user_id` and `staff_id`.
-      //   - `orders:`         → alias the response key to `orders` so the
-      //                          rest of this function reads naturally.
-      const { data: users, error } = await supabase
+      // ── 1. Fetch consumers (no embed). ──────────────────────────────────
+      // Earlier attempt used PostgREST embed `orders:Order!fk_orders_user(...)`
+      // and the API errored with "Could not find a relationship between 'User'
+      // and 'Order' in the schema cache". That's PostgREST's relationship
+      // cache missing the FK — happens when constraints were created out of
+      // band or the cache hasn't reloaded. Rather than chase the cache, we
+      // do two clean queries and join in JS. Bulletproof + zero magic.
+      const { data: usersRaw, error: uErr } = await supabase
         .from('User')
-        .select(`
-          id,
-          name,
-          email,
-          phone,
-          status,
-          "createdAt",
-          orders:Order!fk_orders_user (
-            total_amount,
-            created_at,
-            branch_id,
-            status
-          )
-        `)
+        .select('id, name, email, phone, status, "createdAt"')
         .eq('role', 'CONSUMER');
+      if (uErr) throw uErr;
+      const usersArr: any[] = usersRaw ?? [];
 
-      if (error) throw error;
+      // ── 2. Fetch orders only for these user IDs. ────────────────────────
+      const userIds = usersArr.map(u => u.id);
+      const ordersByUser: Record<string, RawOrder[]> = {};
+      if (userIds.length > 0) {
+        const { data: ordersRaw, error: oErr } = await supabase
+          .from('Order')
+          .select('user_id, total_amount, created_at, branch_id, status')
+          .in('user_id', userIds);
+        if (oErr) throw oErr;
+        (ordersRaw ?? []).forEach((o: any) => {
+          const uid = o.user_id;
+          if (!uid) return;
+          if (!ordersByUser[uid]) ordersByUser[uid] = [];
+          ordersByUser[uid].push({
+            total_amount: o.total_amount,
+            created_at:   o.created_at,
+            branch_id:    o.branch_id,
+            status:       o.status,
+          });
+        });
+      }
 
-      // ── 2. Batch-resolve city: collect every branch_id, look up city ──
+      // Attach orders onto each user (preserves the rest of the mapping logic).
+      const users = usersArr.map(u => ({ ...u, orders: ordersByUser[u.id] ?? [] }));
+
+      // ── 3. Batch-resolve city: collect every branch_id, look up city ──
       const branchIds = new Set<string>();
       (users ?? []).forEach((u: any) => {
         (u.orders ?? []).forEach((o: RawOrder) => {
