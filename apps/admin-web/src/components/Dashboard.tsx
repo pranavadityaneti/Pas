@@ -89,18 +89,8 @@ export function Dashboard() {
         statusBreakdown={stats.statusBreakdown} 
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-1">
-          <TopStoresList stores={stats.topStores} />
-        </div>
-        <div className="lg:col-span-2 bg-gradient-to-br from-gray-50 to-white rounded-lg border border-gray-200 p-8 flex flex-col items-center justify-center text-center shadow-sm">
-           <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mb-4">
-               <DollarSign className="w-8 h-8 text-blue-500" />
-           </div>
-           <h3 className="text-lg font-semibold text-gray-900 mb-2">More Insights Coming</h3>
-           <p className="text-gray-500 max-w-sm">We are preparing advanced data points like best-selling categories and delivery SLA monitoring for the next update.</p>
-        </div>
-      </div>
+      {/* "More Insights Coming" placeholder removed 2026-06-02. Top stores takes the full row. */}
+      <TopStoresList stores={stats.topStores} />
     </div>
   );
 }

@@ -53,13 +53,20 @@ export function KYCQueue() {
     setActiveDoc('pan');
   }, [selectedApp?.id]);
 
-  const handleDecision = async (decision: 'approve' | 'reject') => {
+  // Extended 2026-06-02: added 'needs_info' branch — merchant gets a "we need more details" email
+  // (via Resend) without rejecting the application outright. KYC status flips to 'needs_info'.
+  const handleDecision = async (decision: 'approve' | 'reject' | 'needs_info') => {
     if (!selectedApp) return;
 
+    // For reject + needs_info, the textarea content is required and reused for both.
+    const detailsOrReason = (decision === 'reject' || decision === 'needs_info') ? rejectionReason : undefined;
+
     try {
-      await kycDecision(selectedApp.id, decision, decision === 'reject' ? rejectionReason : undefined);
+      await kycDecision(selectedApp.id, decision, detailsOrReason);
       if (decision === 'approve') {
         toast.success(`Application Approved`, { description: `${selectedApp.store_name} is now active. Email notification sent.` });
+      } else if (decision === 'needs_info') {
+        toast.info(`More info requested`, { description: `${selectedApp.store_name} has been emailed with your follow-up details.` });
       } else {
         toast.error(`Application Rejected`, { description: `${selectedApp.store_name} has been notified via email.` });
       }
@@ -360,12 +367,12 @@ export function KYCQueue() {
 
               {/* Comment Box */}
               <div className="space-y-1">
-                <Label htmlFor="comment" className="text-[11px] font-medium text-gray-500">Rejection Note</Label>
+                <Label htmlFor="comment" className="text-[11px] font-medium text-gray-500">Reject reason or details for "Needs Info"</Label>
                 <Textarea
                   id="comment"
                   value={rejectionReason}
                   onChange={(e) => setRejectionReason(e.target.value)}
-                  placeholder="Reason..."
+                  placeholder="e.g. PAN image unreadable — please re-upload."
                   className="resize-none h-14 text-xs min-h-[50px] py-1.5"
                 />
               </div>
@@ -382,6 +389,18 @@ export function KYCQueue() {
                 Approve Store
               </Button>
               <div className="flex gap-2">
+                {/* Needs Info — added 2026-06-02. Reuses the textarea content as the merchant-facing
+                    "what we need" message; backend persists kycStatus='needs_info' + sends Resend email. */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 text-amber-700 border-amber-200 hover:bg-amber-50 hover:text-amber-800 h-9 text-xs"
+                  disabled={!rejectionReason}
+                  title={!rejectionReason ? 'Type the missing details in the box above first' : 'Email merchant with the missing-info note'}
+                  onClick={() => handleDecision('needs_info')}
+                >
+                  Needs Info
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"

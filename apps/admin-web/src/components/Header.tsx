@@ -65,17 +65,8 @@ export function Header() {
           </div>
         </div>
 
-        {/* Right: Notifications & Profile */}
+        {/* Right: Profile (Notifications bell removed 2026-06-02 per founder request) */}
         <div className="flex items-center gap-4">
-          {/* Notifications */}
-          <button
-            onClick={handleNotificationClick}
-            className="relative p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-          >
-            <Bell className="w-6 h-6" />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-[#B52725] rounded-full"></span>
-          </button>
-
           {/* Admin Profile with Dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

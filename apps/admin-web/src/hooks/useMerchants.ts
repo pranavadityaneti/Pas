@@ -266,14 +266,25 @@ export function useMerchants() {
     };
 
     /**
-     * Routes KYC approve/reject through the backend API so server-side
-     * email notifications are dispatched automatically.
+     * Routes KYC approve / reject / needs_info through the backend API so server-side
+     * Resend email + (eventually) Wati notifications are dispatched automatically.
+     *
+     * 2026-06-02 — added 'needs_info' decision per the RBAC + ops doc. Backend route
+     * already accepts it and stores kycStatus='needs_info' + kycRejectionReason=details.
      */
-    const kycDecision = async (id: string, decision: 'approve' | 'reject', rejectionReason?: string) => {
+    const kycDecision = async (
+        id: string,
+        decision: 'approve' | 'reject' | 'needs_info',
+        detailsOrReason?: string,
+    ) => {
         globalLoading = true;
         notifyListeners();
         try {
-            const { data } = await api.post(`/merchants/${id}/kyc-decision`, { decision, rejectionReason });
+            // Backend accepts both `rejectionReason` (for reject) and `needsInfoDetails` (for needs_info).
+            const payload: any = { decision };
+            if (decision === 'reject') payload.rejectionReason = detailsOrReason;
+            if (decision === 'needs_info') payload.needsInfoDetails = detailsOrReason;
+            const { data } = await api.post(`/merchants/${id}/kyc-decision`, payload);
             await fetchMerchantsGlobal();
             return data;
         } catch (err: any) {

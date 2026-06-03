@@ -17,6 +17,9 @@ import { CityManager } from './components/modules/geography/CityManager';
 import { FinanceHub } from './components/modules/finance/FinanceHub';
 import { AnalyticsHub } from './components/modules/analytics/AnalyticsHub';
 import { SettingsHub } from './components/modules/settings/SettingsHub';
+import { RolesPermissions } from './components/modules/roles/RolesPermissions';
+import { RefundsDisputes } from './components/modules/operations/RefundsDisputes';
+import { CustomerSupportInbox } from './components/modules/operations/CustomerSupportInbox';
 
 export default function App() {
   const { isAuthenticated, loading, profileError, mustChangePassword, clearPasswordChangeFlag } = useAuth();
@@ -76,6 +79,10 @@ export default function App() {
         <Route path="finance" element={<FinanceHub />} />
         <Route path="analytics" element={<AnalyticsHub />} />
         <Route path="settings" element={<SettingsHub />} />
+        {/* Added 2026-06-02 per RBAC doc */}
+        <Route path="roles" element={<RolesPermissions />} />
+        <Route path="refunds-disputes" element={<RefundsDisputes />} />
+        <Route path="customer-support" element={<CustomerSupportInbox />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

@@ -28,10 +28,15 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// An authorized admin is either a legacy email SUPER_ADMIN or a phone-OTP admin
-// flagged via User.isAdmin (which survives the merchant JIT role overwrite).
+// Extended 2026-06-02 per RBAC doc: any admin-tier role grants access to the
+// admin dashboard. Sidebar + per-page gates then filter what each role sees via
+// roleCan(role, capability) from ../lib/rbac.
+// `isAdmin` flag is preserved as a SUPER_ADMIN-equivalent for backwards compat.
+const ADMIN_TIER_ROLES = new Set(['SUPER_ADMIN', 'OPERATIONS', 'FINANCE', 'SUPPORT']);
 function isAdminProfile(profile: AdminUser | null): boolean {
-    return !!profile && (profile.role === 'SUPER_ADMIN' || profile.isAdmin === true);
+    if (!profile) return false;
+    if (profile.isAdmin === true) return true;
+    return ADMIN_TIER_ROLES.has(profile.role);
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
