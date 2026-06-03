@@ -1,13 +1,20 @@
 import { useState } from 'react';
 import { AnalyticsDashboard } from './AnalyticsDashboard';
-import { GlobalConfig } from './GlobalConfig';
 import { AuditLog } from './AuditLog';
-import { BarChart3, Settings2, ShieldAlert, LineChart } from 'lucide-react';
+import { BarChart3, ShieldAlert, LineChart } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { cn } from '../../ui/utils';
 
+/**
+ * Global Config tab hidden 2026-06-03. The GlobalConfig.tsx form was 100%
+ * mock UI — hardcoded defaultValues for COD limits / fees / referral bonuses
+ * with a Save button that only showed a toast, no backend persistence.
+ * Re-introduce once a `platform_settings` table + GET/PATCH routes exist
+ * AND the values are actually consumed by the consumer/merchant apps.
+ */
+
 export function AnalyticsHub() {
-  const [activeTab, setActiveTab] = useState<'reports' | 'config' | 'audit'>('reports');
+  const [activeTab, setActiveTab] = useState<'reports' | 'audit'>('reports');
 
   return (
     <div className="h-full flex flex-col bg-gray-50 px-6 pt-10 pb-6 space-y-6">
@@ -46,21 +53,6 @@ export function AnalyticsHub() {
             size="sm"
             className={cn(
               "gap-2 rounded-lg transition-all",
-              activeTab === 'config'
-                ? "bg-gray-900 text-white hover:bg-gray-800 shadow-md"
-                : "text-gray-600 hover:text-[#B52725] hover:bg-gray-50"
-            )}
-            onClick={() => setActiveTab('config')}
-          >
-            <Settings2 className="w-4 h-4" />
-            Global Config
-          </Button>
-          <div className="w-px h-4 bg-gray-200 mx-1"></div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn(
-              "gap-2 rounded-lg transition-all",
               activeTab === 'audit'
                 ? "bg-gray-900 text-white hover:bg-gray-800 shadow-md"
                 : "text-gray-600 hover:text-[#B52725] hover:bg-gray-50"
@@ -77,8 +69,7 @@ export function AnalyticsHub() {
       <div className="flex-1 bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col overflow-hidden">
         <div className="flex-1 overflow-auto p-6">
           {activeTab === 'reports' && <AnalyticsDashboard />}
-          {activeTab === 'config' && <GlobalConfig />}
-          {activeTab === 'audit' && <AuditLog />}
+          {activeTab === 'audit'   && <AuditLog />}
         </div>
       </div>
     </div>
