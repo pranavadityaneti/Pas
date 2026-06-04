@@ -30,18 +30,7 @@ import { Colors } from '../../../../constants/Colors';
 import { useSignupContext } from '../shared/SignupContext';
 import { styles } from '../shared/signupStyles';
 import type { Branch } from '../shared/types';
-
-const GOOGLE_MAPS_API_KEY =
-    process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
-    'AIzaSyAQAg7zpYvmd2BJGCGmf1opDLDC4KXbKUg';
-
-/** Pull `locality` out of Google's address_components shape. */
-function extractCity(details: any): string {
-    const component = details?.address_components?.find((c: any) =>
-        c.types.includes('locality'),
-    );
-    return component?.long_name || '';
-}
+import { GOOGLE_MAPS_API_KEY, extractCity } from '../shared/googlePlaces';
 
 export function StepBranches() {
     const { hasBranches, setHasBranches, branches, setBranches, selectedVertical } = useSignupContext();

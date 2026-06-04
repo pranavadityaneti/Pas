@@ -28,17 +28,7 @@ import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplet
 import { Colors } from '../../../../constants/Colors';
 import { useSignupContext } from '../shared/SignupContext';
 import { styles } from '../shared/signupStyles';
-
-const GOOGLE_MAPS_API_KEY =
-    process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
-    'AIzaSyAQAg7zpYvmd2BJGCGmf1opDLDC4KXbKUg';
-
-function extractCity(details: any): string {
-    const component = details?.address_components?.find((c: any) =>
-        c.types.includes('locality'),
-    );
-    return component?.long_name || '';
-}
+import { GOOGLE_MAPS_API_KEY, extractCity } from '../shared/googlePlaces';
 
 export function StepStore() {
     const {

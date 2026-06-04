@@ -1,25 +1,23 @@
-// @lock — Do NOT overwrite. Approved layout as of March 22, 2026.
-import React, { useState, useRef, useEffect } from 'react';
-import {
-    View, Text, TextInput, TouchableOpacity, StyleSheet,
-    Platform, ActivityIndicator, Image, ScrollView, Modal, TouchableWithoutFeedback, Alert
-} from 'react-native';
+// @lock — Orchestrator only. After Phase 1.7 (2026-06-04), this file holds:
+//   - SignupProvider mount + isRestoring loading view
+//   - useSignupOtpVerify + useImageUpload hook instances (shared down to steps)
+//   - Cross-cutting handlers: validateStep, handleNext, handleBack,
+//     handleFinalSubmit, handlePayment, syncDraftState
+//   - renderStepIndicator (top), Back/Next footer (bottom)
+//   - Step dispatch: {step === N && <StepX />}
+// Per-step UI lives in src/screens/signup/steps/Step{Identity,Store,Photos,
+// Branches,Kyc,Subscription,Review}.tsx — those are NOT locked. Edits to
+// THIS file require explicit chat-confirmed approval from Pranav.
+import React from 'react';
+import { View, Text, TouchableOpacity, Platform, ActivityIndicator, Alert } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import * as Location from 'expo-location';
-import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system/legacy';
-import { decode } from 'base64-arraybuffer';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
-import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
-import axios from 'axios';
-import { supabase, setSessionFromTokens } from '../../src/lib/supabase';
+import { supabase } from '../../src/lib/supabase';
 import { Colors } from '../../constants/Colors';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Vertical, Branch, IdentityState, StoreState, KycState } from '../../src/screens/signup/shared/types';
 import {
     validateIdentity,
     validateStore,
@@ -34,12 +32,12 @@ import { useImageUpload } from '../../src/hooks/useImageUpload';
 import { SignupProvider, useSignupContext } from '../../src/screens/signup/shared/SignupContext';
 import { styles } from '../../src/screens/signup/shared/signupStyles';
 import { StepIdentity } from '../../src/screens/signup/steps/StepIdentity';
-import { StepPhotos } from '../../src/screens/signup/steps/StepPhotos';
-import { StepReview } from '../../src/screens/signup/steps/StepReview';
-import { StepSubscription } from '../../src/screens/signup/steps/StepSubscription';
-import { StepKyc } from '../../src/screens/signup/steps/StepKyc';
-import { StepBranches } from '../../src/screens/signup/steps/StepBranches';
 import { StepStore } from '../../src/screens/signup/steps/StepStore';
+import { StepPhotos } from '../../src/screens/signup/steps/StepPhotos';
+import { StepBranches } from '../../src/screens/signup/steps/StepBranches';
+import { StepKyc } from '../../src/screens/signup/steps/StepKyc';
+import { StepSubscription } from '../../src/screens/signup/steps/StepSubscription';
+import { StepReview } from '../../src/screens/signup/steps/StepReview';
 
 let RazorpayCheckout: any = null;
 if (Constants.appOwnership !== 'expo') {
@@ -50,21 +48,7 @@ if (Constants.appOwnership !== 'expo') {
     }
 }
 
-
-// Helper to extract city from Google Places address_components
-function extractCity(details: any): string {
-    const component = details?.address_components?.find((c: any) =>
-        c.types.includes('locality')
-    );
-    return component?.long_name || '';
-}
-
-const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyAQAg7zpYvmd2BJGCGmf1opDLDC4KXbKUg';
-
 const STEPS = ['Identity', 'Store', 'Photos', 'Branches', 'KYC', 'Subscription', 'Review'];
-
-// 2026-06-04 (Phase 1.1): Vertical + Branch types extracted to
-// ../../src/screens/signup/shared/types.ts — see import above.
 
 function SignupScreenInner() {
     // 2026-06-04 (Phase 1.6.B): master signup state lifted into SignupProvider
