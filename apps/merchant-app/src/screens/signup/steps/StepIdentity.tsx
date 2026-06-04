@@ -65,6 +65,19 @@ export function StepIdentity({ otp }: StepIdentityProps) {
                     />
                 </View>
 
+                {/* 2026-06-04 (Phase 2.A, spec blocker B2): Designation populates the
+                    signatory block on the partner-agreement PDF at Step 4. */}
+                <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Designation <Text style={styles.required}>*</Text></Text>
+                    <TextInput
+                        style={styles.input}
+                        placeholder="Proprietor / Director / Partner"
+                        placeholderTextColor="#9CA3AF"
+                        value={identity.designation}
+                        onChangeText={(t) => setIdentity({ ...identity, designation: t })}
+                    />
+                </View>
+
                 <View style={styles.inputGroup}>
                     <Text style={styles.label}>WhatsApp Number <Text style={styles.required}>*</Text></Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 12, backgroundColor: '#FFFFFF', paddingHorizontal: 16 }}>

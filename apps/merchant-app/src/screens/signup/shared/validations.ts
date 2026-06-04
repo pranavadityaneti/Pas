@@ -62,7 +62,7 @@ export function validateIdentity(
     identity: IdentityState,
     otpVerified: boolean,
 ): ValidationResult {
-    if (!identity.ownerName || !identity.email || !identity.phone) {
+    if (!identity.ownerName || !identity.email || !identity.phone || !identity.designation) {
         return { ok: false, title: 'Error', message: 'Please fill all required fields' };
     }
     if (!otpVerified) {

@@ -165,6 +165,7 @@ export function SignupProvider({ children }: SignupProviderProps) {
 
     const [identity, setIdentity] = useState<IdentityState>({
         ownerName: '',
+        designation: '',
         phone: '',
         email: '',
     });

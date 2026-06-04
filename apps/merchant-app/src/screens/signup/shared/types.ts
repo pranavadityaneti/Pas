@@ -33,9 +33,15 @@ export interface Branch {
 /**
  * State shape for Step 1 — Identity.
  * Extracted from inline useState({...}) call in signup.tsx (Phase 1.2, 2026-06-04).
+ *
+ * 2026-06-04 (Phase 2.A, spec blocker B2): `designation` added — required
+ * free text capturing the owner's role/title (e.g. "Proprietor", "Director",
+ * "Partner"). Populates the signatory block on the partner-agreement PDF
+ * generated at Step 4 (Agreements + Digio eSign).
  */
 export interface IdentityState {
     ownerName: string;
+    designation: string;
     phone: string;
     email: string;
 }

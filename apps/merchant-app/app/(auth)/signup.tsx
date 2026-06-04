@@ -314,6 +314,10 @@ function SignupScreenInner() {
 
         const payload = {
             ownerName: identity.ownerName,
+            // 2026-06-04 (Phase 2.A, spec blocker B2): designation captured at Step 1.
+            // Server-side handling lands in Phase 2.A2 (migration + Zod + Prisma update);
+            // until then the API silently drops this field via its passthrough Zod schema.
+            designation: identity.designation,
             email: identity.email,
             phone: identity.phone,
             storeName: store.storeName,
