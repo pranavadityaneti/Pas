@@ -68,6 +68,7 @@ function SignupScreenInner() {
         branches, setBranches,
         stores, setStores,
         agreements,
+        couponCode, couponDiscount,
         kyc, setKyc,
         docFiles, setDocFiles,
         paymentStatus, setPaymentStatus,
@@ -135,22 +136,31 @@ function SignupScreenInner() {
     };
 
     const handlePayment = async () => {
+        // 2026-06-04 (Phase 2.E): per-store linear pricing + coupon discount.
+        // Was a flat ₹999/₹2999 in v1; v2 multiplies by stores.length.
         const isPremium = selectedVertical?.isPremium || false;
-        const subscriptionAmount = isPremium ? 2999 : 999;
-        
+        const perStorePrice = isPremium ? 2999 : 999;
+        const storeCount = Math.max(1, stores.length);
+        const subtotal = storeCount * perStorePrice;
+        const subscriptionAmount = Math.max(0, subtotal - (couponDiscount || 0));
+
         let orderId = '';
         try {
             const apiUrl = getApiUrl();
             const res = await fetch(`${apiUrl}/payments/create-order`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    amount: subscriptionAmount, 
-                    type: 'merchant', 
+                body: JSON.stringify({
+                    amount: subscriptionAmount,
+                    type: 'merchant',
                     userId: identity.phone || 'merchant',
                     notes: {
                         plan_type: isPremium ? 'Premium Subscription' : 'Standard Subscription',
-                        store_category: store.categoryId
+                        store_category: store.categoryId,
+                        // Phase 2.E: pass store count + coupon for server-side audit
+                        store_count: storeCount,
+                        coupon_code: couponCode || null,
+                        coupon_discount: couponDiscount || 0,
                     }
                 })
             });
@@ -393,7 +403,14 @@ function SignupScreenInner() {
             })),
 
             finalize,
-            subscription: paymentOverrides
+            subscription: paymentOverrides,
+
+            // 2026-06-04 (Phase 2.E): per-store + coupon audit fields.
+            // Server-side persistence via merchant_signup_coupon_redemptions
+            // lands in Phase 2.E2; until then passthrough Zod drops these.
+            storeCount: stores.length,
+            couponCode: couponCode || null,
+            couponDiscount: couponDiscount || 0,
         };
 
         const response = await fetchWithTimeout(`${getApiUrl()}/auth/merchant/draft`, {

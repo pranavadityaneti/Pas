@@ -162,6 +162,22 @@ export interface SignupContextValue {
     agreements: AgreementsState;
     setAgreements: React.Dispatch<React.SetStateAction<AgreementsState>>;
 
+    // ── step 5: subscription coupon (v2 NEW) ──────────────────────────
+    /**
+     * 2026-06-04 (Phase 2.E): partner-coupon state for the Subscription step.
+     *  - couponCode: free-text input
+     *  - couponDiscount: ₹ flat off applied (0 when no coupon)
+     *  - couponError: last validation error to display
+     * Server-side validation + persistence lands in Phase 2.E2
+     * (merchant_signup_coupons table + POST /merchant-signup/validate-coupon).
+     */
+    couponCode: string;
+    setCouponCode: React.Dispatch<React.SetStateAction<string>>;
+    couponDiscount: number;
+    setCouponDiscount: React.Dispatch<React.SetStateAction<number>>;
+    couponError: string | null;
+    setCouponError: React.Dispatch<React.SetStateAction<string | null>>;
+
     // ── step 5: kyc + docFiles ────────────────────────────────────────
     kyc: KycState;
     setKyc: React.Dispatch<React.SetStateAction<KycState>>;
@@ -249,6 +265,11 @@ export function SignupProvider({ children }: SignupProviderProps) {
         signed: false,
         txnIds: [],
     });
+
+    // 2026-06-04 (Phase 2.E): v2 partner-coupon state.
+    const [couponCode, setCouponCode] = useState('');
+    const [couponDiscount, setCouponDiscount] = useState(0);
+    const [couponError, setCouponError] = useState<string | null>(null);
 
     const [kyc, setKyc] = useState<KycState>({
         panNumber: '',
@@ -411,6 +432,9 @@ export function SignupProvider({ children }: SignupProviderProps) {
         branches, setBranches,
         stores, setStores,
         agreements, setAgreements,
+        couponCode, setCouponCode,
+        couponDiscount, setCouponDiscount,
+        couponError, setCouponError,
         kyc, setKyc,
         docFiles, setDocFiles,
         paymentStatus, setPaymentStatus,
