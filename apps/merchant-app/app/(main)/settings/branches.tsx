@@ -14,6 +14,7 @@ import { supabase } from '../../../src/lib/supabase';
 import { Colors } from '../../../constants/Colors'
 import BottomModal from '../../../src/components/BottomModal';
 import { useCreateManager } from '../../../src/hooks/useStaff';
+import { useImageUpload } from '../../../src/hooks/useImageUpload';
 
 LogBox.ignoreLogs(['VirtualizedLists should never be nested']);interface Branch {
     id: string;
@@ -48,6 +49,13 @@ export default function BranchesScreen() {
     const { user } = useUser();
     const { refreshStore, merchantId } = useStore();
     const [isDining, setIsDining] = useState(false);
+
+    // 2026-06-04 (Phase 1.5.C): file→storage upload extracted to the shared
+    // useImageUpload primitive (src/hooks/useImageUpload.ts). Bucket stays
+    // 'merchant-assets' — same destination as before. Branches now inherit
+    // signup's 3-attempt retry policy (was: zero retry → silent drop on
+    // failure). Skip-already-uploaded guard preserved.
+    const { uploadFile } = useImageUpload({ bucket: 'merchant-assets' });
 
     // Lookup whether this merchant's vertical is dining
     useEffect(() => {
@@ -150,23 +158,26 @@ export default function BranchesScreen() {
     };
 
     const uploadBranchPhotos = async (branchId: string, photos: string[]): Promise<string[]> => {
+        // 2026-06-04 (Phase 1.5.C): delegates to the shared useImageUpload hook
+        // declared at the top of BranchesScreen(). The hook handles:
+        //   - skip-already-uploaded guard (any non-file://, non-content:// URI)
+        //   - 3-attempt retry with attempt*1500ms backoff (NEW for branches)
+        //   - base64 + FileSystem.readAsStringAsync upload mechanism
+        // The per-photo try/catch below preserves this file's PRIOR silent-skip
+        // semantic for permanent upload failures (matches the original
+        // `if (!error) uploaded.push(path)` pattern). With retries now in
+        // place, transient failures are far less likely to ever land here.
         const uploaded: string[] = [];
         for (let i = 0; i < photos.length; i++) {
             const uri = photos[i];
-            // Skip already-uploaded paths (not local URIs)
-            if (!uri.startsWith('file://') && !uri.startsWith('content://')) {
-                uploaded.push(uri);
-                continue;
-            }
             const ext = uri.split('.').pop() || 'jpg';
             const path = `branches/${branchId}/photo_${i}.${ext}`;
-            const response = await fetch(uri);
-            const blob = await response.blob();
-            const arrayBuffer = await new Response(blob).arrayBuffer();
-            const { error } = await supabase.storage
-                .from('merchant-assets')
-                .upload(path, arrayBuffer, { contentType: `image/${ext}`, upsert: true });
-            if (!error) uploaded.push(path);
+            try {
+                const result = await uploadFile(uri, path);
+                if (result) uploaded.push(result);
+            } catch (e: any) {
+                console.error(`[branches.uploadBranchPhotos] photo ${i} failed after retries:`, e?.message || e);
+            }
         }
         return uploaded;
     };
