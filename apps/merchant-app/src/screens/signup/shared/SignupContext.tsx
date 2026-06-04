@@ -50,13 +50,38 @@ import React, {
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../../lib/supabase';
-import type { Vertical, IdentityState, StoreState, KycState, Branch } from './types';
+import type { Vertical, IdentityState, StoreState, KycState, Branch, Store } from './types';
+import uuid from 'react-native-uuid';
 
 /* ─────────────────────────── Local helpers ──────────────────────────── */
 
 const getApiUrl = (): string => {
     return process.env.EXPO_PUBLIC_API_URL as string;
 };
+
+/**
+ * 2026-06-04 (Phase 2.C.1): Factory for a fresh empty Store entry. Used by:
+ *   - Provider mount (seeds `stores` with one editable card per spec)
+ *   - "Save & Add Another Store" in StepStores
+ * `uuid.v4()` returns a string-typed UUID — wrapped via `String()` to satisfy
+ * the typedef (the lib's `.v4()` return is `string | number[]`).
+ */
+export function createEmptyStore(): Store {
+    return {
+        id: String(uuid.v4()),
+        name: '',
+        address: '',
+        latitude: null,
+        longitude: null,
+        city: '',
+        managerName: '',
+        managerPhone: '',
+        photos: [],
+        cuisines: [],
+        isVeg: false,
+        restaurantType: '',
+    };
+}
 
 /**
  * 15-second AbortController wrapper around fetch. Duplicated here from
@@ -112,11 +137,21 @@ export interface SignupContextValue {
     storePhotos: string[];
     setStorePhotos: React.Dispatch<React.SetStateAction<string[]>>;
 
-    // ── step 4: branches ──────────────────────────────────────────────
+    // ── step 4: branches (LEGACY — to be removed in Phase 2.G) ────────
     hasBranches: boolean;
     setHasBranches: React.Dispatch<React.SetStateAction<boolean>>;
     branches: Branch[];
     setBranches: React.Dispatch<React.SetStateAction<Branch[]>>;
+
+    // ── step 3 (v2): consolidated stores list ─────────────────────────
+    /**
+     * 2026-06-04 (Phase 2.C.1): v2 Stores replaces v1's main store + photos
+     * + branches trio. Seeded with one empty Store on Provider mount so the
+     * Step 3 UI opens with one editable card (spec requirement). N stores
+     * supported via "Save & Add Another Store"; no is_primary flag.
+     */
+    stores: Store[];
+    setStores: React.Dispatch<React.SetStateAction<Store[]>>;
 
     // ── step 5: kyc + docFiles ────────────────────────────────────────
     kyc: KycState;
@@ -191,6 +226,11 @@ export function SignupProvider({ children }: SignupProviderProps) {
 
     const [hasBranches, setHasBranches] = useState(false);
     const [branches, setBranches] = useState<Branch[]>([]);
+
+    // 2026-06-04 (Phase 2.C.1): v2 consolidated stores. Lazy-initialized with
+    // one empty Store so Step 3 opens with a single editable card. Subsequent
+    // stores added via the StepStores "Save & Add Another Store" button.
+    const [stores, setStores] = useState<Store[]>(() => [createEmptyStore()]);
 
     const [kyc, setKyc] = useState<KycState>({
         panNumber: '',
@@ -303,6 +343,12 @@ export function SignupProvider({ children }: SignupProviderProps) {
                     }
                     if (parsed.hasBranches !== undefined) setHasBranches(parsed.hasBranches);
                     if (parsed.branches) setBranches(parsed.branches);
+                    // 2026-06-04 (Phase 2.C.1): v2 stores list. If a prior session
+                    // saved a non-empty stores array, restore it. Falls back to the
+                    // one-empty-store seed already set by useState's lazy initializer.
+                    if (Array.isArray(parsed.stores) && parsed.stores.length > 0) {
+                        setStores(parsed.stores);
+                    }
                     if (parsed.kyc) setKyc(parsed.kyc);
                     if (parsed.docFiles) setDocFiles(parsed.docFiles);
                     if (parsed.storePhotos) setStorePhotos(parsed.storePhotos);
@@ -325,13 +371,13 @@ export function SignupProvider({ children }: SignupProviderProps) {
     useEffect(() => {
         if (isRestoring) return; // Do not overwrite draft with empty initial states during mount
         const timer = setTimeout(() => {
-            const snapshot = { step, identity, store, hasBranches, branches, kyc, docFiles, storePhotos };
+            const snapshot = { step, identity, store, hasBranches, branches, stores, kyc, docFiles, storePhotos };
             AsyncStorage.setItem('@merchant_signup_draft', JSON.stringify(snapshot)).catch(e => {
                 console.error('[Signup] Failed to synchronize draft with disk:', e);
             });
         }, 1000); // 1-second debounce per QA instructions
         return () => clearTimeout(timer);
-    }, [step, identity, store, hasBranches, branches, kyc, docFiles, storePhotos, isRestoring]);
+    }, [step, identity, store, hasBranches, branches, stores, kyc, docFiles, storePhotos, isRestoring]);
 
     // ── exposed value ─────────────────────────────────────────────────
     const value: SignupContextValue = {
@@ -345,6 +391,7 @@ export function SignupProvider({ children }: SignupProviderProps) {
         storePhotos, setStorePhotos,
         hasBranches, setHasBranches,
         branches, setBranches,
+        stores, setStores,
         kyc, setKyc,
         docFiles, setDocFiles,
         paymentStatus, setPaymentStatus,

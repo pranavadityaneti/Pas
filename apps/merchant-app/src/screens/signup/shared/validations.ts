@@ -19,7 +19,7 @@
  * Reference: docs/merchant-signup-v2-spec.md (Phase 1 — File restructure).
  */
 
-import type { IdentityState, StoreState, KycState, Branch, Vertical } from './types';
+import type { IdentityState, StoreState, KycState, Branch, Store, Vertical } from './types';
 
 /* ───────────────────────────── Result type ───────────────────────────── */
 
@@ -99,6 +99,58 @@ export function validateStore(store: StoreState): ValidationResult {
 export function validatePhotos(storePhotos: string[]): ValidationResult {
     if (storePhotos.length < 2) {
         return { ok: false, title: 'Error', message: 'Please upload at least 2 store photos' };
+    }
+    return { ok: true };
+}
+
+/**
+ * 2026-06-04 (Phase 2.C.1): validateStores — v2 consolidated stores validation.
+ * Replaces validateStore + validatePhotos + validateBranches in the v2 flow.
+ * Requirements (per spec Step 3):
+ *  - At least 1 store
+ *  - Each store: name, address, managerName, managerPhone non-empty
+ *  - Each store: latitude AND longitude non-null (Google Places must have set them)
+ *  - Each store: minimum 2 photos
+ */
+export function validateStores(stores: Store[]): ValidationResult {
+    if (!stores || stores.length === 0) {
+        return {
+            ok: false,
+            title: 'Required',
+            message: 'Please add at least one store to continue.',
+        };
+    }
+    for (let i = 0; i < stores.length; i++) {
+        const s = stores[i];
+        const storeLabel = `Store ${i + 1}`;
+        if (!s.name || !s.managerName || !s.managerPhone) {
+            return {
+                ok: false,
+                title: 'Error',
+                message: `Please fill name, manager and phone for ${storeLabel}.`,
+            };
+        }
+        if (!s.address) {
+            return {
+                ok: false,
+                title: 'Address Required',
+                message: `Please search and select an address for ${storeLabel}.`,
+            };
+        }
+        if (s.latitude === null || s.longitude === null) {
+            return {
+                ok: false,
+                title: 'Location Required',
+                message: `Please pick ${storeLabel}'s address from the Google suggestions so we can place it on the map.`,
+            };
+        }
+        if (!s.photos || s.photos.length < 2) {
+            return {
+                ok: false,
+                title: 'Photos Required',
+                message: `Please upload at least 2 photos for ${storeLabel}.`,
+            };
+        }
     }
     return { ok: true };
 }

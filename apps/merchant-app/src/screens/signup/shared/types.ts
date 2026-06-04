@@ -31,6 +31,42 @@ export interface Branch {
 }
 
 /**
+ * State shape for Step 3 — Stores (v2 consolidated). Each merchant has one or
+ * more Store entries; the v1 distinction between "main store" and "branches"
+ * is collapsed per docs/merchant-signup-v2-spec.md (Step 3).
+ *
+ * 2026-06-04 (Phase 2.C.1): introduced alongside the legacy StoreState +
+ * Branch types — they coexist until Phase 2.C.2 wires the new component and
+ * 2.G retires the old types.
+ *
+ * Key differences vs v1 Branch:
+ *  - Client-generated `id` for stable React keys (uuid.v4()).
+ *  - `managerName` + `managerPhone` (camelCase, per v2 convention).
+ *  - `latitude` / `longitude` mandatory non-null at validation (no Hyderabad
+ *    sentinel) — set by Google Places autocomplete selection only.
+ *  - No `categoryId` — the vertical is chosen once at signup, shared across
+ *    all stores.
+ */
+export interface Store {
+    /** Client-side UUID. Stable React key + future cross-step references. */
+    id: string;
+    name: string;
+    address: string;
+    /** Mandatory non-null after Google Places selection (validateStores enforces). */
+    latitude: number | null;
+    longitude: number | null;
+    city: string;
+    managerName: string;
+    managerPhone: string;
+    /** Min 2 photos enforced by validateStores. */
+    photos: string[];
+    /** Food-vertical fields — used only when selectedVertical?.requiresFssai or isDining. */
+    cuisines: string[];
+    isVeg: boolean;
+    restaurantType: string;
+}
+
+/**
  * State shape for Step 1 — Identity.
  * Extracted from inline useState({...}) call in signup.tsx (Phase 1.2, 2026-06-04).
  *
