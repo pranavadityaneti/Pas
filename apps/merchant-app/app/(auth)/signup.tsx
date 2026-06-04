@@ -36,6 +36,7 @@ import { styles } from '../../src/screens/signup/shared/signupStyles';
 import { StepIdentity } from '../../src/screens/signup/steps/StepIdentity';
 import { StepPhotos } from '../../src/screens/signup/steps/StepPhotos';
 import { StepReview } from '../../src/screens/signup/steps/StepReview';
+import { StepSubscription } from '../../src/screens/signup/steps/StepSubscription';
 
 let RazorpayCheckout: any = null;
 if (Constants.appOwnership !== 'expo') {
@@ -1200,80 +1201,7 @@ function SignupScreenInner() {
                     </>
                 )}
 
-                {step === 6 && (
-                    <View style={styles.card}>
-                        <View style={{ alignItems: 'center', paddingVertical: 20 }}>
-                            <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#111827', marginBottom: 8 }}>Partner Subscription</Text>
-                            <Text style={{ fontSize: 14, color: '#6B7280', textAlign: 'center', marginBottom: 24 }}>Unlock generic analytics, premium support, and unlimited listings with lifetime access.</Text>
-
-                            <View style={{
-                                backgroundColor: '#FFFFFF',
-                                borderRadius: 16,
-                                padding: 24,
-                                width: '100%',
-                                alignItems: 'center',
-                                borderWidth: 1,
-                                borderColor: '#E5E7EB',
-                                shadowColor: '#000',
-                                shadowOffset: { width: 0, height: 2 },
-                                shadowOpacity: 0.05,
-                                shadowRadius: 4,
-                                elevation: 2
-                            }}>
-                                <Text style={{ fontSize: 16, fontWeight: '600', color: Colors.primary, marginBottom: 12 }}>LIFETIME ACCESS</Text>
-
-                                <View style={{ flexDirection: 'row', alignItems: 'baseline', marginBottom: 24 }}>
-                                    <Text style={{ fontSize: 20, color: '#9CA3AF', textDecorationLine: 'line-through', marginRight: 12 }}>
-                                        {selectedVertical?.isPremium ? '₹4999' : '₹2499'}
-                                    </Text>
-                                    <Text style={{ fontSize: 40, fontWeight: '800', color: '#10B981' }}>
-                                        {selectedVertical?.isPremium ? '₹2999' : '₹999'}
-                                    </Text>
-                                </View>
-
-                                <View style={{ width: '100%', paddingHorizontal: 10 }}>
-                                    {['Unlimited Listings', 'Premium Support', 'Store Analytics'].map((feat, i) => (
-                                        <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                                            <Ionicons name="checkmark-circle" size={20} color="#10B981" style={{ marginRight: 10 }} />
-                                            <Text style={{ fontSize: 16, color: '#374151' }}>{feat}</Text>
-                                        </View>
-                                    ))}
-                                </View>
-                            </View>
-
-                            {paymentStatus === 'success' ? (
-                                <View style={{ marginTop: 24, alignItems: 'center' }}>
-                                    <Ionicons name="checkmark-circle" size={64} color="#10B981" />
-                                    <Text style={{ fontSize: 18, fontWeight: '600', color: '#10B981', marginTop: 12 }}>Payment Successful!</Text>
-                                    <Text style={{ color: '#6B7280', marginTop: 4 }}>Transaction ID: {paymentDetails?.paymentId}</Text>
-                                </View>
-                            ) : (
-                                <TouchableOpacity
-                                    style={{
-                                        backgroundColor: Colors.primary,
-                                        width: '100%',
-                                        paddingVertical: 16,
-                                        borderRadius: 12,
-                                        alignItems: 'center',
-                                        marginTop: 32,
-                                        flexDirection: 'row',
-                                        justifyContent: 'center'
-                                    }}
-                                    onPress={handlePayment}
-                                >
-                                    <Ionicons name="lock-closed" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
-                                    <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: 'bold' }}>Pay & Unlock</Text>
-                                </TouchableOpacity>
-                            )}
-
-                            <View style={{ marginTop: 16, flexDirection: 'row', alignItems: 'center' }}>
-                                <View style={{ height: 1, backgroundColor: '#E5E7EB', flex: 1 }} />
-                                <Text style={{ marginHorizontal: 10, color: '#9CA3AF', fontSize: 12 }}>Secure Payment via Razorpay</Text>
-                                <View style={{ height: 1, backgroundColor: '#E5E7EB', flex: 1 }} />
-                            </View>
-                        </View>
-                    </View>
-                )}
+                {step === 6 && <StepSubscription onPayment={handlePayment} />}
 
                 {step === 7 && <StepReview />}
                 </View>
