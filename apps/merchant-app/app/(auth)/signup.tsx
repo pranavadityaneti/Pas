@@ -20,9 +20,7 @@ import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
     validateIdentity,
-    validateStore,
-    validatePhotos,
-    validateBranches,
+    validateStores,
     validateKyc,
     validatePayment,
     type ValidationResult,
@@ -32,9 +30,7 @@ import { useImageUpload } from '../../src/hooks/useImageUpload';
 import { SignupProvider, useSignupContext } from '../../src/screens/signup/shared/SignupContext';
 import { styles } from '../../src/screens/signup/shared/signupStyles';
 import { StepIdentity } from '../../src/screens/signup/steps/StepIdentity';
-import { StepStore } from '../../src/screens/signup/steps/StepStore';
-import { StepPhotos } from '../../src/screens/signup/steps/StepPhotos';
-import { StepBranches } from '../../src/screens/signup/steps/StepBranches';
+import { StepStores } from '../../src/screens/signup/steps/StepStores';
 import { StepKyc } from '../../src/screens/signup/steps/StepKyc';
 import { StepSubscription } from '../../src/screens/signup/steps/StepSubscription';
 import { StepReview } from '../../src/screens/signup/steps/StepReview';
@@ -48,7 +44,9 @@ if (Constants.appOwnership !== 'expo') {
     }
 }
 
-const STEPS = ['Identity', 'Store', 'Photos', 'Branches', 'KYC', 'Subscription', 'Review'];
+// 2026-06-04 (Phase 2.C.2): v2 step order. Agreements (Step 4) lands in
+// Phase 2.D, shifting Subscription → 5 and Review → 6.
+const STEPS = ['Identity', 'Stores', 'KYC', 'Subscription', 'Review'];
 
 function SignupScreenInner() {
     // 2026-06-04 (Phase 1.6.B): master signup state lifted into SignupProvider
@@ -66,6 +64,7 @@ function SignupScreenInner() {
         storePhotos, setStorePhotos,
         hasBranches, setHasBranches,
         branches, setBranches,
+        stores, setStores,
         kyc, setKyc,
         docFiles, setDocFiles,
         paymentStatus, setPaymentStatus,
@@ -117,12 +116,12 @@ function SignupScreenInner() {
         // a thin switch that delegates to those pure helpers and presents the
         // resulting Alert. Error titles + messages are preserved verbatim.
         let result: ValidationResult = { ok: true };
+        // 2026-06-04 (Phase 2.C.2): v2 step map. Identity → Stores → KYC →
+        // Subscription → Review. (Agreements lands at Step 4 in Phase 2.D.)
         if (step === 1) result = validateIdentity(identity, otp.verified);
-        else if (step === 2) result = validateStore(store);
-        else if (step === 3) result = validatePhotos(storePhotos);
-        else if (step === 4) result = validateBranches(hasBranches, branches);
-        else if (step === 5) result = validateKyc(kyc, docFiles, selectedVertical);
-        else if (step === 6) result = validatePayment(paymentStatus);
+        else if (step === 2) result = validateStores(store.categoryId, stores);
+        else if (step === 3) result = validateKyc(kyc, docFiles, selectedVertical);
+        else if (step === 4) result = validatePayment(paymentStatus);
 
         if (!result.ok) {
             Alert.alert(result.title, result.message);
@@ -299,37 +298,41 @@ function SignupScreenInner() {
             fssai: docFiles.fssai ? await uploadFile(docFiles.fssai, `${userId}/fssai.jpg`) : null,
         };
 
-        const storePhotoUrls = await Promise.all(storePhotos.map((uri, idx) => uploadFile(uri, `${userId}/store_photo_${idx}.jpg`)));
+        // 2026-06-04 (Phase 2.C.2): v2 per-store photo upload. Each Store has
+        // its own photos array, uploaded to a UUID-keyed bucket path.
+        const storesWithUploaded = await Promise.all(stores.map(async (s) => {
+            const uploaded = await Promise.all(
+                s.photos.map((uri, pIdx) => uploadFile(uri, `${userId}/${s.id}/photo_${pIdx}.jpg`))
+            );
+            return {
+                id: s.id,
+                name: s.name,
+                address: s.address,
+                latitude: s.latitude,
+                longitude: s.longitude,
+                city: s.city,
+                manager_name: s.managerName,
+                phone: s.managerPhone,
+                cuisines: s.cuisines,
+                is_veg: s.isVeg,
+                restaurant_type: s.restaurantType || null,
+                photos: uploaded.filter(u => u !== null) as string[],
+            };
+        }));
 
-        // Upload branch photos
-        const branchPhotoUrls = await Promise.all(
-            branches.map(async (branch, bIdx) => {
-                if (!branch.photos || branch.photos.length === 0) return [];
-                const urls = await Promise.all(
-                    branch.photos.map((uri, pIdx) => uploadFile(uri, `${userId}/branch_${bIdx}/photo_${pIdx}.jpg`))
-                );
-                return urls.filter(u => u !== null) as string[];
-            })
-        );
+        const firstStore = storesWithUploaded[0];
+        const restStores = storesWithUploaded.slice(1);
 
         const payload = {
             ownerName: identity.ownerName,
-            // 2026-06-04 (Phase 2.A, spec blocker B2): designation captured at Step 1.
-            // Server-side handling lands in Phase 2.A2 (migration + Zod + Prisma update);
-            // until then the API silently drops this field via its passthrough Zod schema.
+            // 2026-06-04 (Phase 2.A, spec blocker B2): designation persisted via
+            // Phase 2.A2 backend wiring (commit e30eecd9, deployed 2026-06-04).
             designation: identity.designation,
             email: identity.email,
             phone: identity.phone,
-            storeName: store.storeName,
             verticalId: store.categoryId,
-            city: store.city,
-            address: store.address,
-            latitude: store.latitude,
-            longitude: store.longitude,
-            hasBranches: hasBranches,
-            cuisines: store.cuisines,
-            isVeg: store.isVeg,
-            restaurantType: store.restaurantType,
+
+            // ── KYC fields ─────────────────────────────────────────────
             panNumber: kyc.panNumber,
             aadharNumber: kyc.aadharNumber,
             msmeNumber: kyc.msmeNumber,
@@ -340,20 +343,40 @@ function SignupScreenInner() {
             gstNumber: kyc.gstNumber,
             fssaiNumber: kyc.fssaiNumber,
             docUrls: docUrlsLocal,
-            storePhotos: storePhotoUrls.filter(url => url !== null),
-            branches: hasBranches ? branches.map((b, i) => ({
+
+            // ── v2 PRIMARY: stores[] (server-side handling lands in Phase 2.C.3) ──
+            stores: storesWithUploaded,
+
+            // ── v1 LEGACY backward-compat ──
+            // Until Phase 2.C.3 ships the server-side stores[] handler, the
+            // current production API uses the v1 flat fields below to create
+            // the Merchant + first Store + N-1 branches. After 2.C.3 deploys,
+            // these become silently ignored by the server (passthrough Zod).
+            // Phase 2.G removes them entirely.
+            storeName: firstStore?.name || '',
+            city: firstStore?.city || '',
+            address: firstStore?.address || '',
+            latitude: firstStore?.latitude,
+            longitude: firstStore?.longitude,
+            hasBranches: stores.length > 1,
+            cuisines: firstStore?.cuisines || [],
+            isVeg: firstStore?.is_veg ?? false,
+            restaurantType: firstStore?.restaurant_type || '',
+            storePhotos: firstStore?.photos || [],
+            branches: restStores.map((b) => ({
                 name: b.name,
                 address: b.address,
                 latitude: b.latitude,
                 longitude: b.longitude,
-                city: b.city || store.city,
+                city: b.city || firstStore?.city || '',
                 manager_name: b.manager_name,
                 phone: b.phone,
-                cuisines: b.cuisines || [],
-                is_veg: b.isVeg || false,
-                restaurant_type: b.restaurantType || null,
-                branch_photos: branchPhotoUrls[i] || [],
-            })) : [],
+                cuisines: b.cuisines,
+                is_veg: b.is_veg,
+                restaurant_type: b.restaurant_type,
+                branch_photos: b.photos,
+            })),
+
             finalize,
             subscription: paymentOverrides
         };
@@ -372,12 +395,14 @@ function SignupScreenInner() {
 
     const handleNext = async () => {
         if (!validateStep()) return;
-        
-        if (step === 5) {
+
+        // 2026-06-04 (Phase 2.C.2): server sync now triggers at KYC → Subscription
+        // boundary (step 3 in v2; was step 5 in v1).
+        if (step === 3) {
             setLoading(true);
             try {
                 await syncDraftState(false);
-                setStep(6);
+                setStep(4);
             } catch (err: any) {
                 Alert.alert('Sync Error', err.message || 'Failed to save progress to server.');
             } finally {
@@ -386,8 +411,7 @@ function SignupScreenInner() {
             return;
         }
 
-        if (step < 7) {
-            // Note: Since step 7 logic was absorbed by Payment (Step 6), standard navigation works here.
+        if (step < STEPS.length) {
             setStep(step + 1);
         }
     };
@@ -458,19 +482,17 @@ function SignupScreenInner() {
                 showsVerticalScrollIndicator={false}
             >
                 <View style={{ flex: 1, padding: 16 }}>
+                {/* 2026-06-04 (Phase 2.C.2): v2 step dispatch. Agreements
+                    (between Stores and Subscription) lands in Phase 2.D. */}
                 {step === 1 && <StepIdentity otp={otp} />}
 
-                {step === 2 && <StepStore />}
+                {step === 2 && <StepStores />}
 
-                {step === 3 && <StepPhotos />}
+                {step === 3 && <StepKyc />}
 
-                {step === 4 && <StepBranches />}
+                {step === 4 && <StepSubscription onPayment={handlePayment} />}
 
-                {step === 5 && <StepKyc />}
-
-                {step === 6 && <StepSubscription onPayment={handlePayment} />}
-
-                {step === 7 && <StepReview />}
+                {step === 5 && <StepReview />}
                 </View>
 
                 <View style={styles.footer}>

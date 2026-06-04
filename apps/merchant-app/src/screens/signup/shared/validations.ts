@@ -112,7 +112,17 @@ export function validatePhotos(storePhotos: string[]): ValidationResult {
  *  - Each store: latitude AND longitude non-null (Google Places must have set them)
  *  - Each store: minimum 2 photos
  */
-export function validateStores(stores: Store[]): ValidationResult {
+export function validateStores(
+    verticalId: string,
+    stores: Store[],
+): ValidationResult {
+    if (!verticalId) {
+        return {
+            ok: false,
+            title: 'Category Required',
+            message: 'Please pick the business category that describes your stores.',
+        };
+    }
     if (!stores || stores.length === 0) {
         return {
             ok: false,

@@ -23,8 +23,8 @@
  * Validation: validateStores in shared/validations.ts (called by orchestrator).
  */
 
-import React from 'react';
-import { View, Text, TextInput, TouchableOpacity, Image, ScrollView, Alert } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, Image, ScrollView, Alert, Modal, TouchableWithoutFeedback, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
@@ -42,7 +42,21 @@ const COMMON_CUISINES = [
 ];
 
 export function StepStores() {
-    const { stores, setStores, selectedVertical } = useSignupContext();
+    const {
+        stores, setStores,
+        store, setStore,
+        verticals, verticalsLoading, verticalsError, fetchVerticals,
+        selectedVertical,
+    } = useSignupContext();
+
+    /**
+     * 2026-06-04 (Phase 2.C.2): The vertical (categoryId/categoryName) lives
+     * on the legacy `store` context object — it's per-merchant, not per-store.
+     * Keeping the v1 storage shape here avoids churning SignupContext again
+     * during this stage; Phase 2.G will lift verticalId/Name into their own
+     * context fields and retire the legacy `store` object entirely.
+     */
+    const [showCategoryPicker, setShowCategoryPicker] = useState(false);
 
     const showFoodFields = !!(selectedVertical?.requiresFssai || selectedVertical?.isDining);
 
@@ -81,6 +95,76 @@ export function StepStores() {
 
     return (
         <>
+            {/* Vertical (business category) picker — first thing the merchant chooses. */}
+            <View style={styles.card}>
+                <View style={styles.cardHeader}>
+                    <Ionicons name="grid-outline" size={20} color={Colors.primary} />
+                    <Text style={styles.cardTitle}>Business Category</Text>
+                </View>
+                <Text style={{ fontSize: 13, color: '#6B7280', marginBottom: 12 }}>
+                    Pick the category that best describes all your stores.
+                </Text>
+                <TouchableOpacity
+                    style={styles.selectInput}
+                    onPress={() => setShowCategoryPicker(true)}
+                >
+                    <Text style={store.categoryName ? styles.selectText : styles.selectPlaceholder}>
+                        {store.categoryName || 'Select category'}
+                    </Text>
+                    <Ionicons name="chevron-down" size={20} color="#9CA3AF" />
+                </TouchableOpacity>
+
+                <Modal
+                    visible={showCategoryPicker}
+                    transparent={true}
+                    animationType="fade"
+                    onRequestClose={() => setShowCategoryPicker(false)}
+                >
+                    <TouchableWithoutFeedback onPress={() => setShowCategoryPicker(false)}>
+                        <View style={styles.modalOverlay}>
+                            <View style={styles.modalContent}>
+                                <Text style={styles.modalTitle}>Select Category</Text>
+                                {verticalsLoading ? (
+                                    <ActivityIndicator size="large" color={Colors.primary} style={{ marginVertical: 20 }} />
+                                ) : verticalsError ? (
+                                    <View style={{ alignItems: 'center', padding: 20 }}>
+                                        <Text style={{ color: '#EF4444', textAlign: 'center', marginBottom: 12 }}>{verticalsError}</Text>
+                                        <TouchableOpacity onPress={fetchVerticals} style={{ padding: 8, backgroundColor: Colors.primary, borderRadius: 8 }}>
+                                            <Text style={{ color: '#FFF' }}>Retry</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                ) : (
+                                    <ScrollView style={{ maxHeight: 300 }}>
+                                        {verticals.map((v) => (
+                                            <TouchableOpacity
+                                                key={v.id}
+                                                style={styles.modalItem}
+                                                onPress={() => {
+                                                    setStore({ ...store, categoryId: v.id, categoryName: v.name });
+                                                    setShowCategoryPicker(false);
+                                                }}
+                                            >
+                                                <Text style={[
+                                                    styles.modalItemText,
+                                                    store.categoryId === v.id && styles.modalItemTextActive
+                                                ]}>{v.name}</Text>
+                                                {store.categoryId === v.id && <Ionicons name="checkmark" size={20} color={Colors.primary} />}
+                                            </TouchableOpacity>
+                                        ))}
+                                    </ScrollView>
+                                )}
+                                <TouchableOpacity
+                                    style={styles.modalCloseBtn}
+                                    onPress={() => setShowCategoryPicker(false)}
+                                >
+                                    <Text style={styles.modalCloseText}>Close</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </TouchableWithoutFeedback>
+                </Modal>
+            </View>
+
             <View style={styles.card}>
                 <View style={styles.cardHeader}>
                     <Ionicons name="storefront-outline" size={20} color={Colors.primary} />
