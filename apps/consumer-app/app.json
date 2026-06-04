@@ -9,7 +9,9 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "updates": {
-      "url": "https://u.expo.dev/350a8772-4cd9-439e-9d0e-a99a91c08915"
+      "url": "https://u.expo.dev/350a8772-4cd9-439e-9d0e-a99a91c08915",
+      "fallbackToCacheTimeout": 0,
+      "checkAutomatically": "ON_LOAD"
     },
     "runtimeVersion": {
       "policy": "appVersion"
@@ -24,7 +26,9 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSLocationWhenInUseUsageDescription": "Pick at Store requires access to your location to discover nearby grocery stores, bakeries, and calculate accurate delivery ETAs for your orders.",
-        "UIBackgroundModes": ["remote-notification"]
+        "UIBackgroundModes": [
+          "remote-notification"
+        ]
       }
     },
     "android": {
@@ -45,7 +49,9 @@
       "package": "io.pickatstore.consumer",
       "privacyPolicyUrl": "https://www.pickatstore.io/privacypolicy",
       "usesCleartextTraffic": true,
-      "permissions": ["android.permission.POST_NOTIFICATIONS"]
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "output": "static",
@@ -100,7 +106,8 @@
         {
           "sounds": []
         }
-      ]
+      ],
+      "@sentry/react-native"
     ],
     "experiments": {
       "typedRoutes": true,
