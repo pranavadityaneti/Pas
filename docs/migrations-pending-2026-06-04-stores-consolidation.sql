@@ -1,0 +1,65 @@
+-- Phase 2.C.3 — Stores consolidation backend notes.
+--
+-- This file is a NOTE document, not a script to run blindly. The frontend
+-- (Phase 2.C.2) and API (Phase 2.C.3, commit landing alongside this doc)
+-- collapse v1's "main store + N branches" model into a flat list of N stores
+-- inside the signup flow. Existing data does NOT need to migrate immediately:
+-- the API's PATCH /auth/merchant/draft handler supports BOTH the v2 stores[]
+-- shape AND the legacy v1 main-branch flow as a fallback.
+--
+-- DATABASE STATE (no changes needed today):
+--   - merchant_branches.id is text (Prisma `String @id @default(uuid())` — no
+--     @db.Uuid). Accepts any UUID-shaped string the frontend generates.
+--   - The id == merchant_id "main branch" convention from v1 stays on existing
+--     merchants. New v2 signups create N branches with fresh UUIDs; the old
+--     main-branch row is left alone for existing merchants.
+--   - No FK or column changes.
+--
+-- ──────────────────────────────────────────────────────────────────────
+-- Optional: migrate existing merchants' main branches to UUID-keyed rows
+-- (Phase 4 or later — only run if/when you want to retire the
+-- id == merchant_id convention entirely. Breaks any FK that points at
+-- the old main-branch ID: store_staff, StoreProduct.branch_id, etc.)
+-- ──────────────────────────────────────────────────────────────────────
+--
+-- 1. Find merchants whose "main branch" row uses id == merchant_id:
+--
+--    SELECT m.id AS merchant_id, mb.id AS branch_id, mb.branch_name
+--    FROM merchants m
+--    JOIN merchant_branches mb ON mb.id = m.id AND mb.merchant_id = m.id;
+--
+-- 2. For each such merchant:
+--    a. Generate a new UUID for the branch.
+--    b. INSERT a new merchant_branches row with the new UUID, copying all
+--       columns from the old row.
+--    c. UPDATE store_staff SET store_id = <new uuid> WHERE store_id = <old>.
+--    d. UPDATE "StoreProduct" SET branch_id = <new uuid> WHERE branch_id = <old>.
+--    e. UPDATE any other FK targets…
+--    f. DELETE the old row.
+--
+-- This is a non-trivial data migration. Recommend scripting it in apps/api
+-- as a one-shot npm task, with dry-run mode and per-merchant transactions.
+-- NOT in scope for the June 6 launch.
+--
+-- ──────────────────────────────────────────────────────────────────────
+-- get_nearby_stores RPC
+-- ──────────────────────────────────────────────────────────────────────
+--
+-- The customer-app discovery RPC reads merchant_branches by lat/lng. The
+-- v2 path creates one row per Store with each store's coords, so a multi-
+-- store merchant will appear N times in get_nearby_stores results — once
+-- per store. This is the CORRECT behavior (the merchant operates from N
+-- physical locations; customers should see each location).
+--
+-- If existing merchants have a "main branch" row AND additional branch
+-- rows at the same coords, they may appear duplicated. Audit if needed:
+--
+--    SELECT merchant_id, COUNT(*) AS branch_count
+--    FROM merchant_branches
+--    WHERE is_active = true
+--      AND latitude IS NOT NULL AND longitude IS NOT NULL
+--    GROUP BY merchant_id
+--    HAVING COUNT(*) > 1
+--    ORDER BY branch_count DESC;
+--
+-- ──────────────────────────────────────────────────────────────────────

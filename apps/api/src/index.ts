@@ -4261,7 +4261,87 @@ app.patch('/auth/merchant/draft', async (req, res) => {
                 });
             }
 
-            if (payload.storeName && payload.city && payload.address) {
+            // 2026-06-04 (Phase 2.C.3): v2 stores[] path. When the frontend sends
+            // the consolidated stores array (Phase 2.C.2+), each Store becomes
+            // a UUID-keyed MerchantBranch row. The Store row (singular, the
+            // anchor row) uses the FIRST store's data for backward-compat with
+            // legacy merchant-id lookups. NO main-branch convention is applied
+            // for new merchants; existing merchants' main branch (id == merchant_id)
+            // remains in place until a dedicated migration retires it.
+            if (Array.isArray(payload.stores) && payload.stores.length > 0 && payload.stores[0]?.city) {
+                const firstStore = payload.stores[0];
+                const cityRecord = await tx.city.upsert({
+                    where: { name: firstStore.city },
+                    update: {},
+                    create: { id: crypto.randomUUID(), name: firstStore.city, active: true, updatedAt: new Date() }
+                });
+
+                const existingStoreRow = await tx.store.findUnique({ where: { id: userId } });
+                const anchorImage = firstStore.photos && firstStore.photos.length > 0 ? firstStore.photos[0] : null;
+
+                if (existingStoreRow) {
+                    await tx.store.update({
+                        where: { id: userId },
+                        data: {
+                            name: firstStore.name || 'Main Store',
+                            cityId: cityRecord.id,
+                            address: firstStore.address,
+                            latitude: firstStore.latitude ?? null,
+                            longitude: firstStore.longitude ?? null,
+                            image: anchorImage,
+                            active: false,
+                            updatedAt: new Date()
+                        }
+                    });
+                } else {
+                    await tx.store.create({
+                        data: { id: userId, managerId: userId, name: firstStore.name || 'Main Store', cityId: cityRecord.id, address: firstStore.address, latitude: firstStore.latitude ?? null, longitude: firstStore.longitude ?? null, active: false, image: anchorImage, updatedAt: new Date() }
+                    });
+                }
+
+                // Upsert each Store as a UUID-keyed MerchantBranch row. The
+                // frontend's Store.id is reused as MerchantBranch.id (text PK,
+                // accepts any UUID-shaped string).
+                for (const s of payload.stores) {
+                    const branchData = {
+                        merchantId: userId,
+                        branchName: s.name || 'Store',
+                        managerName: s.manager_name,
+                        phone: s.phone,
+                        address: s.address,
+                        city: s.city ?? null,
+                        latitude: s.latitude ?? null,
+                        longitude: s.longitude ?? null,
+                        isActive: true,
+                        cuisines: s.cuisines || [],
+                        isVeg: s.is_veg ?? null,
+                        restaurantType: s.restaurant_type || null,
+                        branchPhotos: s.photos || [],
+                    };
+                    await tx.merchantBranch.upsert({
+                        where: { id: s.id },
+                        update: branchData,
+                        create: { id: s.id, ...branchData },
+                    });
+                }
+
+                // Delete any branches owned by this merchant that are NOT in the
+                // submitted stores[] list — handles store removal. Preserves the
+                // existing main-branch row (id == merchant_id) ONLY if it's not
+                // in the submitted list (so old merchants keep their main row).
+                const submittedIds = payload.stores.map((s: any) => s.id);
+                await tx.merchantBranch.deleteMany({
+                    where: {
+                        merchantId: userId,
+                        id: { notIn: submittedIds.concat([userId]) }
+                    }
+                });
+            }
+            // 2026-06-04 (Phase 2.C.3): legacy v1 path retained as a fallback
+            // for clients still sending the flat storeName/branches payload
+            // (older app builds before Phase 2.C.2 ships). Removed in Phase 2.G
+            // once the v2 build is universal.
+            else if (payload.storeName && payload.city && payload.address) {
                 const cityRecord = await tx.city.upsert({
                     where: { name: payload.city },
                     update: {},
