@@ -69,6 +69,7 @@ function SignupScreenInner() {
         stores, setStores,
         agreements,
         couponCode, couponDiscount,
+        reviewConfirmed,
         kyc, setKyc,
         docFiles, setDocFiles,
         paymentStatus, setPaymentStatus,
@@ -449,6 +450,14 @@ function SignupScreenInner() {
     };
 
     const handleFinalSubmit = async () => {
+        // 2026-06-04 (Phase 2.F): gate on the Review-step confirm checkbox.
+        if (!reviewConfirmed) {
+            Alert.alert(
+                'Confirmation Required',
+                'Please tick "I confirm everything is correct" at the top of the Review page before submitting.',
+            );
+            return;
+        }
         setLoading(true);
         try {
             await syncDraftState(true);

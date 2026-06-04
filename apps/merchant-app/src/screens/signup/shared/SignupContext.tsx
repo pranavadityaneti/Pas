@@ -178,6 +178,10 @@ export interface SignupContextValue {
     couponError: string | null;
     setCouponError: React.Dispatch<React.SetStateAction<string | null>>;
 
+    // ── step 6: review confirmation (v2 NEW) ──────────────────────────
+    reviewConfirmed: boolean;
+    setReviewConfirmed: React.Dispatch<React.SetStateAction<boolean>>;
+
     // ── step 5: kyc + docFiles ────────────────────────────────────────
     kyc: KycState;
     setKyc: React.Dispatch<React.SetStateAction<KycState>>;
@@ -270,6 +274,13 @@ export function SignupProvider({ children }: SignupProviderProps) {
     const [couponCode, setCouponCode] = useState('');
     const [couponDiscount, setCouponDiscount] = useState(0);
     const [couponError, setCouponError] = useState<string | null>(null);
+
+    // 2026-06-04 (Phase 2.F): Review-step "Confirm everything is correct"
+    // checkbox. Final submit gates on this. Resets to false on every fresh
+    // entry to the Review step is NOT implemented — the user only needs to
+    // confirm once unless they Edit something (which would naturally bring
+    // them back here).
+    const [reviewConfirmed, setReviewConfirmed] = useState(false);
 
     const [kyc, setKyc] = useState<KycState>({
         panNumber: '',
@@ -435,6 +446,7 @@ export function SignupProvider({ children }: SignupProviderProps) {
         couponCode, setCouponCode,
         couponDiscount, setCouponDiscount,
         couponError, setCouponError,
+        reviewConfirmed, setReviewConfirmed,
         kyc, setKyc,
         docFiles, setDocFiles,
         paymentStatus, setPaymentStatus,
