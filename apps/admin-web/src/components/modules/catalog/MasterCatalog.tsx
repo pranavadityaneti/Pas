@@ -587,7 +587,7 @@ export function MasterCatalog() {
 
         {/* Right Actions Toolbar */}
         <div className="flex items-center gap-3 bg-white p-1.5 rounded-xl border border-gray-200 shadow-sm">
-          <Button variant="ghost" size="sm" className="text-gray-600 hover:text-blue-600" onClick={() => window.open('http://localhost:3000/products/template', '_blank')}>
+          <Button variant="ghost" size="sm" className="text-gray-600 hover:text-[#B52725]" onClick={() => window.open('http://localhost:3000/products/template', '_blank')}>
             <FileSpreadsheet className="w-4 h-4 mr-2" /> Template
           </Button>
           <div className="w-px h-4 bg-gray-200"></div>
@@ -687,7 +687,7 @@ export function MasterCatalog() {
                   <Filter className="w-4 h-4 text-gray-500" />
                   Filters
                   {(filters.category.length > 0 || filters.gstRate.length > 0 || filters.missingData.length > 0) && (
-                    <Badge variant="secondary" className="ml-1 h-5 px-1.5 min-w-[20px] bg-blue-50 text-blue-700 hover:bg-blue-100">
+                    <Badge variant="secondary" className="ml-1 h-5 px-1.5 min-w-[20px] bg-[#B52725]/10 text-[#B52725] hover:bg-[#B52725]/15">
                       {filters.category.length + filters.gstRate.length + filters.missingData.length}
                     </Badge>
                   )}
@@ -979,7 +979,7 @@ export function MasterCatalog() {
                             </div>
                           </TableCell>
                           <TableCell className="text-right">
-                             <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50/50 font-bold whitespace-nowrap">
+                             <Badge variant="outline" className="text-[#B52725] border-[#B52725]/20 bg-[#B52725]/5 font-bold whitespace-nowrap">
                                {item.status}
                              </Badge>
                           </TableCell>
@@ -1140,11 +1140,11 @@ export function MasterCatalog() {
                   {/* Full Width Upload */}
                   {(editingProduct?.images?.length || 0) < 5 && (
                     <div
-                      className="w-full h-24 rounded-lg border-2 border-dashed border-gray-200 bg-gray-50 hover:bg-blue-50 hover:border-blue-200 cursor-pointer flex flex-col items-center justify-center gap-2 transition-all group mb-4"
+                      className="w-full h-24 rounded-lg border-2 border-dashed border-gray-200 bg-gray-50 hover:bg-[#B52725]/5 hover:border-[#B52725]/30 cursor-pointer flex flex-col items-center justify-center gap-2 transition-all group mb-4"
                       onClick={() => imageInputRef.current?.click()}
                     >
-                      {isUploading ? <Loader2 className="w-5 h-5 animate-spin text-blue-500" /> : <Plus className="w-5 h-5 text-gray-400 group-hover:text-blue-500" />}
-                      <span className="text-sm font-medium text-gray-500 group-hover:text-blue-600">Click to Upload Image</span>
+                      {isUploading ? <Loader2 className="w-5 h-5 animate-spin text-[#B52725]" /> : <Plus className="w-5 h-5 text-gray-400 group-hover:text-[#B52725]" />}
+                      <span className="text-sm font-medium text-gray-500 group-hover:text-[#B52725]">Click to Upload Image</span>
                     </div>
                   )}
                   <input
@@ -1187,7 +1187,7 @@ export function MasterCatalog() {
                     <Input
                       value={editingProduct?.name || ''}
                       onChange={(e) => setEditingProduct(prev => prev ? { ...prev, name: e.target.value } : null)}
-                      className="h-10 text-sm bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500 rounded-md shadow-sm"
+                      className="h-10 text-sm bg-white border-gray-300 focus:border-[#B52725] focus:ring-[#B52725] rounded-md shadow-sm"
                     />
                   </div>
 
@@ -1378,7 +1378,7 @@ export function MasterCatalog() {
               <div className="bg-gray-900 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-4 border border-gray-700">
                 {/* Selection Count */}
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold text-sm">
+                  <div className="w-8 h-8 bg-[#B52725] rounded-lg flex items-center justify-center font-bold text-sm">
                     {selectedProducts.length}
                   </div>
                   <span className="text-sm font-medium text-gray-300">selected</span>

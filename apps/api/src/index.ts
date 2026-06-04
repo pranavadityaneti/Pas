@@ -5504,6 +5504,47 @@ app.get('/admin/customers/:id/orders', async (req, res) => {
 });
 
 /**
+ * GET /admin/merchants/:id/orders
+ *
+ * Recent orders for a merchant — powers the Recent Orders tab in
+ * MerchantDetailsSheet. Migrated from supabase.from('orders') direct
+ * read (RLS-blocked for the authenticated JWT) to API + Prisma per the
+ * "admin reads via API" architectural rule.
+ */
+app.get('/admin/merchants/:id/orders', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER as any); if (!caller) return;
+    try {
+        const { id } = req.params;
+        const limit = Math.min(parseInt((req.query.limit as string) || '50', 10) || 50, 500);
+        const rows = await prisma.order.findMany({
+            where: { storeId: id },
+            orderBy: { createdAt: 'desc' },
+            take: limit,
+            select: {
+                id: true, orderNumber: true, customer_name: true,
+                totalAmount: true, status: true, createdAt: true,
+                items_count: true, order_type: true,
+            },
+        });
+        res.json({
+            orders: rows.map(o => ({
+                id:           o.id,
+                order_number: o.orderNumber,
+                customer_name:o.customer_name,
+                total_amount: o.totalAmount,
+                status:       o.status,
+                created_at:   o.createdAt,
+                items_count:  o.items_count,
+                order_type:   o.order_type,
+            })),
+        });
+    } catch (e: any) {
+        console.error('[admin/merchants/:id/orders] error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to fetch merchant orders' });
+    }
+});
+
+/**
  * GET /admin/customers/:id/addresses
  *
  * All addresses for one customer — used by the CustomerDetailsSheet "Addresses"

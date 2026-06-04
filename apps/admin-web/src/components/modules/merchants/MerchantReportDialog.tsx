@@ -180,7 +180,7 @@ export function MerchantReportDialog({ merchant, open, onOpenChange }: MerchantR
                                 <div className="p-4 bg-white rounded-lg border shadow-sm space-y-2">
                                     <div className="flex justify-between items-start">
                                         <p className="text-xs font-medium text-gray-500 uppercase">Total Orders</p>
-                                        <Package className="w-4 h-4 text-blue-600" />
+                                        <Package className="w-4 h-4 text-[#B52725]" />
                                     </div>
                                     <p className="text-2xl font-bold">{stats.orderHistory.reduce((a, b) => a + b.orders, 0)}</p>
                                     <p className="text-xs text-gray-500">Last 7 days</p>
@@ -281,7 +281,7 @@ export function MerchantReportDialog({ merchant, open, onOpenChange }: MerchantR
                                                 <span>65%</span>
                                             </div>
                                             <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
-                                                <div className="h-full bg-blue-500 w-[65%]"></div>
+                                                <div className="h-full bg-[#B52725] w-[65%]"></div>
                                             </div>
                                         </div>
                                         <div className="space-y-2">

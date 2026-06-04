@@ -308,7 +308,7 @@ export function EditMerchantDialog({ merchant, open, onOpenChange, onRefresh }: 
                                                     key={day}
                                                     value={day}
                                                     aria-label={day}
-                                                    className="h-8 w-10 text-xs data-[state=on]:bg-blue-600 data-[state=on]:text-white data-[state=on]:border-blue-600 hover:bg-gray-100 transition-colors"
+                                                    className="h-8 w-10 text-xs data-[state=on]:bg-[#B52725] data-[state=on]:text-white data-[state=on]:border-[#B52725] hover:bg-gray-100 transition-colors"
                                                 >
                                                     {day}
                                                 </ToggleGroupItem>

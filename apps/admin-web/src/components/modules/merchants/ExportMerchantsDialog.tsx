@@ -200,7 +200,7 @@ export function ExportMerchantsDialog({ trigger }: ExportMerchantsDialogProps) {
                             <Label className="text-sm font-medium">Fields to Export</Label>
                             <button
                                 type="button"
-                                className="text-xs text-blue-600 hover:underline"
+                                className="text-xs text-[#B52725] hover:underline"
                                 onClick={() => setSelectedFields(EXPORT_FIELDS.map(f => f.id))}
                             >
                                 Select All

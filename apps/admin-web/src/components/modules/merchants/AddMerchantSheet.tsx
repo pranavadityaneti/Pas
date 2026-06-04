@@ -197,7 +197,7 @@ export function AddMerchantSheet({ trigger, onSuccess }: AddMerchantSheetProps) 
                             {/* Basic Details Card */}
                             <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
                                 <div className="flex items-center gap-2 mb-6">
-                                    <Store className="w-5 h-5 text-blue-600" />
+                                    <Store className="w-5 h-5 text-[#B52725]" />
                                     <h3 className="font-semibold text-gray-900">Basic Details</h3>
                                 </div>
 
@@ -209,7 +209,7 @@ export function AddMerchantSheet({ trigger, onSuccess }: AddMerchantSheetProps) 
                                             value={formData.name}
                                             onChange={e => setFormData({ ...formData, name: e.target.value })}
                                             placeholder="e.g. Ratnadeep Supermarket"
-                                            className="bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500 h-11"
+                                            className="bg-white border-gray-300 focus:border-[#B52725] focus:ring-[#B52725] h-11"
                                         />
                                     </div>
 
@@ -219,7 +219,7 @@ export function AddMerchantSheet({ trigger, onSuccess }: AddMerchantSheetProps) 
                                             value={formData.ownerName}
                                             onChange={e => setFormData({ ...formData, ownerName: e.target.value })}
                                             placeholder="Full name of the owner"
-                                            className="bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500 h-11"
+                                            className="bg-white border-gray-300 focus:border-[#B52725] focus:ring-[#B52725] h-11"
                                         />
                                     </div>
 
@@ -230,7 +230,7 @@ export function AddMerchantSheet({ trigger, onSuccess }: AddMerchantSheetProps) 
                                             value={formData.email}
                                             onChange={e => setFormData({ ...formData, email: e.target.value })}
                                             placeholder="owner@example.com"
-                                            className="bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500 h-11"
+                                            className="bg-white border-gray-300 focus:border-[#B52725] focus:ring-[#B52725] h-11"
                                         />
                                     </div>
 
@@ -241,7 +241,7 @@ export function AddMerchantSheet({ trigger, onSuccess }: AddMerchantSheetProps) 
                                             value={formData.phone}
                                             onChange={e => setFormData({ ...formData, phone: e.target.value })}
                                             placeholder="+91 98765 43210"
-                                            className="bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500 h-11"
+                                            className="bg-white border-gray-300 focus:border-[#B52725] focus:ring-[#B52725] h-11"
                                         />
                                     </div>
                                 </div>
@@ -250,7 +250,7 @@ export function AddMerchantSheet({ trigger, onSuccess }: AddMerchantSheetProps) 
                             {/* Location Card */}
                             <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
                                 <div className="flex items-center gap-2 mb-2">
-                                    <MapPin className="w-5 h-5 text-blue-600" />
+                                    <MapPin className="w-5 h-5 text-[#B52725]" />
                                     <h3 className="font-semibold text-gray-900">Store Location</h3>
                                 </div>
                                 <p className="text-xs text-gray-500 mb-4">Click on the map or drag the pin to mark the exact shop location.</p>
@@ -266,7 +266,7 @@ export function AddMerchantSheet({ trigger, onSuccess }: AddMerchantSheetProps) 
                                         value={formData.address}
                                         onChange={e => setFormData({ ...formData, address: e.target.value })}
                                         placeholder="Shop No, Street, Landmark..."
-                                        className="bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500 h-11"
+                                        className="bg-white border-gray-300 focus:border-[#B52725] focus:ring-[#B52725] h-11"
                                     />
                                 </div>
                             </div>
@@ -283,7 +283,7 @@ export function AddMerchantSheet({ trigger, onSuccess }: AddMerchantSheetProps) 
                                         id="hasBranches"
                                         checked={formData.hasBranches}
                                         onCheckedChange={(c) => setFormData({ ...formData, hasBranches: c as boolean })}
-                                        className="mt-1 border-gray-400 data-[state=checked]:bg-blue-600"
+                                        className="mt-1 border-gray-400 data-[state=checked]:bg-[#B52725] data-[state=checked]:border-[#B52725]"
                                     />
                                     <div className="flex-1">
                                         <Label htmlFor="hasBranches" className="text-base font-semibold text-gray-900 cursor-pointer">
@@ -304,7 +304,7 @@ export function AddMerchantSheet({ trigger, onSuccess }: AddMerchantSheetProps) 
                                         <div className="flex items-center gap-2">
                                             <h3 className="font-semibold text-gray-900">Branch List</h3>
                                             {branches.length > 0 && (
-                                                <span className="bg-blue-100 text-blue-700 text-xs font-medium px-2 py-0.5 rounded-full">
+                                                <span className="bg-[#B52725]/10 text-[#B52725] text-xs font-medium px-2 py-0.5 rounded-full">
                                                     {branches.length}
                                                 </span>
                                             )}
@@ -312,7 +312,7 @@ export function AddMerchantSheet({ trigger, onSuccess }: AddMerchantSheetProps) 
                                         <Button
                                             size="sm"
                                             variant="outline"
-                                            className="text-blue-600 border-blue-200 hover:bg-blue-50"
+                                            className="text-[#B52725] border-[#B52725]/30 hover:bg-[#B52725]/5"
                                             onClick={() => setBranches([...branches, { name: '', location: '' }])}
                                         >
                                             <Plus className="w-4 h-4 mr-1" /> Add Branch
