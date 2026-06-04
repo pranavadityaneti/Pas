@@ -29,3 +29,48 @@ export interface Branch {
     restaurantType: string;
     photos: string[];
 }
+
+/**
+ * State shape for Step 1 — Identity.
+ * Extracted from inline useState({...}) call in signup.tsx (Phase 1.2, 2026-06-04).
+ */
+export interface IdentityState {
+    ownerName: string;
+    phone: string;
+    email: string;
+}
+
+/**
+ * State shape for Step 2 — Store.
+ * Note: latitude/longitude are `number` (not `number | null`) because the
+ * current signup.tsx initializes them to Hyderabad defaults (17.385, 78.4867).
+ * That sentinel handling is being addressed in Phase 4, not Phase 1.
+ */
+export interface StoreState {
+    storeName: string;
+    categoryId: string;
+    categoryName: string;
+    city: string;
+    address: string;
+    latitude: number;
+    longitude: number;
+    cuisines: string[];
+    isVeg: boolean;
+    restaurantType: string;
+}
+
+/**
+ * State shape for Step 5 — KYC.
+ * Extracted from inline useState({...}) call in signup.tsx (Phase 1.2, 2026-06-04).
+ */
+export interface KycState {
+    panNumber: string;
+    aadharNumber: string;
+    msmeNumber: string;
+    bankAccount: string;
+    ifsc: string;
+    turnoverRange: string;
+    gstNumber: string;
+    fssaiNumber: string;
+    beneficiaryName: string;
+}

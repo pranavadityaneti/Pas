@@ -19,7 +19,7 @@ import { supabase, setSessionFromTokens } from '../../src/lib/supabase';
 import { Colors } from '../../constants/Colors';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Vertical, Branch } from '../../src/screens/signup/shared/types';
+import type { Vertical, Branch, IdentityState, StoreState, KycState } from '../../src/screens/signup/shared/types';
 
 let RazorpayCheckout: any = null;
 if (Constants.appOwnership !== 'expo') {
@@ -52,7 +52,7 @@ export default function SignupScreen() {
     const [isRestoring, setIsRestoring] = useState(true);
 
     // Step 1: Identity
-    const [identity, setIdentity] = useState({
+    const [identity, setIdentity] = useState<IdentityState>({
         ownerName: '',
         phone: '',
         email: '',
@@ -178,7 +178,7 @@ export default function SignupScreen() {
     };
 
     // Step 2: Store
-    const [store, setStore] = useState({
+    const [store, setStore] = useState<StoreState>({
         storeName: '',
         categoryId: '',
         categoryName: '',
@@ -222,7 +222,7 @@ export default function SignupScreen() {
     const [branches, setBranches] = useState<Branch[]>([]);
 
     // Step 4: KYC
-    const [kyc, setKyc] = useState({
+    const [kyc, setKyc] = useState<KycState>({
         panNumber: '',
         aadharNumber: '',
         msmeNumber: '',
