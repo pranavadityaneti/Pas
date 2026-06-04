@@ -4202,6 +4202,9 @@ app.patch('/auth/merchant/draft', async (req, res) => {
         await prisma.$transaction(async (tx) => {
             const updateData: any = {};
             if (payload.ownerName !== undefined) updateData.ownerName = payload.ownerName;
+            // 2026-06-04 (Phase 2.A2, spec blocker B2): designation captured at
+            // Step 1; populates the signatory block on the partner-agreement PDF.
+            if (payload.designation !== undefined) updateData.designation = payload.designation;
             if (payload.email !== undefined) updateData.email = payload.email;
             if (payload.phone !== undefined) updateData.phone = payload.phone;
 

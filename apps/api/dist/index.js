@@ -38,6 +38,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const dotenv_1 = __importDefault(require("dotenv"));
 dotenv_1.default.config();
+// Sentry MUST be initialised before any other module that we want instrumented
+// (express, http, prisma, etc.). The dotenv.config() above must run first so
+// instrument.ts can read SENTRY_DSN from the environment.
+require("./instrument");
+const Sentry = __importStar(require("@sentry/node"));
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const helmet_1 = __importDefault(require("helmet"));
@@ -101,6 +106,88 @@ async function getAuthUser(req) {
         throw new Error('Unauthorized');
     }
     return user;
+}
+// Guard: admin-only route. Writes 401/403 directly and returns null on failure;
+// caller does `const u = await requireAdmin(req, res); if (!u) return;`.
+// Matches the inline pattern at /admin/allowlist (~3747). Used by coupon admin routes.
+async function requireAdmin(req, res) {
+    let caller;
+    try {
+        caller = await getAuthUser(req);
+    }
+    catch {
+        res.status(401).json({ error: 'Authentication required' });
+        return null;
+    }
+    const callerProfile = await prisma.user.findUnique({
+        where: { id: caller.id },
+        select: { isAdmin: true, role: true },
+    });
+    // Per the 2026-06-02 RBAC doc, requireAdmin = SUPER_ADMIN only (governance tier).
+    // The legacy isAdmin flag is treated as SUPER_ADMIN equivalent for backwards
+    // compatibility. OPERATIONS / FINANCE / SUPPORT do NOT pass requireAdmin — use
+    // requireRole(['SUPER_ADMIN', 'OPERATIONS', …]) for per-route role checks.
+    const ok = !!callerProfile &&
+        (callerProfile.isAdmin === true || callerProfile.role === 'SUPER_ADMIN');
+    if (!ok) {
+        res.status(403).json({ error: 'Super-admin access required' });
+        return null;
+    }
+    return caller;
+}
+/**
+ * Generic RBAC guard. Pass an allowed-roles list; SUPER_ADMIN is always allowed.
+ *
+ *   const u = await requireRole(req, res, ['OPERATIONS', 'FINANCE']); if (!u) return;
+ *
+ * Per the 2026-06-02 RBAC doc:
+ *   SUPER_ADMIN   founder/eng — unrestricted; always passes
+ *   OPERATIONS    daily marketplace ops
+ *   FINANCE       settlements + payouts + reconciliation
+ *   SUPPORT       customer support (mostly view-only)
+ *
+ * The legacy `isAdmin: true` flag is treated as SUPER_ADMIN equivalent for
+ * backwards compatibility with users who pre-date the Role enum.
+ */
+async function requireRole(req, res, allowedRoles) {
+    let caller;
+    try {
+        caller = await getAuthUser(req);
+    }
+    catch {
+        res.status(401).json({ error: 'Authentication required' });
+        return null;
+    }
+    const callerProfile = await prisma.user.findUnique({
+        where: { id: caller.id },
+        select: { isAdmin: true, role: true },
+    });
+    if (!callerProfile) {
+        res.status(403).json({ error: 'Access denied' });
+        return null;
+    }
+    // SUPER_ADMIN always allowed; isAdmin flag treated as SUPER_ADMIN.
+    if (callerProfile.role === 'SUPER_ADMIN' || callerProfile.isAdmin === true) {
+        return caller;
+    }
+    if (callerProfile.role && allowedRoles.includes(callerProfile.role)) {
+        return caller;
+    }
+    res.status(403).json({ error: 'Insufficient role for this action' });
+    return null;
+}
+// Guard: any logged-in user. Writes 401 directly and returns null on failure;
+// caller does `const u = await requireUser(req, res); if (!u) return;`.
+// Used by consumer-side coupon routes (/coupons/available, validate-coupon, redeem)
+// so we derive userId from the verified token instead of trusting the request body.
+async function requireUser(req, res) {
+    try {
+        return await getAuthUser(req);
+    }
+    catch {
+        res.status(401).json({ error: 'Authentication required' });
+        return null;
+    }
 }
 async function logAudit(productId, action, field, oldValue, newValue, changedBy = 'System') {
     try {
@@ -2023,6 +2110,15 @@ app.post('/orders', async (req, res) => {
                 paymentId: paymentId || null,
             },
         }).catch(e => console.error('[POST /orders] New order notif failed:', e));
+        // 2026-06-04 (Option B): backfill User.name from this order's
+        // customer_name when the user has never provided a profile name.
+        // Fire-and-forget — never block order success on a profile write.
+        if (userId && typeof customerName === 'string' && customerName.trim().length >= 2) {
+            prisma.user.updateMany({
+                where: { id: userId, name: null },
+                data: { name: customerName.trim() },
+            }).catch(e => console.warn('[POST /orders] User.name backfill failed:', e?.message || e));
+        }
         // Customer-side notification: branch on order_type
         // - Dine-in: send DINING_BOOKED (event #12)
         // - Pickup (paid only): send PAYMENT_SUCCESSFUL (event #2)
@@ -2855,14 +2951,18 @@ app.patch('/stores/:id', async (req, res) => {
 // List Coupons (with filtering)
 app.get('/coupons', async (req, res) => {
     try {
+        const caller = await requireAdmin(req, res);
+        if (!caller)
+            return;
         const { storeId, isActive, fundingSource, search } = req.query;
         const where = {};
+        // Prisma `where` uses model fields (camelCase), not @map column names.
         if (storeId)
-            where.store_id = String(storeId);
+            where.storeId = String(storeId);
         if (isActive !== undefined)
-            where.is_active = isActive === 'true';
+            where.isActive = isActive === 'true';
         if (fundingSource)
-            where.funding_source = String(fundingSource).toUpperCase();
+            where.fundingSource = String(fundingSource).toUpperCase();
         if (search) {
             where.code = { contains: String(search).toUpperCase(), mode: 'insensitive' };
         }
@@ -2880,10 +2980,28 @@ app.get('/coupons', async (req, res) => {
 // Create Coupon
 app.post('/coupon', async (req, res) => {
     try {
-        const { code, discountType, discountValue, maxDiscountCap, fundingSource, targetAudience, storeId, usageLimit, startDate, endDate } = req.body;
+        const caller = await requireAdmin(req, res);
+        if (!caller)
+            return;
+        const { code, discountType, discountValue, maxDiscountCap, fundingSource, targetAudience, storeId, usageLimit, startDate, endDate, 
+        // coupon-engine fields
+        minOrder, perCustomerLimit, bogoBuy, bogoGet, title, brandName, description, showLogo, logoUrl, autoCode, theme } = req.body;
+        // theme validation — admin must pick one of the curated presets; default classic.
+        const ALLOWED_THEMES = ['classic', 'bold', 'modern', 'festive'];
+        const themeValue = theme && ALLOWED_THEMES.includes(String(theme))
+            ? String(theme)
+            : 'classic';
+        const type = discountType ? String(discountType).toUpperCase() : '';
         // Validation
-        if (!code || !discountType || !discountValue || !fundingSource || !targetAudience) {
-            return res.status(400).json({ error: 'Missing required fields: code, discountType, discountValue, fundingSource, targetAudience' });
+        if (!code || !type || !fundingSource || !targetAudience) {
+            return res.status(400).json({ error: 'Missing required fields: code, discountType, fundingSource, targetAudience' });
+        }
+        if (type === 'BOGO') {
+            if (!bogoBuy || !bogoGet)
+                return res.status(400).json({ error: 'BOGO coupons require bogoBuy and bogoGet' });
+        }
+        else if (!discountValue) {
+            return res.status(400).json({ error: 'discountValue is required for PERCENTAGE/FLAT coupons' });
         }
         // Check for duplicate code
         const existing = await prisma.coupon.findUnique({ where: { code: code.toUpperCase() } });
@@ -2900,15 +3018,26 @@ app.post('/coupon', async (req, res) => {
         const coupon = await prisma.coupon.create({
             data: {
                 code: code.toUpperCase(),
-                discountType: discountType.toUpperCase(),
-                discountValue: Number(discountValue),
+                discountType: type,
+                discountValue: discountValue != null ? Number(discountValue) : 0,
                 maxDiscountCap: maxDiscountCap ? Number(maxDiscountCap) : null,
-                fundingSource: fundingSource.toUpperCase(),
-                targetAudience: targetAudience.toUpperCase(),
+                fundingSource: String(fundingSource).toUpperCase(),
+                targetAudience: String(targetAudience).toUpperCase(),
                 storeId: storeId || null,
                 usageLimit: usageLimit ? parseInt(usageLimit) : null,
                 startDate: startDate ? new Date(startDate) : new Date(),
                 endDate: endDate ? new Date(endDate) : null,
+                minOrder: minOrder != null ? Number(minOrder) : null,
+                perCustomerLimit: perCustomerLimit != null ? parseInt(perCustomerLimit) : null,
+                bogoBuy: bogoBuy != null ? parseInt(bogoBuy) : null,
+                bogoGet: bogoGet != null ? parseInt(bogoGet) : null,
+                title: title || null,
+                brandName: brandName || null,
+                description: description || null,
+                showLogo: showLogo != null ? Boolean(showLogo) : true,
+                logoUrl: logoUrl || null,
+                autoCode: autoCode != null ? Boolean(autoCode) : false,
+                theme: themeValue,
                 updatedAt: new Date(),
             }
         });
@@ -2922,10 +3051,17 @@ app.post('/coupon', async (req, res) => {
 // Update Coupon
 app.patch('/coupon/:id', async (req, res) => {
     try {
+        const caller = await requireAdmin(req, res);
+        if (!caller)
+            return;
         const { id } = req.params;
         const updateData = {};
         const allowedFields = ['code', 'discountType', 'discountValue', 'maxDiscountCap',
-            'fundingSource', 'targetAudience', 'storeId', 'isActive', 'usageLimit', 'startDate', 'endDate'];
+            'fundingSource', 'targetAudience', 'storeId', 'isActive', 'usageLimit', 'startDate', 'endDate',
+            // coupon-engine fields
+            'minOrder', 'perCustomerLimit', 'bogoBuy', 'bogoGet', 'title', 'brandName', 'description', 'showLogo', 'logoUrl', 'autoCode',
+            'theme'];
+        const ALLOWED_THEMES_PATCH = ['classic', 'bold', 'modern', 'festive'];
         for (const field of allowedFields) {
             if (req.body[field] !== undefined) {
                 let value = req.body[field];
@@ -2935,14 +3071,21 @@ app.patch('/coupon/:id', async (req, res) => {
                 }
                 if (field === 'code')
                     value = String(value).toUpperCase();
-                if (['discountValue', 'maxDiscountCap'].includes(field)) {
+                if (['discountValue', 'maxDiscountCap', 'minOrder'].includes(field)) {
                     value = value === null ? null : parseFloat(value);
                 }
-                if (field === 'usageLimit') {
+                if (['usageLimit', 'perCustomerLimit', 'bogoBuy', 'bogoGet'].includes(field)) {
                     value = value === null ? null : parseInt(value);
+                }
+                if (['showLogo', 'autoCode'].includes(field)) {
+                    value = Boolean(value);
                 }
                 if (['startDate', 'endDate'].includes(field)) {
                     value = value === null ? null : new Date(value);
+                }
+                if (field === 'theme') {
+                    // silently fall back to 'classic' if an unknown theme id sneaks through
+                    value = ALLOWED_THEMES_PATCH.includes(String(value)) ? String(value) : 'classic';
                 }
                 updateData[prismaField] = value;
             }
@@ -2961,6 +3104,9 @@ app.patch('/coupon/:id', async (req, res) => {
 // Delete Coupon
 app.delete('/coupon/:id', async (req, res) => {
     try {
+        const caller = await requireAdmin(req, res);
+        if (!caller)
+            return;
         const { id } = req.params;
         await prisma.coupon.delete({ where: { id } });
         res.json({ message: 'Coupon deleted successfully' });
@@ -2970,10 +3116,68 @@ app.delete('/coupon/:id', async (req, res) => {
         res.status(500).json({ error: 'Failed to delete coupon' });
     }
 });
+// List coupons the logged-in customer is eligible to see on checkout.
+// Filters: active + within validity window + audience matches + store-scope respected.
+// Audience math is done once per request (1 aggregate query for the user) and applied in-memory.
+app.get('/coupons/available', async (req, res) => {
+    try {
+        const u = await requireUser(req, res);
+        if (!u)
+            return;
+        const storeId = typeof req.query.storeId === 'string' && req.query.storeId.length > 0 ? req.query.storeId : null;
+        const now = new Date();
+        // Pull every coupon currently in its validity window. Audience filter applied below.
+        const candidates = await prisma.coupon.findMany({
+            where: {
+                isActive: true,
+                startDate: { lte: now },
+                AND: [
+                    { OR: [{ endDate: null }, { endDate: { gt: now } }] },
+                    storeId
+                        ? { OR: [{ storeId: null }, { storeId }] }
+                        : { storeId: null },
+                ],
+            },
+            orderBy: { createdAt: 'desc' },
+        });
+        // Determine the caller's audience-eligibility ONCE (avoids N+1 per coupon).
+        const stats = await prisma.order.aggregate({
+            where: { userId: u.id },
+            _count: { _all: true },
+            _max: { createdAt: true },
+        });
+        const orderCount = stats._count._all;
+        const lastOrderAt = stats._max.createdAt;
+        const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        const isNew = orderCount === 0;
+        const isInactive = orderCount > 0 && !!lastOrderAt && lastOrderAt < thirtyDaysAgo;
+        // Also respect usageLimit at list-time so we don't show "Sold out" coupons.
+        const eligible = candidates.filter((c) => {
+            if (c.usageLimit !== null && c.usageLimit !== undefined && c.usedCount >= c.usageLimit)
+                return false;
+            if (c.targetAudience === 'ALL')
+                return true;
+            if (c.targetAudience === 'NEW_USERS')
+                return isNew;
+            if (c.targetAudience === 'INACTIVE_USERS')
+                return isInactive;
+            return false;
+        });
+        res.json({ data: eligible });
+    }
+    catch (error) {
+        console.error('List Available Coupons Error:', error);
+        res.status(500).json({ error: 'Failed to fetch available coupons' });
+    }
+});
 // Validate Coupon (for Consumer Checkout)
 app.post('/checkout/validate-coupon', async (req, res) => {
     try {
-        const { code, cartTotal, storeId, userId } = req.body;
+        const u = await requireUser(req, res);
+        if (!u)
+            return;
+        const { code, cartTotal, storeId } = req.body;
+        const userId = u.id; // derived from verified token, NOT trusted from body
         if (!code || !cartTotal) {
             return res.status(400).json({ error: 'code and cartTotal are required' });
         }
@@ -3008,16 +3212,33 @@ app.post('/checkout/validate-coupon', async (req, res) => {
                 return res.status(400).json({ valid: false, error: 'This coupon is only for new users' });
             }
         }
+        // Check minimum order value
+        if (coupon.minOrder && Number(cartTotal) < coupon.minOrder) {
+            return res.status(400).json({ valid: false, error: `Minimum order of ₹${coupon.minOrder} required to use this coupon` });
+        }
+        // Check per-customer limit (counts this user's prior redemptions)
+        if (coupon.perCustomerLimit && userId) {
+            const usedByUser = await prisma.couponRedemption.count({ where: { couponId: coupon.id, userId } });
+            if (usedByUser >= coupon.perCustomerLimit) {
+                return res.status(400).json({ valid: false, error: 'You have already used this coupon the maximum number of times' });
+            }
+        }
         // Calculate discount
         let discount = 0;
+        let bogo = null;
         if (coupon.discountType === 'PERCENTAGE') {
             discount = (Number(cartTotal) * coupon.discountValue) / 100;
             if (coupon.maxDiscountCap) {
                 discount = Math.min(discount, coupon.maxDiscountCap);
             }
         }
+        else if (coupon.discountType === 'BOGO') {
+            // BOGO applies at the line-item level (cheapest-free etc.) — surface the rule,
+            // not a flat ₹ off. The cart computes the actual saving from buy/get.
+            bogo = { buy: coupon.bogoBuy ?? 1, get: coupon.bogoGet ?? 1 };
+        }
         else {
-            discount = coupon.discountValue;
+            discount = coupon.discountValue; // FLAT
         }
         // Don't let discount exceed cart total
         discount = Math.min(discount, Number(cartTotal));
@@ -3029,11 +3250,49 @@ app.post('/checkout/validate-coupon', async (req, res) => {
             discountType: coupon.discountType,
             discountValue: coupon.discountValue,
             maxDiscountCap: coupon.maxDiscountCap,
+            bogo,
+            minOrder: coupon.minOrder ?? null,
         });
     }
     catch (error) {
         console.error('Validate Coupon Error:', error);
         res.status(500).json({ error: 'Failed to validate coupon' });
+    }
+});
+// Redeem a coupon — records the usage atomically. Call this at order placement.
+// Idempotent on orderId so retries (or the webhook backstop) can't double-count.
+app.post('/coupons/redeem', async (req, res) => {
+    try {
+        const u = await requireUser(req, res);
+        if (!u)
+            return;
+        const { code, orderId, issuedCode } = req.body;
+        const userId = u.id; // derived from verified token, NOT trusted from body
+        if (!code) {
+            return res.status(400).json({ error: 'code is required' });
+        }
+        const coupon = await prisma.coupon.findUnique({ where: { code: String(code).toUpperCase() } });
+        if (!coupon)
+            return res.status(404).json({ error: 'Invalid coupon code' });
+        // Idempotency: if this order already redeemed this coupon, return the existing record.
+        if (orderId) {
+            const existing = await prisma.couponRedemption.findFirst({ where: { couponId: coupon.id, orderId } });
+            if (existing)
+                return res.status(200).json({ redemptionId: existing.id, alreadyRedeemed: true });
+        }
+        // Record redemption + bump usedCount in one transaction.
+        const redemption = await prisma.$transaction(async (tx) => {
+            const r = await tx.couponRedemption.create({
+                data: { couponId: coupon.id, userId, orderId: orderId || null, issuedCode: issuedCode || null },
+            });
+            await tx.coupon.update({ where: { id: coupon.id }, data: { usedCount: { increment: 1 } } });
+            return r;
+        });
+        res.status(201).json({ redemptionId: redemption.id, couponId: coupon.id });
+    }
+    catch (error) {
+        console.error('Redeem Coupon Error:', error);
+        res.status(500).json({ error: 'Failed to redeem coupon' });
     }
 });
 // --- DEBUG: Fix DB Route ---
@@ -3110,17 +3369,9 @@ app.post('/auth/send-otp', async (req, res) => {
                 return res.status(404).json({ error: 'No merchant account found for this number. Please apply as partner first.' });
             }
         }
-        // Rate limit: max 3 OTPs per phone in 10 minutes
-        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-        const recentCount = await prisma.otpVerification.count({
-            where: {
-                phone,
-                createdAt: { gte: tenMinutesAgo }
-            }
-        });
-        if (recentCount >= 3) {
-            return res.status(429).json({ error: 'Too many OTP requests. Please wait 10 minutes.' });
-        }
+        // [2026-05-30] 10-min/3-OTP per-phone ban REMOVED — was blocking founder/legitimate testing.
+        // Per-OTP attempt limit (5 wrong tries on a single record, in /auth/verify-otp) is retained.
+        // TODO (forlater.md): replace with a cheaper per-IP throttle + Wati-cost cap before scale.
         // Generate 6-digit OTP
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min expiry
@@ -3319,21 +3570,40 @@ app.post('/auth/verify-otp', async (req, res) => {
         console.log(`[Auth] User ${existingUser.id} authenticated (isNew: ${isNewUser})`);
         // Admin login: stamp the durable isAdmin flag (survives the JIT role
         // overwrite above). Upsert because non-merchant admins have no User row yet.
+        // 2026-06-03: also promote AdminAllowlist.role onto User.role if the
+        // invitee was given a role at invite time, AND keep their existing User.role
+        // if they already have one of the new admin-tier roles.
         if (isAdminLogin) {
             const allow = await prisma.adminAllowlist.findFirst({ where: { phone, isActive: true } });
+            const allowRole = allow?.role && ['SUPER_ADMIN', 'OPERATIONS', 'FINANCE', 'SUPPORT'].includes(String(allow.role).toUpperCase())
+                ? String(allow.role).toUpperCase()
+                : null;
+            const existingProfile = await prisma.user.findUnique({
+                where: { id: existingUser.id },
+                select: { role: true },
+            });
+            const existingRole = existingProfile?.role;
+            // Don't override an existing admin-tier role on each login — that would
+            // wipe Super Admin's manual demotion. Only promote when the user has no
+            // admin role yet (or is still tagged as CONSUMER/MERCHANT).
+            const shouldApplyAllowRole = allowRole && (!existingRole || existingRole === 'CONSUMER' || existingRole === 'MERCHANT');
+            const targetRole = shouldApplyAllowRole ? allowRole : null;
             await prisma.user.upsert({
                 where: { id: existingUser.id },
-                update: { isAdmin: true },
+                update: {
+                    isAdmin: true,
+                    ...(targetRole ? { role: targetRole } : {}),
+                },
                 create: {
                     id: existingUser.id,
                     email: existingUser.email || syntheticEmail,
                     phone: formattedPhone,
-                    role: 'CONSUMER',
+                    role: (targetRole ?? 'CONSUMER'),
                     isAdmin: true,
                     name: allow?.name ?? null,
                 },
             });
-            console.log(`[Auth] Admin isAdmin flag set for ${existingUser.id}`);
+            console.log(`[Auth] Admin isAdmin set for ${existingUser.id}${targetRole ? ` (role=${targetRole} from allowlist)` : ''}`);
         }
         res.json({
             success: true,
@@ -3610,6 +3880,10 @@ app.patch('/auth/merchant/draft', async (req, res) => {
             const updateData = {};
             if (payload.ownerName !== undefined)
                 updateData.ownerName = payload.ownerName;
+            // 2026-06-04 (Phase 2.A2, spec blocker B2): designation captured at
+            // Step 1; populates the signatory block on the partner-agreement PDF.
+            if (payload.designation !== undefined)
+                updateData.designation = payload.designation;
             if (payload.email !== undefined)
                 updateData.email = payload.email;
             if (payload.phone !== undefined)
@@ -3807,11 +4081,18 @@ app.patch('/auth/merchant/draft', async (req, res) => {
  * Sends branded email notification to the merchant.
  */
 app.post('/merchants/:id/kyc-decision', async (req, res) => {
+    // RBAC: OPERATIONS owns KYC review per the 2026-06-02 doc. SUPER_ADMIN
+    // always allowed by requireRole's wildcard.
+    const caller = await requireRole(req, res, ['OPERATIONS']);
+    if (!caller)
+        return;
     try {
         const { id } = req.params;
-        const { decision, rejectionReason } = req.body;
-        if (!decision || !['approve', 'reject'].includes(decision)) {
-            return res.status(400).json({ error: 'Invalid decision. Must be "approve" or "reject".' });
+        // `needsInfoDetails` is the per-merchant message the admin types when picking 'needs_info'
+        // (e.g. "Please re-upload PAN; the file you sent was unreadable.").
+        const { decision, rejectionReason, needsInfoDetails } = req.body;
+        if (!decision || !['approve', 'reject', 'needs_info'].includes(decision)) {
+            return res.status(400).json({ error: 'Invalid decision. Must be "approve", "reject", or "needs_info".' });
         }
         const merchant = await prisma.merchant.findUnique({ where: { id } });
         if (!merchant)
@@ -3832,6 +4113,19 @@ app.post('/merchants/:id/kyc-decision', async (req, res) => {
                     .catch(err => console.error('[Email] Approval email failed:', err));
             }
             console.log(`[KYC] Approved merchant ${id} (${merchant.storeName})`);
+        }
+        else if (decision === 'needs_info') {
+            // KYC stays in 'pending' / 'needs_info' state — store stays inactive.
+            // The merchant fixes whatever's flagged and the admin re-reviews.
+            await prisma.merchant.update({
+                where: { id },
+                data: { kycStatus: 'needs_info', kycRejectionReason: needsInfoDetails || null }
+            });
+            if (merchant.email) {
+                (0, email_service_1.sendStoreNeedsInfoEmail)(merchant.email, merchant.ownerName || 'Partner', needsInfoDetails || '')
+                    .catch(err => console.error('[Email] Needs-info email failed:', err));
+            }
+            console.log(`[KYC] Needs more info on merchant ${id} (${merchant.storeName})`);
         }
         else {
             await prisma.merchant.update({
@@ -4133,10 +4427,1173 @@ app.get('/auth/me', async (req, res) => {
         res.status(500).json({ error: 'Failed to fetch user context' });
     }
 });
+// --- Sentry test endpoint (admin-gated) ---
+// Throws on purpose. Useful to verify Sentry receives + that source maps are
+// resolving (after the 2026-06-02 wizard pass, stack traces should show real
+// function names). Locked behind requireAdmin so randos can't trigger alerts.
+app.get('/debug-sentry', async (req, res) => {
+    const caller = await requireAdmin(req, res);
+    if (!caller)
+        return;
+    throw new Error(`[Sentry verification] Triggered by admin ${caller.id}`);
+});
+// --- Resend test endpoint (admin-gated) ---
+// Sends one of the 4 template emails to a target address. Admin-locked so we
+// can't spam customers + nobody else can fire test sends. Usage:
+//   POST /debug-resend
+//   { to: "you@example.com", template: "received" | "approved" | "rejected" | "needs_info" }
+app.post('/debug-resend', async (req, res) => {
+    const caller = await requireAdmin(req, res);
+    if (!caller)
+        return;
+    const { to, template = 'received' } = req.body || {};
+    if (!to || typeof to !== 'string') {
+        return res.status(400).json({ error: 'Provide { to: "email@domain.com" }' });
+    }
+    try {
+        const name = 'Test Partner';
+        if (template === 'approved') {
+            await (0, email_service_1.sendStoreApprovedEmail)(to, name, 'Test Store');
+        }
+        else if (template === 'rejected') {
+            await (0, email_service_1.sendStoreRejectedEmail)(to, name, 'Test rejection reason (verification only).');
+        }
+        else if (template === 'needs_info') {
+            await (0, email_service_1.sendStoreNeedsInfoEmail)(to, name, 'Please re-upload your GST certificate.\nThis is a test send.');
+        }
+        else {
+            await (0, email_service_1.sendApplicationReceivedEmail)(to, name);
+        }
+        res.json({ success: true, to, template, triggeredBy: caller.id });
+    }
+    catch (e) {
+        console.error('[debug-resend] Error:', e);
+        res.status(500).json({ error: e?.message || 'Email send failed' });
+    }
+});
+// --- Admin: invite a new admin-tier user (Super Admin only) ---
+// Per the 2026-06-02 RBAC doc, only SUPER_ADMIN can create/edit admin accounts.
+//
+// Two paths:
+//   - method: 'email' (default) — server generates a temp password, creates the
+//     Supabase auth user via admin API, inserts User row, emails via Resend.
+//     Invitee logs in with email/password and is force-prompted to change it.
+//   - method: 'phone' — server inserts into AdminAllowlist with the chosen role.
+//     Invitee opens admin.pickatstore.io, switches to phone-OTP login, gets OTP
+//     via Wati (existing flow). On first verify-otp, the User row is JIT-created
+//     and the role is promoted from AdminAllowlist. No template needed.
+app.post('/admin/users/invite', async (req, res) => {
+    const caller = await requireAdmin(req, res);
+    if (!caller)
+        return;
+    try {
+        const { method = 'email', email, phone, name, role } = req.body || {};
+        if (!name || !role) {
+            return res.status(400).json({ error: 'name and role are required' });
+        }
+        const allowedRoles = ['OPERATIONS', 'FINANCE', 'SUPPORT', 'SUPER_ADMIN'];
+        if (!allowedRoles.includes(String(role).toUpperCase())) {
+            return res.status(400).json({ error: `role must be one of: ${allowedRoles.join(', ')}` });
+        }
+        const targetRole = String(role).toUpperCase();
+        const inviterName = caller.email?.split('@')[0] || 'A team member';
+        const labels = {
+            SUPER_ADMIN: 'Super Admin',
+            OPERATIONS: 'Operations',
+            FINANCE: 'Finance',
+            SUPPORT: 'Customer Support',
+        };
+        // ─── Phone path ──────────────────────────────────────────────────
+        if (method === 'phone') {
+            if (!phone) {
+                return res.status(400).json({ error: 'phone is required when method=phone' });
+            }
+            // Normalize: strip non-digits; require 10 digits; prepend 91 for India.
+            const digits = String(phone).replace(/\D/g, '');
+            if (digits.length < 10) {
+                return res.status(400).json({ error: 'phone must be a 10-digit Indian number' });
+            }
+            const normPhone = digits.length === 10 ? `91${digits}` : digits;
+            // Reject if already invited / allowlisted.
+            const existingAllow = await prisma.adminAllowlist.findUnique({ where: { phone: normPhone } });
+            if (existingAllow && existingAllow.isActive) {
+                return res.status(409).json({ error: 'This phone is already in the admin allowlist' });
+            }
+            // Upsert allowlist row carrying the chosen role.
+            await prisma.adminAllowlist.upsert({
+                where: { phone: normPhone },
+                update: { name, role: targetRole, isActive: true },
+                create: { phone: normPhone, name, role: targetRole, isActive: true },
+            });
+            console.log(`[InviteAdmin] Phone allowlist ${normPhone} (role=${targetRole}) (invited by ${caller.id})`);
+            return res.json({
+                success: true,
+                method: 'phone',
+                phone: normPhone,
+                role: targetRole,
+                hint: `Tell ${name} to open admin.pickatstore.io, switch to phone-OTP login, and enter +${normPhone}.`,
+            });
+        }
+        // ─── Email path (existing) ───────────────────────────────────────
+        if (!email) {
+            return res.status(400).json({ error: 'email is required when method=email' });
+        }
+        const targetEmail = String(email).trim().toLowerCase();
+        const existing = await prisma.user.findFirst({ where: { email: targetEmail } });
+        if (existing) {
+            return res.status(409).json({ error: 'A user with this email already exists' });
+        }
+        const ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+        let tempPassword = '';
+        for (let i = 0; i < 16; i++)
+            tempPassword += ALPHA[Math.floor(Math.random() * ALPHA.length)];
+        const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+            email: targetEmail,
+            password: tempPassword,
+            email_confirm: true,
+            user_metadata: { name, mustChangePassword: true, invitedBy: caller.id },
+        });
+        if (createErr || !created?.user) {
+            console.error('[InviteAdmin] createUser failed:', createErr);
+            return res.status(500).json({ error: createErr?.message || 'Failed to create auth user' });
+        }
+        try {
+            await prisma.user.create({
+                data: {
+                    id: created.user.id,
+                    email: targetEmail,
+                    name,
+                    role: targetRole,
+                    passwordHash: 'managed-by-supabase-auth',
+                    updatedAt: new Date(),
+                },
+            });
+        }
+        catch (profileErr) {
+            console.error('[InviteAdmin] User row insert failed, rolling back auth user:', profileErr);
+            await supabaseAdmin.auth.admin.deleteUser(created.user.id).catch(() => { });
+            return res.status(500).json({ error: profileErr?.message || 'Failed to create user profile' });
+        }
+        try {
+            await (0, email_service_1.sendAdminInviteEmail)(targetEmail, name, labels[targetRole] ?? targetRole, tempPassword, inviterName);
+        }
+        catch (mailErr) {
+            console.warn('[InviteAdmin] Email send failed (user was still created):', mailErr?.message);
+        }
+        console.log(`[InviteAdmin] Email-created ${targetRole} ${targetEmail} (invited by ${caller.id})`);
+        res.json({ success: true, method: 'email', id: created.user.id, email: targetEmail, role: targetRole });
+    }
+    catch (e) {
+        console.error('[InviteAdmin] error:', e);
+        res.status(500).json({ error: e?.message || 'Invite failed' });
+    }
+});
+// --- Admin: edit role / status of an existing user (Super Admin only) ---
+//
+// Body: { role?: string, status?: 'active'|'suspended', suspendedReason?: string }
+//
+// Safeguards:
+//   - Self-suspend blocked (can't lock yourself out).
+//   - Last-Super-Admin safeguard: demoting or suspending the only remaining
+//     Super Admin is blocked. "Super Admin" here = role==='SUPER_ADMIN' OR
+//     isAdmin===true (legacy). Counts only active users.
+app.patch('/admin/users/:id', async (req, res) => {
+    const caller = await requireAdmin(req, res);
+    if (!caller)
+        return;
+    try {
+        const { id } = req.params;
+        const { role, status, suspendedReason } = req.body || {};
+        if (!role && !status) {
+            return res.status(400).json({ error: 'Provide at least one of: role, status' });
+        }
+        const target = await prisma.user.findUnique({ where: { id }, select: { id: true, role: true, isAdmin: true, email: true } });
+        if (!target)
+            return res.status(404).json({ error: 'User not found' });
+        // Self-suspend block.
+        if (status === 'suspended' && id === caller.id) {
+            return res.status(400).json({ error: "You can't suspend your own account." });
+        }
+        // Last-Super-Admin safeguard.
+        const targetIsCurrentlySuperAdmin = target.role === 'SUPER_ADMIN' || target.isAdmin === true;
+        const isDemoteOrSuspend = (role && String(role).toUpperCase() !== 'SUPER_ADMIN') ||
+            status === 'suspended';
+        if (targetIsCurrentlySuperAdmin && isDemoteOrSuspend) {
+            const otherSuperAdmins = await prisma.user.count({
+                where: {
+                    id: { not: id },
+                    status: { not: 'suspended' },
+                    OR: [{ role: 'SUPER_ADMIN' }, { isAdmin: true }],
+                },
+            });
+            if (otherSuperAdmins === 0) {
+                return res.status(400).json({
+                    error: 'Cannot demote or suspend the only remaining Super Admin. Promote another user first.',
+                });
+            }
+        }
+        // Validate role if provided.
+        const allowedRoles = ['SUPER_ADMIN', 'OPERATIONS', 'FINANCE', 'SUPPORT'];
+        const updates = { updatedAt: new Date() };
+        if (role) {
+            const normRole = String(role).toUpperCase();
+            if (!allowedRoles.includes(normRole)) {
+                return res.status(400).json({ error: `role must be one of: ${allowedRoles.join(', ')}` });
+            }
+            updates.role = normRole;
+            // If they're being demoted to non-SUPER_ADMIN, also drop the legacy isAdmin flag
+            // so requireAdmin doesn't keep treating them as Super Admin.
+            if (normRole !== 'SUPER_ADMIN') {
+                updates.isAdmin = false;
+            }
+            else {
+                updates.isAdmin = true;
+            }
+        }
+        if (status) {
+            if (status !== 'active' && status !== 'suspended') {
+                return res.status(400).json({ error: "status must be 'active' or 'suspended'" });
+            }
+            updates.status = status;
+            if (status === 'suspended') {
+                updates.suspendedAt = new Date();
+                updates.suspendedReason = suspendedReason ?? null;
+            }
+            else {
+                updates.suspendedAt = null;
+                updates.suspendedReason = null;
+            }
+        }
+        const updated = await prisma.user.update({
+            where: { id },
+            data: updates,
+            select: { id: true, email: true, role: true, isAdmin: true, status: true, suspendedAt: true, suspendedReason: true },
+        });
+        console.log(`[AdminEdit] ${target.email}: ${JSON.stringify(updates)} (by ${caller.id})`);
+        res.json({ success: true, user: updated });
+    }
+    catch (e) {
+        console.error('[AdminEdit] error:', e);
+        res.status(500).json({ error: e?.message || 'Edit failed' });
+    }
+});
+// --- Wati inbound webhook ---
+// Wati sends a POST here every time a customer messages the business number.
+// Activate by setting the webhook URL in Wati dashboard → Settings → Webhooks
+// to: https://api.pickatstore.io/webhooks/wati
+//
+// Wati payload shape varies by message type — we capture the raw payload AND
+// best-effort extract common fields. Admin Customer Support inbox reads from
+// the wati_inbox table downstream.
+//
+// Security: the route is open by design (Wati can't sign requests with our
+// secret), but we de-dup on Wati's own message_id so replay is harmless.
+app.post('/webhooks/wati', async (req, res) => {
+    try {
+        const payload = req.body || {};
+        // Wati v3 webhook common fields — fall back gracefully if shape differs.
+        const watiMessageId = payload.id || payload.messageId || payload.whatsappMessageId || null;
+        const waPhone = String(payload.waId || payload.from || payload.whatsappNumber || '').replace(/^\+/, '');
+        const contactName = payload.senderName || payload.contactName || null;
+        const messageType = payload.type || payload.eventType || 'text';
+        const body = payload.text?.body ??
+            payload.text ??
+            payload.message ??
+            payload.button?.text ??
+            payload.interactive?.button_reply?.title ??
+            null;
+        if (!waPhone) {
+            // Not a usable inbound — acknowledge so Wati doesn't retry.
+            console.warn('[wati-webhook] payload missing wa phone; storing raw only', payload);
+        }
+        await prisma.watiInbox.create({
+            data: {
+                watiMessageId,
+                waPhone: waPhone || 'unknown',
+                contactName,
+                messageType,
+                body,
+                rawPayload: payload,
+            },
+        }).catch((e) => {
+            // Unique-constraint conflict on watiMessageId = duplicate webhook; that's fine.
+            if (e?.code !== 'P2002') {
+                console.error('[wati-webhook] persist error:', e?.message || e);
+            }
+        });
+        // Always 200 — never block Wati.
+        res.json({ ok: true });
+    }
+    catch (e) {
+        console.error('[wati-webhook] error:', e?.message || e);
+        // Still 200 — we don't want Wati's retry storm even on our errors.
+        res.json({ ok: true, captured: false });
+    }
+});
+// --- Wati inbox list ---
+// RBAC: OPERATIONS / FINANCE / SUPPORT all read; SUPER_ADMIN via wildcard.
+// Customer support team is the primary consumer.
+app.get('/wati/inbox', async (req, res) => {
+    const caller = await requireRole(req, res, ['OPERATIONS', 'FINANCE', 'SUPPORT']);
+    if (!caller)
+        return;
+    try {
+        const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+        const limit = Math.min(parseInt(req.query.limit || '50', 10) || 50, 200);
+        const rows = await prisma.watiInbox.findMany({
+            where: status ? { status } : undefined,
+            orderBy: { receivedAt: 'desc' },
+            take: limit,
+        });
+        res.json({ data: rows, count: rows.length });
+    }
+    catch (e) {
+        console.error('[wati-inbox] list error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to fetch inbox' });
+    }
+});
+// ────────────────────────────────────────────────────────────────────────────
+// Admin reads — proper architecture (added 2026-06-03 night)
+//
+// Why these exist:
+//   admin-web's Customers + Orders pages were reading directly from Supabase
+//   via PostgREST (.from('orders'), .from('User'), etc.). That repeatedly
+//   hit "table not in schema cache" / RLS-blocked-row issues — admin-tier
+//   users have no implicit read access to the production tables, and adding
+//   table-by-table RLS policies for the admin UI is fragile.
+//
+//   These endpoints use Prisma (direct PG connection, service_role-equivalent)
+//   gated by requireRole. Clean: auth at the API layer, RBAC enforced, no
+//   PostgREST cache surprises, no RLS policy management for admin UIs.
+//
+// Roles allowed: SUPER_ADMIN + OPERATIONS + FINANCE + SUPPORT (all admin tiers).
+//   Routes do not return raw passwords or sensitive auth fields.
+// ────────────────────────────────────────────────────────────────────────────
+const ANY_ADMIN_TIER = ['SUPER_ADMIN', 'OPERATIONS', 'FINANCE', 'SUPPORT'];
+/**
+ * recordAdminAudit — best-effort audit-trail writer.
+ *
+ * Writes to `public.admin_audit_log` (see docs/migrations-pending-2026-06-04.sql
+ * for the schema). Wrapped in try/catch so it NEVER fails the user-facing
+ * action — if the table doesn't exist yet (founder hasn't applied the
+ * migration), the audit attempt silently no-ops and the response still
+ * returns 200. Once the migration is applied, entries land without further
+ * code changes.
+ *
+ * Uses $executeRaw with parameter binding (not template substitution) so
+ * this works without adding the table to schema.prisma.
+ */
+async function recordAdminAudit(req, opts) {
+    try {
+        await prisma.$executeRaw `
+            INSERT INTO public.admin_audit_log (
+                actor_id, action, target_table, target_id,
+                before_value, after_value, reason,
+                ip_address, user_agent
+            ) VALUES (
+                ${opts.actorId}::uuid,
+                ${opts.action},
+                ${opts.targetTable},
+                ${opts.targetId},
+                ${opts.before ? JSON.stringify(opts.before) : null}::jsonb,
+                ${opts.after ? JSON.stringify(opts.after) : null}::jsonb,
+                ${opts.reason ?? null},
+                ${req.headers['x-forwarded-for'] || req.ip || null},
+                ${req.headers['user-agent'] || null}
+            )
+        `;
+    }
+    catch (e) {
+        // Common case before migration applied: relation "admin_audit_log" does not exist.
+        console.warn('[audit] entry not written:', e?.message || String(e));
+    }
+}
+/**
+ * GET /admin/customers
+ *
+ * Returns every consumer + their orders (aggregated client-side for
+ * LTV / AOV / recency) + a branch→city map so the UI can derive the
+ * customer's location from their most recent order's branch.
+ *
+ * Shape (kept stable with the prior useCustomers hook so the client
+ * mapping logic stays unchanged):
+ *   {
+ *     customers: [
+ *       { id, name, email, phone, status, createdAt,
+ *         orders: [{ total_amount, created_at, branch_id, status }] }
+ *     ],
+ *     branchCityMap: { [branchId]: city }
+ *   }
+ */
+app.get('/admin/customers', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER);
+    if (!caller)
+        return;
+    try {
+        // 2026-06-04: paginated. Default page = 500 customers, cap = 2000.
+        // Client doesn't yet have a load-more UI; this is server-side hardening
+        // so the endpoint can't be made to return 100k rows + their order arrays
+        // in one shot as the consumer base grows.
+        const limit = Math.min(parseInt(req.query.limit || '500', 10) || 500, 2000);
+        const offset = Math.max(parseInt(req.query.offset || '0', 10) || 0, 0);
+        // 2026-06-04 (Q2/Q3 fix): widened from `role: 'CONSUMER'` to "anyone who
+        // signed up as a consumer OR has placed at least one order, regardless of
+        // role". Pranav's audit showed 35/48 test orders (73%) were sitting under
+        // MERCHANT-role users (phone matched a branch → JIT promoted to MERCHANT
+        // at OTP-verify) so the prior filter hid them entirely.
+        const customersWhere = {
+            OR: [
+                { role: 'CONSUMER' },
+                { orders: { some: {} } },
+            ],
+        };
+        const [users, totalCount] = await Promise.all([
+            prisma.user.findMany({
+                where: customersWhere,
+                orderBy: { createdAt: 'desc' },
+                take: limit,
+                skip: offset,
+                select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                    phone: true,
+                    status: true,
+                    role: true,
+                    createdAt: true,
+                    orders: {
+                        select: {
+                            totalAmount: true,
+                            createdAt: true,
+                            branchId: true,
+                            status: true,
+                        },
+                    },
+                },
+            }),
+            prisma.user.count({ where: customersWhere }),
+        ]);
+        // Name fallback: for users with NULL User.name, look up profiles.full_name
+        // (the consumer app's ProfileSetupScreen writes to public.profiles.full_name,
+        // not User.name — that's the architectural split we're patching at the read
+        // layer for now; Option A below writes User.name on future setups).
+        const userIdsWithNullName = users.filter(u => !u.name).map(u => u.id);
+        const profileNameMap = {};
+        if (userIdsWithNullName.length > 0) {
+            const profiles = await prisma.profile.findMany({
+                where: { id: { in: userIdsWithNullName } },
+                select: { id: true, fullName: true },
+            });
+            profiles.forEach(p => { if (p.fullName)
+                profileNameMap[p.id] = p.fullName; });
+        }
+        // Collect unique branch IDs across every customer's orders → look up city.
+        const branchIds = new Set();
+        users.forEach(u => u.orders.forEach(o => { if (o.branchId)
+            branchIds.add(o.branchId); }));
+        let branchCityMap = {};
+        if (branchIds.size > 0) {
+            const branches = await prisma.merchantBranch.findMany({
+                where: { id: { in: Array.from(branchIds) } },
+                select: { id: true, city: true },
+            });
+            branches.forEach(b => { if (b?.id && b?.city)
+                branchCityMap[b.id] = b.city; });
+        }
+        // 2026-06-04 (Q1-A): pull consumer_addresses for the location column.
+        // We return the DEFAULT address per user + a count of all addresses;
+        // the full list ships via GET /admin/customers/:id/addresses for the drawer.
+        const userIds = users.map(u => u.id);
+        const addressCountByUser = {};
+        const defaultAddressByUser = {};
+        if (userIds.length > 0) {
+            try {
+                const allAddrs = await prisma.consumer_addresses.findMany({
+                    where: { user_id: { in: userIds } },
+                    select: {
+                        id: true, user_id: true, type: true, address: true,
+                        latitude: true, longitude: true, is_default: true, created_at: true,
+                    },
+                });
+                allAddrs.forEach(a => {
+                    if (!a.user_id)
+                        return;
+                    addressCountByUser[a.user_id] = (addressCountByUser[a.user_id] ?? 0) + 1;
+                });
+                // Default = is_default true; tie-break = most recent
+                allAddrs.forEach(a => {
+                    if (!a.user_id)
+                        return;
+                    const cur = defaultAddressByUser[a.user_id];
+                    const isBetter = !cur ||
+                        (a.is_default === true) ||
+                        (a.created_at && cur && a.created_at > cur.created_at);
+                    if (isBetter) {
+                        defaultAddressByUser[a.user_id] = {
+                            id: a.id,
+                            type: a.type,
+                            address: a.address,
+                            latitude: a.latitude,
+                            longitude: a.longitude,
+                        };
+                    }
+                });
+            }
+            catch (e) {
+                console.warn('[admin/customers] consumer_addresses lookup failed:', e?.message || e);
+            }
+        }
+        // 2026-06-04 (Q2-C): fuzzy-detect likely duplicate accounts among the loaded
+        // customers — phones within Levenshtein distance ≤ 1. Catches test typos
+        // (e.g. 917842687373 ↔ 917842287373). Requires the `fuzzystrmatch` extension;
+        // wrapped in try/catch so if it's not enabled, we silently return no hints.
+        const phoneToIds = {};
+        users.forEach(u => {
+            if (u.phone) {
+                if (!phoneToIds[u.phone])
+                    phoneToIds[u.phone] = [];
+                phoneToIds[u.phone].push(u.id);
+            }
+        });
+        const possibleDupesByUser = {};
+        try {
+            const phones = Object.keys(phoneToIds);
+            if (phones.length >= 2) {
+                // Self-join only the phones we've actually loaded — bounded work.
+                const rows = await prisma.$queryRaw `
+                    SELECT a.phone AS a_phone, b.phone AS b_phone
+                    FROM (SELECT unnest(${phones}::text[]) AS phone) a
+                    JOIN (SELECT unnest(${phones}::text[]) AS phone) b
+                      ON a.phone < b.phone
+                     AND LENGTH(a.phone) = LENGTH(b.phone)
+                     AND levenshtein(a.phone, b.phone) <= 1
+                `;
+                rows.forEach(({ a_phone, b_phone }) => {
+                    const aIds = phoneToIds[a_phone] ?? [];
+                    const bIds = phoneToIds[b_phone] ?? [];
+                    aIds.forEach(aId => {
+                        bIds.forEach(bId => {
+                            if (!possibleDupesByUser[aId])
+                                possibleDupesByUser[aId] = [];
+                            if (!possibleDupesByUser[bId])
+                                possibleDupesByUser[bId] = [];
+                            possibleDupesByUser[aId].push(bId);
+                            possibleDupesByUser[bId].push(aId);
+                        });
+                    });
+                });
+            }
+        }
+        catch (e) {
+            // Most common cause: `levenshtein` function not available (fuzzystrmatch
+            // extension not enabled). Apply the SQL doc to enable. Until then, the
+            // duplicate-hint column is silently empty.
+            console.warn('[admin/customers] fuzzy-dupe check skipped:', e?.message || e);
+        }
+        // Reshape to snake_case for the client (matches the previous PostgREST shape).
+        const customers = users.map(u => ({
+            id: u.id,
+            name: u.name ?? profileNameMap[u.id] ?? null,
+            email: u.email,
+            phone: u.phone,
+            status: u.status,
+            role: u.role,
+            createdAt: u.createdAt,
+            orders: u.orders.map(o => ({
+                total_amount: o.totalAmount,
+                created_at: o.createdAt,
+                branch_id: o.branchId,
+                status: o.status,
+            })),
+            default_address: defaultAddressByUser[u.id] ?? null,
+            address_count: addressCountByUser[u.id] ?? 0,
+            potential_duplicates: possibleDupesByUser[u.id] ?? [],
+        }));
+        res.json({
+            customers, branchCityMap,
+            total: totalCount,
+            limit, offset,
+            hasMore: offset + customers.length < totalCount,
+        });
+    }
+    catch (e) {
+        console.error('[admin/customers] list error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to fetch customers' });
+    }
+});
+/**
+ * GET /admin/orders
+ *
+ * Returns recent orders for the /orders Admin page. Optional `userId`
+ * query param filters to a single customer's orders — used by the
+ * "View orders" deep link from the Customers page.
+ *
+ * Shape mirrors the previous Supabase .from('orders') columns so the
+ * OrderManager UI doesn't have to change beyond switching its data
+ * source.
+ */
+app.get('/admin/orders', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER);
+    if (!caller)
+        return;
+    try {
+        const userId = typeof req.query.userId === 'string' ? req.query.userId : undefined;
+        const limit = Math.min(parseInt(req.query.limit || '500', 10) || 500, 1000);
+        const rows = await prisma.order.findMany({
+            where: userId ? { userId } : undefined,
+            orderBy: { createdAt: 'desc' },
+            take: limit,
+            select: {
+                id: true,
+                orderNumber: true,
+                customer_name: true,
+                customer_phone: true,
+                storeId: true,
+                store_name: true,
+                userId: true,
+                branchId: true,
+                status: true,
+                totalAmount: true,
+                items_count: true,
+                order_type: true,
+                cancelledReason: true,
+                createdAt: true,
+            },
+        });
+        // Reshape to snake_case for the client.
+        const orders = rows.map(o => ({
+            id: o.id,
+            order_number: o.orderNumber,
+            customer_name: o.customer_name,
+            customer_phone: o.customer_phone,
+            store_id: o.storeId,
+            store_name: o.store_name,
+            user_id: o.userId,
+            branch_id: o.branchId,
+            status: o.status,
+            total_amount: o.totalAmount,
+            items_count: o.items_count,
+            order_type: o.order_type,
+            cancelled_reason: o.cancelledReason,
+            created_at: o.createdAt,
+        }));
+        res.json({ orders, count: orders.length });
+    }
+    catch (e) {
+        console.error('[admin/orders] list error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to fetch orders' });
+    }
+});
+/**
+ * PATCH /admin/orders/:id
+ *
+ * Used by OrderManager's "Force complete" / "Force cancel" actions.
+ * Status must be a valid OrderStatus enum value (uppercase).
+ *
+ * Restricted to SUPER_ADMIN + OPERATIONS (FINANCE/SUPPORT are view-only
+ * for order status — they go through /refunds-disputes for refunds).
+ */
+app.patch('/admin/orders/:id', async (req, res) => {
+    const caller = await requireRole(req, res, ['SUPER_ADMIN', 'OPERATIONS']);
+    if (!caller)
+        return;
+    try {
+        const { id } = req.params;
+        const { status, cancelledReason } = req.body ?? {};
+        // 2026-06-04: full 10-value OrderStatus enum. Was missing PREPARING +
+        // RETURN_REQUESTED + RETURN_APPROVED + RETURN_REJECTED — admin
+        // overrides to those states would 400 even though they're valid.
+        const VALID = [
+            'PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED',
+            'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REFUNDED',
+        ];
+        if (!status || !VALID.includes(status)) {
+            return res.status(400).json({ error: `status must be one of ${VALID.join(', ')}` });
+        }
+        // Snapshot before-state for the audit log.
+        const before = await prisma.order.findUnique({
+            where: { id },
+            select: { status: true, cancelledReason: true },
+        });
+        const updated = await prisma.order.update({
+            where: { id },
+            data: {
+                status,
+                ...(cancelledReason ? { cancelledReason } : {}),
+            },
+            select: { id: true, status: true },
+        });
+        // Best-effort audit — fire-and-forget pattern, but awaited so any
+        // db connection errors get logged on this turn rather than orphaned.
+        await recordAdminAudit(req, {
+            actorId: caller.id,
+            action: 'order.status_change',
+            targetTable: 'orders',
+            targetId: id,
+            before: before ? { status: before.status, cancelledReason: before.cancelledReason } : null,
+            after: { status: updated.status, cancelledReason: cancelledReason ?? null },
+            reason: cancelledReason,
+        });
+        res.json({ ok: true, order: updated });
+    }
+    catch (e) {
+        console.error('[admin/orders] patch error:', e?.message || e);
+        if (e?.code === 'P2025')
+            return res.status(404).json({ error: 'Order not found' });
+        res.status(500).json({ error: 'Failed to update order' });
+    }
+});
+/**
+ * GET /admin/customers/:id/orders
+ *
+ * Order history for the CustomerDetailsSheet drawer. Same role gate
+ * as /admin/customers.
+ */
+app.get('/admin/customers/:id/orders', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER);
+    if (!caller)
+        return;
+    try {
+        const { id } = req.params;
+        const rows = await prisma.order.findMany({
+            where: { userId: id },
+            orderBy: { createdAt: 'desc' },
+            take: 200,
+            select: {
+                id: true, orderNumber: true, store_name: true,
+                totalAmount: true, status: true, createdAt: true,
+            },
+        });
+        const orders = rows.map(o => ({
+            id: o.id,
+            order_number: o.orderNumber,
+            store_name: o.store_name,
+            total_amount: o.totalAmount,
+            status: o.status,
+            created_at: o.createdAt,
+        }));
+        res.json({ orders });
+    }
+    catch (e) {
+        console.error('[admin/customers/:id/orders] error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to fetch customer orders' });
+    }
+});
+/**
+ * GET /admin/merchants/:id/orders
+ *
+ * Recent orders for a merchant — powers the Recent Orders tab in
+ * MerchantDetailsSheet. Migrated from supabase.from('orders') direct
+ * read (RLS-blocked for the authenticated JWT) to API + Prisma per the
+ * "admin reads via API" architectural rule.
+ */
+app.get('/admin/merchants/:id/orders', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER);
+    if (!caller)
+        return;
+    try {
+        const { id } = req.params;
+        const limit = Math.min(parseInt(req.query.limit || '50', 10) || 50, 500);
+        const rows = await prisma.order.findMany({
+            where: { storeId: id },
+            orderBy: { createdAt: 'desc' },
+            take: limit,
+            select: {
+                id: true, orderNumber: true, customer_name: true,
+                totalAmount: true, status: true, createdAt: true,
+                items_count: true, order_type: true,
+            },
+        });
+        res.json({
+            orders: rows.map(o => ({
+                id: o.id,
+                order_number: o.orderNumber,
+                customer_name: o.customer_name,
+                total_amount: o.totalAmount,
+                status: o.status,
+                created_at: o.createdAt,
+                items_count: o.items_count,
+                order_type: o.order_type,
+            })),
+        });
+    }
+    catch (e) {
+        console.error('[admin/merchants/:id/orders] error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to fetch merchant orders' });
+    }
+});
+/**
+ * GET /admin/customers/:id/addresses
+ *
+ * All addresses for one customer — used by the CustomerDetailsSheet "Addresses"
+ * section. Returned ordered by is_default DESC, created_at DESC so the default
+ * shows first.
+ */
+app.get('/admin/customers/:id/addresses', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER);
+    if (!caller)
+        return;
+    try {
+        const { id } = req.params;
+        const rows = await prisma.consumer_addresses.findMany({
+            where: { user_id: id },
+            orderBy: [{ is_default: 'desc' }, { created_at: 'desc' }],
+            select: {
+                id: true, type: true, address: true,
+                latitude: true, longitude: true,
+                is_default: true, created_at: true,
+            },
+        });
+        res.json({
+            addresses: rows.map(a => ({
+                id: a.id,
+                type: a.type,
+                address: a.address,
+                latitude: a.latitude,
+                longitude: a.longitude,
+                is_default: a.is_default ?? false,
+                created_at: a.created_at,
+            })),
+        });
+    }
+    catch (e) {
+        console.error('[admin/customers/:id/addresses] error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to fetch customer addresses' });
+    }
+});
+/**
+ * PATCH /admin/customers/:id/name
+ *
+ * Lets any admin-tier user manually set / correct a customer's display name.
+ * Use case: incomplete signups where User.name stayed NULL and ProfileSetup
+ * was abandoned; admin can patch what they know from support context.
+ *
+ * Audited via recordAdminAudit. Failure to audit doesn't block the update.
+ */
+app.patch('/admin/customers/:id/name', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER);
+    if (!caller)
+        return;
+    try {
+        const { id } = req.params;
+        const { name } = req.body ?? {};
+        if (typeof name !== 'string' || name.trim().length < 2) {
+            return res.status(400).json({ error: 'name must be a string with at least 2 characters' });
+        }
+        const cleanName = name.trim();
+        const before = await prisma.user.findUnique({
+            where: { id },
+            select: { id: true, name: true },
+        });
+        if (!before)
+            return res.status(404).json({ error: 'User not found' });
+        const updated = await prisma.user.update({
+            where: { id },
+            data: { name: cleanName },
+            select: { id: true, name: true },
+        });
+        // Best-effort audit.
+        await recordAdminAudit(req, {
+            actorId: caller.id,
+            action: 'customer.name_change',
+            targetTable: 'User',
+            targetId: id,
+            before: { name: before.name },
+            after: { name: updated.name },
+        });
+        res.json({ ok: true, user: updated });
+    }
+    catch (e) {
+        console.error('[admin/customers/:id/name] error:', e?.message || e);
+        if (e?.code === 'P2025')
+            return res.status(404).json({ error: 'User not found' });
+        res.status(500).json({ error: 'Failed to update customer name' });
+    }
+});
+// ────────────────────────────────────────────────────────────────────────────
+// Admin home dashboards — one endpoint per role-home (added 2026-06-04)
+//
+// The home dashboards under apps/admin-web/src/components/home/ were still
+// reading via supabase.from() directly for KPI counts. RLS blocks those for
+// admin-tier JWTs, so the tiles silently returned 0. Per the "admin reads
+// go through API" architectural rule, each home now has a dedicated
+// endpoint that aggregates everything it needs server-side via Prisma.
+// ────────────────────────────────────────────────────────────────────────────
+/**
+ * GET /admin/home/super-admin
+ *   Platform-wide overview tiles + Recent Activity feed.
+ *   Range: 24h | 7d | 30d (default 30d) — for the "new customers in range" tile.
+ */
+app.get('/admin/home/super-admin', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER);
+    if (!caller)
+        return;
+    try {
+        const range = (typeof req.query.range === 'string' ? req.query.range : '30d');
+        const days = range === '24h' ? 1 : range === '7d' ? 7 : 30;
+        const since = new Date();
+        since.setDate(since.getDate() - days);
+        const [newCustomers, activeBranches, recentOrders, recentMerchants] = await Promise.all([
+            prisma.user.count({ where: { role: 'CONSUMER', createdAt: { gte: since } } }),
+            prisma.merchantBranch.count({ where: { isActive: true } }),
+            prisma.order.findMany({
+                orderBy: { createdAt: 'desc' },
+                take: 10,
+                select: {
+                    id: true, orderNumber: true, customer_name: true,
+                    totalAmount: true, status: true, createdAt: true,
+                },
+            }),
+            prisma.merchant.findMany({
+                orderBy: { createdAt: 'desc' },
+                take: 5,
+                select: { id: true, storeName: true, status: true, createdAt: true },
+            }),
+        ]);
+        res.json({
+            newCustomers,
+            activeBranches,
+            recentOrders: recentOrders.map(o => ({
+                id: o.id, order_number: o.orderNumber, customer_name: o.customer_name,
+                total_amount: o.totalAmount, status: o.status, created_at: o.createdAt,
+            })),
+            recentMerchants: recentMerchants.map(m => ({
+                id: m.id, store_name: m.storeName, status: m.status, created_at: m.createdAt,
+            })),
+        });
+    }
+    catch (e) {
+        console.error('[admin/home/super-admin] error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to load super-admin home' });
+    }
+});
+/**
+ * GET /admin/home/operations
+ *   Queue depths + today's order momentum (hourly buckets) + KYC + inbox feeds.
+ */
+app.get('/admin/home/operations', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER);
+    if (!caller)
+        return;
+    try {
+        const sinceMidnight = new Date();
+        sinceMidnight.setHours(0, 0, 0, 0);
+        // Include the new PREPARING status in the "active queue" count (was missing
+        // pre-2026-06-04). Cast to any so we don't need to import the Prisma enum here.
+        const ACTIVE_FOR_QUEUE = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY'];
+        const [pendingOrders, kycPending, inboxUnread, activeBranches, pendingKycList, recentInboxRows, todaysOrders,] = await Promise.all([
+            prisma.order.count({ where: { status: { in: ACTIVE_FOR_QUEUE } } }),
+            prisma.merchant.count({ where: { kycStatus: 'pending' } }),
+            prisma.watiInbox.count({ where: { isRead: false } }),
+            prisma.merchantBranch.count({ where: { isActive: true } }),
+            prisma.merchant.findMany({
+                where: { kycStatus: 'pending' },
+                orderBy: { createdAt: 'desc' },
+                take: 8,
+                select: { id: true, storeName: true, kycStatus: true, createdAt: true },
+            }),
+            prisma.watiInbox.findMany({
+                orderBy: { receivedAt: 'desc' },
+                take: 8,
+                select: {
+                    id: true, contactName: true, waPhone: true, body: true,
+                    receivedAt: true, isRead: true,
+                },
+            }),
+            prisma.order.findMany({
+                where: { createdAt: { gte: sinceMidnight } },
+                select: { createdAt: true },
+            }),
+        ]);
+        // Bucket today's orders into hours (server-side — was client-side before).
+        const buckets = {};
+        todaysOrders.forEach(o => {
+            const h = new Date(o.createdAt).getHours();
+            buckets[h] = (buckets[h] ?? 0) + 1;
+        });
+        const todaysOrdersHourly = [];
+        const nowHour = new Date().getHours();
+        for (let h = 0; h <= nowHour; h++) {
+            todaysOrdersHourly.push({
+                hour: `${h.toString().padStart(2, '0')}:00`,
+                orders: buckets[h] ?? 0,
+            });
+        }
+        res.json({
+            pendingOrders, kycPending, inboxUnread, activeBranches,
+            pendingKycList: pendingKycList.map(m => ({
+                id: m.id, store_name: m.storeName,
+                kyc_status: m.kycStatus, created_at: m.createdAt,
+            })),
+            recentInboxMessages: recentInboxRows.map(r => ({
+                id: r.id, contact_name: r.contactName, wa_phone: r.waPhone,
+                body: r.body, received_at: r.receivedAt, is_read: r.isRead,
+            })),
+            todaysOrdersHourly,
+        });
+    }
+    catch (e) {
+        console.error('[admin/home/operations] error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to load operations home' });
+    }
+});
+/**
+ * GET /admin/home/support
+ *   Inbox + cancellation tiles + recent inbox/cancellations.
+ */
+app.get('/admin/home/support', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER);
+    if (!caller)
+        return;
+    try {
+        const sinceMidnight = new Date();
+        sinceMidnight.setHours(0, 0, 0, 0);
+        const [inboxUnread, inboxTotal, cancelledToday, recentMessages, recentCancellations,] = await Promise.all([
+            prisma.watiInbox.count({ where: { isRead: false } }),
+            prisma.watiInbox.count(),
+            prisma.order.count({
+                where: { status: 'CANCELLED', createdAt: { gte: sinceMidnight } },
+            }),
+            prisma.watiInbox.findMany({
+                orderBy: { receivedAt: 'desc' },
+                take: 12,
+                select: {
+                    id: true, contactName: true, waPhone: true, body: true,
+                    receivedAt: true, isRead: true, status: true,
+                },
+            }),
+            prisma.order.findMany({
+                where: { status: 'CANCELLED' },
+                orderBy: { createdAt: 'desc' },
+                take: 8,
+                select: {
+                    id: true, orderNumber: true, customer_name: true,
+                    customer_phone: true, totalAmount: true,
+                    createdAt: true, cancelledReason: true,
+                },
+            }),
+        ]);
+        res.json({
+            inboxUnread, inboxTotal, cancelledToday,
+            recentMessages: recentMessages.map(r => ({
+                id: r.id, contact_name: r.contactName, wa_phone: r.waPhone,
+                body: r.body, received_at: r.receivedAt, is_read: r.isRead, status: r.status,
+            })),
+            recentCancellations: recentCancellations.map(o => ({
+                id: o.id, order_number: o.orderNumber, customer_name: o.customer_name,
+                customer_phone: o.customer_phone, total_amount: o.totalAmount,
+                created_at: o.createdAt, cancelled_reason: o.cancelledReason,
+            })),
+        });
+    }
+    catch (e) {
+        console.error('[admin/home/support] error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to load support home' });
+    }
+});
+/**
+ * GET /admin/home/finance
+ *   Refund-pressure count. The rest of the Finance home uses
+ *   get_super_admin_stats_in_range RPC which already works.
+ */
+app.get('/admin/home/finance', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER);
+    if (!caller)
+        return;
+    try {
+        const refundLike = await prisma.order.count({
+            where: { status: { in: ['CANCELLED', 'REFUNDED'] } },
+        });
+        res.json({ refundLike });
+    }
+    catch (e) {
+        console.error('[admin/home/finance] error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to load finance home' });
+    }
+});
+// ────────────────────────────────────────────────────────────────────────────
+// Self-profile update — consumer-side (added 2026-06-04, Option A)
+//
+// The consumer app's ProfileSetupScreen currently writes the user's name to
+// public.profiles.full_name only. Our admin UI reads from public."User".name.
+// Result: every user who completed profile-setup still showed "(no name)"
+// in admin because the two columns were never synced.
+//
+// This endpoint accepts the same payload the screen already builds and
+// writes to BOTH tables in a single Prisma transaction. The consumer app
+// is being updated to call this instead of the direct supabase.from()
+// upsert; the existing screen code path stays around as a fallback during
+// the OTA rollout window.
+// ────────────────────────────────────────────────────────────────────────────
+app.post('/me/profile', async (req, res) => {
+    const caller = await requireUser(req, res);
+    if (!caller)
+        return;
+    try {
+        const { name, email, dateOfBirth, avatarUrl } = req.body ?? {};
+        if (!name || typeof name !== 'string' || name.trim().length < 2) {
+            return res.status(400).json({ error: 'name must be a string with at least 2 characters' });
+        }
+        const cleanName = name.trim();
+        // Resolve a phone if we already have one on the User row — needed only
+        // when we create a fresh User (consumer JIT case).
+        const existing = await prisma.user.findUnique({
+            where: { id: caller.id },
+            select: { id: true, phone: true, email: true },
+        });
+        const fallbackEmail = caller.email
+            || existing?.email
+            || `${caller.id}@user.pickatstore.app`;
+        await prisma.$transaction([
+            prisma.user.upsert({
+                where: { id: caller.id },
+                update: { name: cleanName },
+                create: {
+                    id: caller.id,
+                    email: fallbackEmail,
+                    phone: existing?.phone ?? null,
+                    name: cleanName,
+                    role: 'CONSUMER',
+                },
+            }),
+            prisma.profile.upsert({
+                where: { id: caller.id },
+                update: {
+                    fullName: cleanName,
+                    ...(email ? { email } : {}),
+                    ...(dateOfBirth ? { dateOfBirth: new Date(dateOfBirth) } : {}),
+                    ...(avatarUrl ? { avatarUrl } : {}),
+                    profileCompleted: true,
+                    updatedAt: new Date(),
+                },
+                create: {
+                    id: caller.id,
+                    fullName: cleanName,
+                    email: email ?? null,
+                    dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
+                    avatarUrl: avatarUrl ?? null,
+                    profileCompleted: true,
+                    updatedAt: new Date(),
+                },
+            }),
+        ]);
+        res.json({ ok: true, name: cleanName });
+    }
+    catch (e) {
+        console.error('[me/profile] update error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to update profile' });
+    }
+});
 // --- 404 Handler ---
 app.use((req, res, next) => {
     res.status(404).json({ error: 'Endpoint not found', path: req.path });
 });
+// --- Sentry Express error handler ---
+// Per Sentry's Express SDK guidance, this MUST be registered after all
+// controllers + the 404 handler, and BEFORE any other error-handling middleware.
+// It does NOT swallow the error — control flows on to the global error handler
+// below, which still returns the JSON response to the client.
+Sentry.setupExpressErrorHandler(app);
 // --- Global Error Handler ---
 app.use((err, req, res, next) => {
     console.error('[Global Error Handler]', err);
@@ -4279,3 +5736,4 @@ server.listen(Number(port), '0.0.0.0', () => {
     console.log(`[API] Server running on http://0.0.0.0:${port}`);
     console.log(`[API] Socket.io ready`);
 });
+//# sourceMappingURL=index.js.map
