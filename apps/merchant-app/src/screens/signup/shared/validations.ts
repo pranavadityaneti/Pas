@@ -134,6 +134,17 @@ export function validateKyc(
     docFiles: { [key: string]: string | null },
     selectedVertical: Vertical | undefined,
 ): ValidationResult {
+    // 2026-06-04 (Phase 2.B): Annual turnover must be explicitly selected.
+    // Previously defaulted to '<20L' which silently slotted every merchant
+    // into the lowest band; spec mandates user choice before Next.
+    if (!kyc.turnoverRange) {
+        return {
+            ok: false,
+            title: 'Required',
+            message: 'Please select your annual turnover range.',
+        };
+    }
+
     // PAN
     if (!kyc.panNumber || !PAN_REGEX.test(kyc.panNumber)) {
         return {

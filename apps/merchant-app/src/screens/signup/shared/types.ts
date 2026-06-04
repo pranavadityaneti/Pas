@@ -68,6 +68,11 @@ export interface StoreState {
 /**
  * State shape for Step 5 — KYC.
  * Extracted from inline useState({...}) call in signup.tsx (Phase 1.2, 2026-06-04).
+ *
+ * 2026-06-04 (Phase 2.B): `turnoverRange` is now `string | null`. The prior
+ * default `'<20L'` silently biased every merchant into the lowest band; spec
+ * requires explicit selection. Initial value is null (see SignupContext).
+ * validateKyc rejects a null turnoverRange before Step → 6 navigation.
  */
 export interface KycState {
     panNumber: string;
@@ -75,7 +80,7 @@ export interface KycState {
     msmeNumber: string;
     bankAccount: string;
     ifsc: string;
-    turnoverRange: string;
+    turnoverRange: string | null;
     gstNumber: string;
     fssaiNumber: string;
     beneficiaryName: string;

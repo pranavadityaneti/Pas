@@ -198,7 +198,10 @@ export function SignupProvider({ children }: SignupProviderProps) {
         msmeNumber: '',
         bankAccount: '',
         ifsc: '',
-        turnoverRange: '<20L',
+        // 2026-06-04 (Phase 2.B): no default. Was '<20L' previously, which
+        // silently biased every merchant into the lowest band. Spec mandates
+        // explicit selection before Step → 6 navigation.
+        turnoverRange: null,
         gstNumber: '',
         fssaiNumber: '',
         beneficiaryName: '',
