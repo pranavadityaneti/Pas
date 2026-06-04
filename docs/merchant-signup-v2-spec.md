@@ -12,7 +12,7 @@ These are open items found in vendor-agreement review (2026-06-04). The signup c
 
 | # | Blocker | Owner | Notes |
 |---|---|---|---|
-| B1 | "Lifetime Access" wording in UI conflicts with agreement's "one-time onboarding fee" + revision clause | Pranav | Decided: change UI to "One-time Onboarding Fee" — drop "lifetime" terminology (see Step 5) |
+| B1 | "Lifetime Access" wording in UI vs agreement's "one-time onboarding fee" + revision clause | Pranav | Decided 2026-06-04: KEEP "Lifetime Access" UI wording. Pranav is redrafting all 3 vendor agreements to include an explicit "Lifetime Listing Right" clause that aligns the agreement text with the UI promise (suggested draft language in gap-analysis notes). |
 | B2 | `designation` field needs to be captured at Step 1 to populate agreement signatory block | Spec | Added below to Step 1 |
 | B3 | Agreements don't explicitly say onboarding fee is non-refundable | Pranav + lawyer | Need clause added before going live |
 | B4 | Agreements don't recognize Aadhaar eSign / Section 3A of IT Act 2000 | Pranav + lawyer | Need clause added before going live |
@@ -133,9 +133,9 @@ These are open items found in vendor-agreement review (2026-06-04). The signup c
 - **Premium tier**: ₹2,999 × number-of-stores (LINEAR, no discount)
 - Vertical's `isPremium` boolean determines tier.
 
-**🚨 UI wording change (per Blocker B1):**
-- Remove "Lifetime Access" terminology from all UI strings.
-- Replace with **"One-time Onboarding Fee"** to match agreement reality.
+**UI wording (resolved 2026-06-04):**
+- **KEEP existing "Lifetime Access" UI strings.**
+- Pranav is redrafting all 3 vendor agreements to include an explicit "Lifetime Listing Right" clause so the agreement text aligns with the UI promise.
 - The strikethrough "₹4999 / ₹2499" remains as discount-vs-list-price framing.
 
 **Coupon input:**

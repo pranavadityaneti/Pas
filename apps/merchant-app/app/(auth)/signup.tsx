@@ -19,6 +19,7 @@ import { supabase, setSessionFromTokens } from '../../src/lib/supabase';
 import { Colors } from '../../constants/Colors';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { Vertical, Branch } from '../../src/screens/signup/shared/types';
 
 let RazorpayCheckout: any = null;
 if (Constants.appOwnership !== 'expo') {
@@ -42,27 +43,8 @@ const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIza
 
 const STEPS = ['Identity', 'Store', 'Photos', 'Branches', 'KYC', 'Subscription', 'Review'];
 
-interface Vertical {
-    id: string;
-    name: string;
-    requiresFssai: boolean;
-    isPremium: boolean;
-    isDining?: boolean;
-}
-
-interface Branch {
-    name: string;
-    address: string;
-    latitude: number | null;
-    longitude: number | null;
-    city: string;
-    manager_name: string;
-    phone: string;
-    cuisines: string[];
-    isVeg: boolean;
-    restaurantType: string;
-    photos: string[];
-}
+// 2026-06-04 (Phase 1.1): Vertical + Branch types extracted to
+// ../../src/screens/signup/shared/types.ts — see import above.
 
 export default function SignupScreen() {
     const [step, setStep] = useState(1);
