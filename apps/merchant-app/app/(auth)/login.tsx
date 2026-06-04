@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
     View, Text, TextInput, TouchableOpacity, StyleSheet,
     Platform, ActivityIndicator, Alert, Image, Modal
@@ -11,25 +11,13 @@ import { supabase, setSessionFromTokens } from '../../src/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '../../constants/Colors';
 import { useStore } from '../../src/context/StoreContext';
+import { useOtpPad } from '../../src/hooks/useOtpPad';
+import { useSendVerifyOtp } from '../../src/hooks/useSendVerifyOtp';
 
-const getApiUrl = () => {
-    return process.env.EXPO_PUBLIC_API_URL;
-};
-
-const fetchWithTimeout = async (resource: RequestInfo | string, options: RequestInit & { timeout?: number } = {}) => {
-    const { timeout = 30000, ...fetchOptions } = options;
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeout);
-    try {
-        const response = await fetch(resource, { ...fetchOptions, signal: controller.signal as any });
-        clearTimeout(id);
-        return response;
-    } catch (error: any) {
-        clearTimeout(id);
-        if (error.name === 'AbortError') throw new Error('Network timeout.');
-        throw error;
-    }
-};
+// 2026-06-04 (Phase 1.4.C): local getApiUrl + fetchWithTimeout helpers
+// removed — OTP send/verify now uses the shared useSendVerifyOtp primitive
+// (apps/merchant-app/src/hooks/useSendVerifyOtp.ts). Per-request OTP timeout
+// is 15s (down from this file's prior 30s default) to match signup.tsx.
 
 type AuthMode = 'phone-input' | 'phone-otp';
 
@@ -39,20 +27,14 @@ export default function LoginScreen() {
     const [showRoleModal, setShowRoleModal] = useState(false);
     const [multiRoles, setMultiRoles] = useState<any[]>([]);
 
-    // Phone OTP state
+    // 2026-06-04 (Phase 1.4.C): pad mechanics + send/verify shared with signup
+    // via Phase 1.4.A primitives (useOtpPad + useSendVerifyOtp). Login keeps
+    // its post-verify role-discovery + multi-context modal inline below.
     const [phoneNumber, setPhoneNumber] = useState('');
-    const [otpValues, setOtpValues] = useState(['', '', '', '', '', '']);
-    const [resendTimer, setResendTimer] = useState(0);
-    const otpRefs = useRef<(TextInput | null)[]>([]);
+    const pad = useOtpPad(6);
+    const otp = useSendVerifyOtp('login');
 
     const { refreshStore } = useStore();
-
-    useEffect(() => {
-        if (resendTimer > 0) {
-            const timer = setTimeout(() => setResendTimer(prev => prev - 1), 1000);
-            return () => clearTimeout(timer);
-        }
-    }, [resendTimer]);
 
     const handleSendOtp = async () => {
         const cleaned = phoneNumber.replace(/\s/g, '');
@@ -63,28 +45,21 @@ export default function LoginScreen() {
 
         setLoading(true);
         try {
-            const response = await fetchWithTimeout(`${getApiUrl()}/auth/send-otp`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phone: `91${cleaned}`, isLogin: true })
-            });
-            const data = await response.json();
-
-            if (!response.ok) throw new Error(data.error || 'Failed to send OTP');
-
+            const result = await otp.sendOtp(`91${cleaned}`);
+            if (!result.ok) {
+                Alert.alert('Error', result.error || 'Failed to send OTP. Please try again.');
+                return;
+            }
             setMode('phone-otp');
-            setResendTimer(60);
-            setOtpValues(['', '', '', '', '', '']);
-        } catch (error: any) {
-            Alert.alert('Error', error.message || 'Failed to send OTP. Please try again.');
+            pad.reset();
         } finally {
             setLoading(false);
         }
     };
 
     const handleVerifyOtp = async () => {
-        const otp = otpValues.join('');
-        if (otp.length !== 6) {
+        const otpValue = pad.getValue();
+        if (otpValue.length !== 6) {
             Alert.alert('Invalid OTP', 'Please enter the complete 6-digit OTP.');
             return;
         }
@@ -93,14 +68,13 @@ export default function LoginScreen() {
         setLoading(true);
 
         try {
-            const response = await fetchWithTimeout(`${getApiUrl()}/auth/verify-otp`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phone: `91${cleaned}`, otp })
-            });
-
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.error || 'OTP verification failed');
+            const result = await otp.verifyOtp(`91${cleaned}`, otpValue);
+            if (!result.ok) {
+                console.error('[Login] Verify OTP Error:', result.error);
+                Alert.alert('Verification Failed', result.error || 'Incorrect OTP or network error. Please try again.');
+                return;
+            }
+            const data = result.data;
 
             // Set Supabase Session
             await setSessionFromTokens(data.session.access_token, data.session.refresh_token);
@@ -251,19 +225,6 @@ export default function LoginScreen() {
         }
     };
 
-    const handleOtpChange = (text: string, index: number) => {
-        const newValues = [...otpValues];
-        newValues[index] = text;
-        setOtpValues(newValues);
-        if (text && index < 5) otpRefs.current[index + 1]?.focus();
-    };
-
-    const handleOtpKeyPress = (e: any, index: number) => {
-        if (e.nativeEvent.key === 'Backspace' && !otpValues[index] && index > 0) {
-            otpRefs.current[index - 1]?.focus();
-        }
-    };
-
     const handleSelectBranch = async (context: any, branchId: string) => {
         console.log('\n=== BRANCH SELECTION ===');
         console.log('1. User tapped:', context.merchantName, 'branch:', branchId);
@@ -342,8 +303,8 @@ export default function LoginScreen() {
                         <>
                             <View style={styles.otpHeader}>
                                 <Text style={styles.label}>Enter 6-digit OTP</Text>
-                                {resendTimer > 0 ? (
-                                    <Text style={styles.timerText}>Resend in {resendTimer}s</Text>
+                                {otp.resendTimer > 0 ? (
+                                    <Text style={styles.timerText}>Resend in {otp.resendTimer}s</Text>
                                 ) : (
                                     <TouchableOpacity onPress={handleSendOtp}>
                                         <Text style={styles.resendText}>Resend OTP</Text>
@@ -352,24 +313,24 @@ export default function LoginScreen() {
                             </View>
 
                             <View style={styles.otpContainer}>
-                                {otpValues.map((val, i) => (
+                                {pad.values.map((val, i) => (
                                     <TextInput
                                         key={i}
-                                        ref={ref => { otpRefs.current[i] = ref; }}
+                                        ref={ref => { pad.refs.current[i] = ref; }}
                                         style={[styles.otpInput, val ? styles.otpInputActive : null]}
                                         maxLength={1}
                                         keyboardType="number-pad"
                                         value={val}
-                                        onChangeText={(text) => handleOtpChange(text, i)}
-                                        onKeyPress={(e) => handleOtpKeyPress(e, i)}
+                                        onChangeText={(text) => pad.onChange(text, i)}
+                                        onKeyPress={(e) => pad.onKeyPress(e, i)}
                                     />
                                 ))}
                             </View>
 
                             <TouchableOpacity
-                                style={[styles.button, (loading || otpValues.join('').length !== 6) && styles.buttonDisabled]}
+                                style={[styles.button, (loading || pad.getValue().length !== 6) && styles.buttonDisabled]}
                                 onPress={handleVerifyOtp}
-                                disabled={loading || otpValues.join('').length !== 6}
+                                disabled={loading || pad.getValue().length !== 6}
                             >
                                 {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>Verify & Login</Text>}
                             </TouchableOpacity>
