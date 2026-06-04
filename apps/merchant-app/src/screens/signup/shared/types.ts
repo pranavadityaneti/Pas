@@ -102,6 +102,24 @@ export interface StoreState {
 }
 
 /**
+ * State shape for Step 4 — Agreements (v2 NEW).
+ * 2026-06-04 (Phase 2.D): Captures per-document consent + the overall
+ * Aadhaar eSign result.
+ *  - privacyAccepted / termsAccepted / partnerAccepted: post-read checkboxes
+ *  - signed: true once Digio eSign returns success (or simulated success
+ *    while Digio credentials are pending — spec blocker B7)
+ *  - txnIds: Digio transaction references for audit trail; one per doc
+ *    when batched, empty when stubbed
+ */
+export interface AgreementsState {
+    privacyAccepted: boolean;
+    termsAccepted: boolean;
+    partnerAccepted: boolean;
+    signed: boolean;
+    txnIds: string[];
+}
+
+/**
  * State shape for Step 5 — KYC.
  * Extracted from inline useState({...}) call in signup.tsx (Phase 1.2, 2026-06-04).
  *

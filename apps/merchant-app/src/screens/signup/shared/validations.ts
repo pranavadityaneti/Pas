@@ -19,7 +19,7 @@
  * Reference: docs/merchant-signup-v2-spec.md (Phase 1 — File restructure).
  */
 
-import type { IdentityState, StoreState, KycState, Branch, Store, Vertical } from './types';
+import type { IdentityState, StoreState, KycState, Branch, Store, Vertical, AgreementsState } from './types';
 
 /* ───────────────────────────── Result type ───────────────────────────── */
 
@@ -161,6 +161,30 @@ export function validateStores(
                 message: `Please upload at least 2 photos for ${storeLabel}.`,
             };
         }
+    }
+    return { ok: true };
+}
+
+/**
+ * 2026-06-04 (Phase 2.D): Step 4 (Agreements) validation. The user must have
+ * checked all 3 "I have read" boxes AND completed the Aadhaar eSign (or its
+ * stubbed equivalent while Digio is pending). Spec: docs/merchant-signup-v2-spec.md
+ * Step 4 — "Block until eSign succeeds. No manual signature fallback."
+ */
+export function validateAgreements(agreements: AgreementsState): ValidationResult {
+    if (!agreements.privacyAccepted || !agreements.termsAccepted || !agreements.partnerAccepted) {
+        return {
+            ok: false,
+            title: 'Read & Accept',
+            message: 'Please read and accept all three documents before continuing.',
+        };
+    }
+    if (!agreements.signed) {
+        return {
+            ok: false,
+            title: 'Signature Required',
+            message: 'Please sign the documents using Aadhaar eSign before continuing.',
+        };
     }
     return { ok: true };
 }

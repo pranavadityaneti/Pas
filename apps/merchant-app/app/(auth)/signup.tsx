@@ -22,6 +22,7 @@ import {
     validateIdentity,
     validateStores,
     validateKyc,
+    validateAgreements,
     validatePayment,
     type ValidationResult,
 } from '../../src/screens/signup/shared/validations';
@@ -32,6 +33,7 @@ import { styles } from '../../src/screens/signup/shared/signupStyles';
 import { StepIdentity } from '../../src/screens/signup/steps/StepIdentity';
 import { StepStores } from '../../src/screens/signup/steps/StepStores';
 import { StepKyc } from '../../src/screens/signup/steps/StepKyc';
+import { StepAgreements } from '../../src/screens/signup/steps/StepAgreements';
 import { StepSubscription } from '../../src/screens/signup/steps/StepSubscription';
 import { StepReview } from '../../src/screens/signup/steps/StepReview';
 
@@ -44,9 +46,9 @@ if (Constants.appOwnership !== 'expo') {
     }
 }
 
-// 2026-06-04 (Phase 2.C.2): v2 step order. Agreements (Step 4) lands in
-// Phase 2.D, shifting Subscription → 5 and Review → 6.
-const STEPS = ['Identity', 'Stores', 'KYC', 'Subscription', 'Review'];
+// 2026-06-04 (Phase 2.D): v2 step order — Agreements lands between KYC
+// and Subscription. Spec: docs/merchant-signup-v2-spec.md (Steps 1–6).
+const STEPS = ['Identity', 'Stores', 'KYC', 'Agreements', 'Subscription', 'Review'];
 
 function SignupScreenInner() {
     // 2026-06-04 (Phase 1.6.B): master signup state lifted into SignupProvider
@@ -65,6 +67,7 @@ function SignupScreenInner() {
         hasBranches, setHasBranches,
         branches, setBranches,
         stores, setStores,
+        agreements,
         kyc, setKyc,
         docFiles, setDocFiles,
         paymentStatus, setPaymentStatus,
@@ -116,12 +119,13 @@ function SignupScreenInner() {
         // a thin switch that delegates to those pure helpers and presents the
         // resulting Alert. Error titles + messages are preserved verbatim.
         let result: ValidationResult = { ok: true };
-        // 2026-06-04 (Phase 2.C.2): v2 step map. Identity → Stores → KYC →
-        // Subscription → Review. (Agreements lands at Step 4 in Phase 2.D.)
+        // 2026-06-04 (Phase 2.D): v2 step map (6 steps).
+        // 1 Identity, 2 Stores, 3 KYC, 4 Agreements, 5 Subscription, 6 Review.
         if (step === 1) result = validateIdentity(identity, otp.verified);
         else if (step === 2) result = validateStores(store.categoryId, stores);
         else if (step === 3) result = validateKyc(kyc, docFiles, selectedVertical);
-        else if (step === 4) result = validatePayment(paymentStatus);
+        else if (step === 4) result = validateAgreements(agreements);
+        else if (step === 5) result = validatePayment(paymentStatus);
 
         if (!result.ok) {
             Alert.alert(result.title, result.message);
@@ -347,6 +351,17 @@ function SignupScreenInner() {
             // ── v2 PRIMARY: stores[] (server-side handling lands in Phase 2.C.3) ──
             stores: storesWithUploaded,
 
+            // ── v2: agreements + eSign audit trail (Phase 2.D) ──
+            // Server-side persistence to `merchant_consents` lands in Phase 2.D2;
+            // until then the API silently drops this via passthrough Zod.
+            agreements: {
+                privacyAccepted: agreements.privacyAccepted,
+                termsAccepted: agreements.termsAccepted,
+                partnerAccepted: agreements.partnerAccepted,
+                signed: agreements.signed,
+                txnIds: agreements.txnIds,
+            },
+
             // ── v1 LEGACY backward-compat ──
             // Until Phase 2.C.3 ships the server-side stores[] handler, the
             // current production API uses the v1 flat fields below to create
@@ -490,9 +505,11 @@ function SignupScreenInner() {
 
                 {step === 3 && <StepKyc />}
 
-                {step === 4 && <StepSubscription onPayment={handlePayment} />}
+                {step === 4 && <StepAgreements />}
 
-                {step === 5 && <StepReview />}
+                {step === 5 && <StepSubscription onPayment={handlePayment} />}
+
+                {step === 6 && <StepReview />}
                 </View>
 
                 <View style={styles.footer}>

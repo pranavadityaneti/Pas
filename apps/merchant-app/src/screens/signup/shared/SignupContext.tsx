@@ -50,7 +50,7 @@ import React, {
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../../lib/supabase';
-import type { Vertical, IdentityState, StoreState, KycState, Branch, Store } from './types';
+import type { Vertical, IdentityState, StoreState, KycState, Branch, Store, AgreementsState } from './types';
 import uuid from 'react-native-uuid';
 
 /* ─────────────────────────── Local helpers ──────────────────────────── */
@@ -153,6 +153,15 @@ export interface SignupContextValue {
     stores: Store[];
     setStores: React.Dispatch<React.SetStateAction<Store[]>>;
 
+    // ── step 4: agreements (v2 NEW) ───────────────────────────────────
+    /**
+     * 2026-06-04 (Phase 2.D): per-doc consent + overall eSign result. Persisted
+     * to AsyncStorage so a draft user resuming sees their previously-checked
+     * boxes (NOT their signed state — eSign re-attempts each time per spec).
+     */
+    agreements: AgreementsState;
+    setAgreements: React.Dispatch<React.SetStateAction<AgreementsState>>;
+
     // ── step 5: kyc + docFiles ────────────────────────────────────────
     kyc: KycState;
     setKyc: React.Dispatch<React.SetStateAction<KycState>>;
@@ -231,6 +240,15 @@ export function SignupProvider({ children }: SignupProviderProps) {
     // one empty Store so Step 3 opens with a single editable card. Subsequent
     // stores added via the StepStores "Save & Add Another Store" button.
     const [stores, setStores] = useState<Store[]>(() => [createEmptyStore()]);
+
+    // 2026-06-04 (Phase 2.D): v2 agreements state.
+    const [agreements, setAgreements] = useState<AgreementsState>({
+        privacyAccepted: false,
+        termsAccepted: false,
+        partnerAccepted: false,
+        signed: false,
+        txnIds: [],
+    });
 
     const [kyc, setKyc] = useState<KycState>({
         panNumber: '',
@@ -392,6 +410,7 @@ export function SignupProvider({ children }: SignupProviderProps) {
         hasBranches, setHasBranches,
         branches, setBranches,
         stores, setStores,
+        agreements, setAgreements,
         kyc, setKyc,
         docFiles, setDocFiles,
         paymentStatus, setPaymentStatus,
