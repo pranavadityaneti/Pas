@@ -31,6 +31,7 @@ import {
 } from '../../src/screens/signup/shared/validations';
 import { useSignupOtpVerify } from '../../src/screens/signup/shared/useSignupOtpVerify';
 import { useImageUpload } from '../../src/hooks/useImageUpload';
+import { SignupProvider, useSignupContext } from '../../src/screens/signup/shared/SignupContext';
 
 let RazorpayCheckout: any = null;
 if (Constants.appOwnership !== 'expo') {
@@ -57,24 +58,35 @@ const STEPS = ['Identity', 'Store', 'Photos', 'Branches', 'KYC', 'Subscription',
 // 2026-06-04 (Phase 1.1): Vertical + Branch types extracted to
 // ../../src/screens/signup/shared/types.ts — see import above.
 
-export default function SignupScreen() {
-    const [step, setStep] = useState(1);
-    const [loading, setLoading] = useState(false);
-    const [isRestoring, setIsRestoring] = useState(true);
-
-    // Step 1: Identity
-    const [identity, setIdentity] = useState<IdentityState>({
-        ownerName: '',
-        phone: '',
-        email: '',
-    });
+function SignupScreenInner() {
+    // 2026-06-04 (Phase 1.6.B): master signup state lifted into SignupProvider
+    // (../../src/screens/signup/shared/SignupContext.tsx). This destructure
+    // exposes the SAME variable names that signup.tsx used previously, so
+    // every handler + JSX reference below continues to work unchanged.
+    const {
+        step, setStep,
+        loading, setLoading,
+        isRestoring,
+        identity, setIdentity,
+        store, setStore,
+        verticals, verticalsLoading, verticalsError,
+        selectedVertical,
+        storePhotos, setStorePhotos,
+        hasBranches, setHasBranches,
+        branches, setBranches,
+        kyc, setKyc,
+        docFiles, setDocFiles,
+        paymentStatus, setPaymentStatus,
+        paymentDetails, setPaymentDetails,
+        fetchVerticals,
+        fetchRemoteMerchantState,
+    } = useSignupContext();
 
     // 2026-06-04 (Phase 1.4.B): OTP state + handlers extracted to
     // ../../src/screens/signup/shared/useSignupOtpVerify.ts — a mid-layer hook
     // composing useOtpPad + useSendVerifyOtp + the signup-specific duplicate-
     // merchant guard. Behavior preserved verbatim. The onVerified arrow closes
-    // over fetchRemoteMerchantState (declared below in this same function) —
-    // safe because the arrow is invoked only after user-triggered verify().
+    // over fetchRemoteMerchantState (now provided by useSignupContext above).
     const otp = useSignupOtpVerify({
         phone: identity.phone,
         onVerified: (data) => fetchRemoteMerchantState(data.session.access_token),
@@ -107,160 +119,11 @@ export default function SignupScreen() {
         }
     };
 
-    // Step 2: Store
-    const [store, setStore] = useState<StoreState>({
-        storeName: '',
-        categoryId: '',
-        categoryName: '',
-        city: 'Hyderabad',
-        address: '',
-        latitude: 17.385,
-        longitude: 78.4867,
-        cuisines: [] as string[],
-        isVeg: false,
-        restaurantType: '',
-    });
+    // 2026-06-04 (Phase 1.6.B): showCategoryPicker is purely local UI state
+    // (Step 2 category-picker modal open/closed). Stays in this component
+    // because no other step reads it. Phase 1.7 will move it into the Step 2
+    // component when the screen is split.
     const [showCategoryPicker, setShowCategoryPicker] = useState(false);
-
-    const [verticals, setVerticals] = useState<Vertical[]>([]);
-    const [verticalsLoading, setVerticalsLoading] = useState(false);
-    const [verticalsError, setVerticalsError] = useState('');
-
-    const fetchVerticals = async () => {
-        setVerticalsLoading(true);
-        setVerticalsError('');
-        try {
-            const response = await fetchWithTimeout(`${getApiUrl()}/verticals`, { method: 'GET' });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.error || 'Failed to fetch verticals');
-            setVerticals(Array.isArray(data) ? data : data.verticals || []);
-        } catch (err: any) {
-            setVerticalsError(err.message || 'Error fetching verticals');
-        } finally {
-            setVerticalsLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        fetchVerticals();
-    }, []);
-
-    const selectedVertical = verticals.find(v => v.id === store.categoryId);
-
-    // Step 3: Branches
-    const [hasBranches, setHasBranches] = useState(false);
-    const [branches, setBranches] = useState<Branch[]>([]);
-
-    // Step 4: KYC
-    const [kyc, setKyc] = useState<KycState>({
-        panNumber: '',
-        aadharNumber: '',
-        msmeNumber: '',
-        bankAccount: '',
-        ifsc: '',
-        turnoverRange: '<20L',
-        gstNumber: '',
-        fssaiNumber: '',
-        beneficiaryName: '',
-    });
-
-    const [docFiles, setDocFiles] = useState<{ [key: string]: string | null }>({
-        pan: null,
-        aadharFront: null,
-        aadharBack: null,
-        msme: null,
-        gst: null,
-        fssai: null,
-    });
-
-    const [storePhotos, setStorePhotos] = useState<string[]>([]);
-
-    // Step 6: Payment
-    const [paymentStatus, setPaymentStatus] = useState<'idle' | 'success' | 'failed'>('idle');
-    const [paymentDetails, setPaymentDetails] = useState<any>(null);
-
-    const fetchRemoteMerchantState = async (token?: string) => {
-        try {
-            let activeToken = token;
-            if (!activeToken) {
-                const { data: sessionData } = await supabase.auth.getSession();
-                activeToken = sessionData?.session?.access_token;
-            }
-            if (!activeToken) return;
-
-            const response = await fetchWithTimeout(`${getApiUrl()}/auth/merchant/draft`, {
-                method: 'GET',
-                headers: { 'Authorization': `Bearer ${activeToken}` }
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                if (data.subscription && data.subscription.status === 'success') {
-                    console.log('[Guard] Found existing successful subscription. Bypassing Step 6.');
-                    setPaymentStatus('success');
-                    setPaymentDetails({
-                        paymentId: data.subscription.transactionId,
-                        orderId: data.subscription.orderId,
-                        amount: data.subscription.amount
-                    });
-                    // If they are on the subscription step, move them forward
-                    if (step === 6) setStep(7);
-                }
-            }
-        } catch (err) {
-            console.warn('[Guard] Pre-flight check failed:', err);
-        }
-    };
-
-    // Initial Draft Restoration
-    useEffect(() => {
-        const loadDraft = async () => {
-            try {
-                const draft = await AsyncStorage.getItem('@merchant_signup_draft');
-                if (draft) {
-                    const parsed = JSON.parse(draft);
-                    if (parsed.step) setStep(parsed.step);
-                    if (parsed.identity) setIdentity(parsed.identity);
-                    if (parsed.store) {
-                        setStore({
-                            ...parsed.store,
-                            categoryId: parsed.store.categoryId || '',
-                            categoryName: parsed.store.categoryName || parsed.store.category || '',
-                            cuisines: parsed.store.cuisines || [],
-                            isVeg: parsed.store.isVeg ?? false,
-                            restaurantType: parsed.store.restaurantType || '',
-                        });
-                    }
-                    if (parsed.hasBranches !== undefined) setHasBranches(parsed.hasBranches);
-                    if (parsed.branches) setBranches(parsed.branches);
-                    if (parsed.kyc) setKyc(parsed.kyc);
-                    if (parsed.docFiles) setDocFiles(parsed.docFiles);
-                    if (parsed.storePhotos) setStorePhotos(parsed.storePhotos);
-                    console.log('[Signup] Draft restored securely. Resuming from step:', parsed.step);
-                    
-                    // After restoring local draft, check remote for subscription guard
-                    fetchRemoteMerchantState();
-                }
-            } catch (e) {
-                console.error('[Signup] Failed to restore draft state', e);
-            } finally {
-                setIsRestoring(false);
-            }
-        };
-        loadDraft();
-    }, []);
-
-    // Debounced Draft Persistence (Saves state robustly against App Background Kills)
-    useEffect(() => {
-        if (isRestoring) return; // Do not overwrite draft with empty initial states during mount
-        const timer = setTimeout(() => {
-            const snapshot = { step, identity, store, hasBranches, branches, kyc, docFiles, storePhotos };
-            AsyncStorage.setItem('@merchant_signup_draft', JSON.stringify(snapshot)).catch(e => {
-                console.error('[Signup] Failed to synchronize draft with disk:', e);
-            });
-        }, 1000); // 1-second debounce per QA instructions
-        return () => clearTimeout(timer);
-    }, [step, identity, store, hasBranches, branches, kyc, docFiles, storePhotos, isRestoring]);
 
     const pickDocument = async (type: string) => {
         const result = await ImagePicker.launchImageLibraryAsync({
@@ -1743,3 +1606,14 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
 });
+
+// 2026-06-04 (Phase 1.6.B): default export is now a thin wrapper that mounts
+// the SignupProvider around SignupScreenInner. All cross-step state lives in
+// the provider; SignupScreenInner consumes it via useSignupContext().
+export default function SignupScreen() {
+    return (
+        <SignupProvider>
+            <SignupScreenInner />
+        </SignupProvider>
+    );
+}

@@ -132,6 +132,12 @@ export interface SignupContextValue {
 
     // ── helpers ───────────────────────────────────────────────────────
     /**
+     * Re-fetches the verticals list. Mostly invoked by the Provider's mount
+     * effect, but ALSO exposed via context because Step 2's category-picker
+     * modal has a "Retry" button that calls it on verticalsError.
+     */
+    fetchVerticals: () => Promise<void>;
+    /**
      * Pre-existing-subscription guard. Called by:
      *   - the draft-restoration effect inside this Provider (post-restore)
      *   - the OTP-verify onVerified callback in signup.tsx (with the fresh
@@ -339,6 +345,7 @@ export function SignupProvider({ children }: SignupProviderProps) {
         docFiles, setDocFiles,
         paymentStatus, setPaymentStatus,
         paymentDetails, setPaymentDetails,
+        fetchVerticals,
         fetchRemoteMerchantState,
     };
 
