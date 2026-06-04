@@ -29,6 +29,7 @@ import {
     validatePayment,
     type ValidationResult,
 } from '../../src/screens/signup/shared/validations';
+import { useSignupOtpVerify } from '../../src/screens/signup/shared/useSignupOtpVerify';
 
 let RazorpayCheckout: any = null;
 if (Constants.appOwnership !== 'expo') {
@@ -67,12 +68,17 @@ export default function SignupScreen() {
         email: '',
     });
 
-    // Inline OTP State
-    const [otpSent, setOtpSent] = useState(false);
-    const [otpVerified, setOtpVerified] = useState(false);
-    const [otpValues, setOtpValues] = useState(['', '', '', '', '', '']);
-    const [resendTimer, setResendTimer] = useState(0);
-    const otpRefs = useRef<(TextInput | null)[]>([]);
+    // 2026-06-04 (Phase 1.4.B): OTP state + handlers extracted to
+    // ../../src/screens/signup/shared/useSignupOtpVerify.ts — a mid-layer hook
+    // composing useOtpPad + useSendVerifyOtp + the signup-specific duplicate-
+    // merchant guard. Behavior preserved verbatim. The onVerified arrow closes
+    // over fetchRemoteMerchantState (declared below in this same function) —
+    // safe because the arrow is invoked only after user-triggered verify().
+    const otp = useSignupOtpVerify({
+        phone: identity.phone,
+        onVerified: (data) => fetchRemoteMerchantState(data.session.access_token),
+        setLoading,
+    });
 
     const getApiUrl = () => {
         return process.env.EXPO_PUBLIC_API_URL;
@@ -90,99 +96,6 @@ export default function SignupScreen() {
             clearTimeout(id);
             if (error.name === 'AbortError') throw new Error('Network timeout.');
             throw error;
-        }
-    };
-
-    useEffect(() => {
-        if (resendTimer > 0) {
-            const timer = setTimeout(() => setResendTimer(prev => prev - 1), 1000);
-            return () => clearTimeout(timer);
-        }
-    }, [resendTimer]);
-
-    const handleSendOtp = async () => {
-        const cleaned = identity.phone.replace(/\s/g, '');
-        if (cleaned.length !== 10) {
-            Alert.alert('Invalid Number', 'Please enter a valid 10-digit phone number.');
-            return;
-        }
-        setLoading(true);
-        try {
-            const response = await fetchWithTimeout(`${getApiUrl()}/auth/send-otp`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phone: `91${cleaned}`, isSignup: true })
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.error || 'Failed to send OTP');
-            setOtpSent(true);
-            setResendTimer(60);
-            setOtpValues(['', '', '', '', '', '']);
-        } catch (error: any) {
-            Alert.alert('Error', error.message || 'Failed to send OTP.');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleVerifyOtp = async () => {
-        const otp = otpValues.join('');
-        if (otp.length !== 6) {
-            Alert.alert('Invalid OTP', 'Please enter the complete 6-digit OTP.');
-            return;
-        }
-        const cleaned = identity.phone.replace(/\s/g, '');
-        setLoading(true);
-        try {
-            const response = await fetchWithTimeout(`${getApiUrl()}/auth/verify-otp`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phone: `91${cleaned}`, otp })
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.error || 'OTP verification failed');
-            // Mount their session to securely query the DB
-            await setSessionFromTokens(data.session.access_token, data.session.refresh_token);
-            
-            // Check if merchant already exists to prevent duplicate signups
-            const { data: existingMerchant } = await supabase
-                .from('merchants')
-                .select('status')
-                .eq('id', data.user.id)
-                .maybeSingle();
-
-            if (existingMerchant && existingMerchant.status !== 'draft') {
-                Alert.alert('Already Registered', 'An application with this phone number already exists. Please login instead.');
-                await supabase.auth.signOut();
-                router.replace('/(auth)/login');
-                return;
-            }
-
-            setOtpVerified(true);
-            Alert.alert('Success', 'Phone number verified successfully!');
-
-            // Fetch remote state to check for existing subscription (Guard)
-            fetchRemoteMerchantState(data.session.access_token);
-
-            // Step 1 only collects local data. Persistence happens at Step 5 via PATCH /auth/merchant/draft.
-        } catch (error: any) {
-            console.error('[Signup] Verify OTP Error:', error);
-            Alert.alert('Verification Failed', error.message || 'Incorrect OTP or network error. Please try again.');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleOtpChange = (text: string, index: number) => {
-        const newValues = [...otpValues];
-        newValues[index] = text;
-        setOtpValues(newValues);
-        if (text && index < 5) otpRefs.current[index + 1]?.focus();
-    };
-
-    const handleOtpKeyPress = (e: any, index: number) => {
-        if (e.nativeEvent.key === 'Backspace' && !otpValues[index] && index > 0) {
-            otpRefs.current[index - 1]?.focus();
         }
     };
 
@@ -378,7 +291,7 @@ export default function SignupScreen() {
         // a thin switch that delegates to those pure helpers and presents the
         // resulting Alert. Error titles + messages are preserved verbatim.
         let result: ValidationResult = { ok: true };
-        if (step === 1) result = validateIdentity(identity, otpVerified);
+        if (step === 1) result = validateIdentity(identity, otp.verified);
         else if (step === 2) result = validateStore(store);
         else if (step === 3) result = validatePhotos(storePhotos);
         else if (step === 4) result = validateBranches(hasBranches, branches);
@@ -805,50 +718,50 @@ export default function SignupScreen() {
                                     maxLength={10}
                                     value={identity.phone}
                                     onChangeText={(t) => setIdentity({ ...identity, phone: t })}
-                                    editable={!otpVerified}
+                                    editable={!otp.verified}
                                 />
-                                {otpVerified ? (
+                                {otp.verified ? (
                                     <Ionicons name="checkmark-circle" size={24} color={Colors.primary} />
                                 ) : (
-                                    <TouchableOpacity 
-                                        onPress={handleSendOtp} 
+                                    <TouchableOpacity
+                                        onPress={otp.send}
                                         disabled={loading || identity.phone.length !== 10}
                                         style={{ backgroundColor: Colors.primary + '20', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, opacity: (loading || identity.phone.length !== 10) ? 0.5 : 1 }}
                                     >
-                                        <Text style={{ color: Colors.primary, fontWeight: 'bold' }}>{otpSent ? 'Resend' : 'Verify'}</Text>
+                                        <Text style={{ color: Colors.primary, fontWeight: 'bold' }}>{otp.sent ? 'Resend' : 'Verify'}</Text>
                                     </TouchableOpacity>
                                 )}
                             </View>
                         </View>
 
-                        {otpSent && !otpVerified && (
+                        {otp.sent && !otp.verified && (
                             <View style={styles.inputGroup}>
                                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                                     <Text style={styles.label}>Enter 6-digit OTP</Text>
-                                    {resendTimer > 0 ? (
-                                        <Text style={{ color: '#9CA3AF', fontSize: 12 }}>Resend in {resendTimer}s</Text>
+                                    {otp.resendTimer > 0 ? (
+                                        <Text style={{ color: '#9CA3AF', fontSize: 12 }}>Resend in {otp.resendTimer}s</Text>
                                     ) : null}
                                 </View>
-                                
+
                                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
-                                    {otpValues.map((val, i) => (
+                                    {otp.values.map((val, i) => (
                                         <TextInput
                                             key={i}
-                                            ref={ref => { otpRefs.current[i] = ref; }}
+                                            ref={ref => { otp.refs.current[i] = ref; }}
                                             style={{ width: 44, height: 52, borderWidth: 1, borderColor: val ? Colors.primary : '#E5E7EB', borderRadius: 12, textAlign: 'center', fontSize: 20, fontWeight: 'bold', color: '#111827', backgroundColor: val ? '#FFFFFF' : '#F9FAFB' }}
                                             maxLength={1}
                                             keyboardType="number-pad"
                                             value={val}
-                                            onChangeText={(text) => handleOtpChange(text, i)}
-                                            onKeyPress={(e) => handleOtpKeyPress(e, i)}
+                                            onChangeText={(text) => otp.onChange(text, i)}
+                                            onKeyPress={(e) => otp.onKeyPress(e, i)}
                                         />
                                     ))}
                                 </View>
 
-                                <TouchableOpacity 
-                                    style={[{ height: 52, backgroundColor: Colors.primary, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginTop: 8 }, (loading || otpValues.join('').length !== 6) && { opacity: 0.6 }]}
-                                    onPress={handleVerifyOtp}
-                                    disabled={loading || otpValues.join('').length !== 6}
+                                <TouchableOpacity
+                                    style={[{ height: 52, backgroundColor: Colors.primary, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginTop: 8 }, (loading || otp.getValue().length !== 6) && { opacity: 0.6 }]}
+                                    onPress={otp.verify}
+                                    disabled={loading || otp.getValue().length !== 6}
                                 >
                                     {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '600' }}>Verify OTP</Text>}
                                 </TouchableOpacity>
