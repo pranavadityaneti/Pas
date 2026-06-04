@@ -30,6 +30,7 @@ import {
     type ValidationResult,
 } from '../../src/screens/signup/shared/validations';
 import { useSignupOtpVerify } from '../../src/screens/signup/shared/useSignupOtpVerify';
+import { useImageUpload } from '../../src/hooks/useImageUpload';
 
 let RazorpayCheckout: any = null;
 if (Constants.appOwnership !== 'expo') {
@@ -79,6 +80,13 @@ export default function SignupScreen() {
         onVerified: (data) => fetchRemoteMerchantState(data.session.access_token),
         setLoading,
     });
+
+    // 2026-06-04 (Phase 1.5.B): file→storage upload extracted to the shared
+    // useImageUpload primitive (apps/merchant-app/src/hooks/useImageUpload.ts).
+    // Bucket stays 'merchant-docs' — same destination as before. Retry policy
+    // (3 attempts, attempt*1500ms backoff) and skip-already-uploaded guard
+    // preserved verbatim.
+    const { uploadFile } = useImageUpload({ bucket: 'merchant-docs' });
 
     const getApiUrl = () => {
         return process.env.EXPO_PUBLIC_API_URL;
@@ -463,32 +471,6 @@ export default function SignupScreen() {
         const { data: sessionData } = await supabase.auth.getSession();
         if (!sessionData?.session) return;
         const userId = sessionData.session.user.id;
-
-        const uploadFile = async (uri: string, path: string, maxRetries = 3) => {
-            if (!uri) return null;
-
-            // If it's already a Supabase path or URL, skip re-uploading
-            if (uri.includes('supabase.co') || (!uri.startsWith('file://') && !uri.startsWith('content://'))) {
-                return uri;
-            }
-
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                try {
-                    const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
-                    const { error } = await supabase.storage.from('merchant-docs').upload(path, decode(base64), { contentType: 'image/jpeg', upsert: true });
-                    if (error) {
-                        console.error('[Upload Error details]:', error);
-                        throw new Error(error.message || 'Supabase upload error');
-                    }
-                    return path;
-                } catch (error: any) {
-                    console.error(`[Upload Attempt ${attempt} failed]:`, error.message || error);
-                    if (attempt === maxRetries) throw new Error(error.message || 'Upload failed');
-                    await new Promise(resolve => setTimeout(resolve, attempt * 1500));
-                }
-            }
-            throw new Error('Upload failed');
-        };
 
         const docUrlsLocal = {
             pan: docFiles.pan ? await uploadFile(docFiles.pan, `${userId}/pan.jpg`) : null,
