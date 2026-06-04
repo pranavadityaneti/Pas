@@ -20,6 +20,15 @@ import { Colors } from '../../constants/Colors';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Vertical, Branch, IdentityState, StoreState, KycState } from '../../src/screens/signup/shared/types';
+import {
+    validateIdentity,
+    validateStore,
+    validatePhotos,
+    validateBranches,
+    validateKyc,
+    validatePayment,
+    type ValidationResult,
+} from '../../src/screens/signup/shared/validations';
 
 let RazorpayCheckout: any = null;
 if (Constants.appOwnership !== 'expo') {
@@ -364,135 +373,21 @@ export default function SignupScreen() {
     };
 
     const validateStep = () => {
-        if (step === 1) {
-            if (!identity.ownerName || !identity.email || !identity.phone) {
-                Alert.alert('Error', 'Please fill all required fields');
-                return false;
-            }
-            if (!otpVerified) {
-                Alert.alert('Verification Required', 'Please verify your phone number using the OTP before continuing.');
-                return false;
-            }
-            // Phone Validation: 10 digits, starts with 6-9
-            const phoneRegex = /^[6-9]\d{9}$/;
-            if (!phoneRegex.test(identity.phone)) {
-                Alert.alert('Invalid Phone', 'Please enter a valid 10-digit Indian mobile number.');
-                return false;
-            }
-            // Email Validation
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            if (!emailRegex.test(identity.email)) {
-                Alert.alert('Invalid Email', 'Please enter a valid email address.');
-                return false;
-            }
-        }
-        if (step === 2) {
-            if (!store.storeName || !store.categoryId || !store.address) {
-                Alert.alert('Error', 'Please enter store name, category and full address');
-                return false;
-            }
-        }
-        if (step === 3) {
-            if (storePhotos.length < 2) {
-                Alert.alert('Error', 'Please upload at least 2 store photos');
-                return false;
-            }
-        }
-        if (step === 4) {
-            if (hasBranches && branches.length > 0) {
-                for (let i = 0; i < branches.length; i++) {
-                    const b = branches[i];
-                    if (!b.name || !b.manager_name || !b.phone) {
-                        Alert.alert('Error', `Please fill name, manager and phone for Branch ${i + 1}.`);
-                        return false;
-                    }
-                    if (b.latitude === null || b.longitude === null) {
-                        Alert.alert('Location Required', `Please search and select an address for Branch ${i + 1} so it can be placed on the map.`);
-                        return false;
-                    }
-                }
-            }
-        }
-        if (step === 5) {
-            // PAN Validation
-            const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
-            if (!kyc.panNumber || !panRegex.test(kyc.panNumber)) {
-                Alert.alert('Invalid PAN', 'Please enter a valid PAN number (e.g., ABCDE1234F).');
-                return false;
-            }
-            if (!docFiles.pan) {
-                Alert.alert('Error', 'Please upload a PAN card image.');
-                return false;
-            }
+        // 2026-06-04 (Phase 1.3b): per-step validators extracted to
+        // ../../src/screens/signup/shared/validations.ts. This function is now
+        // a thin switch that delegates to those pure helpers and presents the
+        // resulting Alert. Error titles + messages are preserved verbatim.
+        let result: ValidationResult = { ok: true };
+        if (step === 1) result = validateIdentity(identity, otpVerified);
+        else if (step === 2) result = validateStore(store);
+        else if (step === 3) result = validatePhotos(storePhotos);
+        else if (step === 4) result = validateBranches(hasBranches, branches);
+        else if (step === 5) result = validateKyc(kyc, docFiles, selectedVertical);
+        else if (step === 6) result = validatePayment(paymentStatus);
 
-            // Aadhaar Validation
-            const aadhaarRegex = /^\d{12}$/;
-            if (!kyc.aadharNumber || !aadhaarRegex.test(kyc.aadharNumber)) {
-                Alert.alert('Invalid Aadhaar', 'Aadhaar number must be exactly 12 digits.');
-                return false;
-            }
-            if (!docFiles.aadharFront || !docFiles.aadharBack) {
-                Alert.alert('Error', 'Please upload Aadhaar (Front & Back) images');
-                return false;
-            }
-
-            // GSTIN Validation (Mandatory for Everyone)
-            const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
-
-            if (!kyc.gstNumber || !gstRegex.test(kyc.gstNumber)) {
-                Alert.alert('Invalid GSTIN', 'Please enter a valid GSTIN format (e.g., 22AAAAA0000A1Z5).');
-                return false;
-            }
-            if (!docFiles.gst) {
-                Alert.alert('Error', 'Please upload your GST Certificate.');
-                return false;
-            }
-
-            // FSSAI Validation
-            if (selectedVertical?.requiresFssai) {
-                const fssaiRegex = /^\d{14}$/;
-                if (!kyc.fssaiNumber || !fssaiRegex.test(kyc.fssaiNumber)) {
-                    Alert.alert('Invalid FSSAI', 'FSSAI License Number must be exactly 14 digits.');
-                    return false;
-                }
-                if (!docFiles.fssai) {
-                    Alert.alert('Required', 'Please upload your FSSAI License.');
-                    return false;
-                }
-            }
-
-            // MSME Validation (Optional, but validated if entered)
-            if (kyc.msmeNumber) {
-                const msmeRegex = /^UDYAM-[A-Z]{2}-\d{2}-\d{7}$/;
-                if (!msmeRegex.test(kyc.msmeNumber)) {
-                    Alert.alert('Invalid MSME', 'MSME Number must match format UDYAM-XX-00-0000000.');
-                    return false;
-                }
-            }
-
-            // Banking Validation
-            const bankAccountRegex = /^\d{9,18}$/;
-            const ifscRegex = /^[A-Z]{4}0[A-Z0-9]{6}$/;
-
-            if (!kyc.bankAccount || !bankAccountRegex.test(kyc.bankAccount)) {
-                Alert.alert('Invalid Account', 'Bank Account must be between 9 to 18 digits.');
-                return false;
-            }
-            if (!kyc.ifsc || !ifscRegex.test(kyc.ifsc)) {
-                Alert.alert('Invalid IFSC', 'IFSC Code must be valid (e.g., SBIN0001234).');
-                return false;
-            }
-            if (!kyc.beneficiaryName) {
-                Alert.alert('Required', 'Please enter Beneficiary Name.');
-                return false;
-            }
-        }
-
-        if (step === 6) {
-            if (paymentStatus !== 'success') {
-                Alert.alert('Payment Required', 'Please complete the subscription payment to proceed.');
-                return false;
-            }
+        if (!result.ok) {
+            Alert.alert(result.title, result.message);
+            return false;
         }
         return true;
     };
