@@ -50,7 +50,7 @@ import React, {
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../../lib/supabase';
-import type { Vertical, IdentityState, StoreState, KycState, Branch, Store, AgreementsState } from './types';
+import type { Vertical, IdentityState, StoreState, KycState, Store, AgreementsState } from './types';
 import uuid from 'react-native-uuid';
 
 /* ─────────────────────────── Local helpers ──────────────────────────── */
@@ -132,16 +132,6 @@ export interface SignupContextValue {
     verticalsLoading: boolean;
     verticalsError: string;
     selectedVertical: Vertical | undefined;
-
-    // ── step 3: photos ────────────────────────────────────────────────
-    storePhotos: string[];
-    setStorePhotos: React.Dispatch<React.SetStateAction<string[]>>;
-
-    // ── step 4: branches (LEGACY — to be removed in Phase 2.G) ────────
-    hasBranches: boolean;
-    setHasBranches: React.Dispatch<React.SetStateAction<boolean>>;
-    branches: Branch[];
-    setBranches: React.Dispatch<React.SetStateAction<Branch[]>>;
 
     // ── step 3 (v2): consolidated stores list ─────────────────────────
     /**
@@ -250,11 +240,6 @@ export function SignupProvider({ children }: SignupProviderProps) {
     const [verticals, setVerticals] = useState<Vertical[]>([]);
     const [verticalsLoading, setVerticalsLoading] = useState(false);
     const [verticalsError, setVerticalsError] = useState('');
-
-    const [storePhotos, setStorePhotos] = useState<string[]>([]);
-
-    const [hasBranches, setHasBranches] = useState(false);
-    const [branches, setBranches] = useState<Branch[]>([]);
 
     // 2026-06-04 (Phase 2.C.1): v2 consolidated stores. Lazy-initialized with
     // one empty Store so Step 3 opens with a single editable card. Subsequent
@@ -391,8 +376,6 @@ export function SignupProvider({ children }: SignupProviderProps) {
                             restaurantType: parsed.store.restaurantType || '',
                         });
                     }
-                    if (parsed.hasBranches !== undefined) setHasBranches(parsed.hasBranches);
-                    if (parsed.branches) setBranches(parsed.branches);
                     // 2026-06-04 (Phase 2.C.1): v2 stores list. If a prior session
                     // saved a non-empty stores array, restore it. Falls back to the
                     // one-empty-store seed already set by useState's lazy initializer.
@@ -401,7 +384,6 @@ export function SignupProvider({ children }: SignupProviderProps) {
                     }
                     if (parsed.kyc) setKyc(parsed.kyc);
                     if (parsed.docFiles) setDocFiles(parsed.docFiles);
-                    if (parsed.storePhotos) setStorePhotos(parsed.storePhotos);
                     console.log('[Signup] Draft restored securely. Resuming from step:', parsed.step);
 
                     // After restoring local draft, check remote for subscription guard
@@ -421,13 +403,13 @@ export function SignupProvider({ children }: SignupProviderProps) {
     useEffect(() => {
         if (isRestoring) return; // Do not overwrite draft with empty initial states during mount
         const timer = setTimeout(() => {
-            const snapshot = { step, identity, store, hasBranches, branches, stores, kyc, docFiles, storePhotos };
+            const snapshot = { step, identity, store, stores, kyc, docFiles };
             AsyncStorage.setItem('@merchant_signup_draft', JSON.stringify(snapshot)).catch(e => {
                 console.error('[Signup] Failed to synchronize draft with disk:', e);
             });
         }, 1000); // 1-second debounce per QA instructions
         return () => clearTimeout(timer);
-    }, [step, identity, store, hasBranches, branches, stores, kyc, docFiles, storePhotos, isRestoring]);
+    }, [step, identity, store, stores, kyc, docFiles, isRestoring]);
 
     // ── exposed value ─────────────────────────────────────────────────
     const value: SignupContextValue = {
@@ -438,9 +420,6 @@ export function SignupProvider({ children }: SignupProviderProps) {
         store, setStore,
         verticals, verticalsLoading, verticalsError,
         selectedVertical,
-        storePhotos, setStorePhotos,
-        hasBranches, setHasBranches,
-        branches, setBranches,
         stores, setStores,
         agreements, setAgreements,
         couponCode, setCouponCode,

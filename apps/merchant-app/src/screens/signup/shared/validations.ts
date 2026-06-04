@@ -19,7 +19,7 @@
  * Reference: docs/merchant-signup-v2-spec.md (Phase 1 — File restructure).
  */
 
-import type { IdentityState, StoreState, KycState, Branch, Store, Vertical, AgreementsState } from './types';
+import type { IdentityState, KycState, Store, Vertical, AgreementsState } from './types';
 
 /* ───────────────────────────── Result type ───────────────────────────── */
 
@@ -85,23 +85,9 @@ export function validateIdentity(
     return { ok: true };
 }
 
-export function validateStore(store: StoreState): ValidationResult {
-    if (!store.storeName || !store.categoryId || !store.address) {
-        return {
-            ok: false,
-            title: 'Error',
-            message: 'Please enter store name, category and full address',
-        };
-    }
-    return { ok: true };
-}
-
-export function validatePhotos(storePhotos: string[]): ValidationResult {
-    if (storePhotos.length < 2) {
-        return { ok: false, title: 'Error', message: 'Please upload at least 2 store photos' };
-    }
-    return { ok: true };
-}
+// 2026-06-04 (Phase 2.G): validateStore + validatePhotos removed. The v1
+// monolithic Store + separate Photos check were consolidated into
+// validateStores (Phase 2.C.1) which iterates the per-store stores[] list.
 
 /**
  * 2026-06-04 (Phase 2.C.1): validateStores — v2 consolidated stores validation.
@@ -189,31 +175,8 @@ export function validateAgreements(agreements: AgreementsState): ValidationResul
     return { ok: true };
 }
 
-export function validateBranches(
-    hasBranches: boolean,
-    branches: Branch[],
-): ValidationResult {
-    if (hasBranches && branches.length > 0) {
-        for (let i = 0; i < branches.length; i++) {
-            const b = branches[i];
-            if (!b.name || !b.manager_name || !b.phone) {
-                return {
-                    ok: false,
-                    title: 'Error',
-                    message: `Please fill name, manager and phone for Branch ${i + 1}.`,
-                };
-            }
-            if (b.latitude === null || b.longitude === null) {
-                return {
-                    ok: false,
-                    title: 'Location Required',
-                    message: `Please search and select an address for Branch ${i + 1} so it can be placed on the map.`,
-                };
-            }
-        }
-    }
-    return { ok: true };
-}
+// 2026-06-04 (Phase 2.G): validateBranches removed (consolidated into
+// validateStores). See the Phase 2.G comment block above.
 
 export function validateKyc(
     kyc: KycState,

@@ -16,19 +16,10 @@ export interface Vertical {
     isDining?: boolean;
 }
 
-export interface Branch {
-    name: string;
-    address: string;
-    latitude: number | null;
-    longitude: number | null;
-    city: string;
-    manager_name: string;
-    phone: string;
-    cuisines: string[];
-    isVeg: boolean;
-    restaurantType: string;
-    photos: string[];
-}
+// 2026-06-04 (Phase 2.G): Branch type removed — the v1 main-store + branches
+// model was retired in favor of the consolidated Store[] in Phase 2.C.1.
+// Other files (StoreContext, settings/branches.tsx) define their own Branch
+// types for their own use cases.
 
 /**
  * State shape for Step 3 — Stores (v2 consolidated). Each merchant has one or
