@@ -20,8 +20,12 @@ import { useState, useMemo, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   Search, Filter, MoreHorizontal, History, Ban, MapPin, Users, Download,
-  ChevronDown, MessageCircle, ShoppingBag, CheckCircle2, Eye,
+  ChevronDown, MessageCircle, ShoppingBag, CheckCircle2, Eye, Pencil,
 } from 'lucide-react';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '../../ui/dialog';
+import { Label } from '../../ui/label';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Badge } from '../../ui/badge';
@@ -129,6 +133,12 @@ export function CustomerDatabase() {
   const [filterSpend,    setFilterSpend]    = useState<string[]>([]);
   const [filterSignup,   setFilterSignup]   = useState<string[]>([]);
   const [filterQuality,  setFilterQuality]  = useState<string[]>([]);
+  // 2026-06-04 (Q2-A): default-hide incomplete signups (no name + no orders)
+  const [showIncomplete, setShowIncomplete] = useState(false);
+  // 2026-06-04 (Q2-B): inline edit-name modal state
+  const [editNameFor,   setEditNameFor]    = useState<Customer | null>(null);
+  const [editNameValue, setEditNameValue]  = useState('');
+  const [editNameSaving,setEditNameSaving] = useState(false);
 
   const cities = useMemo(
     () => [...new Set(customers.map(c => c.city))].filter(Boolean).sort(),
@@ -139,9 +149,23 @@ export function CustomerDatabase() {
   const activeCount  = customers.filter(c => c.status === 'active').length;
   const suspendCount = customers.filter(c => c.status === 'suspended').length;
 
+  // 2026-06-04 (Q2-A): an "incomplete signup" is a row with no name AND no orders
+  // — usually a half-finished phone-OTP signup (zombie account). Hidden by default;
+  // toggle reveals them.
+  const isIncompleteSignup = (c: Customer) =>
+    (c.name == null || c.name.trim().length === 0) && c.order_count === 0;
+
+  const incompleteCount = useMemo(
+    () => customers.filter(isIncompleteSignup).length,
+    [customers],
+  );
+
   const filteredCustomers = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     return customers.filter(c => {
+      // Q2-A: hide incomplete signups unless toggle is on
+      if (!showIncomplete && isIncompleteSignup(c)) return false;
+
       // Search: name + phone + city + ID. Do NOT match against synthesized email.
       const matchesSearch = !term
         || (c.name && c.name.toLowerCase().includes(term))
@@ -164,7 +188,34 @@ export function CustomerDatabase() {
   }, [
     customers, searchTerm, filterStatus, filterCity,
     filterActivity, filterRecency, filterSpend, filterSignup, filterQuality,
+    showIncomplete,
   ]);
+
+  // Lookup map for "↔ likely same as" hint badge (Q2-C)
+  const customersById = useMemo(() => {
+    const m: Record<string, Customer> = {};
+    customers.forEach(c => { m[c.id] = c; });
+    return m;
+  }, [customers]);
+
+  // Save handler for the inline edit-name modal
+  const saveCustomerName = async () => {
+    if (!editNameFor) return;
+    const trimmed = editNameValue.trim();
+    if (trimmed.length < 2) return;
+    setEditNameSaving(true);
+    try {
+      await (await import('../../../lib/api')).default.patch(`/admin/customers/${editNameFor.id}/name`, { name: trimmed });
+      // Refresh authoritative data
+      await fetchCustomers();
+      setEditNameFor(null);
+    } catch (err: any) {
+      const { toast } = await import('sonner');
+      toast.error('Failed to update name', { description: err?.response?.data?.error ?? err?.message });
+    } finally {
+      setEditNameSaving(false);
+    }
+  };
 
   const activeFilterCount =
     filterStatus.length + filterCity.length + filterActivity.length
@@ -334,6 +385,21 @@ export function CustomerDatabase() {
             </DropdownMenu>
           </div>
 
+          {/* Q2-A: show-incomplete-signups toggle */}
+          {incompleteCount > 0 && (
+            <button
+              onClick={() => setShowIncomplete(v => !v)}
+              className={`text-xs font-medium px-3 py-1.5 rounded-md border transition-colors ${
+                showIncomplete
+                  ? 'bg-[#B52725]/10 text-[#B52725] border-[#B52725]/30'
+                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+              }`}
+              title="Incomplete signups have no name and no orders — usually abandoned phone-OTP attempts."
+            >
+              {showIncomplete ? 'Hide' : 'Show'} {incompleteCount} incomplete signup{incompleteCount === 1 ? '' : 's'}
+            </button>
+          )}
+
           <div className="text-sm text-gray-500 font-medium">
             {filteredCustomers.length} of {totalCount}
           </div>
@@ -399,6 +465,22 @@ export function CustomerDatabase() {
                                   {customer.role}
                                 </span>
                               )}
+                              {/* Q2-C: duplicate hint badge */}
+                              {customer.potential_duplicates && customer.potential_duplicates.length > 0 && (() => {
+                                const dupes = customer.potential_duplicates.map(d => customersById[d]).filter(Boolean);
+                                if (dupes.length === 0) return null;
+                                const tip = dupes
+                                  .map(d => `${d.name ?? '(no name)'} · ${d.phone || 'no phone'}`)
+                                  .join('\n');
+                                return (
+                                  <span
+                                    className="ml-2 inline-block text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 border border-orange-200 align-middle cursor-help"
+                                    title={`Possibly the same customer as:\n${tip}\n\n(phone numbers differ by 1 character — typo-detection)`}
+                                  >
+                                    ↔ {dupes.length === 1 ? 'likely dupe' : `${dupes.length} likely dupes`}
+                                  </span>
+                                );
+                              })()}
                             </p>
                             <p className="text-[10px] text-gray-400 font-mono">ID: {customer.id.slice(0, 8)}</p>
                           </div>
@@ -409,11 +491,42 @@ export function CustomerDatabase() {
                           ? <span className="text-sm text-gray-700">{customer.phone}</span>
                           : <span className="text-xs italic text-gray-400">no phone</span>}
                       </TableCell>
+                      {/* Q1-A: Real address > branch city > 'Unknown'. Truncated with full text in title for hover. */}
                       <TableCell onClick={() => setSelectedCustomer(customer)} className="cursor-pointer">
-                        <div className="flex items-center gap-1.5 text-gray-600 text-sm">
-                          <MapPin className="w-3.5 h-3.5 text-gray-400" />
-                          {customer.city}
-                        </div>
+                        {(() => {
+                          const addr = customer.default_address;
+                          const extras = customer.address_count > 1 ? customer.address_count - 1 : 0;
+                          if (addr?.address) {
+                            return (
+                              <div
+                                className="flex items-center gap-1.5 text-gray-700 text-sm max-w-[220px]"
+                                title={addr.address + (extras > 0 ? `\n\n(+${extras} more saved address${extras === 1 ? '' : 'es'})` : '')}
+                              >
+                                <MapPin className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                                <span className="truncate">{addr.address}</span>
+                                {extras > 0 && (
+                                  <span className="text-[10px] font-bold px-1 py-0.5 rounded bg-gray-100 text-gray-600 flex-shrink-0">
+                                    +{extras}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          }
+                          // Fallback: branch-city heuristic
+                          return (
+                            <div
+                              className="flex items-center gap-1.5 text-gray-500 text-sm"
+                              title={customer.city === 'Unknown'
+                                ? 'No saved address; no order history to infer a city from'
+                                : `Inferred from this customer's most recent order branch — no saved address yet`}
+                            >
+                              <MapPin className="w-3.5 h-3.5 text-gray-400" />
+                              {customer.city === 'Unknown'
+                                ? <span className="italic text-gray-400">No address</span>
+                                : <span>{customer.city} <span className="text-[10px] text-gray-400">(via order)</span></span>}
+                            </div>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell className="text-right text-gray-700">
                         {customer.order_count.toLocaleString('en-IN')}
@@ -453,6 +566,16 @@ export function CustomerDatabase() {
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={() => setSelectedCustomer(customer)}>
                               <Eye className="w-4 h-4 mr-2" /> View details
+                            </DropdownMenuItem>
+                            {/* Q2-B: admin can set/correct the display name */}
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setEditNameFor(customer);
+                                setEditNameValue(customer.name ?? '');
+                              }}
+                            >
+                              <Pencil className="w-4 h-4 mr-2" />
+                              {customer.name ? 'Edit name' : 'Set name'}
                             </DropdownMenuItem>
                             {customer.phone && (
                               <DropdownMenuItem onClick={() => openWhatsApp(customer.phone)}>
@@ -504,6 +627,58 @@ export function CustomerDatabase() {
         isOpen={!!selectedCustomer}
         onClose={() => setSelectedCustomer(null)}
       />
+
+      {/* Q2-B: inline edit-name modal */}
+      <Dialog open={!!editNameFor} onOpenChange={(open) => { if (!open) setEditNameFor(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {editNameFor?.name ? 'Edit customer name' : 'Set customer name'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="text-xs text-gray-500">
+              Phone: <span className="font-mono">{editNameFor?.phone || '—'}</span>
+              {' · '}
+              ID: <span className="font-mono">{editNameFor?.id.slice(0, 8)}</span>
+            </div>
+            <div>
+              <Label htmlFor="cust-name" className="text-xs uppercase tracking-wide font-semibold text-gray-600">
+                Display name
+              </Label>
+              <Input
+                id="cust-name"
+                value={editNameValue}
+                onChange={(e) => setEditNameValue(e.target.value)}
+                placeholder="e.g. Ajay Karthik"
+                autoFocus
+                disabled={editNameSaving}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && editNameValue.trim().length >= 2 && !editNameSaving) {
+                    saveCustomerName();
+                  }
+                }}
+                className="mt-1"
+              />
+              <p className="text-[11px] text-gray-500 mt-1">
+                Audited — actor + before/after stored in <code className="font-mono">admin_audit_log</code>.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditNameFor(null)} disabled={editNameSaving}>
+              Cancel
+            </Button>
+            <Button
+              onClick={saveCustomerName}
+              disabled={editNameSaving || editNameValue.trim().length < 2}
+              className="bg-[#B52725] hover:bg-[#9a1f1d] text-white"
+            >
+              {editNameSaving ? 'Saving…' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <span className="hidden">{BRAND_RED}</span>
     </div>

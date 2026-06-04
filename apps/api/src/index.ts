@@ -5228,6 +5228,95 @@ app.get('/admin/customers', async (req, res) => {
             branches.forEach(b => { if (b?.id && b?.city) branchCityMap[b.id] = b.city; });
         }
 
+        // 2026-06-04 (Q1-A): pull consumer_addresses for the location column.
+        // We return the DEFAULT address per user + a count of all addresses;
+        // the full list ships via GET /admin/customers/:id/addresses for the drawer.
+        const userIds = users.map(u => u.id);
+        const addressCountByUser: Record<string, number> = {};
+        const defaultAddressByUser: Record<string, {
+            id: string; type: string | null; address: string | null;
+            latitude: number | null; longitude: number | null;
+        }> = {};
+        if (userIds.length > 0) {
+            try {
+                const allAddrs = await prisma.consumer_addresses.findMany({
+                    where: { user_id: { in: userIds } },
+                    select: {
+                        id: true, user_id: true, type: true, address: true,
+                        latitude: true, longitude: true, is_default: true, created_at: true,
+                    },
+                });
+                allAddrs.forEach(a => {
+                    if (!a.user_id) return;
+                    addressCountByUser[a.user_id] = (addressCountByUser[a.user_id] ?? 0) + 1;
+                });
+                // Default = is_default true; tie-break = most recent
+                allAddrs.forEach(a => {
+                    if (!a.user_id) return;
+                    const cur = defaultAddressByUser[a.user_id];
+                    const isBetter =
+                        !cur ||
+                        (a.is_default === true) ||
+                        (a.created_at && cur && (a as any).created_at > (cur as any).created_at);
+                    if (isBetter) {
+                        defaultAddressByUser[a.user_id] = {
+                            id:        a.id,
+                            type:      a.type,
+                            address:   a.address,
+                            latitude:  a.latitude,
+                            longitude: a.longitude,
+                        };
+                    }
+                });
+            } catch (e: any) {
+                console.warn('[admin/customers] consumer_addresses lookup failed:', e?.message || e);
+            }
+        }
+
+        // 2026-06-04 (Q2-C): fuzzy-detect likely duplicate accounts among the loaded
+        // customers — phones within Levenshtein distance ≤ 1. Catches test typos
+        // (e.g. 917842687373 ↔ 917842287373). Requires the `fuzzystrmatch` extension;
+        // wrapped in try/catch so if it's not enabled, we silently return no hints.
+        const phoneToIds: Record<string, string[]> = {};
+        users.forEach(u => {
+            if (u.phone) {
+                if (!phoneToIds[u.phone]) phoneToIds[u.phone] = [];
+                phoneToIds[u.phone].push(u.id);
+            }
+        });
+        const possibleDupesByUser: Record<string, string[]> = {};
+        try {
+            const phones = Object.keys(phoneToIds);
+            if (phones.length >= 2) {
+                // Self-join only the phones we've actually loaded — bounded work.
+                const rows = await prisma.$queryRaw<Array<{ a_phone: string; b_phone: string }>>`
+                    SELECT a.phone AS a_phone, b.phone AS b_phone
+                    FROM (SELECT unnest(${phones}::text[]) AS phone) a
+                    JOIN (SELECT unnest(${phones}::text[]) AS phone) b
+                      ON a.phone < b.phone
+                     AND LENGTH(a.phone) = LENGTH(b.phone)
+                     AND levenshtein(a.phone, b.phone) <= 1
+                `;
+                rows.forEach(({ a_phone, b_phone }) => {
+                    const aIds = phoneToIds[a_phone] ?? [];
+                    const bIds = phoneToIds[b_phone] ?? [];
+                    aIds.forEach(aId => {
+                        bIds.forEach(bId => {
+                            if (!possibleDupesByUser[aId]) possibleDupesByUser[aId] = [];
+                            if (!possibleDupesByUser[bId]) possibleDupesByUser[bId] = [];
+                            possibleDupesByUser[aId].push(bId);
+                            possibleDupesByUser[bId].push(aId);
+                        });
+                    });
+                });
+            }
+        } catch (e: any) {
+            // Most common cause: `levenshtein` function not available (fuzzystrmatch
+            // extension not enabled). Apply the SQL doc to enable. Until then, the
+            // duplicate-hint column is silently empty.
+            console.warn('[admin/customers] fuzzy-dupe check skipped:', e?.message || e);
+        }
+
         // Reshape to snake_case for the client (matches the previous PostgREST shape).
         const customers = users.map(u => ({
             id:        u.id,
@@ -5243,6 +5332,9 @@ app.get('/admin/customers', async (req, res) => {
                 branch_id:    o.branchId,
                 status:       o.status,
             })),
+            default_address:      defaultAddressByUser[u.id] ?? null,
+            address_count:        addressCountByUser[u.id] ?? 0,
+            potential_duplicates: possibleDupesByUser[u.id] ?? [],
         }));
 
         res.json({
@@ -5408,6 +5500,92 @@ app.get('/admin/customers/:id/orders', async (req, res) => {
     } catch (e: any) {
         console.error('[admin/customers/:id/orders] error:', e?.message || e);
         res.status(500).json({ error: 'Failed to fetch customer orders' });
+    }
+});
+
+/**
+ * GET /admin/customers/:id/addresses
+ *
+ * All addresses for one customer — used by the CustomerDetailsSheet "Addresses"
+ * section. Returned ordered by is_default DESC, created_at DESC so the default
+ * shows first.
+ */
+app.get('/admin/customers/:id/addresses', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER as any); if (!caller) return;
+    try {
+        const { id } = req.params;
+        const rows = await prisma.consumer_addresses.findMany({
+            where: { user_id: id },
+            orderBy: [{ is_default: 'desc' }, { created_at: 'desc' }],
+            select: {
+                id: true, type: true, address: true,
+                latitude: true, longitude: true,
+                is_default: true, created_at: true,
+            },
+        });
+        res.json({
+            addresses: rows.map(a => ({
+                id:         a.id,
+                type:       a.type,
+                address:    a.address,
+                latitude:   a.latitude,
+                longitude:  a.longitude,
+                is_default: a.is_default ?? false,
+                created_at: a.created_at,
+            })),
+        });
+    } catch (e: any) {
+        console.error('[admin/customers/:id/addresses] error:', e?.message || e);
+        res.status(500).json({ error: 'Failed to fetch customer addresses' });
+    }
+});
+
+/**
+ * PATCH /admin/customers/:id/name
+ *
+ * Lets any admin-tier user manually set / correct a customer's display name.
+ * Use case: incomplete signups where User.name stayed NULL and ProfileSetup
+ * was abandoned; admin can patch what they know from support context.
+ *
+ * Audited via recordAdminAudit. Failure to audit doesn't block the update.
+ */
+app.patch('/admin/customers/:id/name', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER as any); if (!caller) return;
+    try {
+        const { id } = req.params;
+        const { name } = req.body ?? {};
+        if (typeof name !== 'string' || name.trim().length < 2) {
+            return res.status(400).json({ error: 'name must be a string with at least 2 characters' });
+        }
+        const cleanName = name.trim();
+
+        const before = await prisma.user.findUnique({
+            where: { id },
+            select: { id: true, name: true },
+        });
+        if (!before) return res.status(404).json({ error: 'User not found' });
+
+        const updated = await prisma.user.update({
+            where: { id },
+            data:  { name: cleanName },
+            select: { id: true, name: true },
+        });
+
+        // Best-effort audit.
+        await recordAdminAudit(req, {
+            actorId:     caller.id,
+            action:      'customer.name_change',
+            targetTable: 'User',
+            targetId:    id,
+            before:      { name: before.name },
+            after:       { name: updated.name },
+        });
+
+        res.json({ ok: true, user: updated });
+    } catch (e: any) {
+        console.error('[admin/customers/:id/name] error:', e?.message || e);
+        if (e?.code === 'P2025') return res.status(404).json({ error: 'User not found' });
+        res.status(500).json({ error: 'Failed to update customer name' });
     }
 });
 

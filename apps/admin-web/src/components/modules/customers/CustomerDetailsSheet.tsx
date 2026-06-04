@@ -48,6 +48,16 @@ interface OrderRow {
   created_at:   string;
 }
 
+interface AddressRow {
+  id:         string;
+  type:       string | null;
+  address:    string | null;
+  latitude:   number | null;
+  longitude:  number | null;
+  is_default: boolean;
+  created_at: string | null;
+}
+
 function fmtINR(n: number | null | undefined): string {
   if (n == null || isNaN(n)) return '₹0';
   return '₹' + Math.round(n).toLocaleString('en-IN');
@@ -61,8 +71,9 @@ function openWhatsApp(phone: string) {
 }
 
 export function CustomerDetailsSheet({ customer, isOpen, onClose }: CustomerDetailsSheetProps) {
-  const [orders,  setOrders]  = useState<OrderRow[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [orders,    setOrders]    = useState<OrderRow[]>([]);
+  const [addresses, setAddresses] = useState<AddressRow[]>([]);
+  const [loading,   setLoading]   = useState(false);
 
   useEffect(() => {
     if (!customer || !isOpen) return;
@@ -70,16 +81,18 @@ export function CustomerDetailsSheet({ customer, isOpen, onClose }: CustomerDeta
     (async () => {
       setLoading(true);
       try {
-        // 2026-06-03 night: switched from supabase.from('Order') (PostgREST
-        // + schema-cache + RLS jungle) to the admin API endpoint that uses
-        // Prisma server-side.
-        const { data } = await api.get<{ orders: OrderRow[] }>(
-          `/admin/customers/${customer.id}/orders`
-        );
-        if (!cancelled) setOrders(data.orders ?? []);
+        // 2026-06-04: pull orders + addresses in parallel (separate endpoints).
+        const [ordersRes, addrRes] = await Promise.all([
+          api.get<{ orders: OrderRow[] }>(`/admin/customers/${customer.id}/orders`),
+          api.get<{ addresses: AddressRow[] }>(`/admin/customers/${customer.id}/addresses`),
+        ]);
+        if (!cancelled) {
+          setOrders(ordersRes.data.orders ?? []);
+          setAddresses(addrRes.data.addresses ?? []);
+        }
       } catch (err) {
-        console.error('CustomerDetailsSheet: failed to load orders', err);
-        if (!cancelled) setOrders([]);
+        console.error('CustomerDetailsSheet: failed to load', err);
+        if (!cancelled) { setOrders([]); setAddresses([]); }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -157,6 +170,10 @@ export function CustomerDetailsSheet({ customer, isOpen, onClose }: CustomerDeta
             <TabsTrigger value="orders" className="gap-1.5">
               <Package className="w-4 h-4" />
               Orders ({orders.length})
+            </TabsTrigger>
+            <TabsTrigger value="addresses" className="gap-1.5">
+              <MapPin className="w-4 h-4" />
+              Addresses ({addresses.length})
             </TabsTrigger>
           </TabsList>
 
@@ -262,6 +279,71 @@ export function CustomerDetailsSheet({ customer, isOpen, onClose }: CustomerDeta
                 </Link>
               ))}
             </div>
+          </TabsContent>
+
+          {/* ─── Addresses tab (Q1-A) ─── */}
+          <TabsContent value="addresses">
+            {loading ? (
+              <div className="text-center py-8 text-gray-500">
+                <div className="inline-flex items-center gap-2">
+                  <div className="w-4 h-4 border-2 border-[#B52725] border-t-transparent rounded-full animate-spin" />
+                  Loading addresses…
+                </div>
+              </div>
+            ) : addresses.length === 0 ? (
+              <div className="text-center py-10 text-gray-500 text-sm">
+                This customer hasn't saved any addresses yet.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {addresses.map((a) => (
+                  <div
+                    key={a.id}
+                    className={`p-3 border rounded-lg transition-colors ${
+                      a.is_default
+                        ? 'border-[#B52725]/40 bg-[#B52725]/[0.03]'
+                        : 'border-gray-100 hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-2 min-w-0">
+                        <MapPin className="w-4 h-4 text-[#B52725] mt-0.5 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <span className="text-xs font-bold uppercase tracking-wide text-gray-700">
+                              {a.type || 'Address'}
+                            </span>
+                            {a.is_default && (
+                              <span className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#B52725] text-white">
+                                Default
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-gray-700 break-words">
+                            {a.address || <span className="italic text-gray-400">No address text</span>}
+                          </p>
+                          {(a.latitude != null && a.longitude != null) && (
+                            <a
+                              href={`https://www.google.com/maps?q=${a.latitude},${a.longitude}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[11px] text-[#B52725] hover:underline mt-1 inline-block"
+                            >
+                              {a.latitude.toFixed(4)}, {a.longitude.toFixed(4)} ↗
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                      {a.created_at && (
+                        <span className="text-[11px] text-gray-400 whitespace-nowrap flex-shrink-0">
+                          {new Date(a.created_at).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </SheetContent>

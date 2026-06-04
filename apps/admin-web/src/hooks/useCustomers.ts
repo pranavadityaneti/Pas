@@ -20,6 +20,14 @@ import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import api from '../lib/api';
 
+export type DefaultAddress = {
+  id:        string;
+  type:      string | null;        // 'home' | 'work' | etc.
+  address:   string | null;        // full text
+  latitude:  number | null;
+  longitude: number | null;
+};
+
 export type Customer = {
   id: string;
   /** Real name from User.name (with profiles.full_name fallback applied server-side). NULL when neither is set. */
@@ -40,6 +48,11 @@ export type Customer = {
   last_order_at:          string | null;
   days_since_last_order:  number | null;
   days_since_signup:      number;
+  // Q1-A (2026-06-04): consumer-supplied address surface
+  default_address:        DefaultAddress | null;
+  address_count:          number;
+  // Q2-C (2026-06-04): user IDs whose phones differ from this user's by ≤1 char
+  potential_duplicates:   string[];
 };
 
 interface RawOrder {
@@ -58,6 +71,9 @@ interface RawApiUser {
   role:      string | null;
   createdAt: string;
   orders:    RawOrder[];
+  default_address?:      DefaultAddress | null;
+  address_count?:        number;
+  potential_duplicates?: string[];
 }
 
 /** Helper used by the UI: is this a synthesized auth-filler email (not a real one)? */
@@ -129,6 +145,9 @@ export function useCustomers() {
           last_order_at:         lastOrder?.created_at ?? null,
           days_since_last_order: daysSinceLast,
           days_since_signup:     daysSinceSignup,
+          default_address:       u.default_address ?? null,
+          address_count:         u.address_count ?? 0,
+          potential_duplicates:  u.potential_duplicates ?? [],
         };
       });
 
