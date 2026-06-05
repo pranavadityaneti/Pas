@@ -21,6 +21,8 @@ import { RootStackParamList } from '../navigation/types';
 import { supabase } from '../lib/supabase';
 import * as Haptics from 'expo-haptics';
 import InvoiceModal from '../components/InvoiceModal';
+import OrderActionsSheet from '../components/OrderActionsSheet';
+import { MoreHorizontal } from 'lucide-react-native';
 
 export default function YourOrdersScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -29,6 +31,8 @@ export default function YourOrdersScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
     const [invoiceVisible, setInvoiceVisible] = useState(false);
+    const [actionsVisible, setActionsVisible] = useState(false);
+    const [actionsOrder, setActionsOrder] = useState<any | null>(null);
 
     useEffect(() => {
         fetchOrders();
@@ -206,10 +210,24 @@ export default function YourOrdersScreen() {
                                         </Text>
                                     </View>
                                 </View>
-                                <View className={`px-3 py-1 rounded-full ${statusConfig.bg}`}>
-                                    <Text className={`text-[12px] font-extrabold uppercase ${statusConfig.textClass}`}>
-                                        {statusConfig.text}
-                                    </Text>
+                                <View className="flex-row items-center" style={{ gap: 8 }}>
+                                    <View className={`px-3 py-1 rounded-full ${statusConfig.bg}`}>
+                                        <Text className={`text-[12px] font-extrabold uppercase ${statusConfig.textClass}`}>
+                                            {statusConfig.text}
+                                        </Text>
+                                    </View>
+                                    {/* WS2.E: Manage order — opens cancel/reschedule/return/exchange sheet */}
+                                    <TouchableOpacity
+                                        className="w-8 h-8 bg-white/20 rounded-full items-center justify-center"
+                                        onPress={(e) => {
+                                            e.stopPropagation();
+                                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                            setActionsOrder(order);
+                                            setActionsVisible(true);
+                                        }}
+                                    >
+                                        <MoreHorizontal size={16} color="white" />
+                                    </TouchableOpacity>
                                 </View>
                             </View>
 
@@ -303,6 +321,17 @@ export default function YourOrdersScreen() {
                 visible={invoiceVisible}
                 order={selectedOrder}
                 onClose={() => setInvoiceVisible(false)}
+            />
+            <OrderActionsSheet
+                visible={actionsVisible}
+                order={actionsOrder}
+                onClose={() => setActionsVisible(false)}
+                onSuccess={() => {
+                    // Trigger a fetch refresh — the realtime subscription will
+                    // also pick up the change, but a manual refresh feels
+                    // snappier after the user submits.
+                    setActionsVisible(false);
+                }}
             />
         </SafeAreaView>
     );
