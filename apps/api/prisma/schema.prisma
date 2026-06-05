@@ -306,6 +306,10 @@ model Product {
   catalogName      String?           @map("catalog_name")
   shippingCharges  Float?            @map("shipping_charges")
   extraData        Json?             @map("extra_data")
+  // 2026-06-05 (WS2.A / WS6): per-product returnability flag. Default true;
+  // admin/ops flip to false for perishable, prepared, intimate categories.
+  // Read by WS2.B rules engine when evaluating return-window eligibility.
+  returnable       Boolean           @default(true)
   category_id      String?           @db.Uuid
   vertical_id      String?           @db.Uuid
   Tier2Category    Tier2Category?    @relation(fields: [category_id], references: [id], onUpdate: NoAction)
@@ -401,12 +405,50 @@ model Order {
   store                Store          @relation(fields: [storeId], references: [id], onUpdate: NoAction, map: "fk_orders_store")
   user                 User           @relation("CustomerOrders", fields: [userId], references: [id], onUpdate: NoAction, map: "fk_orders_user")
   branch               MerchantBranch @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  issues               OrderIssue[]
 
   @@index([orderNumber], map: "Order_order_number_idx")
   @@index([storeId], map: "Order_store_id_idx")
   @@index([userId], map: "Order_user_id_idx")
   @@index([branchId])
   @@map("orders")
+  @@schema("public")
+}
+
+/// WS2.A (2026-06-05) — Unified return / exchange / cancel-dispute request
+/// table backing the order lifecycle flows. One row per customer-initiated
+/// issue. Lifecycle: PENDING → APPROVED / REJECTED / AUTO_APPROVED. The
+/// sla_due_at + status partial index drives the auto-approve cron.
+model OrderIssue {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId                String    @map("order_id") @db.Uuid
+  /// 'return' | 'exchange' | 'cancel_dispute'
+  type                   String
+  /// Customer-selected reason code from the picklist (WS2.B rules.ts).
+  reason                 String
+  /// Free-text from the customer.
+  description            String?
+  /// Photo URLs uploaded with the request.
+  photos                 String[]  @default([])
+  /// 'PENDING' | 'APPROVED' | 'REJECTED' | 'AUTO_APPROVED'
+  status                 String    @default("PENDING")
+  refundAmountInr        Int?      @map("refund_amount_inr")
+  refundRazorpayId       String?   @map("refund_razorpay_id")
+  refundProcessedAt      DateTime? @map("refund_processed_at") @db.Timestamptz(6)
+  merchantDecisionReason String?   @map("merchant_decision_reason")
+  /// auth.users.id of the merchant/admin who approved or rejected.
+  resolvedBy             String?   @map("resolved_by") @db.Uuid
+  resolvedAt             DateTime? @map("resolved_at") @db.Timestamptz(6)
+  /// Cron auto-approves rows whose sla_due_at has elapsed and status is PENDING.
+  slaDueAt               DateTime  @map("sla_due_at") @db.Timestamptz(6)
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  order                  Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([slaDueAt], map: "order_issues_pending_sla_idx")
+  @@index([status, createdAt(sort: Desc)], map: "order_issues_status_created_idx")
+  @@map("order_issues")
   @@schema("public")
 }
 
@@ -1282,6 +1324,11 @@ enum OrderStatus {
   RETURN_APPROVED
   RETURN_REJECTED
   REFUNDED
+  // 2026-06-05 (WS2.A): Exchange lifecycle values for the unified return/
+  // exchange flow. Three-state mirror of RETURN_*.
+  EXCHANGE_REQUESTED
+  EXCHANGE_APPROVED
+  EXCHANGE_REJECTED
 
   @@schema("public")
 }
