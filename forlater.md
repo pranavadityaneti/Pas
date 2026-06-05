@@ -493,6 +493,80 @@
 ### ~~10. Krishna's issue — paid order not appearing in merchant tabs~~ — RESOLVED 2026-05-26
 *Closed by orders RLS structural fix + store_staff backfill. See Done section.*
 
+### 11. `POST /orders/:id/refund` legacy endpoint — auth, metadata-merge, state guards (WS2 third-pass audit)
+- **What:** The pre-existing endpoint at `apps/api/src/index.ts:2985` (1) has NO `requireUser` auth check, (2) returns a stub Razorpay id (`rfnd_test_*`) instead of calling the actual Razorpay refund, and (3) sets `metadata` to `{ razorpayRefundId }` which REPLACES (does not merge) the existing JSON — wiping `razorpayPaymentId`, `orderRequestId`, and the entire WS2 cancellation audit trail. The state guard at line 2997 only blocks REFUNDED orders, so it can be called on a CANCELLED order (post-WS2-cancel) to flip → REFUNDED + nuke metadata.
+- **Why it matters:** After WS2 cancel ships, every cancelled-with-refund order is one call away from losing its audit trail. Combined with no auth, an unauthenticated caller can wipe the WS2 metadata of any order. Out of scope for the WS2 fix bundle because it's a different feature's endpoint — but adjacent and dangerous.
+- **Scope when picked up:** `apps/api/src/index.ts` lines 2985-3061. Add `requireUser` + `userCanManageOrderStore`. Spread metadata instead of replace. Extend state guard to block `CANCELLED`, `RETURN_*`, `EXCHANGE_*` so the WS2 endpoints own those transitions. Decide whether to actually wire the Razorpay refund call (currently stubbed). Audit who calls this endpoint (merchant-app `useOrders.refundOrder`) and what they expect on response.
+- **Status:** Queued — deferred from WS2 third-pass audit bundle, June 5 2026.
+- **Date added:** 2026-06-05
+- **Originated from:** WS2 third-pass audit (the bundle that fixed N1/N2/N4/N5/N7).
+
+### 12. `PATCH /orders/:id/status` legacy endpoint — auth + stock-restoration idempotency (WS2 third-pass audit)
+- **What:** Endpoint at `apps/api/src/index.ts:2798` has NO auth check. On a CANCELLED transition it iterates items and increments stock (line 2855-2862), but the terminal-state guard at line 2814 only blocks setting CANCELLED on `COMPLETED/REFUNDED/RETURN_APPROVED` — it does NOT block CANCELLED → CANCELLED. So a duplicate call restores stock a second time, inflating inventory.
+- **Why it matters:** WS2 cancel already restores stock atomically (inside its transaction). If someone (or a merchant-app `updateOrderStatus` retry) hits the legacy endpoint with `status: 'CANCELLED'` on a WS2-cancelled order, stock gets bumped twice. Inventory drift compounds over time. Also: the no-auth surface means any caller can flip any order's status.
+- **Scope when picked up:** `apps/api/src/index.ts` lines 2798-2917. Add `requireUser` + store auth check. Block the CANCELLED → CANCELLED transition explicitly. Audit whether moving to WS2 lifecycle states (RETURN_*, EXCHANGE_*) via this endpoint should be blocked too (force callers through the WS2 endpoints). Merchant-app's `useOrders.updateOrderStatus` at line 385 calls this without an Authorization header — will need updating in lockstep.
+- **Status:** Queued — deferred from WS2 third-pass audit bundle, June 5 2026.
+- **Date added:** 2026-06-05
+- **Originated from:** WS2 third-pass audit (the bundle that fixed N1/N2/N4/N5/N7).
+
+### 13. WS2 round-4 audit follow-ups (MEDIUM cluster — concurrency hardening)
+- **What:** The round-4 adversarial review (19 parallel agents × 3 lenses + cross-cutting) returned 0 critical / 0 high / 11 medium / 9 low. Five mediums were fixed inline in the same bundle (exchange copy, dining-cancel copy, metadata.orderRequestId persistence gap, awaited order_requests cleanup, multi-coupon redemption iteration). Six remaining mediums share a common theme: **the same compare-and-set pattern that fixed N2 should also gate the order.status writes in three more endpoints**.
+- **Why it matters:** Each of these is real but narrow — a customer would have to double-tap submit (or the client retry on a slow first response) to hit the race. The mediums are listed in priority order:
+  1. **Cancel endpoint** (apps/api/src/index.ts ~3323): re-check `order.status !== 'CANCELLED'` inside the tx as a compare-and-set. Without it, two parallel cancels both restore stock + both fire customer notifs. Pattern: `tx.order.updateMany({ where: { id, status: { not: 'CANCELLED' } }, data: {...} })` + bail if count===0.
+  2. **Return endpoint** (apps/api/src/index.ts ~3594): same pattern on the status flip BEFORE the OrderIssue.create. Without it, two parallel return submits create two PENDING OrderIssue rows + cron auto-approves both = double refund in 24h.
+  3. **Exchange endpoint** (apps/api/src/index.ts ~3689): same pattern. Two parallel exchange submits → duplicate issues.
+  4. **Cron order.metadata lost-update** (apps/api/src/services/scheduled-jobs.ts ~157+217): `order.metadata` is read OUTSIDE the tx and re-merged inside; any concurrent metadata write (from the soon-to-be-hardened merchant PATCH) is silently clobbered. Fix: re-read metadata inside the tx via `tx.order.findUnique({ where: { id }, select: { metadata: true } })`.
+  5. **Cron `tx.order.update` has no order.status CAS** (apps/api/src/services/scheduled-jobs.ts ~211): the issue-level CAS protects the issue row, not the order row. Future writers could be clobbered.
+  6. **Cross-fix race: cancel + cron-auto-approve on same order** — if customer cancels while cron auto-approves a related return issue, both call Razorpay. evaluateCancel blocks RETURN_* states but reads OUTSIDE the tx. Same fix as items 1–3 closes this too.
+- **Scope:** All 6 changes are in two files (apps/api/src/index.ts + apps/api/src/services/scheduled-jobs.ts). Pattern is identical (mirror of the N2 fix). ~80 lines total.
+- **Status:** Queued — deferred from WS2 third-pass audit, round-4 follow-ups. Bundle includes both UPDATE patterns and possibly a partial unique index migration on `coupon_redemptions(order_id) WHERE order_id IS NOT NULL`.
+- **Date added:** 2026-06-05
+- **Originated from:** WS2 third-pass adversarial review workflow (the one that fixed N1/N2/N4/N5/N7 plus 5 round-4 inline tightenings).
+
+### 14. WS2 round-4 audit follow-ups (LOW cluster — observability + polish)
+- **What:** Round-4 review surfaced 9 low-severity items, grouped here:
+  - **NotificationToast.tsx + NotificationsScreen.tsx icon maps**: the four new WS2 types (RETURN_REQUESTED, EXCHANGE_REQUESTED, RETURN_DECISION, EXCHANGE_DECISION) currently fall through to the generic Bell icon. Add proper mappings (suggested: Package icon for return, RefreshCw for exchange, distinct colors for requested vs decision).
+  - **routeForNotification explicit cases**: same four types currently hit the default case. Add explicit cases for future routing intent (deep-link to specific order detail when OrderDetail screen ships).
+  - **sendConsumerNotification dedup**: no `(userId, type, referenceId)` idempotency at the dispatch layer. Add an optional dedupKey or auto-dedupe when refId + type are both provided.
+  - **Cron overlapping ticks**: `* * * * *` can fire while previous tick's Razorpay call is in flight. Add a running guard inside the cron callback.
+  - **N7 reconciliation cron**: sweeper that finds `order_requests` with status='COMPLETED' whose linked order has status='CANCELLED' and flips them. Heals N7 cleanup misses (SIGTERM mid-await).
+  - **Sentry on N7 cleanup catch**: route the catch through Sentry.captureException for visibility.
+  - **N4 userId scoping defense**: add `userId: order.userId` to the `tx.couponRedemption.findMany` where-clause as defense-in-depth against malformed redemption rows.
+  - **N4 `reversed_at` column for audit trail**: instead of deleting redemptions on cancel, mark them reversed — preserves audit trail and prevents theoretical double-decrement.
+  - **Stock-restore inner `.catch` removal**: the per-item `.catch` on `tx.storeProduct.update` swallows errors but Postgres aborts the transaction anyway → subsequent ops fail with confusing "transaction aborted" messages. Remove the inner catch and let the outer try/catch handle it.
+- **Scope:** Mixed surface — 2 mobile files (NotificationToast, NotificationsScreen), 1 lib file (notificationRoute), 1 service (notification.service.ts), 1 API endpoint (cancel), 1 cron file (scheduled-jobs.ts). Each item is small but they touch a lot of places.
+- **Status:** Queued — defense-in-depth, ship after the medium cluster above.
+- **Date added:** 2026-06-05
+- **Originated from:** WS2 third-pass adversarial review workflow.
+
+### 15. WS2 round-5/round-6 audit — remaining deferred items
+- **What:** The round-5 hardening (CAS on cancel/return/exchange, requireUser on legacy endpoints, cron hardening, merchant-app Bearer tokens) closed 8 mediums + 4 highs inline. The round-5 adversarial review surfaced 1 cross-cutting critical (merchant rejection break — fixed inline as round-6) + 6 highs (3 fixed inline as round-6, 3 deferred) + 11 mediums + 9 lows. Remaining items below.
+- **DEFERRED HIGHS:**
+  1. **A1 cancel decision uses stale snapshot for fee calc.** Rules engine `decision` computed OUTSIDE the cancel tx against the pre-CAS snapshot. If order transitioned PENDING→CONFIRMED→PREPARING between the read and CAS, the cancel still succeeds (all 3 in CAS IN-list) but feeInr/refundInr/autoRefundEligible reflect stale state. Customer can be charged wrong fee. Fix needs rules engine re-evaluation inside the tx, or move evaluateCancel logic into the CAS predicate. Non-trivial restructure.
+  2. **A8 SIGTERM gap on AUTO_APPROVED+pending-refund.** Between cron's first transaction commit (status=AUTO_APPROVED) and Razorpay call, SIGTERM leaves the issue auto-approved with no refund, and the next tick's PENDING-only findMany excludes it forever. Need a new reconciliation pass that finds AUTO_APPROVED issues with refundAmountInr>0 + refundRazorpayId IS NULL + resolvedAt > 5min ago.
+  3. **/orders/:id/reschedule has no CAS.** Two parallel reschedules both pass evaluateReschedule's PENDING/CONFIRMED gate, last-write-wins on slot_time_at. Benign (no money/stock side effects) but breaks the symmetry round-5 established.
+- **DEFERRED MEDIUMS:**
+  1. **A1 cancel: order.metadata stale spread inside tx.** A1's CAS update spreads `order.metadata` from the pre-tx findUnique. Should re-read inside the tx via `tx.order.findUnique({ select: { metadata: true } })` like A8 cron now does.
+  2. **A6 status: stock-restore not in tx + silent error swallow.** The legacy endpoint's stock-restore loop runs outside any tx, with `.catch(() => console.error)` per item. Partial failures = silent inventory drift. Should wrap in tx + drop the inner catch (like we did for A1 cancel).
+  3. **A6 status: TOCTOU on CANCELLED guard.** Two concurrent merchant rejections both pass the CANCELLED→CANCELLED check, both run stock restoration. Needs `updateMany WHERE status != 'CANCELLED'` compare-and-set.
+  4. **A6 status: input validation missing on req.body.status.** No enum check — attacker can probe schema by sending garbage and reading the Prisma error.
+  5. **userCanManageOrderStore admits ANY storeStaff role.** No role-within-store granularity. A cashier-tier staff member can flip orders to CANCELLED, issue refunds, etc. Schema change: add `storeStaff.role` enum + tighten permission check for destructive transitions.
+  6. **CRON_DRY_RUN doesn't cover other Razorpay call sites.** processRazorpayRefund (used by A1 cancel + merchant PATCH approve) and bookings.ts initiateRefund are unconditional. The DRY_RUN flag should either be cron-only (rename to CRON_REFUND_DRY_RUN + document) or universal (shared helper readRazorpayDryRun()).
+  7. **CRON_DRY_RUN undocumented outside source.** Needs entry in a deploy runbook (currently only mentioned in scheduled-jobs.ts comments).
+  8. **D-migration: no CONCURRENTLY + no pre-flight duplicate scan.** CREATE UNIQUE INDEX without CONCURRENTLY takes ACCESS EXCLUSIVE locks. The pre-flight queries are in docs/ws2-pre-deploy-checks.sql but the migration file itself doesn't guide ops to run them first.
+- **DEFERRED LOWS:**
+  - Pre-existing key mismatch: useOrders.updateOrderStatus sends `cancellationReason` but API reads `reason`. Merchant rejection reason silently drops.
+  - authHeaders() silent degradation when session missing. Surfaces as confusing 'Failed to update' rather than 're-login required'.
+  - `CONCURRENT_DECISION` sentinel uses string-message matching (fragile to future refactors).
+  - `tryRazorpayRefund` returns `simulated:true` for three distinct reasons (dry-run / no-payment / error). Single boolean conflates them; ops can't query 'how many real failures today'.
+  - Smoke-test python3 dependency for ISSUE_ID extraction (WARN added in round-6; jq would be more standard).
+  - Dev test scripts (test_refund_order.ts, test_accept_order.ts) now 401 — needs comment update.
+  - Reconciliation SQL casts `(metadata->>'orderRequestId')::uuid` without filtering — a single malformed legacy row will brick the entire reconciliation pass.
+- **Scope when picked up:** ~6-8 files across apps/api/src/index.ts + scheduled-jobs.ts + merchant-app/useOrders.ts. Most are 5-20 line patches; the storeStaff.role addition needs a schema migration.
+- **Status:** Queued — all are MEDIUM/LOW non-blockers per the round-5 adversarial review. The deploy-blocking critical (XC1 merchant rejection) was fixed inline in round-6.
+- **Date added:** 2026-06-05
+- **Originated from:** WS2 round-5 hardening bundle's adversarial review workflow (20 agents, 1M tokens).
+
 ### 10. Krishna's issue — paid order not appearing in merchant Processing or Ready tabs [closed]
 - **What:** Merchant approves order on merchant app → customer pays on customer app → customer sees "Order Confirmed" with order number `PAS-20260526-7500`, payment ID `pay_StrRGarBSyUiPO`, store "Ak colths". Merchant checks Processing and Ready tabs — order absent. Same symptom shape as the bug we fixed earlier today (orders RLS structural bug) but possibly different root cause, since RLS has been corrected.
 - **Likely causes (ranked, unconfirmed):**
