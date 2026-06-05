@@ -304,6 +304,92 @@ app.post('/payments/create-order', async (req, res) => {
     }
 });
 
+/**
+ * 2026-06-04 (Phase 2.E2) — POST /merchant-signup/validate-coupon
+ *
+ * Validates a merchant-signup partner coupon. Used by the StepSubscription
+ * "Apply" button to replace the v0 client-only stub.
+ *
+ * Input  : { code: string, tier?: 'standard' | 'premium' }
+ * Output : on valid → { valid: true, couponId, code, discountInr }
+ *          on invalid → { valid: false, error: string }
+ *
+ * Does NOT increment used_count or insert a redemption row — those happen
+ * atomically inside the PATCH /auth/merchant/draft finalize transaction,
+ * paired with the Razorpay subscription record. This endpoint is read-only
+ * by design so the same code can be tapped multiple times during the signup
+ * flow without bumping counters.
+ *
+ * Auth: requires the merchant to be signed in via OTP. We surface a 401
+ * (not 200 with valid:false) if not authenticated, because anonymous
+ * coupon scraping wouldn't be useful and the client is always authed by
+ * the time it reaches Step 5.
+ */
+app.post('/merchant-signup/validate-coupon', async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    try {
+        const { code, tier } = req.body || {};
+        if (!code || typeof code !== 'string') {
+            return res.json({ valid: false, error: 'Please enter a coupon code.' });
+        }
+        const normalized = code.trim().toUpperCase();
+        if (!normalized) {
+            return res.json({ valid: false, error: 'Please enter a coupon code.' });
+        }
+
+        // Case-insensitive lookup — matches the UPPER(code) unique index in the migration.
+        const coupon = await prisma.merchantSignupCoupon.findFirst({
+            where: { code: { equals: normalized, mode: 'insensitive' } },
+        });
+        if (!coupon) {
+            return res.json({ valid: false, error: 'Invalid coupon code.' });
+        }
+        if (!coupon.isActive) {
+            return res.json({ valid: false, error: 'This coupon is no longer active.' });
+        }
+        if (coupon.expiresAt && coupon.expiresAt < new Date()) {
+            return res.json({ valid: false, error: 'This coupon has expired.' });
+        }
+        if (coupon.maxUses !== null && coupon.usedCount >= coupon.maxUses) {
+            return res.json({ valid: false, error: 'This coupon has reached its usage limit.' });
+        }
+        if (
+            coupon.appliesToTier &&
+            tier &&
+            String(tier).toLowerCase() !== coupon.appliesToTier.toLowerCase()
+        ) {
+            return res.json({
+                valid: false,
+                error: `This coupon only applies to ${coupon.appliesToTier} tier subscriptions.`,
+            });
+        }
+
+        // Reject re-redemption by the same merchant (defense in depth — the
+        // UNIQUE(merchant_id) constraint would catch this at the redemption
+        // insert anyway, but we surface a friendlier error pre-payment).
+        const existing = await prisma.merchantSignupCouponRedemption.findUnique({
+            where: { merchantId: user.id },
+        });
+        if (existing) {
+            return res.json({
+                valid: false,
+                error: 'You have already redeemed a coupon for this signup.',
+            });
+        }
+
+        return res.json({
+            valid: true,
+            couponId: coupon.id,
+            code: coupon.code,
+            discountInr: coupon.discountInr,
+        });
+    } catch (err: any) {
+        console.error('[validate-coupon] error:', err);
+        return res.status(500).json({ valid: false, error: 'Server error validating coupon.' });
+    }
+});
+
 app.post('/payments/verify', (req, res) => {
     try {
         const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
@@ -4435,6 +4521,52 @@ app.patch('/auth/merchant/draft', async (req, res) => {
                         transactionId: payload.subscription.paymentId
                     }
                 });
+
+                // 2026-06-04 (Phase 2.E2): Coupon redemption — atomic with the
+                // subscription create. Server-side re-validation (defense in
+                // depth: the frontend's couponDiscount can't be trusted as-is).
+                // The UNIQUE(merchant_id) constraint on
+                // merchant_signup_coupon_redemptions makes this idempotent —
+                // a retried PATCH /auth/merchant/draft with the same payload
+                // will throw P2002 on the second redemption attempt.
+                if (payload.couponCode && Number(payload.couponDiscount) > 0) {
+                    const normalized = String(payload.couponCode).trim().toUpperCase();
+                    const coupon = await tx.merchantSignupCoupon.findFirst({
+                        where: { code: { equals: normalized, mode: 'insensitive' } },
+                    });
+                    if (!coupon) {
+                        throw new Error(`Coupon ${normalized} not found at redemption time.`);
+                    }
+                    if (!coupon.isActive) {
+                        throw new Error(`Coupon ${normalized} is no longer active.`);
+                    }
+                    if (coupon.expiresAt && coupon.expiresAt < new Date()) {
+                        throw new Error(`Coupon ${normalized} expired.`);
+                    }
+                    if (coupon.maxUses !== null && coupon.usedCount >= coupon.maxUses) {
+                        throw new Error(`Coupon ${normalized} usage limit reached.`);
+                    }
+                    if (Number(payload.couponDiscount) !== coupon.discountInr) {
+                        // Frontend sent a discount that doesn't match the coupon's
+                        // server-side discount_inr. Reject — possible tampering.
+                        throw new Error(
+                            `Coupon ${normalized} discount mismatch (expected ₹${coupon.discountInr}).`,
+                        );
+                    }
+
+                    await tx.merchantSignupCouponRedemption.create({
+                        data: {
+                            couponId: coupon.id,
+                            merchantId: userId,
+                            codeSnapshot: coupon.code,
+                            amountInr: coupon.discountInr,
+                        },
+                    });
+                    await tx.merchantSignupCoupon.update({
+                        where: { id: coupon.id },
+                        data: { usedCount: { increment: 1 } },
+                    });
+                }
             }
         });
 

@@ -493,9 +493,52 @@ model Merchant {
   branches            MerchantBranch[]
   Vertical            Vertical?        @relation(fields: [verticalId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   subscriptions       Subscription[]
+  signupCouponRedemption MerchantSignupCouponRedemption?
 
   @@index([verticalId])
   @@map("merchants")
+  @@schema("public")
+}
+
+/// 2026-06-04 (Phase 2.E2): Partner-coupon system for merchant signup. Separate
+/// from consumer coupons (different audience, lifecycle, redemption mechanics).
+/// Backed by migration docs/migrations-pending-2026-06-04-merchant-signup-coupons.sql.
+model MerchantSignupCoupon {
+  id              String                              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code            String                              @unique
+  discountInr     Int                                 @map("discount_inr")
+  maxUses         Int?                                @map("max_uses")
+  usedCount       Int                                 @default(0) @map("used_count")
+  appliesToTier   String?                             @map("applies_to_tier")
+  expiresAt       DateTime?                           @map("expires_at") @db.Timestamptz(6)
+  isActive        Boolean                             @default(true) @map("is_active")
+  createdAt       DateTime                            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime                            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  redemptions     MerchantSignupCouponRedemption[]
+
+  @@map("merchant_signup_coupons")
+  @@schema("public")
+}
+
+/// 2026-06-04 (Phase 2.E2): One row per merchant who has redeemed a signup
+/// coupon. UNIQUE(merchantId) enforces "one coupon per merchant signup, ever"
+/// — same constraint as in the migration SQL.
+///
+/// Note: merchantId is plain `String` (text in DB), not `@db.Uuid`, because
+/// merchants.id is text. See ERRORS.md "Writing raw SQL against the
+/// pas-admin Postgres" — `text` vs `@db.Uuid` mismatch.
+model MerchantSignupCouponRedemption {
+  id            String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  couponId      String                @map("coupon_id") @db.Uuid
+  merchantId    String                @unique @map("merchant_id")
+  codeSnapshot  String                @map("code_snapshot")
+  amountInr     Int                   @map("amount_inr")
+  appliedAt     DateTime              @default(now()) @map("applied_at") @db.Timestamptz(6)
+  coupon        MerchantSignupCoupon  @relation(fields: [couponId], references: [id], onDelete: Restrict)
+  merchant      Merchant              @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([couponId])
+  @@map("merchant_signup_coupon_redemptions")
   @@schema("public")
 }
 

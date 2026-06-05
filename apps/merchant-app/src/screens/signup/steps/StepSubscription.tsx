@@ -28,6 +28,7 @@ import { View, Text, TouchableOpacity, TextInput, ActivityIndicator } from 'reac
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../../../constants/Colors';
 import { useSignupContext } from '../shared/SignupContext';
+import { supabase } from '../../../lib/supabase';
 import { styles } from '../shared/signupStyles';
 
 export interface StepSubscriptionProps {
@@ -60,10 +61,11 @@ export function StepSubscription({ onPayment }: StepSubscriptionProps) {
     const couponApplied = couponDiscount > 0;
 
     /**
-     * v0 stub validator. Phase 2.E2 will replace with POST /merchant-signup/
-     * validate-coupon. For now: code 'LAUNCH100' → ₹100 off; 'LAUNCH500' →
-     * ₹500 off; everything else returns an error after a 600ms simulated
-     * network round-trip.
+     * 2026-06-04 (Phase 2.E2): real server-side validation. Calls
+     * POST /merchant-signup/validate-coupon with the Supabase access token.
+     * Server checks coupon existence, is_active, expires_at, max_uses,
+     * applies_to_tier, AND that this merchant hasn't already redeemed.
+     * Returns { valid, discountInr } | { valid:false, error }.
      */
     const applyCoupon = async () => {
         const code = couponCode.trim().toUpperCase();
@@ -74,17 +76,39 @@ export function StepSubscription({ onPayment }: StepSubscriptionProps) {
         setValidating(true);
         setCouponError(null);
         try {
-            await new Promise(r => setTimeout(r, 600));
-            if (code === 'LAUNCH100') {
-                setCouponDiscount(100);
-                setCouponError(null);
-            } else if (code === 'LAUNCH500') {
-                setCouponDiscount(500);
-                setCouponError(null);
-            } else {
-                setCouponDiscount(0);
-                setCouponError('Invalid or expired coupon code.');
+            const { data: sess } = await supabase.auth.getSession();
+            const token = sess?.session?.access_token;
+            if (!token) {
+                setCouponError('Please re-verify your phone before applying a coupon.');
+                return;
             }
+            const res = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/merchant-signup/validate-coupon`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                    code,
+                    tier: isPremium ? 'premium' : 'standard',
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                setCouponDiscount(0);
+                setCouponError(data?.error || 'Could not validate coupon. Please try again.');
+                return;
+            }
+            if (!data?.valid) {
+                setCouponDiscount(0);
+                setCouponError(data?.error || 'Invalid coupon code.');
+                return;
+            }
+            setCouponDiscount(Number(data.discountInr) || 0);
+            setCouponError(null);
+        } catch (e: any) {
+            setCouponDiscount(0);
+            setCouponError('Network error while validating the coupon. Please try again.');
         } finally {
             setValidating(false);
         }
