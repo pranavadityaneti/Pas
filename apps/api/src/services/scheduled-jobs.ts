@@ -67,9 +67,164 @@ export function initScheduledJobs(
         } catch (e) {
             console.error('[cron] healMissingUserRows error:', e);
         }
+        // WS2.D (2026-06-05): SLA auto-approve for return/exchange issues.
+        try {
+            await processOrderIssueSla(prisma, notificationService);
+        } catch (e) {
+            console.error('[cron] processOrderIssueSla error:', e);
+        }
     });
 
     console.log('[cron] Scheduled jobs initialized — running every 1 minute');
+}
+
+// ─────────────────────── WS2.D: SLA auto-approve cron ──────────────────
+// Polls order_issues for PENDING rows whose merchant-decision SLA has
+// elapsed (sla_due_at < now()) and auto-approves them. Each elapsed row:
+//   1. issue.status → AUTO_APPROVED
+//   2. order.status → RETURN_APPROVED / EXCHANGE_APPROVED
+//   3. For returns with refundAmountInr > 0 — attempt Razorpay refund.
+//      Fallback to a simulated refund id so the issue resolves cleanly
+//      even when Razorpay isn't reachable; ops reconciles in the dashboard.
+//   4. Customer notification (RETURN_DECISION / EXCHANGE_DECISION) with
+//      decision='AUTO_APPROVED' in metadata.
+//
+// Idempotent via the PENDING gate — a row that's already AUTO_APPROVED
+// won't be reprocessed. The partial index `order_issues_pending_sla_idx`
+// (WHERE status='PENDING') keeps the lookup cheap.
+
+// Locally-scoped Razorpay refund helper (mirrors apps/api/src/index.ts
+// processRazorpayRefund — kept in-file to avoid a circular import).
+async function tryRazorpayRefund(
+    orderMetadata: any,
+    amountInr: number,
+): Promise<{ razorpayRefundId: string; simulated: boolean }> {
+    const paymentId =
+        orderMetadata?.paymentId ||
+        orderMetadata?.razorpay_payment_id ||
+        null;
+
+    let razorpayInstance: any = null;
+    try {
+        const Razorpay = require('razorpay');
+        if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+            razorpayInstance = new Razorpay({
+                key_id: process.env.RAZORPAY_KEY_ID,
+                key_secret: process.env.RAZORPAY_KEY_SECRET,
+            });
+        }
+    } catch (e) {
+        console.warn('[cron sla refund] razorpay sdk init failed:', e);
+    }
+
+    if (!razorpayInstance || !paymentId) {
+        const stubId = `rfnd_sim_${Date.now()}`;
+        console.warn('[cron sla refund] razorpay missing or no paymentId — simulating', stubId);
+        return { razorpayRefundId: stubId, simulated: true };
+    }
+
+    try {
+        const refund = await razorpayInstance.payments.refund(paymentId, {
+            amount: Math.round(amountInr) * 100,
+        });
+        return { razorpayRefundId: refund.id as string, simulated: false };
+    } catch (err: any) {
+        console.error('[cron sla refund] razorpay refund failed:', paymentId, err?.message || err);
+        return { razorpayRefundId: `rfnd_err_${Date.now()}`, simulated: true };
+    }
+}
+
+async function processOrderIssueSla(
+    prisma: PrismaClient,
+    notificationService: NotificationService,
+): Promise<void> {
+    const now = new Date();
+
+    // Find elapsed PENDING issues. Cap the per-tick batch to avoid runaway
+    // load if the backlog gets large.
+    const elapsed = await prisma.orderIssue.findMany({
+        where: { status: 'PENDING', slaDueAt: { lt: now } },
+        orderBy: { slaDueAt: 'asc' },
+        take: 50,
+    });
+
+    if (elapsed.length === 0) return;
+    console.log(`[cron sla] auto-approving ${elapsed.length} elapsed issue(s)`);
+
+    for (const issue of elapsed) {
+        try {
+            const order = await prisma.order.findUnique({
+                where: { id: issue.orderId },
+                include: { user: true },
+            });
+            if (!order) {
+                console.warn('[cron sla] order missing for issue', issue.id, '— skipping');
+                continue;
+            }
+
+            let refundResult: { razorpayRefundId: string; simulated: boolean } | null = null;
+            if (issue.type === 'return' && (issue.refundAmountInr ?? 0) > 0) {
+                refundResult = await tryRazorpayRefund(order.metadata, issue.refundAmountInr!);
+            }
+
+            const newOrderStatus =
+                issue.type === 'return' ? 'RETURN_APPROVED' :
+                issue.type === 'exchange' ? 'EXCHANGE_APPROVED' :
+                order.status;
+
+            await prisma.$transaction(async (tx) => {
+                await tx.orderIssue.update({
+                    where: { id: issue.id },
+                    data: {
+                        status: 'AUTO_APPROVED',
+                        resolvedAt: now,
+                        merchantDecisionReason: 'Auto-approved after merchant SLA elapsed (24h).',
+                        ...(refundResult && {
+                            refundRazorpayId: refundResult.razorpayRefundId,
+                            refundProcessedAt: now,
+                        }),
+                    },
+                });
+                await tx.order.update({
+                    where: { id: order.id },
+                    data: {
+                        status: newOrderStatus,
+                        ...(issue.type === 'return' && refundResult && { isPaid: false }),
+                        metadata: {
+                            ...(typeof order.metadata === 'object' && order.metadata !== null ? order.metadata : {}),
+                            ...(refundResult && {
+                                returnRazorpayRefundId: refundResult.razorpayRefundId,
+                                returnRefundSimulated: refundResult.simulated,
+                                autoApprovedAt: now.toISOString(),
+                            }),
+                        } as any,
+                    },
+                });
+            });
+
+            notificationService.sendConsumerNotification({
+                userId: order.userId,
+                title: `${issue.type === 'return' ? 'Return' : 'Exchange'} auto-approved`,
+                body: `Order #${order.orderNumber}: approved automatically after 24h wait.`,
+                type: issue.type === 'return' ? 'RETURN_DECISION' : 'EXCHANGE_DECISION',
+                referenceId: order.id,
+                storeId: order.storeId,
+                link: `/orders/${order.id}`,
+                metadata: {
+                    orderNumber: order.orderNumber,
+                    issueId: issue.id,
+                    decision: 'AUTO_APPROVED',
+                    refundInr: issue.refundAmountInr ?? null,
+                    razorpayRefundId: refundResult?.razorpayRefundId ?? null,
+                },
+            }).catch(e => console.error('[cron sla] consumer notif failed:', e));
+
+            console.log(`[cron sla] ✓ issue=${issue.id} type=${issue.type} order=#${order.orderNumber} ${refundResult ? `refund=${refundResult.razorpayRefundId}${refundResult.simulated ? '(sim)' : ''}` : 'no-refund'}`);
+        } catch (e) {
+            console.error('[cron sla] issue', issue.id, 'failed:', e);
+            // Continue processing the rest — this issue retries next tick.
+        }
+    }
 }
 
 // ---------- Reminder helpers ----------
