@@ -3894,6 +3894,206 @@ app.post('/admin/allowlist', async (req, res) => {
     }
 });
 // =====================================================================
+// Phase 2.E2 (2026-06-04) — Admin CRUD for merchant signup coupons.
+// =====================================================================
+/**
+ * GET /admin/merchant-signup-coupons
+ * List all coupons with redemption counts. Newest first.
+ */
+app.get('/admin/merchant-signup-coupons', async (req, res) => {
+    const caller = await requireAdmin(req, res);
+    if (!caller)
+        return;
+    try {
+        const coupons = await prisma.merchantSignupCoupon.findMany({
+            orderBy: { createdAt: 'desc' },
+            include: { _count: { select: { redemptions: true } } },
+        });
+        return res.json(coupons.map(c => ({
+            id: c.id,
+            code: c.code,
+            discountInr: c.discountInr,
+            maxUses: c.maxUses,
+            usedCount: c.usedCount,
+            appliesToTier: c.appliesToTier,
+            expiresAt: c.expiresAt ? c.expiresAt.toISOString() : null,
+            isActive: c.isActive,
+            createdAt: c.createdAt.toISOString(),
+            updatedAt: c.updatedAt.toISOString(),
+            redemptionCount: c._count.redemptions,
+        })));
+    }
+    catch (e) {
+        console.error('[Admin] list merchant-signup-coupons error:', e);
+        return res.status(500).json({ error: 'Failed to list coupons' });
+    }
+});
+/**
+ * POST /admin/merchant-signup-coupons
+ * Create a new coupon.
+ * Body: { code, discountInr, maxUses?, appliesToTier?, expiresAt?, isActive? }
+ */
+app.post('/admin/merchant-signup-coupons', async (req, res) => {
+    const caller = await requireAdmin(req, res);
+    if (!caller)
+        return;
+    try {
+        const body = req.body || {};
+        const code = String(body.code || '').trim().toUpperCase();
+        const discountInr = Number(body.discountInr);
+        const maxUses = body.maxUses === null || body.maxUses === undefined || body.maxUses === ''
+            ? null : Number(body.maxUses);
+        const appliesToTier = body.appliesToTier && ['standard', 'premium'].includes(String(body.appliesToTier).toLowerCase())
+            ? String(body.appliesToTier).toLowerCase()
+            : null;
+        const expiresAt = body.expiresAt ? new Date(body.expiresAt) : null;
+        const isActive = body.isActive === undefined ? true : !!body.isActive;
+        if (!code || !/^[A-Z0-9_-]{3,30}$/.test(code)) {
+            return res.status(400).json({ error: 'Code must be 3-30 chars, letters/digits/_/- only.' });
+        }
+        if (!Number.isFinite(discountInr) || discountInr <= 0) {
+            return res.status(400).json({ error: 'discountInr must be a positive integer.' });
+        }
+        if (maxUses !== null && (!Number.isFinite(maxUses) || maxUses <= 0)) {
+            return res.status(400).json({ error: 'maxUses must be a positive integer or null.' });
+        }
+        if (expiresAt && Number.isNaN(expiresAt.getTime())) {
+            return res.status(400).json({ error: 'expiresAt must be a valid ISO date.' });
+        }
+        const existing = await prisma.merchantSignupCoupon.findUnique({ where: { code } });
+        if (existing) {
+            return res.status(409).json({ error: `Coupon code "${code}" already exists.` });
+        }
+        const created = await prisma.merchantSignupCoupon.create({
+            data: {
+                code,
+                discountInr: Math.floor(discountInr),
+                maxUses: maxUses === null ? null : Math.floor(maxUses),
+                appliesToTier,
+                expiresAt,
+                isActive,
+            },
+        });
+        return res.status(201).json({
+            id: created.id,
+            code: created.code,
+            discountInr: created.discountInr,
+            maxUses: created.maxUses,
+            usedCount: created.usedCount,
+            appliesToTier: created.appliesToTier,
+            expiresAt: created.expiresAt ? created.expiresAt.toISOString() : null,
+            isActive: created.isActive,
+            createdAt: created.createdAt.toISOString(),
+            updatedAt: created.updatedAt.toISOString(),
+            redemptionCount: 0,
+        });
+    }
+    catch (e) {
+        console.error('[Admin] create merchant-signup-coupon error:', e);
+        return res.status(500).json({ error: 'Failed to create coupon' });
+    }
+});
+/**
+ * PATCH /admin/merchant-signup-coupons/:id
+ * Update is_active / max_uses / expires_at / applies_to_tier. Code and
+ * discount_inr are immutable after creation (changing them mid-flight
+ * would confuse already-issued codes).
+ */
+app.patch('/admin/merchant-signup-coupons/:id', async (req, res) => {
+    const caller = await requireAdmin(req, res);
+    if (!caller)
+        return;
+    try {
+        const { id } = req.params;
+        const body = req.body || {};
+        const data = {};
+        if (body.isActive !== undefined)
+            data.isActive = !!body.isActive;
+        if (body.maxUses !== undefined) {
+            const n = body.maxUses === null || body.maxUses === '' ? null : Number(body.maxUses);
+            if (n !== null && (!Number.isFinite(n) || n <= 0)) {
+                return res.status(400).json({ error: 'maxUses must be a positive integer or null.' });
+            }
+            data.maxUses = n === null ? null : Math.floor(n);
+        }
+        if (body.expiresAt !== undefined) {
+            const d = body.expiresAt ? new Date(body.expiresAt) : null;
+            if (d && Number.isNaN(d.getTime())) {
+                return res.status(400).json({ error: 'expiresAt must be a valid ISO date or null.' });
+            }
+            data.expiresAt = d;
+        }
+        if (body.appliesToTier !== undefined) {
+            const t = body.appliesToTier;
+            if (t !== null && !['standard', 'premium'].includes(String(t).toLowerCase())) {
+                return res.status(400).json({ error: "appliesToTier must be 'standard' | 'premium' | null." });
+            }
+            data.appliesToTier = t === null ? null : String(t).toLowerCase();
+        }
+        if (Object.keys(data).length === 0) {
+            return res.status(400).json({ error: 'Nothing to update.' });
+        }
+        const updated = await prisma.merchantSignupCoupon.update({
+            where: { id },
+            data,
+            include: { _count: { select: { redemptions: true } } },
+        });
+        return res.json({
+            id: updated.id,
+            code: updated.code,
+            discountInr: updated.discountInr,
+            maxUses: updated.maxUses,
+            usedCount: updated.usedCount,
+            appliesToTier: updated.appliesToTier,
+            expiresAt: updated.expiresAt ? updated.expiresAt.toISOString() : null,
+            isActive: updated.isActive,
+            createdAt: updated.createdAt.toISOString(),
+            updatedAt: updated.updatedAt.toISOString(),
+            redemptionCount: updated._count.redemptions,
+        });
+    }
+    catch (e) {
+        if (e?.code === 'P2025') {
+            return res.status(404).json({ error: 'Coupon not found.' });
+        }
+        console.error('[Admin] update merchant-signup-coupon error:', e);
+        return res.status(500).json({ error: 'Failed to update coupon' });
+    }
+});
+/**
+ * GET /admin/merchant-signup-coupons/:id/redemptions
+ * List who has redeemed this coupon (most recent first).
+ */
+app.get('/admin/merchant-signup-coupons/:id/redemptions', async (req, res) => {
+    const caller = await requireAdmin(req, res);
+    if (!caller)
+        return;
+    try {
+        const { id } = req.params;
+        const rows = await prisma.merchantSignupCouponRedemption.findMany({
+            where: { couponId: id },
+            orderBy: { appliedAt: 'desc' },
+            include: {
+                merchant: {
+                    select: { id: true, storeName: true, ownerName: true, phone: true, email: true, status: true, createdAt: true },
+                },
+            },
+        });
+        return res.json(rows.map(r => ({
+            id: r.id,
+            merchantId: r.merchantId,
+            codeSnapshot: r.codeSnapshot,
+            amountInr: r.amountInr,
+            appliedAt: r.appliedAt.toISOString(),
+            merchant: r.merchant,
+        })));
+    }
+    catch (e) {
+        console.error('[Admin] list redemptions error:', e);
+        return res.status(500).json({ error: 'Failed to list redemptions' });
+    }
+});
+// =====================================================================
 // DELETE /auth/delete-account
 // Apple Guideline 5.1.1(v): Users must be able to delete their account.
 // Anonymizes order data (keeps financial records for merchant reconciliation)
