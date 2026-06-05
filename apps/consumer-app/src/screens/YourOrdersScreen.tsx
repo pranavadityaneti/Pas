@@ -126,15 +126,32 @@ export default function YourOrdersScreen() {
     const getStatusDisplay = (status: string, orderType?: string) => {
         const normalized = (status || '').toUpperCase();
         const isDining = orderType === 'dine-in';
-        
+
         if (normalized === 'PENDING') return { text: 'CONFIRMED', bg: 'bg-black', textClass: 'text-white' };
         if (normalized === 'ACCEPTED' || normalized === 'READY') {
-            return isDining 
+            return isDining
                 ? { text: 'RESERVED', bg: 'bg-blue-100', textClass: 'text-blue-800' }
                 : { text: 'PREPARING', bg: 'bg-yellow-400', textClass: 'text-black' };
         }
         if (normalized === 'COMPLETED' || normalized === 'DELIVERED') return { text: 'COMPLETED', bg: 'bg-green-100', textClass: 'text-green-800' };
-        return { text: 'CANCELLED', bg: 'bg-red-100', textClass: 'text-red-800' }; // Fallback
+
+        // 2026-06-05 — WS2 lifecycle statuses. Previously every one of these
+        // fell through to the "CANCELLED" fallback, so customers who filed a
+        // return saw their order labelled CANCELLED. Now each gets its own
+        // proper badge.
+        if (normalized === 'RETURN_REQUESTED') return { text: 'RETURN PENDING', bg: 'bg-orange-100', textClass: 'text-orange-800' };
+        if (normalized === 'RETURN_APPROVED')  return { text: 'RETURN APPROVED', bg: 'bg-green-100', textClass: 'text-green-800' };
+        if (normalized === 'RETURN_REJECTED')  return { text: 'RETURN DECLINED', bg: 'bg-red-100', textClass: 'text-red-800' };
+        if (normalized === 'EXCHANGE_REQUESTED') return { text: 'EXCHANGE PENDING', bg: 'bg-violet-100', textClass: 'text-violet-800' };
+        if (normalized === 'EXCHANGE_APPROVED')  return { text: 'EXCHANGE APPROVED', bg: 'bg-green-100', textClass: 'text-green-800' };
+        if (normalized === 'EXCHANGE_REJECTED')  return { text: 'EXCHANGE DECLINED', bg: 'bg-red-100', textClass: 'text-red-800' };
+        if (normalized === 'REFUNDED') return { text: 'REFUNDED', bg: 'bg-violet-100', textClass: 'text-violet-800' };
+        if (normalized === 'REJECTED') return { text: 'REJECTED', bg: 'bg-gray-200', textClass: 'text-gray-800' };
+        if (normalized === 'CANCELLED') return { text: 'CANCELLED', bg: 'bg-red-100', textClass: 'text-red-800' };
+
+        // True fallback — unknown status. Default to gray so it's clearly
+        // not a known state rather than misleadingly red.
+        return { text: normalized || 'UNKNOWN', bg: 'bg-gray-100', textClass: 'text-gray-700' };
     };
 
     if (loading) {

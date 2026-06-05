@@ -27,6 +27,11 @@ export function routeForNotification(n: NotifLike): { screen: string; params?: a
         case 'PICKUP_REMINDER_30MIN':
         case 'PICKUP_REMINDER_10MIN':
         case 'DINING_REMINDER_30MIN':
+        // Round-5: explicit WS2 cases (previously hit the default).
+        case 'RETURN_REQUESTED':
+        case 'RETURN_DECISION':
+        case 'EXCHANGE_REQUESTED':
+        case 'EXCHANGE_DECISION':
             return { screen: 'YourOrders' };
         default:
             // Every notification today is order-related, so a tap should always

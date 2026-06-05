@@ -41,11 +41,17 @@ interface Props {
     onSuccess?: (resultPayload: any) => void;
 }
 
-// Reason codes — mirror of WS2.B rules.ts
+// Reason codes — mirror of WS2.B rules.ts.
+//
+// 2026-06-05: 'damaged' is intentionally omitted here. The server requires
+// at least one photo for 'damaged' returns, but the customer-app doesn't
+// have a photo upload picker yet (v0.1 work). Surfacing the chip would
+// trap the customer in a dead-end where the server rejects every submit.
+// Customers with damaged items should pick 'Quality issue' and describe
+// the damage in the description field until photo upload ships.
 const RETURN_REASONS = [
     { code: 'missing_item', label: 'Missing item' },
     { code: 'wrong_item', label: 'Wrong item' },
-    { code: 'damaged', label: 'Damaged' },
     { code: 'quality_issue', label: 'Quality issue' },
     { code: 'expired', label: 'Expired' },
     { code: 'changed_mind', label: 'Changed mind' },
@@ -62,13 +68,26 @@ const EXCHANGE_REASONS = [
 // What actions are even SHOWN for this order's current state. The server
 // still validates; this is just to grey out actions the customer can't
 // take from this state.
+//
+// 2026-06-05 updates:
+//   - Added 'REJECTED' to the cancellable disallow list (Bug 6 — a
+//     merchant-rejected order should not be cancellable).
+//   - Dropped the `t === 'pickup'` qualifier on the READY block — any
+//     READY order (pickup, takeaway, delivery) cannot be cancelled
+//     because the merchant has already incurred full cost (Bug 7).
+//   - Reschedule limited to slot-based orders (pickup/dine-in) — server
+//     would reject takeaway/delivery anyway because they have no slot.
 function availableActions(orderStatus: string, orderType: string | null): Record<Action, boolean> {
     const s = (orderStatus || '').toUpperCase();
     const t = (orderType || 'pickup').toLowerCase();
 
-    const cancellable = !['COMPLETED', 'CANCELLED', 'REFUNDED', 'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'EXCHANGE_REQUESTED', 'EXCHANGE_APPROVED', 'EXCHANGE_REJECTED'].includes(s)
-        && !(t === 'pickup' && s === 'READY');
-    const reschedulable = ['PENDING', 'CONFIRMED'].includes(s);
+    const terminalStates = [
+        'COMPLETED', 'CANCELLED', 'REJECTED', 'REFUNDED',
+        'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED',
+        'EXCHANGE_REQUESTED', 'EXCHANGE_APPROVED', 'EXCHANGE_REJECTED',
+    ];
+    const cancellable = !terminalStates.includes(s) && s !== 'READY';
+    const reschedulable = ['PENDING', 'CONFIRMED'].includes(s) && (t === 'pickup' || t === 'dine-in');
     const returnable = s === 'COMPLETED';
     const exchangeable = s === 'COMPLETED';
 
@@ -274,6 +293,11 @@ export default function OrderActionsSheet({ visible, order, onClose, onSuccess }
                 options={RETURN_REASONS}
                 onChange={setReturnReason}
             />
+            <View className="bg-blue-50 border border-blue-200 rounded-2xl p-3 mt-3">
+                <Text className="text-[12px] text-blue-900">
+                    Damaged item? Pick "Quality issue" and describe what's wrong — photo upload is coming in the next release.
+                </Text>
+            </View>
             <Text className="text-[14px] text-gray-700 mt-4 mb-2">Add details (optional)</Text>
             <TextInput
                 className="border border-gray-300 rounded-2xl p-4 text-[14px] mb-4"

@@ -1,11 +1,27 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+
+// Round-5 hardening: the API now requires `requireUser` on
+// PATCH /orders/:id/status and POST /orders/:id/refund (forlater #11 + #12).
+// Lockstep with the API deploy — these helper-functions add the Bearer
+// token so the merchant app keeps working after the auth deploy.
+async function authHeaders(): Promise<Record<string, string>> {
+    try {
+        const { data } = await supabase.auth.getSession();
+        const token = data?.session?.access_token;
+        return token
+            ? { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+            : { 'Content-Type': 'application/json' };
+    } catch {
+        return { 'Content-Type': 'application/json' };
+    }
+}
 import { useStore } from './useStore';
 import Constants from 'expo-constants';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
-export type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED' | 'REJECTED' | 'RETURN_REQUESTED' | 'RETURN_APPROVED' | 'RETURN_REJECTED' | 'REFUNDED';
+export type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED' | 'REJECTED' | 'RETURN_REQUESTED' | 'RETURN_APPROVED' | 'RETURN_REJECTED' | 'EXCHANGE_REQUESTED' | 'EXCHANGE_APPROVED' | 'EXCHANGE_REJECTED' | 'REFUNDED';
 
 export interface OrderItem {
     id: string;
@@ -384,7 +400,7 @@ export function useOrders(dateRange?: DateRange) {
         try {
             const response = await fetch(`${API_URL}/orders/${orderId}/status`, {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
+                headers: await authHeaders(),
                 body: JSON.stringify({ status, cancellationReason })
             });
 
@@ -408,7 +424,7 @@ export function useOrders(dateRange?: DateRange) {
         try {
             const response = await fetch(`${API_URL}/orders/${orderId}/verify-otp`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: await authHeaders(),
                 body: JSON.stringify({ otp })
             });
 
@@ -435,7 +451,7 @@ export function useOrders(dateRange?: DateRange) {
 
             const response = await fetch(`${API_URL}/orders/${orderId}/refund`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: await authHeaders(),
                 body: JSON.stringify(body)
             });
 

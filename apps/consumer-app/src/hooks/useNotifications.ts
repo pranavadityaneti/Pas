@@ -30,6 +30,15 @@ const CONSUMER_NOTIFICATION_TYPES = [
     'PICKUP_REMINDER_30MIN',
     'PICKUP_REMINDER_10MIN',
     'DINING_REMINDER_30MIN',
+    // 2026-06-05 — WS2 lifecycle notification types. These were emitted by
+    // the API the moment WS2.C shipped, but this allowlist filtered them
+    // out — so customers who filed a return/exchange got nothing in-app
+    // when the merchant decided or the cron auto-approved after the 24h
+    // SLA. Adding all four sender-side types here.
+    'RETURN_REQUESTED',     // consumer in-app on their own return submission
+    'EXCHANGE_REQUESTED',   // consumer in-app on their own exchange submission
+    'RETURN_DECISION',      // merchant or cron decision on a return
+    'EXCHANGE_DECISION',    // merchant or cron decision on an exchange
 ];
 
 export interface ConsumerNotification {

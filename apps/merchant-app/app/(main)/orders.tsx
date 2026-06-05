@@ -27,7 +27,7 @@ const STATUS_MAP: Record<string, OrderStatus[]> = {
     pending: ['PENDING'],
     processing: ['CONFIRMED', 'PREPARING'],
     ready: ['READY'],
-    history: ['COMPLETED', 'CANCELLED', 'REJECTED', 'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REFUNDED']
+    history: ['COMPLETED', 'CANCELLED', 'REJECTED', 'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'EXCHANGE_REQUESTED', 'EXCHANGE_APPROVED', 'EXCHANGE_REJECTED', 'REFUNDED']
 };
 
 type HistoryFilter = 'All' | 'Completed' | 'Rejected' | 'Cancelled' | 'Refunded';

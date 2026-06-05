@@ -9,7 +9,7 @@
 // (navigationRef) instead of Ionicons + expo-router.
 import React, { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { View, Text, StyleSheet, Animated, TouchableOpacity, Platform } from 'react-native';
-import { CheckCircle2, ShoppingBag, Utensils, XCircle, Clock, Bell, X } from 'lucide-react-native';
+import { CheckCircle2, ShoppingBag, Utensils, XCircle, Clock, Bell, X, Package, RefreshCw } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { navigationRef } from '../navigation/navigationRef';
 
@@ -28,6 +28,12 @@ const TYPE_CONFIG: Record<string, { Icon: any; color: string; bg: string }> = {
     PICKUP_REMINDER_30MIN: { Icon: Clock,        color: '#F59E0B', bg: '#FFFBEB' },
     PICKUP_REMINDER_10MIN: { Icon: Clock,        color: '#F59E0B', bg: '#FFFBEB' },
     DINING_REMINDER_30MIN: { Icon: Clock,        color: '#F59E0B', bg: '#FFFBEB' },
+    // Round-5: WS2 lifecycle notif types. Distinct colors so the customer
+    // can tell at a glance whether a return/exchange is pending or decided.
+    RETURN_REQUESTED:      { Icon: Package,      color: '#F97316', bg: '#FFF7ED' }, // orange — pending
+    RETURN_DECISION:       { Icon: Package,      color: '#10B981', bg: '#ECFDF5' }, // green — resolved
+    EXCHANGE_REQUESTED:    { Icon: RefreshCw,    color: '#8B5CF6', bg: '#F5F3FF' }, // violet — pending
+    EXCHANGE_DECISION:     { Icon: RefreshCw,    color: '#10B981', bg: '#ECFDF5' }, // green — resolved
     DEFAULT:               { Icon: Bell,         color: '#6B7280', bg: '#F9FAFB' },
 };
 

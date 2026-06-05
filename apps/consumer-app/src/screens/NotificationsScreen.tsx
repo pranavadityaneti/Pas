@@ -6,7 +6,7 @@ import { View, Text, TouchableOpacity, FlatList, ActivityIndicator, RefreshContr
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { ArrowLeft, Bell, BellOff, CheckCircle2, ShoppingBag, Utensils, XCircle, Clock } from 'lucide-react-native';
+import { ArrowLeft, Bell, BellOff, CheckCircle2, ShoppingBag, Utensils, XCircle, Clock, Package, RefreshCw } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { useNotificationContext } from '../context/NotificationContext';
 import { routeForNotification } from '../lib/notificationRoute';
@@ -33,6 +33,15 @@ function iconForType(type: string): { Icon: any; color: string; bg: string } {
         case 'PICKUP_REMINDER_10MIN':
         case 'DINING_REMINDER_30MIN':
             return { Icon: Clock, color: '#F59E0B', bg: '#FFFBEB' };
+        // Round-5: WS2 lifecycle notif types — themed by lifecycle stage.
+        case 'RETURN_REQUESTED':
+            return { Icon: Package, color: '#F97316', bg: '#FFF7ED' };
+        case 'RETURN_DECISION':
+            return { Icon: Package, color: '#10B981', bg: '#ECFDF5' };
+        case 'EXCHANGE_REQUESTED':
+            return { Icon: RefreshCw, color: '#8B5CF6', bg: '#F5F3FF' };
+        case 'EXCHANGE_DECISION':
+            return { Icon: RefreshCw, color: '#10B981', bg: '#ECFDF5' };
         default:
             return { Icon: Bell, color: '#6B7280', bg: '#F3F4F6' };
     }
