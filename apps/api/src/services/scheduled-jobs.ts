@@ -20,6 +20,7 @@
  */
 
 import cron from 'node-cron';
+import * as Sentry from '@sentry/node';
 import { PrismaClient } from '@prisma/client';
 import { NotificationService } from './notification.service';
 
@@ -39,43 +40,77 @@ export function initScheduledJobs(
     prisma: PrismaClient,
     notificationService: NotificationService
 ): void {
-    // Single cron tick every minute runs all four jobs sequentially.
-    // Low overhead; avoids running multiple concurrent jobs that might race on the same rows.
+    // Per-process running guard (round-5 hardening). node-cron fires every
+    // minute regardless of whether the previous tick finished. With slow
+    // Razorpay calls inside processOrderIssueSla, tick N+1 can start while
+    // tick N is still mid-batch. The issue-level CAS prevents double-refund
+    // on the same row, but multiple ticks racing each other waste DB
+    // connections and inflate Sentry noise. This flag serializes ticks.
+    let cronTickRunning = false;
+
     cron.schedule('* * * * *', async () => {
-        try {
-            await firePickupReminders30Min(prisma, notificationService);
-        } catch (e) {
-            console.error('[cron] firePickupReminders30Min error:', e);
+        if (cronTickRunning) {
+            console.warn('[cron] previous tick still running — skipping this tick');
+            return;
         }
+        cronTickRunning = true;
         try {
-            await firePickupReminders10Min(prisma, notificationService);
-        } catch (e) {
-            console.error('[cron] firePickupReminders10Min error:', e);
-        }
-        try {
-            await fireDiningReminders30Min(prisma, notificationService);
-        } catch (e) {
-            console.error('[cron] fireDiningReminders30Min error:', e);
-        }
-        try {
-            await expireStaleOrderRequests(prisma);
-        } catch (e) {
-            console.error('[cron] expireStaleOrderRequests error:', e);
-        }
-        try {
-            await healMissingUserRows(prisma);
-        } catch (e) {
-            console.error('[cron] healMissingUserRows error:', e);
-        }
-        // WS2.D (2026-06-05): SLA auto-approve for return/exchange issues.
-        try {
-            await processOrderIssueSla(prisma, notificationService);
-        } catch (e) {
-            console.error('[cron] processOrderIssueSla error:', e);
+            try {
+                await firePickupReminders30Min(prisma, notificationService);
+            } catch (e) {
+                console.error('[cron] firePickupReminders30Min error:', e);
+                Sentry.captureException(e, { tags: { area: 'cron.pickupReminders30' } });
+            }
+            try {
+                await firePickupReminders10Min(prisma, notificationService);
+            } catch (e) {
+                console.error('[cron] firePickupReminders10Min error:', e);
+                Sentry.captureException(e, { tags: { area: 'cron.pickupReminders10' } });
+            }
+            try {
+                await fireDiningReminders30Min(prisma, notificationService);
+            } catch (e) {
+                console.error('[cron] fireDiningReminders30Min error:', e);
+                Sentry.captureException(e, { tags: { area: 'cron.diningReminders30' } });
+            }
+            try {
+                await expireStaleOrderRequests(prisma);
+            } catch (e) {
+                console.error('[cron] expireStaleOrderRequests error:', e);
+                Sentry.captureException(e, { tags: { area: 'cron.expireStaleOrderRequests' } });
+            }
+            try {
+                await healMissingUserRows(prisma);
+            } catch (e) {
+                console.error('[cron] healMissingUserRows error:', e);
+                Sentry.captureException(e, { tags: { area: 'cron.healMissingUserRows' } });
+            }
+            // WS2.D (2026-06-05): SLA auto-approve for return/exchange issues.
+            try {
+                await processOrderIssueSla(prisma, notificationService);
+            } catch (e) {
+                console.error('[cron] processOrderIssueSla error:', e);
+                Sentry.captureException(e, { tags: { area: 'cron.processOrderIssueSla' } });
+            }
+            // Round-5 hardening: reconciliation pass for N7 misses. Catches
+            // order_requests that were left COMPLETED even though their
+            // linked order was cancelled (e.g., SIGTERM during the cancel
+            // endpoint's post-tx cleanup).
+            try {
+                await reconcileOrderRequestStatus(prisma);
+            } catch (e) {
+                console.error('[cron] reconcileOrderRequestStatus error:', e);
+                Sentry.captureException(e, { tags: { area: 'cron.reconcileOrderRequestStatus' } });
+            }
+        } finally {
+            cronTickRunning = false;
         }
     });
 
     console.log('[cron] Scheduled jobs initialized — running every 1 minute');
+    if (process.env.CRON_DRY_RUN === 'true') {
+        console.warn('[cron] DRY-RUN MODE — Razorpay refund calls will be simulated only. Unset CRON_DRY_RUN to enable real refunds.');
+    }
 }
 
 // ─────────────────────── WS2.D: SLA auto-approve cron ──────────────────
@@ -99,10 +134,21 @@ async function tryRazorpayRefund(
     orderMetadata: any,
     amountInr: number,
 ): Promise<{ razorpayRefundId: string; simulated: boolean }> {
-    const paymentId =
-        orderMetadata?.paymentId ||
-        orderMetadata?.razorpay_payment_id ||
-        null;
+    // Round-5 hardening: dry-run mode for the rollout-first-day. With
+    // CRON_DRY_RUN=true, never actually call Razorpay — return a 'sim'
+    // stub. Lets ops watch logs for what the cron WOULD do for 24h
+    // before flipping the flag and letting it move real money.
+    if (process.env.CRON_DRY_RUN === 'true') {
+        const stubId = `rfnd_dryrun_${Date.now()}`;
+        console.warn('[cron sla refund] DRY_RUN — would refund', { amountInr, stubId });
+        return { razorpayRefundId: stubId, simulated: true };
+    }
+
+    // POST /orders persists Razorpay's payment id at metadata.razorpayPaymentId
+    // (camelCase) — see index.ts ~line 2414 and InvoiceModal.tsx line 64. This
+    // helper previously looked at the wrong keys and therefore ALWAYS fell
+    // through to the simulated path. Fixed 2026-06-05 (Bug B).
+    const paymentId = orderMetadata?.razorpayPaymentId || null;
 
     let razorpayInstance: any = null;
     try {
@@ -149,6 +195,21 @@ async function processOrderIssueSla(
     });
 
     if (elapsed.length === 0) return;
+
+    // Round-6 hardening (H5): true dry-run mode. The previous DRY_RUN gate
+    // only stubbed the Razorpay HTTP call — DB state still committed +
+    // customer notifications still fired. That is NOT a soak mode; it
+    // leaves real customers waiting for refunds the cron promised them.
+    // Now DRY_RUN short-circuits the entire SLA loop. Ops can verify
+    // counts + per-issue logs without any mutation.
+    if (process.env.CRON_DRY_RUN === 'true') {
+        console.warn(`[cron sla] DRY_RUN — would auto-approve ${elapsed.length} issue(s). No DB writes, no Razorpay calls, no notifications.`);
+        for (const issue of elapsed) {
+            console.warn(`[cron sla] DRY_RUN issue=${issue.id} type=${issue.type} orderId=${issue.orderId} refundAmountInr=${issue.refundAmountInr ?? 'n/a'}`);
+        }
+        return;
+    }
+
     console.log(`[cron sla] auto-approving ${elapsed.length} elapsed issue(s)`);
 
     for (const issue of elapsed) {
@@ -162,45 +223,113 @@ async function processOrderIssueSla(
                 continue;
             }
 
-            let refundResult: { razorpayRefundId: string; simulated: boolean } | null = null;
-            if (issue.type === 'return' && (issue.refundAmountInr ?? 0) > 0) {
-                refundResult = await tryRazorpayRefund(order.metadata, issue.refundAmountInr!);
-            }
-
             const newOrderStatus =
                 issue.type === 'return' ? 'RETURN_APPROVED' :
                 issue.type === 'exchange' ? 'EXCHANGE_APPROVED' :
                 order.status;
+            const needsRefund = issue.type === 'return' && (issue.refundAmountInr ?? 0) > 0;
 
+            // FLIP STATUS FIRST inside a transaction (Bug 3 fix).
+            //
+            // Previously the Razorpay refund was called BEFORE this
+            // transaction. If the refund succeeded but the transaction then
+            // threw (DB blip, contention), the catch block would log and
+            // `continue` to the next issue — leaving this issue still
+            // PENDING. The next cron tick (1 minute later) would find it
+            // again and refund a second time. Cron retry makes this the
+            // worst exposure in the codebase.
+            //
+            // By committing AUTO_APPROVED first, the PENDING-only findMany
+            // at the top of this function excludes the row on subsequent
+            // ticks. The refund happens at most once.
+            // ATOMIC COMPARE-AND-SET (Bug N2 fix — third-pass audit).
+            //
+            // findMany at the top returned this issue as PENDING, but the
+            // merchant could have clicked Approve in their inbox during the
+            // gap between that read and this write. Without a compare-and-
+            // set guard, both processes would commit a status change and
+            // both would call Razorpay → double refund.
+            //
+            // `updateMany` with `status: 'PENDING'` in the WHERE clause is
+            // atomic: if the merchant won the race, count === 0, we set
+            // `wonRace = false` and skip the refund block entirely. The row
+            // is already correctly resolved by the merchant's transaction.
+            let wonRace = true;
             await prisma.$transaction(async (tx) => {
-                await tx.orderIssue.update({
-                    where: { id: issue.id },
+                const updateRes = await tx.orderIssue.updateMany({
+                    where: { id: issue.id, status: 'PENDING' },
                     data: {
                         status: 'AUTO_APPROVED',
                         resolvedAt: now,
                         merchantDecisionReason: 'Auto-approved after merchant SLA elapsed (24h).',
-                        ...(refundResult && {
-                            refundRazorpayId: refundResult.razorpayRefundId,
-                            refundProcessedAt: now,
-                        }),
                     },
+                });
+                if (updateRes.count === 0) {
+                    wonRace = false;
+                    return;  // transaction body returns; nothing else mutates
+                }
+                // Round-5 hardening: re-read order.metadata INSIDE the tx so
+                // concurrent writes (merchant PATCH, webhook) between findUnique
+                // at line 158 and this update don't get silently clobbered.
+                const fresh = await tx.order.findUnique({
+                    where: { id: order.id },
+                    select: { metadata: true },
                 });
                 await tx.order.update({
                     where: { id: order.id },
                     data: {
                         status: newOrderStatus,
-                        ...(issue.type === 'return' && refundResult && { isPaid: false }),
+                        ...(needsRefund && { isPaid: false }),
                         metadata: {
-                            ...(typeof order.metadata === 'object' && order.metadata !== null ? order.metadata : {}),
-                            ...(refundResult && {
-                                returnRazorpayRefundId: refundResult.razorpayRefundId,
-                                returnRefundSimulated: refundResult.simulated,
-                                autoApprovedAt: now.toISOString(),
-                            }),
+                            ...(typeof fresh?.metadata === 'object' && fresh?.metadata !== null ? fresh.metadata : {}),
+                            autoApprovedAt: now.toISOString(),
                         } as any,
                     },
                 });
             });
+
+            if (!wonRace) {
+                console.log(`[cron sla] issue ${issue.id} was already decided by merchant — skipping refund + notif`);
+                continue;
+            }
+
+            // Razorpay refund AFTER status commit. The compare-and-set above
+            // guarantees we only reach here if we own the resolution.
+            let refundResult: { razorpayRefundId: string; simulated: boolean } | null = null;
+            if (needsRefund) {
+                refundResult = await tryRazorpayRefund(order.metadata, issue.refundAmountInr!);
+                // Persist refund id back. If this write fails after Razorpay
+                // succeeded, ops reconciles from the dashboard.
+                await prisma.$transaction(async (tx) => {
+                    await tx.orderIssue.update({
+                        where: { id: issue.id },
+                        data: { refundRazorpayId: refundResult!.razorpayRefundId, refundProcessedAt: now },
+                    });
+                    // Round-5 hardening: re-read metadata inside the tx so concurrent
+                    // writes during the Razorpay HTTP call aren't clobbered.
+                    const fresh = await tx.order.findUnique({
+                        where: { id: order.id },
+                        select: { metadata: true },
+                    });
+                    await tx.order.update({
+                        where: { id: order.id },
+                        data: {
+                            metadata: {
+                                ...(typeof fresh?.metadata === 'object' && fresh?.metadata !== null ? fresh.metadata : {}),
+                                returnRazorpayRefundId: refundResult!.razorpayRefundId,
+                                returnRefundSimulated: refundResult!.simulated,
+                                autoApprovedAt: now.toISOString(),
+                            } as any,
+                        },
+                    });
+                }).catch((e: any) => {
+                    console.error('[cron sla] metadata refund write failed:', e);
+                    Sentry.captureException(e, {
+                        tags: { area: 'cron.metadataRefundWrite' },
+                        extra: { issueId: issue.id, orderId: order.id, razorpayRefundId: refundResult?.razorpayRefundId },
+                    });
+                });
+            }
 
             notificationService.sendConsumerNotification({
                 userId: order.userId,
@@ -222,8 +351,55 @@ async function processOrderIssueSla(
             console.log(`[cron sla] ✓ issue=${issue.id} type=${issue.type} order=#${order.orderNumber} ${refundResult ? `refund=${refundResult.razorpayRefundId}${refundResult.simulated ? '(sim)' : ''}` : 'no-refund'}`);
         } catch (e) {
             console.error('[cron sla] issue', issue.id, 'failed:', e);
+            Sentry.captureException(e, {
+                tags: { area: 'cron.processIssueLoop' },
+                extra: { issueId: issue.id, orderId: issue.orderId, issueType: issue.type },
+            });
             // Continue processing the rest — this issue retries next tick.
         }
+    }
+}
+
+// ─────────────── Round-5: reconciliation pass for N7 misses ──────────
+//
+// The /orders/:id/cancel endpoint flips its linked order_request to
+// CANCELLED in a best-effort `await`ed call. If the API process is
+// killed (SIGTERM during EB rolling deploy / scaling) in the gap
+// between sending the response and the SQL round-trip resolving,
+// the order_request stays at COMPLETED forever — the merchant
+// request-queue dashboard sees a "fulfilled" request whose order is
+// actually CANCELLED.
+//
+// This pass catches the drift: find COMPLETED order_requests whose
+// linked order is CANCELLED, and reconcile. Idempotent.
+
+async function reconcileOrderRequestStatus(prisma: PrismaClient): Promise<void> {
+    // Limit per-tick to avoid a runaway sweep.
+    const candidates: Array<{ id: string; order_id: string | null }> = await prisma.$queryRawUnsafe(`
+        SELECT r.id, o.id AS order_id
+        FROM order_requests r
+        JOIN orders o ON (o.metadata->>'orderRequestId')::uuid = r.id
+        WHERE r.status = 'COMPLETED' AND o.status = 'CANCELLED'
+        LIMIT 50
+    `);
+    if (candidates.length === 0) return;
+    let healed = 0;
+    for (const c of candidates) {
+        const res = await prisma.order_requests.updateMany({
+            where: { id: c.id, status: 'COMPLETED' },
+            data: { status: 'CANCELLED', updated_at: new Date() },
+        }).catch((e: any) => {
+            console.error('[cron reconcile] failed for', c.id, e);
+            Sentry.captureException(e, {
+                tags: { area: 'cron.reconcileOrderRequestStatus' },
+                extra: { orderRequestId: c.id },
+            });
+            return null;
+        });
+        if (res && res.count > 0) healed++;
+    }
+    if (healed > 0) {
+        console.warn(`[cron reconcile] healed ${healed} stale COMPLETED order_requests whose orders are CANCELLED. Investigate cancel-endpoint SIGTERMs.`);
     }
 }
 

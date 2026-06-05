@@ -112,7 +112,38 @@ test('cancel: READY pickup → blocked (convert to takeaway in store)', () => {
         requestedAt: new Date(),
     });
     assert.equal(r.allowed, false);
-    assert.ok(r.reason.includes('ready'));
+    assert.ok(r.reason.toLowerCase().includes('ready'));
+});
+
+test('cancel: READY takeaway → blocked (food already packed)', () => {
+    // Bug 7 regression guard — previously the READY block was qualified
+    // `orderType === 'pickup'`, leaving takeaway-READY cancellable with a 5%
+    // fee. The food has already been prepared so the merchant should not be
+    // forced into the refund path.
+    const r = evaluateCancel({
+        orderType: 'takeaway',
+        orderStatus: 'READY',
+        orderTotalInr: 500,
+        isPaid: true,
+        createdAt: new Date(),
+        slotTimeAt: null,
+        requestedAt: new Date(),
+    });
+    assert.equal(r.allowed, false);
+    assert.ok(r.reason.toLowerCase().includes('ready'));
+});
+
+test('cancel: READY delivery → blocked (driver en route)', () => {
+    const r = evaluateCancel({
+        orderType: 'delivery',
+        orderStatus: 'READY',
+        orderTotalInr: 500,
+        isPaid: true,
+        createdAt: new Date(),
+        slotTimeAt: null,
+        requestedAt: new Date(),
+    });
+    assert.equal(r.allowed, false);
 });
 
 test('cancel: dining → no refund, full forfeit', () => {
@@ -133,7 +164,11 @@ test('cancel: dining → no refund, full forfeit', () => {
 });
 
 test('cancel: terminal states blocked', () => {
-    for (const st of ['COMPLETED', 'CANCELLED', 'REFUNDED'] as const) {
+    // 2026-06-05 — added 'REJECTED' here to mirror the rules-engine fix.
+    // Without REJECTED in the terminal-status check, a merchant-rejected
+    // order could be "cancelled" by the customer and run through the
+    // refund branches as if it were a normal paid order.
+    for (const st of ['COMPLETED', 'CANCELLED', 'REJECTED', 'REFUNDED'] as const) {
         const r = evaluateCancel({
             orderType: 'pickup',
             orderStatus: st,

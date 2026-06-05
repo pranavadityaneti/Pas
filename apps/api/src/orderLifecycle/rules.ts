@@ -37,7 +37,7 @@ export type OrderTypeKind = 'pickup' | 'dining' | 'takeaway' | 'delivery';
  */
 export type OrderStatusLite =
     | 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY' | 'COMPLETED'
-    | 'CANCELLED' | 'REFUNDED'
+    | 'CANCELLED' | 'REJECTED' | 'REFUNDED'
     | 'RETURN_REQUESTED' | 'RETURN_APPROVED' | 'RETURN_REJECTED'
     | 'EXCHANGE_REQUESTED' | 'EXCHANGE_APPROVED' | 'EXCHANGE_REJECTED';
 
@@ -152,19 +152,27 @@ export function evaluateCancel(input: CancelInput): Decision<CancelOutcome> {
     const { orderType, orderStatus, orderTotalInr, isPaid, createdAt, requestedAt } = input;
 
     // Terminal states — nothing to cancel.
-    if (orderStatus === 'COMPLETED' || orderStatus === 'CANCELLED' || orderStatus === 'REFUNDED') {
-        return { allowed: false, reason: 'This order has already been completed, cancelled, or refunded.' };
+    // 2026-06-05: Added REJECTED here. Without it a merchant-rejected order
+    // would slip through to the pickup/dining branches below and trigger a
+    // "cancellation" of an already-rejected order, which is nonsensical and
+    // could request a refund on money that was never captured.
+    if (orderStatus === 'COMPLETED' || orderStatus === 'CANCELLED' || orderStatus === 'REJECTED' || orderStatus === 'REFUNDED') {
+        return { allowed: false, reason: 'This order has already been completed, cancelled, rejected, or refunded.' };
     }
     if (orderStatus === 'RETURN_REQUESTED' || orderStatus === 'RETURN_APPROVED' || orderStatus === 'RETURN_REJECTED'
         || orderStatus === 'EXCHANGE_REQUESTED' || orderStatus === 'EXCHANGE_APPROVED' || orderStatus === 'EXCHANGE_REJECTED') {
         return { allowed: false, reason: 'This order is already in a return or exchange flow.' };
     }
 
-    // Pickup orders that are READY can't cancel — they convert to takeaway in-store.
-    if (orderType === 'pickup' && orderStatus === 'READY') {
+    // READY orders can't cancel regardless of type. Previously this was gated
+    // on `orderType === 'pickup'`, leaving takeaway-READY (food packed on the
+    // counter) and delivery-READY (driver en route) cancellable. Both produce
+    // refunds on orders where the merchant has already incurred full cost.
+    // 2026-06-05: Removed the pickup-only qualifier.
+    if (orderStatus === 'READY') {
         return {
             allowed: false,
-            reason: 'Your order is ready for pickup. Visit the store to pick it up or convert to takeaway — too late to cancel.',
+            reason: 'Your order is ready. Visit the store to pick it up or convert to takeaway — too late to cancel.',
         };
     }
 

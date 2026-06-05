@@ -27,6 +27,9 @@ import { initScheduledJobs } from './services/scheduled-jobs';
 import { parseArrivalTime } from './utils/parseArrivalTime';
 import staffRouter from './routes/staff';
 import bookingsRouter from './routes/bookings';
+// WS2.B rules engine — typed namespace import (replaces lazy require so TS
+// catches wrong-shape inputs like the 'dine-in' vs 'dining' enum mismatch).
+import * as orderLifecycleRules from './orderLifecycle/rules';
 
 // --- Configuration ---
 const app = express();
@@ -2411,7 +2414,17 @@ app.post('/orders', async (req, res) => {
                     // Parse arrival_time text → absolute UTC timestamp for cron-based slot reminders.
                     // Returns null if format unrecognized; order just won't get scheduled reminders.
                     slot_time_at: parseArrivalTime(arrivalTime, new Date()),
-                    metadata: paymentId ? { razorpayPaymentId: paymentId, orderRequestId: orderRequestId || null } : undefined,
+                    // Persist orderRequestId whenever we have one, regardless of paymentId
+                    // (round-4 audit fix for Bug N7: the cancel-time order_requests cleanup
+                    // reads metadata.orderRequestId — leaving it undefined for non-Razorpay
+                    // flows meant the cleanup silently no-op'd. Now we set metadata if
+                    // EITHER paymentId or orderRequestId is present.)
+                    metadata: (paymentId || orderRequestId)
+                        ? {
+                            ...(paymentId ? { razorpayPaymentId: paymentId } : {}),
+                            ...(orderRequestId ? { orderRequestId } : {}),
+                        }
+                        : undefined,
                     items: {
                         create: items.map((item: any) => ({
                             storeProductId: item.storeProductId || null,
@@ -2793,6 +2806,11 @@ app.patch('/order-requests/:id/status', async (req, res) => {
 
 // Update Order Status (Merchant Side)
 app.patch('/orders/:id/status', async (req, res) => {
+    // Round-5 hardening (forlater #12): auth was completely absent. Any
+    // caller could flip any order to any status, doubling stock restoration
+    // on CANCELLED retries and bypassing the WS2 lifecycle endpoints.
+    const user = await requireUser(req, res);
+    if (!user) return;
     try {
         const { id } = req.params;
         const { status, reason } = req.body; // Accept reason
@@ -2807,6 +2825,11 @@ app.patch('/orders/:id/status', async (req, res) => {
             return res.status(404).json({ error: 'Order not found' });
         }
 
+        const canManage = await userCanManageOrderStore(user.id, currentOrder.storeId);
+        if (!canManage) {
+            return res.status(403).json({ error: 'You do not have merchant access to this order.' });
+        }
+
         // 2. Validate Transitions & Safeguards
         if (['COMPLETED', 'REFUNDED', 'RETURN_APPROVED'].includes(currentOrder.status)) {
             // Allow formatting changes if needed, but generally these states are final regarding cancellation
@@ -2815,9 +2838,44 @@ app.patch('/orders/:id/status', async (req, res) => {
             }
         }
 
-        if (status === 'RETURN_APPROVED' && currentOrder.status !== 'RETURN_REQUESTED') {
-            return res.status(400).json({ error: 'Order must be in RETURN_REQUESTED state to approve return.' });
+        // Round-5 hardening: idempotency guard on CANCELLED → CANCELLED.
+        // Without this, calling this endpoint twice with status='CANCELLED'
+        // restores stock a second time (the loop below runs unconditionally
+        // on CANCELLED), inflating inventory.
+        if (status === 'CANCELLED' && currentOrder.status === 'CANCELLED') {
+            return res.status(400).json({ error: 'Order is already cancelled.' });
         }
+
+        // Round-5 hardening (revised round-6 after adversarial review XC1):
+        //
+        // The merchant rejection path in apps/merchant-app calls this endpoint
+        // with status='CANCELLED' to reject paid orders. We MUST allow that —
+        // customers cannot reach this endpoint anyway because they can't pass
+        // userCanManageOrderStore. So the auth check above is already the
+        // gate that keeps customers out of the merchant flow; we don't need
+        // a redundant CANCELLED-redirect that would break legitimate
+        // merchant rejections.
+        //
+        // We DO still block WS2-OWNED transitions (RETURN_* / EXCHANGE_* /
+        // REFUNDED) because those must go through the dedicated endpoints
+        // that emit the right events and update OrderIssue rows.
+        if (['RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED',
+             'EXCHANGE_REQUESTED', 'EXCHANGE_APPROVED', 'EXCHANGE_REJECTED'].includes(status)) {
+            return res.status(400).json({
+                error: 'Use the WS2 endpoints (POST /orders/:id/return, /exchange, PATCH /orders/:id/issue/:issueId) for return/exchange lifecycle transitions.',
+            });
+        }
+        // Round-6 (audit finding H4): block status='REFUNDED' direct input.
+        // Without this, a merchant can lie that an order was refunded without
+        // any actual Razorpay refund being issued — finance dashboards drift.
+        if (status === 'REFUNDED') {
+            return res.status(400).json({
+                error: 'Use POST /orders/:id/refund to issue an actual refund.',
+            });
+        }
+        // Round-6 (audit finding H2): drop the now-dead RETURN_APPROVED
+        // precondition check — the WS2 block above already rejects
+        // RETURN_APPROVED inputs.
 
         // CRITICAL: Block Manual Completion
         if (status === 'COMPLETED') {
@@ -2974,12 +3032,25 @@ app.patch('/orders/:id/status', async (req, res) => {
         res.json(order);
     } catch (error: any) {
         console.error('Update Status Error:', error);
-        res.status(500).json({ error: 'Failed to update order status', details: error.message, stack: error.stack });
+        // Round-6 (H2): no longer return error.stack — info disclosure
+        // (file paths, line numbers, ORM internals). Sentry has the full
+        // trace for debugging server-side.
+        Sentry.captureException(error, {
+            tags: { area: 'ws2.legacyStatus' },
+            extra: { orderId: req.params.id, userId: user.id, requestedStatus: req.body?.status },
+        });
+        res.status(500).json({ error: 'Failed to update order status' });
     }
 });
 
 // Refund Order Endpoint
 app.post('/orders/:id/refund', async (req, res) => {
+    // Round-5 hardening (forlater #11): auth was completely absent on this
+    // endpoint. Any unauthenticated caller could refund any order and wipe
+    // its metadata. Now requires (a) a valid user token and (b) merchant
+    // access to the order's store.
+    const user = await requireUser(req, res);
+    if (!user) return;
     try {
         const { id } = req.params;
         const { amount, reason } = req.body; // Optional partial refund later
@@ -2990,8 +3061,23 @@ app.post('/orders/:id/refund', async (req, res) => {
         });
 
         if (!order) return res.status(404).json({ error: 'Order not found' });
+
+        const canManage = await userCanManageOrderStore(user.id, order.storeId);
+        if (!canManage) {
+            return res.status(403).json({ error: 'You do not have merchant access to this order.' });
+        }
+
         if (!order.isPaid) return res.status(400).json({ error: 'Cannot refund an unpaid order' });
         if (order.status === 'REFUNDED') return res.status(400).json({ error: 'Order already refunded' });
+        // Round-5 hardening: block WS2 lifecycle states. The WS2 flows have
+        // their own refund handling — going through this legacy endpoint
+        // would wipe the WS2 metadata and bypass the issue-tracking flow.
+        if (['CANCELLED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'RETURN_REQUESTED',
+             'EXCHANGE_APPROVED', 'EXCHANGE_REJECTED', 'EXCHANGE_REQUESTED'].includes(order.status)) {
+            return res.status(400).json({
+                error: `Order is in ${order.status} — use the WS2 endpoints (cancel / issue PATCH) instead.`,
+            });
+        }
 
         // Initialize Razorpay (Safely)
         let razorpayInstance: any = null;
@@ -3030,13 +3116,23 @@ app.post('/orders/:id/refund', async (req, res) => {
         }
 
         // Update Status to REFUNDED (Local Database)
+        // Round-5 hardening: spread existing metadata instead of replacing.
+        // Previous behavior wiped razorpayPaymentId, orderRequestId, and any
+        // WS2 audit fields. Now we merge — the refund id is added alongside
+        // the existing record.
         const refundedOrder = await prisma.order.update({
             where: { id },
             data: {
                 status: 'REFUNDED',
                 isPaid: false,
                 returnReason: reason || 'Refund processed',
-                metadata: refundResult ? { razorpayRefundId: refundResult.id } : undefined
+                metadata: refundResult
+                    ? {
+                        ...(typeof order.metadata === 'object' && order.metadata !== null ? order.metadata : {}),
+                        razorpayRefundId: refundResult.id,
+                        legacyRefundAt: new Date().toISOString(),
+                    } as any
+                    : (order.metadata as any) ?? undefined,
             },
             include: { user: true }
         });
@@ -3052,6 +3148,11 @@ app.post('/orders/:id/refund', async (req, res) => {
 
     } catch (error: any) {
         console.error('Refund Error:', error);
+        // Round-6 (cross-cutting medium): Sentry parity with WS2 endpoints.
+        Sentry.captureException(error, {
+            tags: { area: 'ws2.legacyRefund' },
+            extra: { orderId: req.params.id, userId: user.id },
+        });
         // Ensure JSON response even on crash
         res.status(500).json({ error: 'Failed to process refund', details: error.message });
     }
@@ -3079,20 +3180,48 @@ app.post('/webhooks/payment', async (req, res) => {
 
 // Verify OTP for Completion
 app.post('/orders/:id/verify-otp', async (req, res) => {
+    // Round-6 hardening (XC3): previously NO auth + NO CAS + NO state guard.
+    // Anyone with a leaked OTP could mark any order COMPLETED, including a
+    // CANCELLED / REFUNDED / RETURN_APPROVED order — breaking every WS2
+    // invariant. Now requires merchant store auth + atomic compare-and-set
+    // limited to orders currently in READY (the only state where OTP
+    // verification is legitimate).
+    const user = await requireUser(req, res);
+    if (!user) return;
     try {
         const { id } = req.params;
         const { otp } = req.body;
 
         const order = await prisma.order.findUnique({ where: { id } });
-        if (!order || order.otp !== otp) {
+        if (!order) return res.status(404).json({ error: 'Order not found' });
+
+        const canManage = await userCanManageOrderStore(user.id, order.storeId);
+        if (!canManage) {
+            return res.status(403).json({ error: 'You do not have merchant access to this order.' });
+        }
+
+        if (order.otp !== otp) {
             return res.status(400).json({ error: 'Invalid PIN' });
         }
 
-        const updatedOrder = await prisma.order.update({
-            where: { id },
+        // Atomic compare-and-set: only flip if still READY.
+        const flipped = await prisma.order.updateMany({
+            where: { id, status: 'READY', otp },
             data: { status: 'COMPLETED' },
+        });
+        if (flipped.count === 0) {
+            return res.status(409).json({
+                error: 'Order is not in READY state (already completed, cancelled, or moved elsewhere). Refresh and try again.',
+            });
+        }
+
+        const updatedOrder = await prisma.order.findUnique({
+            where: { id },
             include: { user: true, items: { include: { storeProduct: { include: { product: true } } } } }
         });
+        if (!updatedOrder) {
+            return res.status(500).json({ error: 'Verify-OTP committed but order vanished — please refresh.' });
+        }
 
         io.emit('order_updated', updatedOrder);
 
@@ -3144,9 +3273,9 @@ app.post('/orders/:id/verify-otp', async (req, res) => {
 // fire-and-forget notifications.
 // =====================================================================
 
-// Lazy require to keep the module import surface unchanged.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const orderLifecycleRules = require('./orderLifecycle/rules');
+// Note: orderLifecycleRules is imported at the top of the file as a typed
+// namespace import so TypeScript can catch input-shape mismatches at compile
+// time (this avoids regressions like the 'dine-in'/'dining' enum slip).
 
 /**
  * Check the auth'd user has merchant-side access to an order's store.
@@ -3174,7 +3303,11 @@ async function processRazorpayRefund(
     orderMetadata: any,
     amountInr: number,
 ): Promise<{ razorpayRefundId: string; simulated: boolean }> {
-    const paymentId = orderMetadata?.paymentId || orderMetadata?.razorpay_payment_id;
+    // POST /orders persists Razorpay's payment id at metadata.razorpayPaymentId
+    // (camelCase) — see index.ts ~line 2414 and InvoiceModal.tsx line 64. This
+    // helper previously looked for `paymentId` / `razorpay_payment_id` and
+    // therefore ALWAYS fell through to the simulated path. Fixed 2026-06-05.
+    const paymentId = orderMetadata?.razorpayPaymentId;
     if (!razorpayInstance || !paymentId) {
         const stubId = `rfnd_sim_${Date.now()}`;
         console.warn('[refund] Razorpay missing or no paymentId — simulating refund id:', stubId);
@@ -3258,6 +3391,7 @@ app.get('/orders/issues/inbox', async (req, res) => {
         return res.json(issues);
     } catch (err: any) {
         console.error('[issues inbox] error:', err);
+        Sentry.captureException(err, { tags: { area: 'ws2.inbox' }, extra: { userId: user.id } });
         return res.status(500).json({ error: 'Failed to list issues.', details: err?.message });
     }
 });
@@ -3269,17 +3403,26 @@ app.post('/orders/:id/cancel', async (req, res) => {
         const { id } = req.params;
         const { reason } = req.body || {};
 
+        // Items pulled in so we can restore stock atomically with the
+        // status flip (Bug 5 fix — the legacy PATCH /orders/:id/status
+        // endpoint restored stock on CANCELLED, this one was silently
+        // skipping it).
         const order = await prisma.order.findUnique({
             where: { id },
-            include: { user: true, store: true },
+            include: { user: true, items: true },
         });
         if (!order) return res.status(404).json({ error: 'Order not found.' });
         if (order.userId !== user.id) {
             return res.status(403).json({ error: 'You do not have permission to cancel this order.' });
         }
 
+        // DB stores order_type='dine-in' (see DiningCheckoutScreen + InvoiceModal),
+        // but the rules engine's OrderTypeKind uses 'dining'. Normalize here to
+        // keep the rules vocabulary stable. Fixed 2026-06-05 (Bug A).
+        const rawOrderType = (order as any).order_type;
+        const normalizedOrderType = rawOrderType === 'dine-in' ? 'dining' : (rawOrderType || 'pickup');
         const decision = orderLifecycleRules.evaluateCancel({
-            orderType: ((order as any).order_type || 'pickup'),
+            orderType: normalizedOrderType,
             orderStatus: order.status,
             orderTotalInr: order.totalAmount,
             isPaid: order.isPaid,
@@ -3291,30 +3434,171 @@ app.post('/orders/:id/cancel', async (req, res) => {
             return res.status(400).json({ error: decision.reason });
         }
 
-        // If refund needed, attempt Razorpay refund FIRST so we don't update
-        // the order to CANCELLED until we know whether money moved (or
-        // simulated, in which case ops reconciles).
+        // FLIP STATUS FIRST inside a transaction (Bug 1 fix).
+        //
+        // Previously the Razorpay refund was called BEFORE the status update.
+        // If the refund succeeded but the order.update transaction then failed
+        // (DB blip, contention, anything transient), the order would still be
+        // PENDING/CONFIRMED — so the customer could tap Cancel again and the
+        // rules engine would approve it, refunding the same payment a second
+        // time. By committing CANCELLED first, any retry is blocked by the
+        // rules engine's terminal-status check.
+        //
+        // Stock restoration runs in the same transaction so inventory and
+        // status are atomic — neither without the other.
+        const cancelledAt = new Date();
+        let updated: any;
+        try {
+            updated = await prisma.$transaction(async (tx) => {
+                // ATOMIC COMPARE-AND-SET on order.status (round-5 hardening).
+                //
+                // Mirror of the N2 fix: re-check the order is still in a
+                // cancellable state INSIDE the transaction. Without this,
+                // two parallel POST /orders/:id/cancel calls (double-tap,
+                // two tabs, client retry) can both pass the rules engine
+                // precheck and both commit — double stock restoration,
+                // double consumer notif, and a cross-fix race with cron
+                // auto-approve flipping the order to RETURN_APPROVED in
+                // between.
+                //
+                // Allowed pre-states match rules.evaluateCancel's accept
+                // set: {PENDING, CONFIRMED, PREPARING}. READY is blocked
+                // by the rules engine outside this tx; we just enforce
+                // the post-conditions atomically here.
+                const flipped = await tx.order.updateMany({
+                    where: { id, status: { in: ['PENDING', 'CONFIRMED', 'PREPARING'] } },
+                    data: {
+                        status: 'CANCELLED',
+                        cancelledReason: reason ? String(reason).slice(0, 500) : decision.reason,
+                        metadata: {
+                            ...(typeof order.metadata === 'object' && order.metadata !== null ? order.metadata : {}),
+                            cancellationFeeInr: decision.feeInr,
+                            refundInr: decision.refundInr,
+                            autoRefundEligible: decision.autoRefundEligible,
+                            cancelledAt: cancelledAt.toISOString(),
+                        } as any,
+                    },
+                });
+                if (flipped.count === 0) {
+                    throw new Error('CONCURRENT_DECISION');
+                }
+
+                // Stock restoration — every item back to its storeProduct.
+                // Inner .catch removed (round-5 hardening): swallowing per-item
+                // errors leaves the underlying Postgres tx in an aborted state,
+                // which then breaks the subsequent couponRedemption + order
+                // operations with a confusing 'transaction aborted' message
+                // instead of the original cause. Let it bubble so the outer
+                // catch rolls back cleanly.
+                for (const item of (order as any).items ?? []) {
+                    if (item.storeProductId) {
+                        await tx.storeProduct.update({
+                            where: { id: item.storeProductId },
+                            data: { stock: { increment: item.quantity ?? 0 } },
+                        });
+                    }
+                }
+
+                // Coupon redemption reversal (Bug N4 fix, refined round-5 with userId scope).
+                //
+                // userId: order.userId is defense-in-depth — guards against a malformed
+                // redemption row from a different user pointing at this orderId from being
+                // deleted on cancel. The redeem endpoint should already enforce userId
+                // matches, but if it ever doesn't this prevents collateral damage.
+                //
+                // findMany + group-by-coupon handles the legitimate multi-coupon case
+                // (one order can have multiple CouponRedemption rows for distinct
+                // coupons because /coupons/redeem only deduplicates on the
+                // (couponId, orderId) pair). `usedCount: { gte: count }` guard prevents
+                // going below zero per coupon.
+                const redemptions = await tx.couponRedemption.findMany({
+                    where: { orderId: id, userId: order.userId },
+                });
+                if (redemptions.length > 0) {
+                    await tx.couponRedemption.deleteMany({
+                        where: { orderId: id, userId: order.userId },
+                    });
+                    const countByCoupon = new Map<string, number>();
+                    for (const r of redemptions) {
+                        countByCoupon.set(r.couponId, (countByCoupon.get(r.couponId) || 0) + 1);
+                    }
+                    for (const [couponId, count] of countByCoupon) {
+                        await tx.coupon.updateMany({
+                            where: { id: couponId, usedCount: { gte: count } },
+                            data: { usedCount: { decrement: count } },
+                        });
+                    }
+                }
+
+                // Re-fetch the row we just CAS-updated so the rest of the
+                // endpoint has the canonical post-flip state.
+                return tx.order.findUnique({ where: { id } });
+            });
+        } catch (err: any) {
+            if (err?.message === 'CONCURRENT_DECISION') {
+                return res.status(409).json({
+                    error: 'This order was already cancelled or moved out of a cancellable state by another process. Refresh and try again.',
+                });
+            }
+            throw err;
+        }
+        if (!updated) {
+            return res.status(500).json({ error: 'Cancel committed but order vanished — please refresh.' });
+        }
+
+        // order_requests cleanup (Bug N7 fix — third-pass audit).
+        //
+        // When the order was created from an order_request, `POST /orders`
+        // sets that request's status to 'COMPLETED'. After a cancel, that
+        // request would otherwise stay 'COMPLETED' forever — misleading
+        // for merchant request-queue dashboards. Flip it to 'CANCELLED'.
+        //
+        // Best-effort and OUTSIDE the transaction on purpose: the
+        // order_requests table is a String-typed status with no defined
+        // CHECK constraint at the Prisma level, but production may have
+        // one. If 'CANCELLED' is rejected, we log + move on — we will
+        // not roll back the successful cancel just because the request
+        // queue couldn't be updated.
+        const orderRequestId = (order.metadata as any)?.orderRequestId;
+        if (orderRequestId && typeof orderRequestId === 'string' && /^[0-9a-f-]{36}$/i.test(orderRequestId)) {
+            // Awaited (round-4 audit fix): a SIGTERM during EB deploy between
+            // the response send and the SQL round-trip would silently lose
+            // the cleanup. Latency cost is one indexed updateMany (~5ms).
+            // The .catch still keeps this best-effort — if the DB rejects
+            // 'CANCELLED' for any reason the cancel itself does not roll back.
+            // The UUID regex above guards against malformed legacy metadata.
+            await prisma.order_requests.updateMany({
+                where: { id: orderRequestId, status: 'COMPLETED' },
+                data: { status: 'CANCELLED', updated_at: cancelledAt },
+            }).catch((e: any) => {
+                console.error('[cancel] order_request cleanup failed:', e);
+                Sentry.captureException(e, {
+                    tags: { area: 'ws2.cancel.orderRequestCleanup' },
+                    extra: { orderId: id, orderRequestId },
+                });
+            });
+        }
+
+        // Razorpay refund AFTER status is committed. Safe to retry the
+        // overall endpoint now — the rules engine blocks CANCELLED orders,
+        // so this code path runs at most once per order.
         let refundResult: { razorpayRefundId: string; simulated: boolean } | null = null;
         if (decision.refundInr > 0) {
             refundResult = await processRazorpayRefund(order.metadata, decision.refundInr);
+            // Persist the refund id back to metadata. If this write fails
+            // after Razorpay succeeded, ops reconciles via the Razorpay
+            // dashboard — but no money is at risk.
+            await prisma.order.update({
+                where: { id },
+                data: {
+                    metadata: {
+                        ...(typeof updated.metadata === 'object' && updated.metadata !== null ? updated.metadata : {}),
+                        razorpayRefundId: refundResult.razorpayRefundId,
+                        refundSimulated: refundResult.simulated,
+                    } as any,
+                },
+            }).catch((e: any) => console.error('[cancel] metadata refund write failed:', e));
         }
-
-        const updated = await prisma.order.update({
-            where: { id },
-            data: {
-                status: 'CANCELLED',
-                cancelledReason: reason ? String(reason).slice(0, 500) : decision.reason,
-                metadata: {
-                    ...(typeof order.metadata === 'object' && order.metadata !== null ? order.metadata : {}),
-                    cancellationFeeInr: decision.feeInr,
-                    refundInr: decision.refundInr,
-                    autoRefundEligible: decision.autoRefundEligible,
-                    razorpayRefundId: refundResult?.razorpayRefundId ?? null,
-                    refundSimulated: refundResult?.simulated ?? false,
-                    cancelledAt: new Date().toISOString(),
-                } as any,
-            },
-        });
 
         // Notifications — fire-and-forget per existing pattern.
         notificationService.sendMerchantNotification({
@@ -3326,6 +3610,32 @@ app.post('/orders/:id/cancel', async (req, res) => {
             link: '/(main)/orders',
             metadata: { orderNumber: order.orderNumber, feeInr: decision.feeInr, refundInr: decision.refundInr },
         }).catch(e => console.error('[cancel] merchant notif failed:', e));
+
+        // Consumer in-app notif (Bug N5 fix — third-pass audit). Previously
+        // the customer only got an SMS, which carriers may delay by minutes
+        // or filter as spam. Now they also get the immediate in-app receipt.
+        //
+        // Body branches (round-4 audit fix — explicit dining-forfeit case):
+        //  1. autoRefundEligible       → full refund inside the 5-min window
+        //  2. refundInr > 0            → late-cancel fee + partial refund
+        //  3. feeInr > 0 & refund = 0  → dining non-refund policy (full forfeit)
+        //  4. else (both = 0)          → free cancel (unpaid)
+        notificationService.sendConsumerNotification({
+            userId: order.userId,
+            title: 'Order cancelled',
+            body: decision.autoRefundEligible
+                ? `Order #${order.orderNumber} cancelled. Full refund of ₹${decision.refundInr} on the way.`
+                : decision.refundInr > 0
+                    ? `Order #${order.orderNumber} cancelled. Refund ₹${decision.refundInr} (fee ₹${decision.feeInr}).`
+                    : decision.feeInr > 0
+                        ? `Order #${order.orderNumber} cancelled. Per the dining cancellation policy, the booking total of ₹${decision.feeInr} is non-refundable.`
+                        : `Order #${order.orderNumber} cancelled.`,
+            type: 'ORDER_CANCELLED',
+            referenceId: order.id,
+            storeId: order.storeId,
+            link: '/orders',
+            metadata: { orderNumber: order.orderNumber, feeInr: decision.feeInr, refundInr: decision.refundInr },
+        }).catch(e => console.error('[cancel] consumer notif failed:', e));
 
         if (order.user?.phone) {
             smsService.sendOrderUpdate(order.user.phone, id, 'Order Cancelled').catch(e => console.error('[cancel] SMS failed:', e));
@@ -3346,6 +3656,7 @@ app.post('/orders/:id/cancel', async (req, res) => {
         });
     } catch (err: any) {
         console.error('[cancel] error:', err);
+        Sentry.captureException(err, { tags: { area: 'ws2.cancel' }, extra: { orderId: req.params.id, userId: user.id } });
         return res.status(500).json({ error: 'Failed to cancel order.', details: err?.message });
     }
 });
@@ -3377,8 +3688,11 @@ app.post('/orders/:id/reschedule', async (req, res) => {
             return res.status(403).json({ error: 'You do not have permission to reschedule this order.' });
         }
 
+        // Normalize 'dine-in' → 'dining' for the rules engine (Bug A fix).
+        const rawOrderType = (order as any).order_type;
+        const normalizedOrderType = rawOrderType === 'dine-in' ? 'dining' : (rawOrderType || 'pickup');
         const decision = orderLifecycleRules.evaluateReschedule({
-            orderType: ((order as any).order_type || 'pickup'),
+            orderType: normalizedOrderType,
             orderStatus: order.status,
             slotTimeAt: (order as any).slot_time_at || null,
             newSlotAt: newSlot,
@@ -3419,6 +3733,7 @@ app.post('/orders/:id/reschedule', async (req, res) => {
         });
     } catch (err: any) {
         console.error('[reschedule] error:', err);
+        Sentry.captureException(err, { tags: { area: 'ws2.reschedule' }, extra: { orderId: req.params.id, userId: user.id } });
         return res.status(500).json({ error: 'Failed to reschedule order.', details: err?.message });
     }
 });
@@ -3457,13 +3772,20 @@ app.post('/orders/:id/return', async (req, res) => {
             (it: any) => it?.storeProduct?.product?.returnable === false,
         );
 
+        // Clamp the requested refund to the order total. Without this a
+        // customer could submit refundInr=99999 on a ₹100 order and the
+        // merchant would see (and potentially approve) the inflated amount.
+        // Razorpay would silently reject anything over the captured amount,
+        // leaving the order in a half-resolved state. Fixed 2026-06-05 (Bug E).
+        const clampedRefund = Math.min(requestedRefund, Number(order.totalAmount));
+
         const decision = orderLifecycleRules.evaluateReturn({
             orderStatus: order.status,
             completedAt: order.updatedAt,
             requestedAt: new Date(),
             reason,
             productReturnable: !anyNonReturnable,
-            requestedRefundInr: requestedRefund,
+            requestedRefundInr: clampedRefund,
             photoCount: photoList.length,
         });
         if (!decision.allowed) {
@@ -3473,26 +3795,51 @@ app.post('/orders/:id/return', async (req, res) => {
         const createdAt = new Date();
         const slaDueAt = orderLifecycleRules.computeSlaDueAt(createdAt);
 
-        const result = await prisma.$transaction(async (tx) => {
-            const issue = await tx.orderIssue.create({
-                data: {
-                    orderId: order.id,
-                    type: 'return',
-                    reason,
-                    description: description ? String(description).slice(0, 1000) : null,
-                    photos: photoList,
-                    status: 'PENDING',
-                    refundAmountInr: decision.refundInr,
-                    slaDueAt,
-                    createdAt,
-                },
+        // ATOMIC COMPARE-AND-SET on order.status (round-5 hardening).
+        //
+        // Status flip MUST happen before issue.create. Without this, two
+        // parallel POST /orders/:id/return calls both pass the rules check
+        // (status === COMPLETED), both enter the transaction, and each
+        // creates its own OrderIssue row. Customer sees two "Return
+        // submitted" pushes; merchant queue has two PENDING issues; cron
+        // auto-approves both → double refund in 24h.
+        //
+        // CAS gate: only the writer that finds status='COMPLETED' wins.
+        // The second writer sees count===0 → CONCURRENT_DECISION → 409.
+        let result: { issue: any; updatedOrder: any };
+        try {
+            result = await prisma.$transaction(async (tx) => {
+                const flipped = await tx.order.updateMany({
+                    where: { id: order.id, status: 'COMPLETED' },
+                    data: { status: 'RETURN_REQUESTED', returnReason: reason, returnImages: photoList },
+                });
+                if (flipped.count === 0) {
+                    throw new Error('CONCURRENT_DECISION');
+                }
+                const issue = await tx.orderIssue.create({
+                    data: {
+                        orderId: order.id,
+                        type: 'return',
+                        reason,
+                        description: description ? String(description).slice(0, 1000) : null,
+                        photos: photoList,
+                        status: 'PENDING',
+                        refundAmountInr: decision.refundInr,
+                        slaDueAt,
+                        createdAt,
+                    },
+                });
+                const updatedOrder = await tx.order.findUnique({ where: { id: order.id } });
+                return { issue, updatedOrder };
             });
-            const updatedOrder = await tx.order.update({
-                where: { id: order.id },
-                data: { status: 'RETURN_REQUESTED', returnReason: reason, returnImages: photoList },
-            });
-            return { issue, updatedOrder };
-        });
+        } catch (err: any) {
+            if (err?.message === 'CONCURRENT_DECISION') {
+                return res.status(409).json({
+                    error: 'This order is no longer in a returnable state (another request may have just moved it). Refresh and try again.',
+                });
+            }
+            throw err;
+        }
 
         notificationService.sendMerchantNotification({
             storeId: order.storeId,
@@ -3503,6 +3850,23 @@ app.post('/orders/:id/return', async (req, res) => {
             link: '/(main)/orders',
             metadata: { orderNumber: order.orderNumber, issueId: result.issue.id, refundInr: decision.refundInr, refundWithoutReturn: decision.refundWithoutReturn },
         }).catch(e => console.error('[return] merchant notif failed:', e));
+
+        // Consumer in-app notif (Bug N5 fix — third-pass audit). Customer
+        // sees an immediate receipt that the return request landed and the
+        // merchant has 24h to respond.
+        notificationService.sendConsumerNotification({
+            userId: order.userId,
+            title: 'Return request submitted',
+            body: decision.refundWithoutReturn
+                ? `Return for order #${order.orderNumber} sent. No need to bring the item back — refund of ₹${decision.refundInr} pending merchant review (24h SLA).`
+                : `Return for order #${order.orderNumber} sent. Drop the item at the store; refund of ₹${decision.refundInr} processes after merchant approves (24h SLA).`,
+            type: 'RETURN_REQUESTED',
+            referenceId: order.id,
+            storeId: order.storeId,
+            link: '/orders',
+            metadata: { orderNumber: order.orderNumber, issueId: result.issue.id, refundInr: decision.refundInr, refundWithoutReturn: decision.refundWithoutReturn },
+        }).catch(e => console.error('[return] consumer notif failed:', e));
+
         io.emit('order_updated', result.updatedOrder);
 
         return res.status(201).json({
@@ -3513,6 +3877,7 @@ app.post('/orders/:id/return', async (req, res) => {
         });
     } catch (err: any) {
         console.error('[return] error:', err);
+        Sentry.captureException(err, { tags: { area: 'ws2.return' }, extra: { orderId: req.params.id, userId: user.id } });
         return res.status(500).json({ error: 'Failed to create return request.', details: err?.message });
     }
 });
@@ -3551,25 +3916,42 @@ app.post('/orders/:id/exchange', async (req, res) => {
         const createdAt = new Date();
         const slaDueAt = orderLifecycleRules.computeSlaDueAt(createdAt);
 
-        const result = await prisma.$transaction(async (tx) => {
-            const issue = await tx.orderIssue.create({
-                data: {
-                    orderId: order.id,
-                    type: 'exchange',
-                    reason,
-                    description: description ? String(description).slice(0, 1000) : null,
-                    photos: [],
-                    status: 'PENDING',
-                    slaDueAt,
-                    createdAt,
-                },
+        // ATOMIC COMPARE-AND-SET on order.status (round-5 hardening — mirror of A2).
+        // Without this, two parallel exchange submits both create OrderIssue
+        // rows; cron auto-approves both in 24h.
+        let result: { issue: any; updatedOrder: any };
+        try {
+            result = await prisma.$transaction(async (tx) => {
+                const flipped = await tx.order.updateMany({
+                    where: { id: order.id, status: 'COMPLETED' },
+                    data: { status: 'EXCHANGE_REQUESTED' },
+                });
+                if (flipped.count === 0) {
+                    throw new Error('CONCURRENT_DECISION');
+                }
+                const issue = await tx.orderIssue.create({
+                    data: {
+                        orderId: order.id,
+                        type: 'exchange',
+                        reason,
+                        description: description ? String(description).slice(0, 1000) : null,
+                        photos: [],
+                        status: 'PENDING',
+                        slaDueAt,
+                        createdAt,
+                    },
+                });
+                const updatedOrder = await tx.order.findUnique({ where: { id: order.id } });
+                return { issue, updatedOrder };
             });
-            const updatedOrder = await tx.order.update({
-                where: { id: order.id },
-                data: { status: 'EXCHANGE_REQUESTED' },
-            });
-            return { issue, updatedOrder };
-        });
+        } catch (err: any) {
+            if (err?.message === 'CONCURRENT_DECISION') {
+                return res.status(409).json({
+                    error: 'This order is no longer in an exchangeable state (another request may have just moved it). Refresh and try again.',
+                });
+            }
+            throw err;
+        }
 
         notificationService.sendMerchantNotification({
             storeId: order.storeId,
@@ -3580,11 +3962,30 @@ app.post('/orders/:id/exchange', async (req, res) => {
             link: '/(main)/orders',
             metadata: { orderNumber: order.orderNumber, issueId: result.issue.id },
         }).catch(e => console.error('[exchange] merchant notif failed:', e));
+
+        // Consumer in-app notif (Bug N5 fix — third-pass audit).
+        // Body wording fix from review-round-4: the 24h is the MERCHANT'S
+        // SLA to decide, not a customer-side deadline. Previous copy told
+        // the customer to "visit the store within 24 hours to complete the
+        // exchange", but they can't complete anything until the merchant
+        // approves and status flips to EXCHANGE_APPROVED.
+        notificationService.sendConsumerNotification({
+            userId: order.userId,
+            title: 'Exchange request submitted',
+            body: `Exchange for order #${order.orderNumber} sent. The merchant has 24 hours to respond — you'll get an update when they decide.`,
+            type: 'EXCHANGE_REQUESTED',
+            referenceId: order.id,
+            storeId: order.storeId,
+            link: '/orders',
+            metadata: { orderNumber: order.orderNumber, issueId: result.issue.id },
+        }).catch(e => console.error('[exchange] consumer notif failed:', e));
+
         io.emit('order_updated', result.updatedOrder);
 
         return res.status(201).json({ success: true, issue: result.issue, exchange: { reason: decision.reason }, order: result.updatedOrder });
     } catch (err: any) {
         console.error('[exchange] error:', err);
+        Sentry.captureException(err, { tags: { area: 'ws2.exchange' }, extra: { orderId: req.params.id, userId: user.id } });
         return res.status(500).json({ error: 'Failed to create exchange request.', details: err?.message });
     }
 });
@@ -3625,12 +4026,6 @@ app.patch('/orders/:id/issue/:issueId', async (req, res) => {
             return res.status(400).json({ error: `Issue is already ${issue.status}; cannot decide twice.` });
         }
 
-        // Process Razorpay refund FIRST on approved returns.
-        let refundResult: { razorpayRefundId: string; simulated: boolean } | null = null;
-        if (decision === 'APPROVED' && issue.type === 'return' && (issue.refundAmountInr ?? 0) > 0) {
-            refundResult = await processRazorpayRefund(order.metadata, issue.refundAmountInr!);
-        }
-
         const now = new Date();
         const newIssueStatus = decision === 'APPROVED' ? 'APPROVED' : 'REJECTED';
         const newOrderStatus =
@@ -3639,41 +4034,100 @@ app.patch('/orders/:id/issue/:issueId', async (req, res) => {
             decision === 'APPROVED' && issue.type === 'exchange' ? 'EXCHANGE_APPROVED' :
             decision === 'REJECTED' && issue.type === 'exchange' ? 'EXCHANGE_REJECTED' :
             order.status;
+        const needsRefund = decision === 'APPROVED' && issue.type === 'return' && (issue.refundAmountInr ?? 0) > 0;
 
-        const result = await prisma.$transaction(async (tx) => {
-            const updatedIssue = await tx.orderIssue.update({
-                where: { id: issueId },
-                data: {
-                    status: newIssueStatus,
-                    merchantDecisionReason: merchantDecisionReason ? String(merchantDecisionReason).slice(0, 500) : null,
-                    resolvedBy: user.id,
-                    resolvedAt: now,
-                    ...(refundResult && {
-                        refundRazorpayId: refundResult.razorpayRefundId,
-                        refundProcessedAt: now,
-                    }),
-                },
+        // FLIP STATUS FIRST inside a transaction (Bug 2 fix).
+        //
+        // Previously the Razorpay refund was called BEFORE this transaction.
+        // If the refund succeeded but the transaction then failed, the issue
+        // would still be PENDING — so the merchant could click Approve again
+        // and refund the same payment a second time. By committing the
+        // APPROVED/REJECTED state first, the `issue.status !== 'PENDING'`
+        // guard at the top of this endpoint blocks any retry.
+        //
+        // isPaid is also flipped here for refund-bearing approvals so that
+        // the customer's perceived state ("refund issued") matches the
+        // merchant's intent the moment they tap Approve. If Razorpay fails
+        // afterward, metadata.returnRefundSimulated stays absent / 'rfnd_err'
+        // and ops reconciles from the dashboard.
+        // ATOMIC COMPARE-AND-SET (Bug N2 fix — third-pass audit).
+        //
+        // Previously this used `tx.orderIssue.update` which is unconditional —
+        // it doesn't re-check the row's current status. That left a TOCTOU
+        // race window: between the `issue.status !== 'PENDING'` check above
+        // and this transaction, the cron SLA job (or a parallel merchant tab)
+        // could have flipped the issue to AUTO_APPROVED/APPROVED. Both
+        // processes would then commit their own status change (last-write-
+        // wins) AND each would call Razorpay → double refund.
+        //
+        // `updateMany` with `status: 'PENDING'` in the WHERE clause makes
+        // this an atomic compare-and-set: the row only updates if its
+        // current status is still PENDING. If another process won the race,
+        // `count === 0` and we throw a sentinel error that the outer
+        // try/catch maps to a 409 — the refund block below is skipped
+        // because we never get there.
+        let result: { issue: any; order: any };
+        try {
+            result = await prisma.$transaction(async (tx) => {
+                const updateRes = await tx.orderIssue.updateMany({
+                    where: { id: issueId, status: 'PENDING' },
+                    data: {
+                        status: newIssueStatus,
+                        merchantDecisionReason: merchantDecisionReason ? String(merchantDecisionReason).slice(0, 500) : null,
+                        resolvedBy: user.id,
+                        resolvedAt: now,
+                    },
+                });
+                if (updateRes.count === 0) {
+                    // Another process (cron auto-approve or a second merchant tab)
+                    // already moved this issue out of PENDING. Bail before doing
+                    // anything else — the refund must not fire a second time.
+                    throw new Error('CONCURRENT_DECISION');
+                }
+                const updatedIssue = await tx.orderIssue.findUnique({ where: { id: issueId } });
+                const updatedOrder = await tx.order.update({
+                    where: { id: order.id },
+                    data: {
+                        status: newOrderStatus,
+                        ...(needsRefund && { isPaid: false }),
+                    },
+                });
+                return { issue: updatedIssue!, order: updatedOrder };
             });
+        } catch (err: any) {
+            if (err?.message === 'CONCURRENT_DECISION') {
+                return res.status(409).json({
+                    error: 'This issue was already decided by another process (cron auto-approve or another session). Refresh and try again.',
+                });
+            }
+            throw err;
+        }
 
-            const updatedOrder = await tx.order.update({
-                where: { id: order.id },
-                data: {
-                    status: newOrderStatus,
-                    // On approved RETURN refund → also mark REFUNDED + isPaid=false
-                    ...(decision === 'APPROVED' && issue.type === 'return' && refundResult && {
-                        isPaid: false,
-                    }),
-                    metadata: {
-                        ...(typeof order.metadata === 'object' && order.metadata !== null ? order.metadata : {}),
-                        ...(refundResult && {
-                            returnRazorpayRefundId: refundResult.razorpayRefundId,
-                            returnRefundSimulated: refundResult.simulated,
-                        }),
-                    } as any,
-                },
-            });
-            return { issue: updatedIssue, order: updatedOrder };
-        });
+        // Razorpay refund AFTER status is committed. Safe to retry the
+        // endpoint now — `issue.status !== 'PENDING'` blocks duplicates.
+        let refundResult: { razorpayRefundId: string; simulated: boolean } | null = null;
+        if (needsRefund) {
+            refundResult = await processRazorpayRefund(order.metadata, issue.refundAmountInr!);
+            // Persist refund id back to issue + order metadata. If this
+            // post-refund write fails, ops reconciles from Razorpay; the
+            // status above is the canonical "approved" record.
+            await prisma.$transaction(async (tx) => {
+                await tx.orderIssue.update({
+                    where: { id: issueId },
+                    data: { refundRazorpayId: refundResult!.razorpayRefundId, refundProcessedAt: now },
+                });
+                await tx.order.update({
+                    where: { id: order.id },
+                    data: {
+                        metadata: {
+                            ...(typeof result.order.metadata === 'object' && result.order.metadata !== null ? result.order.metadata : {}),
+                            returnRazorpayRefundId: refundResult!.razorpayRefundId,
+                            returnRefundSimulated: refundResult!.simulated,
+                        } as any,
+                    },
+                });
+            }).catch((e: any) => console.error('[issue PATCH] metadata refund write failed:', e));
+        }
 
         // Customer notification
         notificationService.sendConsumerNotification({
@@ -3702,6 +4156,7 @@ app.patch('/orders/:id/issue/:issueId', async (req, res) => {
         });
     } catch (err: any) {
         console.error('[issue PATCH] error:', err);
+        Sentry.captureException(err, { tags: { area: 'ws2.merchantPatch' }, extra: { orderId: req.params.id, issueId: req.params.issueId, userId: user.id } });
         return res.status(500).json({ error: 'Failed to update issue.', details: err?.message });
     }
 });
@@ -4351,17 +4806,36 @@ app.post('/coupons/redeem', async (req, res) => {
         }
 
         // Record redemption + bump usedCount in one transaction.
-        const redemption = await prisma.$transaction(async (tx) => {
-            const r = await tx.couponRedemption.create({
-                data: { couponId: coupon.id, userId, orderId: orderId || null, issuedCode: issuedCode || null },
+        // Round-6 (XC2): the new partial unique index on
+        // coupon_redemptions(coupon_id, order_id) WHERE order_id IS NOT NULL
+        // makes the parallel-redeem race surface as Prisma P2002 on the
+        // second writer. Catch that and return the existing redemption
+        // (idempotent 200) — mirrors the line 4764-4765 fast path.
+        let redemption: { id: string };
+        try {
+            redemption = await prisma.$transaction(async (tx) => {
+                const r = await tx.couponRedemption.create({
+                    data: { couponId: coupon.id, userId, orderId: orderId || null, issuedCode: issuedCode || null },
+                });
+                await tx.coupon.update({ where: { id: coupon.id }, data: { usedCount: { increment: 1 } } });
+                return r;
             });
-            await tx.coupon.update({ where: { id: coupon.id }, data: { usedCount: { increment: 1 } } });
-            return r;
-        });
+        } catch (err: any) {
+            // P2002 = Prisma unique constraint violation. With the new index,
+            // a parallel redeem for the same (couponId, orderId) hits this.
+            if (err?.code === 'P2002' && orderId) {
+                const existing = await prisma.couponRedemption.findFirst({ where: { couponId: coupon.id, orderId } });
+                if (existing) {
+                    return res.status(200).json({ redemptionId: existing.id, alreadyRedeemed: true });
+                }
+            }
+            throw err;
+        }
 
         res.status(201).json({ redemptionId: redemption.id, couponId: coupon.id });
     } catch (error) {
         console.error('Redeem Coupon Error:', error);
+        Sentry.captureException(error, { tags: { area: 'coupons.redeem' } });
         res.status(500).json({ error: 'Failed to redeem coupon' });
     }
 });
