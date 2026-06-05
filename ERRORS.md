@@ -16,6 +16,7 @@
   1. Never run `eb setenv` "by itself" on this platform — always chain `eb setenv … ; eb deploy`. Pre-existing rule from prior ERRORS.md entries but the rollback nuance is new: a failed setenv erases the var, so you have to re-run setenv after the env recovers.
   2. If the chained command shows `InvalidParameterValueError`, the env was mid-cleanup. Wait for `eb status` to show Ready, then re-run BOTH setenv and deploy. Don't skip the setenv — the var probably got rolled back.
   3. `eb printenv` is the source of truth for "is this var actually set?" — confirm after a setenv+deploy chain before testing the dependent feature.
+- **Recurrence (2026-06-05 ~21:25 UTC, WS2 round-5/6 rollout):** same pattern fired with `CRON_DRY_RUN=true`. setenv reported "Successfully deployed new configuration" but the Node restart crashed with `Cannot find module 'dotenv'` (same shape as "node_modules went missing"). 93-min outage until the follow-up `eb deploy pas-api-prod-v2` reinstalled node_modules and brought up the new code. Health flipped Red → Severe (100% 5xx) → back to nominal post-deploy. **Confirmed:** the documented fix works exactly. **Never leave `eb setenv` standalone on this platform — always chain with `eb deploy`.**
 
 ## Editing `.numbers` files (numbers-parser)
 - **What didn't work:** `sheet = doc.add_sheet(...)` then `sheet.tables[0]` → `add_sheet` returns **None**.
