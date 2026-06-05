@@ -3196,6 +3196,72 @@ async function processRazorpayRefund(
  * POST /orders/:id/cancel — customer cancels an order.
  * Body: { reason?: string }
  */
+
+/**
+ * GET /orders/issues/inbox — merchant inbox of return/exchange requests.
+ * Lists OrderIssue rows for stores the auth'd user manages (Store.managerId
+ * OR store_staff). Query params: status, type, limit.
+ */
+app.get('/orders/issues/inbox', async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    try {
+        const statusParam = String(req.query.status || 'PENDING').toUpperCase();
+        const typeParam = String(req.query.type || 'ALL').toLowerCase();
+        const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '50'), 10) || 50));
+        const validStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'AUTO_APPROVED', 'ALL'];
+        if (!validStatuses.includes(statusParam)) {
+            return res.status(400).json({ error: `status must be one of ${validStatuses.join(', ')}` });
+        }
+        const validTypes = ['return', 'exchange', 'ALL'];
+        if (!validTypes.includes(typeParam)) {
+            return res.status(400).json({ error: `type must be one of ${validTypes.join(', ')}` });
+        }
+        const [managedStores, staffStoreRows] = await Promise.all([
+            prisma.store.findMany({ where: { managerId: user.id }, select: { id: true } }),
+            prisma.storeStaff.findMany({
+                where: { OR: [{ user_id: user.id }, { authUserId: user.id }] },
+                select: { storeId: true },
+            }),
+        ]);
+        const storeIdSet = new Set<string>([
+            ...managedStores.map(s => s.id),
+            ...staffStoreRows.map(s => s.storeId),
+        ]);
+        if (storeIdSet.size === 0) return res.json([]);
+
+        const where: any = { order: { storeId: { in: Array.from(storeIdSet) } } };
+        if (statusParam !== 'ALL') where.status = statusParam;
+        if (typeParam !== 'ALL') where.type = typeParam;
+
+        const issues = await prisma.orderIssue.findMany({
+            where,
+            orderBy: [{ status: 'asc' }, { slaDueAt: 'asc' }],
+            take: limit,
+            include: {
+                order: {
+                    select: {
+                        id: true, orderNumber: true, status: true, totalAmount: true,
+                        customer_name: true, customer_phone: true, store_name: true,
+                        order_type: true, createdAt: true, isPaid: true,
+                        user: { select: { name: true, phone: true, email: true } },
+                        items: {
+                            select: {
+                                id: true, quantity: true, price: true, product_name: true,
+                                storeProduct: { select: { product: { select: { name: true, returnable: true } } } },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        return res.json(issues);
+    } catch (err: any) {
+        console.error('[issues inbox] error:', err);
+        return res.status(500).json({ error: 'Failed to list issues.', details: err?.message });
+    }
+});
+
 app.post('/orders/:id/cancel', async (req, res) => {
     const user = await requireUser(req, res);
     if (!user) return;
