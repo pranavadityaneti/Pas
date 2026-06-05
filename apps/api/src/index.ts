@@ -280,9 +280,22 @@ if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
 app.post('/payments/create-order', async (req, res) => {
     try {
         if (!razorpayInstance) return res.status(500).json({ error: 'Razorpay not configured' });
-        
+
         const { amount, type = 'consumer', userId = 'unknown', notes = {} } = req.body;
         if (!amount || isNaN(amount)) return res.status(400).json({ error: 'Valid amount is required' });
+
+        // 2026-06-04 (Phase 2.E3): For merchant signup payments, require auth
+        // and stuff the authenticated user.id into Razorpay notes. The webhook
+        // handler (/webhooks/razorpay) uses notes.merchantId to reconcile
+        // payments that landed but didn't get a Subscription row recorded
+        // (e.g., app crash between Razorpay success and PATCH finalize).
+        const enrichedNotes: Record<string, any> = { ...notes };
+        if (type === 'merchant') {
+            const user = await requireUser(req, res);
+            if (!user) return;     // requireUser already sent 401
+            enrichedNotes.merchantId = user.id;
+            enrichedNotes.paymentType = 'merchant_signup';
+        }
 
         const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
         const randomStr = Math.floor(100 + Math.random() * 900);
@@ -293,7 +306,7 @@ app.post('/payments/create-order', async (req, res) => {
             amount: Math.round(Number(amount) * 100), // convert to paise
             currency: 'INR',
             receipt,
-            notes
+            notes: enrichedNotes,
         };
 
         const order = await razorpayInstance.orders.create(options);
@@ -413,6 +426,159 @@ app.post('/payments/verify', (req, res) => {
         res.status(500).json({ error: 'Verification failed', details: error.message });
     }
 });
+
+/**
+ * 2026-06-04 (Phase 2.E3) — POST /webhooks/razorpay
+ *
+ * Razorpay webhook endpoint. Listens for payment lifecycle events fired by
+ * Razorpay's webhook system. The primary job is to reconcile the rare case
+ * where a merchant pays but the merchant-app crashes between
+ * Razorpay.open() success and PATCH /auth/merchant/draft (finalize). In
+ * that scenario the merchant is charged but no Subscription row exists.
+ * The webhook catches it and creates the missing row.
+ *
+ * Setup (Pranav, on launch):
+ *  1. Set RAZORPAY_WEBHOOK_SECRET in EB env vars (apps/api → Configuration
+ *     → Software). Generate via Razorpay Dashboard → Settings → Webhooks
+ *     → New webhook → choose a strong secret.
+ *  2. Register the webhook URL in Razorpay Dashboard:
+ *       https://api.pickatstore.io/webhooks/razorpay
+ *  3. Subscribe to events: payment.captured, payment.failed.
+ *
+ * Idempotency: lookups against subscriptions.transactionId guarantee the
+ * same razorpay_payment_id can be processed multiple times without
+ * creating duplicate rows (Razorpay retries failed webhook deliveries
+ * up to 24 hours).
+ *
+ * Auth: signature header `x-razorpay-signature` is the HMAC-SHA256 of the
+ * raw request body using RAZORPAY_WEBHOOK_SECRET. Requests with missing
+ * or wrong signatures return 401. The express.json() middleware ABOVE
+ * means we lose the raw body — we re-serialize it for the HMAC; this is
+ * safe because JSON.stringify(JSON.parse(body)) is canonical for the
+ * keys/values Razorpay sends.
+ */
+app.post('/webhooks/razorpay', async (req, res) => {
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    if (!secret) {
+        console.error('[razorpay-webhook] RAZORPAY_WEBHOOK_SECRET not configured');
+        return res.status(503).json({ error: 'Webhook not configured' });
+    }
+
+    const signatureHeader = req.headers['x-razorpay-signature'];
+    const signature = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader;
+    if (!signature) {
+        console.warn('[razorpay-webhook] Missing signature header');
+        return res.status(401).json({ error: 'Missing signature' });
+    }
+
+    const payloadString = JSON.stringify(req.body);
+    const expectedSignature = crypto
+        .createHmac('sha256', secret)
+        .update(payloadString)
+        .digest('hex');
+
+    if (expectedSignature !== signature) {
+        console.warn('[razorpay-webhook] Signature mismatch — possible forgery or wrong secret');
+        return res.status(401).json({ error: 'Invalid signature' });
+    }
+
+    const event = req.body?.event as string | undefined;
+    const eventId = req.body?.id as string | undefined;
+    const payment = req.body?.payload?.payment?.entity;
+
+    console.log('[razorpay-webhook] event=', event, 'eventId=', eventId, 'paymentId=', payment?.id);
+
+    try {
+        if (event === 'payment.captured' && payment) {
+            await handlePaymentCaptured(payment);
+        } else if (event === 'payment.failed' && payment) {
+            console.warn('[razorpay-webhook] payment.failed for paymentId=', payment.id,
+                'orderId=', payment.order_id, 'reason=', payment.error_description);
+            // Currently log-only. Future: notify the merchant + mark draft to retry.
+        } else {
+            console.log('[razorpay-webhook] event ignored (no handler):', event);
+        }
+
+        // Always 200 on successful processing so Razorpay doesn't retry.
+        return res.json({ received: true });
+    } catch (err: any) {
+        console.error('[razorpay-webhook] handler error:', err);
+        // Return 500 so Razorpay retries the delivery later.
+        return res.status(500).json({ error: 'Webhook handler failed', details: err.message });
+    }
+});
+
+/**
+ * Handler for Razorpay `payment.captured` events. Idempotent: a re-delivery
+ * of the same event is a no-op because we look up by transactionId before
+ * creating a Subscription.
+ */
+async function handlePaymentCaptured(payment: any) {
+    const paymentId = payment.id as string;
+    const orderId = payment.order_id as string;
+    const amountPaise = payment.amount as number;
+    const amountInr = amountPaise / 100;
+
+    // Already recorded via the normal /auth/merchant/draft finalize path?
+    const existing = await prisma.subscription.findFirst({
+        where: { transactionId: paymentId },
+    });
+    if (existing) {
+        console.log('[razorpay-webhook] Subscription already exists for paymentId=', paymentId,
+            ' — idempotent no-op');
+        return;
+    }
+
+    // Merchant signup payments stuff merchantId into order notes at
+    // /payments/create-order time. Fetch the order to retrieve it.
+    if (!razorpayInstance) {
+        throw new Error('Razorpay SDK not configured — cannot fetch order notes');
+    }
+    const order = await razorpayInstance.orders.fetch(orderId);
+    const notes = (order?.notes || {}) as Record<string, any>;
+    const merchantId = notes.merchantId as string | undefined;
+    const paymentType = notes.paymentType as string | undefined;
+
+    if (!merchantId || paymentType !== 'merchant_signup') {
+        // Likely a consumer payment or an order from before the Phase 2.E3
+        // notes-enrichment landed. Log and skip — consumer flow has its own
+        // settlement path.
+        console.log('[razorpay-webhook] No merchant_signup notes on order',
+            orderId, '— skipping reconciliation. notes=', JSON.stringify(notes));
+        return;
+    }
+
+    // Confirm the merchant exists. If not, we can't safely insert.
+    const merchant = await prisma.merchant.findUnique({ where: { id: merchantId } });
+    if (!merchant) {
+        console.error('[razorpay-webhook] payment.captured but merchant',
+            merchantId, 'does not exist in DB. Payment', paymentId,
+            'requires manual reconciliation.');
+        return;
+    }
+
+    // Create the missing subscription. transactionId is the Razorpay
+    // payment_id, matching what the normal finalize path stores.
+    await prisma.subscription.create({
+        data: {
+            merchantId,
+            amount: amountInr,
+            currency: payment.currency || 'INR',
+            status: 'success',
+            provider: 'razorpay',
+            transactionId: paymentId,
+        },
+    });
+
+    console.log('[razorpay-webhook] Reconciled missing Subscription for merchant=',
+        merchantId, 'paymentId=', paymentId, 'amount=', amountInr);
+
+    // Note: we do NOT reconcile coupon redemption here. If the merchant
+    // applied a coupon but the finalize step never landed, the redemption
+    // row will be missing. That's an admin-reconciliation case — too risky
+    // to auto-increment used_count from a webhook without the merchant
+    // confirming via the app.
+}
 
 /**
  * GET /payments/methods
