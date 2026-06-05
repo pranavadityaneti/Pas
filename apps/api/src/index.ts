@@ -3137,6 +3137,510 @@ app.post('/orders/:id/verify-otp', async (req, res) => {
 
 // --- Auto-Reject logic ---
 
+// =====================================================================
+// WS2.C (2026-06-05) — Order lifecycle endpoints.
+// Cancel / Reschedule / Return / Exchange + merchant Issue PATCH.
+// All thin wrappers around the WS2.B rules engine + DB writes +
+// fire-and-forget notifications.
+// =====================================================================
+
+// Lazy require to keep the module import surface unchanged.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const orderLifecycleRules = require('./orderLifecycle/rules');
+
+/**
+ * Check the auth'd user has merchant-side access to an order's store.
+ * Returns true if user is the store's managerId, or has a store_staff row.
+ */
+async function userCanManageOrderStore(userId: string, storeId: string): Promise<boolean> {
+    const [store, staffRow] = await Promise.all([
+        prisma.store.findUnique({ where: { id: storeId }, select: { managerId: true } }),
+        prisma.storeStaff.findFirst({ where: { storeId, OR: [{ user_id: userId }, { authUserId: userId }] }, select: { id: true } }),
+    ]);
+    if (store?.managerId === userId) return true;
+    if (staffRow) return true;
+    return false;
+}
+
+/**
+ * Attempt a Razorpay refund using the payment_id stored in order.metadata.
+ * Returns { razorpayRefundId, simulated } — if Razorpay isn't configured or
+ * the order has no paymentId on record, falls back to a stub refund id
+ * matching the existing /orders/:id/refund behavior. Server-side state
+ * change happens regardless; the failure mode is "no money moved in
+ * Razorpay" which ops can reconcile manually from the dashboard.
+ */
+async function processRazorpayRefund(
+    orderMetadata: any,
+    amountInr: number,
+): Promise<{ razorpayRefundId: string; simulated: boolean }> {
+    const paymentId = orderMetadata?.paymentId || orderMetadata?.razorpay_payment_id;
+    if (!razorpayInstance || !paymentId) {
+        const stubId = `rfnd_sim_${Date.now()}`;
+        console.warn('[refund] Razorpay missing or no paymentId — simulating refund id:', stubId);
+        return { razorpayRefundId: stubId, simulated: true };
+    }
+    try {
+        const refund = await razorpayInstance.payments.refund(paymentId, {
+            amount: Math.round(amountInr) * 100, // paise
+        });
+        return { razorpayRefundId: refund.id as string, simulated: false };
+    } catch (err: any) {
+        console.error('[refund] Razorpay refund failed for paymentId', paymentId, err?.message || err);
+        const stubId = `rfnd_err_${Date.now()}`;
+        return { razorpayRefundId: stubId, simulated: true };
+    }
+}
+
+/**
+ * POST /orders/:id/cancel — customer cancels an order.
+ * Body: { reason?: string }
+ */
+app.post('/orders/:id/cancel', async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    try {
+        const { id } = req.params;
+        const { reason } = req.body || {};
+
+        const order = await prisma.order.findUnique({
+            where: { id },
+            include: { user: true, store: true },
+        });
+        if (!order) return res.status(404).json({ error: 'Order not found.' });
+        if (order.userId !== user.id) {
+            return res.status(403).json({ error: 'You do not have permission to cancel this order.' });
+        }
+
+        const decision = orderLifecycleRules.evaluateCancel({
+            orderType: ((order as any).order_type || 'pickup'),
+            orderStatus: order.status,
+            orderTotalInr: order.totalAmount,
+            isPaid: order.isPaid,
+            createdAt: order.createdAt,
+            slotTimeAt: (order as any).slot_time_at || null,
+            requestedAt: new Date(),
+        });
+        if (!decision.allowed) {
+            return res.status(400).json({ error: decision.reason });
+        }
+
+        // If refund needed, attempt Razorpay refund FIRST so we don't update
+        // the order to CANCELLED until we know whether money moved (or
+        // simulated, in which case ops reconciles).
+        let refundResult: { razorpayRefundId: string; simulated: boolean } | null = null;
+        if (decision.refundInr > 0) {
+            refundResult = await processRazorpayRefund(order.metadata, decision.refundInr);
+        }
+
+        const updated = await prisma.order.update({
+            where: { id },
+            data: {
+                status: 'CANCELLED',
+                cancelledReason: reason ? String(reason).slice(0, 500) : decision.reason,
+                metadata: {
+                    ...(typeof order.metadata === 'object' && order.metadata !== null ? order.metadata : {}),
+                    cancellationFeeInr: decision.feeInr,
+                    refundInr: decision.refundInr,
+                    autoRefundEligible: decision.autoRefundEligible,
+                    razorpayRefundId: refundResult?.razorpayRefundId ?? null,
+                    refundSimulated: refundResult?.simulated ?? false,
+                    cancelledAt: new Date().toISOString(),
+                } as any,
+            },
+        });
+
+        // Notifications — fire-and-forget per existing pattern.
+        notificationService.sendMerchantNotification({
+            storeId: order.storeId,
+            title: 'Order cancelled by customer',
+            body: `Order #${order.orderNumber} cancelled. Fee ₹${decision.feeInr}, refund ₹${decision.refundInr}.`,
+            type: 'ORDER_CANCELLED',
+            referenceId: order.id,
+            link: '/(main)/orders',
+            metadata: { orderNumber: order.orderNumber, feeInr: decision.feeInr, refundInr: decision.refundInr },
+        }).catch(e => console.error('[cancel] merchant notif failed:', e));
+
+        if (order.user?.phone) {
+            smsService.sendOrderUpdate(order.user.phone, id, 'Order Cancelled').catch(e => console.error('[cancel] SMS failed:', e));
+        }
+        io.emit('order_updated', updated);
+
+        return res.json({
+            success: true,
+            cancellation: {
+                feeInr: decision.feeInr,
+                refundInr: decision.refundInr,
+                autoRefundEligible: decision.autoRefundEligible,
+                reason: decision.reason,
+                razorpayRefundId: refundResult?.razorpayRefundId ?? null,
+                refundSimulated: refundResult?.simulated ?? null,
+            },
+            order: updated,
+        });
+    } catch (err: any) {
+        console.error('[cancel] error:', err);
+        return res.status(500).json({ error: 'Failed to cancel order.', details: err?.message });
+    }
+});
+
+/**
+ * POST /orders/:id/reschedule — customer moves the slot for a pickup/dining
+ * order. Body: { newSlotAt: ISO string }
+ */
+app.post('/orders/:id/reschedule', async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    try {
+        const { id } = req.params;
+        const { newSlotAt } = req.body || {};
+        if (!newSlotAt) {
+            return res.status(400).json({ error: 'newSlotAt is required (ISO 8601 timestamp).' });
+        }
+        const newSlot = new Date(newSlotAt);
+        if (Number.isNaN(newSlot.getTime())) {
+            return res.status(400).json({ error: 'newSlotAt must be a valid ISO 8601 timestamp.' });
+        }
+
+        const order = await prisma.order.findUnique({
+            where: { id },
+            include: { user: true },
+        });
+        if (!order) return res.status(404).json({ error: 'Order not found.' });
+        if (order.userId !== user.id) {
+            return res.status(403).json({ error: 'You do not have permission to reschedule this order.' });
+        }
+
+        const decision = orderLifecycleRules.evaluateReschedule({
+            orderType: ((order as any).order_type || 'pickup'),
+            orderStatus: order.status,
+            slotTimeAt: (order as any).slot_time_at || null,
+            newSlotAt: newSlot,
+            requestedAt: new Date(),
+            peakSurchargeInr: 0, // v0 — merchant peak-hour config TBD
+        });
+        if (!decision.allowed) {
+            return res.status(400).json({ error: decision.reason });
+        }
+
+        const updated = await prisma.order.update({
+            where: { id },
+            data: {
+                slot_time_at: newSlot,
+                metadata: {
+                    ...(typeof order.metadata === 'object' && order.metadata !== null ? order.metadata : {}),
+                    lastRescheduledAt: new Date().toISOString(),
+                    peakSurchargeInr: decision.surchargeInr,
+                } as any,
+            },
+        });
+
+        notificationService.sendMerchantNotification({
+            storeId: order.storeId,
+            title: 'Order rescheduled',
+            body: `Order #${order.orderNumber} new slot: ${newSlot.toLocaleString('en-IN')}.`,
+            type: 'ORDER_RESCHEDULED',
+            referenceId: order.id,
+            link: '/(main)/orders',
+            metadata: { orderNumber: order.orderNumber, newSlotAt: newSlot.toISOString() },
+        }).catch(e => console.error('[reschedule] merchant notif failed:', e));
+        io.emit('order_updated', updated);
+
+        return res.json({
+            success: true,
+            reschedule: { surchargeInr: decision.surchargeInr, reason: decision.reason },
+            order: updated,
+        });
+    } catch (err: any) {
+        console.error('[reschedule] error:', err);
+        return res.status(500).json({ error: 'Failed to reschedule order.', details: err?.message });
+    }
+});
+
+/**
+ * POST /orders/:id/return — customer files a return issue.
+ * Body: { reason: ReturnReason, description?: string, photos?: string[], refundInr: number }
+ */
+app.post('/orders/:id/return', async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    try {
+        const { id } = req.params;
+        const { reason, description, photos, refundInr } = req.body || {};
+
+        if (!reason || !orderLifecycleRules.isReturnReason(String(reason))) {
+            return res.status(400).json({ error: 'reason is required and must be a valid return reason code.' });
+        }
+        const requestedRefund = Number(refundInr);
+        if (!Number.isFinite(requestedRefund) || requestedRefund <= 0) {
+            return res.status(400).json({ error: 'refundInr must be a positive number.' });
+        }
+        const photoList = Array.isArray(photos) ? photos.filter(p => typeof p === 'string') : [];
+
+        const order = await prisma.order.findUnique({
+            where: { id },
+            include: { user: true, items: { include: { storeProduct: { include: { product: true } } } } },
+        });
+        if (!order) return res.status(404).json({ error: 'Order not found.' });
+        if (order.userId !== user.id) {
+            return res.status(403).json({ error: 'You do not have permission to return this order.' });
+        }
+
+        // Product returnable check — pessimistic across all items.
+        const anyNonReturnable = (order as any).items?.some(
+            (it: any) => it?.storeProduct?.product?.returnable === false,
+        );
+
+        const decision = orderLifecycleRules.evaluateReturn({
+            orderStatus: order.status,
+            completedAt: order.updatedAt,
+            requestedAt: new Date(),
+            reason,
+            productReturnable: !anyNonReturnable,
+            requestedRefundInr: requestedRefund,
+            photoCount: photoList.length,
+        });
+        if (!decision.allowed) {
+            return res.status(400).json({ error: decision.reason });
+        }
+
+        const createdAt = new Date();
+        const slaDueAt = orderLifecycleRules.computeSlaDueAt(createdAt);
+
+        const result = await prisma.$transaction(async (tx) => {
+            const issue = await tx.orderIssue.create({
+                data: {
+                    orderId: order.id,
+                    type: 'return',
+                    reason,
+                    description: description ? String(description).slice(0, 1000) : null,
+                    photos: photoList,
+                    status: 'PENDING',
+                    refundAmountInr: decision.refundInr,
+                    slaDueAt,
+                    createdAt,
+                },
+            });
+            const updatedOrder = await tx.order.update({
+                where: { id: order.id },
+                data: { status: 'RETURN_REQUESTED', returnReason: reason, returnImages: photoList },
+            });
+            return { issue, updatedOrder };
+        });
+
+        notificationService.sendMerchantNotification({
+            storeId: order.storeId,
+            title: 'Return requested',
+            body: `Order #${order.orderNumber} return: ${reason} (₹${decision.refundInr}). SLA 24h.`,
+            type: 'RETURN_REQUESTED',
+            referenceId: order.id,
+            link: '/(main)/orders',
+            metadata: { orderNumber: order.orderNumber, issueId: result.issue.id, refundInr: decision.refundInr, refundWithoutReturn: decision.refundWithoutReturn },
+        }).catch(e => console.error('[return] merchant notif failed:', e));
+        io.emit('order_updated', result.updatedOrder);
+
+        return res.status(201).json({
+            success: true,
+            issue: result.issue,
+            return: { refundWithoutReturn: decision.refundWithoutReturn, refundInr: decision.refundInr, reason: decision.reason },
+            order: result.updatedOrder,
+        });
+    } catch (err: any) {
+        console.error('[return] error:', err);
+        return res.status(500).json({ error: 'Failed to create return request.', details: err?.message });
+    }
+});
+
+/**
+ * POST /orders/:id/exchange — customer files an exchange issue.
+ * Body: { reason: ExchangeReason, description?: string }
+ */
+app.post('/orders/:id/exchange', async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    try {
+        const { id } = req.params;
+        const { reason, description } = req.body || {};
+
+        if (!reason || !orderLifecycleRules.isExchangeReason(String(reason))) {
+            return res.status(400).json({ error: 'reason is required and must be a valid exchange reason code.' });
+        }
+
+        const order = await prisma.order.findUnique({ where: { id }, include: { user: true } });
+        if (!order) return res.status(404).json({ error: 'Order not found.' });
+        if (order.userId !== user.id) {
+            return res.status(403).json({ error: 'You do not have permission to exchange this order.' });
+        }
+
+        const decision = orderLifecycleRules.evaluateExchange({
+            orderStatus: order.status,
+            completedAt: order.updatedAt,
+            requestedAt: new Date(),
+            reason,
+        });
+        if (!decision.allowed) {
+            return res.status(400).json({ error: decision.reason });
+        }
+
+        const createdAt = new Date();
+        const slaDueAt = orderLifecycleRules.computeSlaDueAt(createdAt);
+
+        const result = await prisma.$transaction(async (tx) => {
+            const issue = await tx.orderIssue.create({
+                data: {
+                    orderId: order.id,
+                    type: 'exchange',
+                    reason,
+                    description: description ? String(description).slice(0, 1000) : null,
+                    photos: [],
+                    status: 'PENDING',
+                    slaDueAt,
+                    createdAt,
+                },
+            });
+            const updatedOrder = await tx.order.update({
+                where: { id: order.id },
+                data: { status: 'EXCHANGE_REQUESTED' },
+            });
+            return { issue, updatedOrder };
+        });
+
+        notificationService.sendMerchantNotification({
+            storeId: order.storeId,
+            title: 'Exchange requested',
+            body: `Order #${order.orderNumber} exchange: ${reason}. SLA 24h.`,
+            type: 'EXCHANGE_REQUESTED',
+            referenceId: order.id,
+            link: '/(main)/orders',
+            metadata: { orderNumber: order.orderNumber, issueId: result.issue.id },
+        }).catch(e => console.error('[exchange] merchant notif failed:', e));
+        io.emit('order_updated', result.updatedOrder);
+
+        return res.status(201).json({ success: true, issue: result.issue, exchange: { reason: decision.reason }, order: result.updatedOrder });
+    } catch (err: any) {
+        console.error('[exchange] error:', err);
+        return res.status(500).json({ error: 'Failed to create exchange request.', details: err?.message });
+    }
+});
+
+/**
+ * PATCH /orders/:id/issue/:issueId — merchant approves/rejects an issue.
+ * Body: { decision: 'APPROVED' | 'REJECTED', merchantDecisionReason?: string }
+ *
+ * On APPROVED for a return: triggers Razorpay refund + flips order to
+ * RETURN_APPROVED + REFUNDED. On APPROVED for exchange: flips to
+ * EXCHANGE_APPROVED. On REJECTED: flips to RETURN_REJECTED or
+ * EXCHANGE_REJECTED.
+ */
+app.patch('/orders/:id/issue/:issueId', async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    try {
+        const { id, issueId } = req.params;
+        const { decision, merchantDecisionReason } = req.body || {};
+
+        if (decision !== 'APPROVED' && decision !== 'REJECTED') {
+            return res.status(400).json({ error: "decision must be 'APPROVED' or 'REJECTED'." });
+        }
+
+        const order = await prisma.order.findUnique({ where: { id }, include: { user: true, store: true } });
+        if (!order) return res.status(404).json({ error: 'Order not found.' });
+
+        const canManage = await userCanManageOrderStore(user.id, order.storeId);
+        if (!canManage) {
+            return res.status(403).json({ error: 'You do not have merchant access to this order.' });
+        }
+
+        const issue = await prisma.orderIssue.findUnique({ where: { id: issueId } });
+        if (!issue || issue.orderId !== order.id) {
+            return res.status(404).json({ error: 'Issue not found for this order.' });
+        }
+        if (issue.status !== 'PENDING') {
+            return res.status(400).json({ error: `Issue is already ${issue.status}; cannot decide twice.` });
+        }
+
+        // Process Razorpay refund FIRST on approved returns.
+        let refundResult: { razorpayRefundId: string; simulated: boolean } | null = null;
+        if (decision === 'APPROVED' && issue.type === 'return' && (issue.refundAmountInr ?? 0) > 0) {
+            refundResult = await processRazorpayRefund(order.metadata, issue.refundAmountInr!);
+        }
+
+        const now = new Date();
+        const newIssueStatus = decision === 'APPROVED' ? 'APPROVED' : 'REJECTED';
+        const newOrderStatus =
+            decision === 'APPROVED' && issue.type === 'return'   ? 'RETURN_APPROVED'   :
+            decision === 'REJECTED' && issue.type === 'return'   ? 'RETURN_REJECTED'   :
+            decision === 'APPROVED' && issue.type === 'exchange' ? 'EXCHANGE_APPROVED' :
+            decision === 'REJECTED' && issue.type === 'exchange' ? 'EXCHANGE_REJECTED' :
+            order.status;
+
+        const result = await prisma.$transaction(async (tx) => {
+            const updatedIssue = await tx.orderIssue.update({
+                where: { id: issueId },
+                data: {
+                    status: newIssueStatus,
+                    merchantDecisionReason: merchantDecisionReason ? String(merchantDecisionReason).slice(0, 500) : null,
+                    resolvedBy: user.id,
+                    resolvedAt: now,
+                    ...(refundResult && {
+                        refundRazorpayId: refundResult.razorpayRefundId,
+                        refundProcessedAt: now,
+                    }),
+                },
+            });
+
+            const updatedOrder = await tx.order.update({
+                where: { id: order.id },
+                data: {
+                    status: newOrderStatus,
+                    // On approved RETURN refund → also mark REFUNDED + isPaid=false
+                    ...(decision === 'APPROVED' && issue.type === 'return' && refundResult && {
+                        isPaid: false,
+                    }),
+                    metadata: {
+                        ...(typeof order.metadata === 'object' && order.metadata !== null ? order.metadata : {}),
+                        ...(refundResult && {
+                            returnRazorpayRefundId: refundResult.razorpayRefundId,
+                            returnRefundSimulated: refundResult.simulated,
+                        }),
+                    } as any,
+                },
+            });
+            return { issue: updatedIssue, order: updatedOrder };
+        });
+
+        // Customer notification
+        notificationService.sendConsumerNotification({
+            userId: order.userId,
+            title: `${issue.type === 'return' ? 'Return' : 'Exchange'} ${decision.toLowerCase()}`,
+            body: `Order #${order.orderNumber}: ${decision === 'APPROVED' ? 'approved' : 'declined'}${merchantDecisionReason ? ` — ${merchantDecisionReason}` : ''}.`,
+            type: issue.type === 'return' ? 'RETURN_DECISION' : 'EXCHANGE_DECISION',
+            referenceId: order.id,
+            storeId: order.storeId,
+            link: `/orders/${order.id}`,
+            metadata: {
+                orderNumber: order.orderNumber,
+                issueId: issue.id,
+                decision: newIssueStatus,
+                refundInr: issue.refundAmountInr ?? null,
+                razorpayRefundId: refundResult?.razorpayRefundId ?? null,
+            },
+        }).catch(e => console.error('[issue PATCH] customer notif failed:', e));
+        io.emit('order_updated', result.order);
+
+        return res.json({
+            success: true,
+            issue: result.issue,
+            order: result.order,
+            refund: refundResult ? { razorpayRefundId: refundResult.razorpayRefundId, simulated: refundResult.simulated } : null,
+        });
+    } catch (err: any) {
+        console.error('[issue PATCH] error:', err);
+        return res.status(500).json({ error: 'Failed to update issue.', details: err?.message });
+    }
+});
+
+// =====================================================================
 // --- Push Token Routes ---
 
 // Register / Upsert push token (called on app launch / login)
