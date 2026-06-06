@@ -106,8 +106,7 @@
         {
           "sounds": []
         }
-      ],
-      "@sentry/react-native"
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
