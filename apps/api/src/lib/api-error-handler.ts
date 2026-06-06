@@ -175,32 +175,39 @@ const ALREADY_REPORTED = Symbol('sentryAlreadyReported');
 
 export function fivexxInterceptorMiddleware(req: Request, res: Response, next: NextFunction): void {
     // Helper to capture; called from both .json and .send wrappers.
+    //
+    // IMPORTANT: We use `captureException` with a synthetic Error rather than
+    // `captureMessage`. Sentry categorizes `captureMessage` events as
+    // 'default' category which falls OUTSIDE the "Errors & Outages" view —
+    // they'd appear in "All Views" but not in the most-visited error inbox.
+    // captureException keeps them in the 'error' category where they belong.
     const capture = (body: any): void => {
         if (res.statusCode < 500 || (res as any)[ALREADY_REPORTED]) return;
         try {
             const reqId = (req as any).id ?? '?';
-            Sentry.captureMessage(
-                `5xx fallback: ${req.method} ${req.path} → ${res.statusCode}`,
-                {
-                    level: 'error',
-                    tags: {
-                        area: 'global.5xx-fallback',
-                        method: req.method,
-                        path: req.path,
-                        http_status: String(res.statusCode),
-                    },
-                    extra: {
-                        requestId: reqId,
-                        url: req.originalUrl,
-                        statusCode: res.statusCode,
-                        body: (() => {
-                            try {
-                                return typeof body === 'string' ? body.slice(0, 2000) : JSON.stringify(body).slice(0, 2000);
-                            } catch { return '<unserializable>'; }
-                        })(),
-                    },
-                },
+            const synth = new Error(
+                `Unhandled 5xx response: ${req.method} ${req.path} → ${res.statusCode}`
             );
+            // Mark as a synthetic error so grouping is by route + status, not stack.
+            synth.name = `Unhandled5xx_${req.method}_${res.statusCode}`;
+            Sentry.captureException(synth, {
+                tags: {
+                    area: 'global.5xx-fallback',
+                    method: req.method,
+                    path: req.path,
+                    http_status: String(res.statusCode),
+                },
+                extra: {
+                    requestId: reqId,
+                    url: req.originalUrl,
+                    statusCode: res.statusCode,
+                    body: (() => {
+                        try {
+                            return typeof body === 'string' ? body.slice(0, 2000) : JSON.stringify(body).slice(0, 2000);
+                        } catch { return '<unserializable>'; }
+                    })(),
+                },
+            });
         } catch {
             // Sentry SDK problem — don't break the response.
         }
