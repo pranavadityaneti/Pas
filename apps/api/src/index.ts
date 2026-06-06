@@ -349,7 +349,8 @@ app.post('/payments/create-order', async (req, res) => {
         const order = await razorpayInstance.orders.create(options);
         res.json({ order_id: order.id, receipt, amount: options.amount, currency: options.currency, details: order });
         } catch (error: any) {
-        return handleApiError(res, error, { area: 'payments.create-order', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Order creation failed' });
+        // Round-7 fix: surface Razorpay/DB cause (was generic since the auto-refactor).
+        return handleApiError(res, error, { area: 'payments.create-order', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: error?.message || 'Order creation failed' });
     }
 });
 
@@ -457,7 +458,8 @@ app.post('/payments/verify', (req, res) => {
             res.status(400).json({ success: false, error: 'Invalid signature' });
         }
         } catch (error: any) {
-        return handleApiError(res, error, { area: 'payments.verify', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Verification failed' });
+        // Round-7 fix: surface signature/HMAC failure cause so the merchant sees what went wrong.
+        return handleApiError(res, error, { area: 'payments.verify', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: error?.message || 'Verification failed' });
     }
 });
 
@@ -2742,7 +2744,8 @@ app.post('/order-requests', async (req, res) => {
 
         res.status(201).json(createdRequests);
         } catch (error: any) {
-        return handleApiError(res, error, { area: 'order-requests', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to create order requests' });
+        // Round-7 fix: customer placing an order needs to see the real reason (store closed, item out of stock, Prisma FK error, etc.).
+        return handleApiError(res, error, { area: 'order-requests', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: error?.message || 'Failed to create order requests' });
     }
 });
 
@@ -2822,7 +2825,8 @@ app.patch('/order-requests/:id/status', async (req, res) => {
 
         res.json(updated);
         } catch (error: any) {
-        return handleApiError(res, error, { area: 'order-requests.status', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to update order request' });
+        // Round-7 fix: merchant rejecting/accepting an order request needs to see the real cause if it fails.
+        return handleApiError(res, error, { area: 'order-requests.status', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined }, userMessage: error?.message || 'Failed to update order request' });
     }
 });
 
@@ -5622,7 +5626,8 @@ app.get('/auth/merchant/draft', async (req, res) => {
             } : null
         });
         } catch (e: any) {
-        return handleApiError(res, e, { area: 'auth.merchant.draft', extra: undefined, userMessage: 'Failed to fetch draft' });
+        // Round-7 fix: merchant signup recovery — show real cause (auth error, RLS denial, etc.) not generic.
+        return handleApiError(res, e, { area: 'auth.merchant.draft', extra: undefined, userMessage: e?.message || 'Failed to fetch draft' });
     }
 });
 
@@ -5689,7 +5694,8 @@ app.post('/auth/merchant/draft', async (req, res) => {
 
         res.json({ success: true, message: 'Draft created' });
         } catch (e: any) {
-        return handleApiError(res, e, { area: 'auth.merchant.draft', extra: undefined, userMessage: 'Failed to create draft' });
+        // Round-7 fix: merchant signup step 1 — show real cause (duplicate phone, RLS denial, etc.).
+        return handleApiError(res, e, { area: 'auth.merchant.draft', extra: undefined, userMessage: e?.message || 'Failed to create draft' });
     }
 });
 
@@ -6346,7 +6352,10 @@ app.post('/auth/merchant/signup', async (req, res) => {
         res.json({ success: true, message: 'Merchant successfully registered' });
 
         } catch (error: any) {
-        return handleApiError(res, error, { area: 'auth.merchant.signup', extra: undefined, userMessage: 'Internal Server Error during registration' });
+        // Round-7 fix: final-step signup failure must surface the specific reason
+        // (Wati error, Razorpay error, Prisma constraint, etc.) so the merchant
+        // knows whether to retry, fix the input, or contact support.
+        return handleApiError(res, error, { area: 'auth.merchant.signup', extra: undefined, userMessage: error?.message || 'Registration failed' });
     }
 });
 
