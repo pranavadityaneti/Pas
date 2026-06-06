@@ -30,6 +30,17 @@ import bookingsRouter from './routes/bookings';
 // WS2.B rules engine — typed namespace import (replaces lazy require so TS
 // catches wrong-shape inputs like the 'dine-in' vs 'dining' enum mismatch).
 import * as orderLifecycleRules from './orderLifecycle/rules';
+// Round-6 Sentry observability — centralized error handler + middleware.
+// Before this shipped, ~91% of catch blocks here logged to console and
+// returned 500 without notifying Sentry. The errors-outages view showed
+// 2 events in 30 days for what should have been a noisy production API.
+import {
+    handleApiError,
+    requestIdMiddleware,
+    sentryUserContextMiddleware,
+    fivexxInterceptorMiddleware,
+    markResponseAsReported,
+} from './lib/api-error-handler';
 
 // --- Configuration ---
 const app = express();
@@ -64,6 +75,19 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
 app.use(helmet());
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '50mb' }));
+
+// --- Sentry observability (round-6) ---
+// Order matters:
+//   1. requestId — assigns UUID, must run FIRST so other middleware + the
+//      error handler can correlate logs ↔ Sentry events via X-Request-Id.
+//   2. sentryUserContext — decodes JWT for Sentry user scope. Runs before
+//      routes so every captured event knows who hit it.
+//   3. fivexxInterceptor — defense-in-depth fallback that captures any 5xx
+//      response we missed via handleApiError. Runs LAST so it wraps res.json
+//      after other middleware has had a chance to modify it.
+app.use(requestIdMiddleware);
+app.use(sentryUserContextMiddleware);
+app.use(fivexxInterceptorMiddleware);
 
 // --- Staff RBAC Routes ---
 app.use('/api/staff', staffRouter);
@@ -314,9 +338,8 @@ app.post('/payments/create-order', async (req, res) => {
 
         const order = await razorpayInstance.orders.create(options);
         res.json({ order_id: order.id, receipt, amount: options.amount, currency: options.currency, details: order });
-    } catch (error: any) {
-        console.error('Failed to create Razorpay order:', error);
-        res.status(500).json({ error: 'Order creation failed', details: error.message });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'payments.create-order', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Order creation failed' });
     }
 });
 
@@ -400,9 +423,8 @@ app.post('/merchant-signup/validate-coupon', async (req, res) => {
             code: coupon.code,
             discountInr: coupon.discountInr,
         });
-    } catch (err: any) {
-        console.error('[validate-coupon] error:', err);
-        return res.status(500).json({ valid: false, error: 'Server error validating coupon.' });
+        } catch (err: any) {
+        return handleApiError(res, err, { area: 'merchant-signup.validate-coupon', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Server error validating coupon.' });
     }
 });
 
@@ -424,9 +446,8 @@ app.post('/payments/verify', (req, res) => {
         } else {
             res.status(400).json({ success: false, error: 'Invalid signature' });
         }
-    } catch (error: any) {
-        console.error('Signature verification failed:', error);
-        res.status(500).json({ error: 'Verification failed', details: error.message });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'payments.verify', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Verification failed' });
     }
 });
 
@@ -504,10 +525,8 @@ app.post('/webhooks/razorpay', async (req, res) => {
 
         // Always 200 on successful processing so Razorpay doesn't retry.
         return res.json({ received: true });
-    } catch (err: any) {
-        console.error('[razorpay-webhook] handler error:', err);
-        // Return 500 so Razorpay retries the delivery later.
-        return res.status(500).json({ error: 'Webhook handler failed', details: err.message });
+        } catch (err: any) {
+        return handleApiError(res, err, { area: 'webhooks.razorpay', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Webhook handler failed' });
     }
 });
 
@@ -848,9 +867,8 @@ app.get('/products/template', async (req, res) => {
 
         await workbook.xlsx.write(res);
         res.end();
-    } catch (error) {
-        console.error('Template generation failed:', error);
-        res.status(500).json({ error: 'Failed to generate template' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'products.template', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to generate template' });
     }
 });
 
@@ -878,9 +896,8 @@ app.get('/products/export', async (req, res) => {
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', 'attachment; filename=products_export.xlsx');
         res.send(buffer);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Failed to export products' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'products.export', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to export products' });
     }
 });
 
@@ -937,9 +954,8 @@ app.post('/products/export-selected', async (req, res) => {
 
         await workbook.xlsx.write(res);
         res.end();
-    } catch (error) {
-        console.error('Export selected failed:', error);
-        res.status(500).json({ error: 'Failed to export selected products' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'products.export-selected', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to export selected products' });
     }
 });
 
@@ -997,6 +1013,8 @@ app.post('/products/upload-image', upload.single('file'), async (req, res) => {
         console.error('Upload failed:', error);
         // Ensure cleanup on error
         if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        Sentry.captureException(error, { tags: { area: 'products.upload-image' }, extra: {} });
+        markResponseAsReported(res);
         res.status(500).json({ error: 'Failed to upload image' });
     }
 });
@@ -1247,9 +1265,8 @@ app.post('/catalog/sync/trigger', async (req, res) => {
             runId: runData.id,
             status: runData.status
         });
-    } catch (error: any) {
-        console.error('Sync Trigger Error:', error);
-        res.status(500).json({ error: 'Failed to trigger sync', details: error.message });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'catalog.sync.trigger', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to trigger sync' });
     }
 });
 
@@ -1267,9 +1284,8 @@ app.get('/catalog/sync/status/:runId', async (req, res) => {
         }
 
         res.json({ status: run.status, progress: run.status });
-    } catch (error: any) {
-        console.error('Sync Status Error:', error);
-        res.status(500).json({ error: 'Failed to fetch sync status', details: error.message });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'catalog.sync.status', extra: { runId: req.params.runId, userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to fetch sync status' });
     }
 });
 
@@ -1285,6 +1301,8 @@ app.post('/catalog/sync/webhook', async (req, res) => {
         res.status(200).send('OK');
     } catch (error) {
         console.error('Webhook Error:', error);
+        Sentry.captureException(error, { tags: { area: 'catalog.sync.webhook' }, extra: {} });
+        markResponseAsReported(res);
         res.status(500).send('Server Error');
     }
 });
@@ -1305,6 +1323,8 @@ app.get('/catalog/sync/queue', async (req, res) => {
         }));
         res.json(mapped);
     } catch (error) {
+        Sentry.captureException(error, { tags: { area: 'catalog.sync.queue' }, extra: {} });
+        markResponseAsReported(res);
         res.status(500).json({ error: 'Failed to fetch sync queue' });
     }
 });
@@ -1350,6 +1370,8 @@ app.get('/verticals', async (req, res) => {
         });
         res.json(verticals);
     } catch (error) {
+        Sentry.captureException(error, { tags: { area: 'verticals' }, extra: {} });
+        markResponseAsReported(res);
         res.status(500).json({ error: 'Failed to fetch verticals' });
     }
 });
@@ -1374,9 +1396,8 @@ app.delete('/verticals/:id', async (req, res) => {
             await (tx as any).vertical.delete({ where: { id } });
         });
         res.json({ success: true, message: 'Vertical deleted and products gracefully uncategorized' });
-    } catch (error) {
-        console.error('Vertical deletion error:', error);
-        res.status(500).json({ error: 'Failed to delete vertical' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'verticals', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to delete vertical' });
     }
 });
 
@@ -1400,9 +1421,8 @@ app.delete('/categories/:id', async (req, res) => {
             await (tx as any).tier2Category.delete({ where: { id } });
         });
         res.json({ success: true, message: 'Category deleted and products gracefully uncategorized' });
-    } catch (error) {
-        console.error('Category deletion error:', error);
-        res.status(500).json({ error: 'Failed to delete category' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'categories', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to delete category' });
     }
 });
 
@@ -1500,9 +1520,8 @@ app.post('/catalog/sync/approve', async (req, res) => {
         });
 
         res.json({ success: true, message: `Successfully approved ${items.length} items with O(1) performance` });
-    } catch (error) {
-        console.error('High-performance sync approval error:', error);
-        res.status(500).json({ error: 'Failed to approve items due to database pressure or constraint violation' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'catalog.sync.approve', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to approve items due to database pressure or constraint violation' });
     }
 });
 
@@ -1523,9 +1542,8 @@ app.post('/catalog/sync/reject', async (req, res) => {
             success: true, 
             message: `Successfully deleted ${result.count} items from queue.`
         });
-    } catch (error: any) {
-        console.error('Reject Sync Error:', error);
-        res.status(500).json({ error: 'Failed to reject sync items', details: error.message });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'catalog.sync.reject', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to reject sync items' });
     }
 });
 
@@ -1623,9 +1641,8 @@ app.post('/products/bulk', upload.single('file'), async (req, res) => {
             skippedCount: skipped.length,
             skipped // Return the details
         });
-    } catch (error) {
-        console.error('Bulk import failed:', error);
-        res.status(500).json({ error: 'Failed to import products' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'products.bulk', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to import products' });
     }
 });
 
@@ -1642,6 +1659,8 @@ app.delete('/products/:id', async (req, res) => {
         }
         res.json({ message: 'Product deleted successfully' });
     } catch (error) {
+        Sentry.captureException(error, { tags: { area: 'products' }, extra: { id: req.params.id } });
+        markResponseAsReported(res);
         res.status(500).json({ error: 'Failed to delete product' });
     }
 });
@@ -1673,9 +1692,8 @@ app.post('/products/bulk-delete', async (req, res) => {
             message: `Deleted ${result.count} products successfully`,
             deletedCount: result.count
         });
-    } catch (error) {
-        console.error('Bulk delete error:', error);
-        res.status(500).json({ error: 'Failed to delete products' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'products.bulk-delete', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to delete products' });
     }
 });
 
@@ -1729,9 +1747,8 @@ app.post('/products/bulk-update', async (req, res) => {
             message: `Updated ${result.count} products successfully`,
             updatedCount: result.count
         });
-    } catch (error) {
-        console.error('Bulk update error:', error);
-        res.status(500).json({ error: 'Failed to update products' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'products.bulk-update', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to update products' });
     }
 });
 
@@ -1850,9 +1867,8 @@ app.delete('/products/images/:imageId', async (req, res) => {
         }
 
         res.json({ message: 'Image removed' });
-    } catch (error) {
-        console.error('Delete Image Error:', error);
-        res.status(500).json({ error: 'Failed to delete image' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'products.images', extra: { imageId: req.params.imageId, userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to delete image' });
     }
 });
 
@@ -1873,6 +1889,8 @@ app.patch('/products/images/:imageId', async (req, res) => {
 
         res.json(image);
     } catch (error) {
+        Sentry.captureException(error, { tags: { area: 'products.images' }, extra: { imageId: req.params.imageId } });
+        markResponseAsReported(res);
         res.status(500).json({ error: 'Failed to update image' });
     }
 });
@@ -2054,9 +2072,8 @@ app.post('/products/bulk-import-json', express.json({ limit: '100mb' }), async (
             hasMoreErrors: errors.length > 50,
         });
 
-    } catch (error: any) {
-        console.error('JSON Bulk import failed:', error);
-        res.status(500).json({ error: 'Bulk import failed', details: error.message });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'products.bulk-import-json', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Bulk import failed' });
     }
 });
 
@@ -2123,9 +2140,8 @@ app.get('/consumer/stores', async (req, res) => {
             data: formatted,
             pagination: { total, page: Number(page), limit: take, totalPages: Math.ceil(total / take) }
         });
-    } catch (error: any) {
-        console.error('Consumer stores error:', error);
-        res.status(500).json({ error: 'Failed to fetch stores', details: error.message });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'consumer.stores', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to fetch stores' });
     }
 });
 
@@ -2212,9 +2228,8 @@ app.get('/consumer/stores/:id', async (req, res) => {
             sections,
             totalProducts: storeProducts.length,
         });
-    } catch (error: any) {
-        console.error('Consumer store detail error:', error);
-        res.status(500).json({ error: 'Failed to fetch store details', details: error.message });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'consumer.stores', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to fetch store details' });
     }
 });
 
@@ -2260,9 +2275,8 @@ app.get('/consumer/products/search', async (req, res) => {
         }));
 
         res.json({ data: results, total: results.length });
-    } catch (error: any) {
-        console.error('Product search error:', error);
-        res.status(500).json({ error: 'Search failed', details: error.message });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'consumer.products.search', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Search failed' });
     }
 });
 
@@ -2717,9 +2731,8 @@ app.post('/order-requests', async (req, res) => {
         }
 
         res.status(201).json(createdRequests);
-    } catch (error: any) {
-        console.error('Create Order Requests Error:', error);
-        res.status(500).json({ error: 'Failed to create order requests', details: error.message });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'order-requests', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to create order requests' });
     }
 });
 
@@ -2798,9 +2811,8 @@ app.patch('/order-requests/:id/status', async (req, res) => {
         }
 
         res.json(updated);
-    } catch (error: any) {
-        console.error('Update Order Request Status Error:', error);
-        res.status(500).json({ error: 'Failed to update order request', details: error.message });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'order-requests.status', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to update order request' });
     }
 });
 
@@ -3172,9 +3184,8 @@ app.post('/webhooks/payment', async (req, res) => {
             return res.json({ message: 'Payment captured' });
         }
         res.status(400).json({ error: 'Payment failed' });
-    } catch (error) {
-        console.error('Webhook processing failed', error);
-        res.status(500).json({ error: 'Webhook error' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'webhooks.payment', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Webhook error' });
     }
 });
 
@@ -3258,9 +3269,8 @@ app.post('/orders/:id/verify-otp', async (req, res) => {
         }
 
         res.json({ success: true, order: updatedOrder });
-    } catch (error) {
-        console.error('Verify OTP Error:', error);
-        res.status(500).json({ error: 'OTP verification failed' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'orders.verify-otp', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined }, userMessage: 'OTP verification failed' });
     }
 });
 
@@ -3340,7 +3350,13 @@ app.get('/orders/issues/inbox', async (req, res) => {
     if (!user) return;
     try {
         const statusParam = String(req.query.status || 'PENDING').toUpperCase();
-        const typeParam = String(req.query.type || 'ALL').toLowerCase();
+        // Round-6 inbox fix: previously `.toLowerCase()` here broke the default
+        // 'ALL' sentinel because the validTypes check below uses uppercase
+        // 'ALL'. The merchant app's "All" tab filter was returning 400 on
+        // every load since WS2.F shipped. Keep the original casing —
+        // type values are 'return' / 'exchange' (lowercase) and 'ALL' is
+        // the uppercase sentinel.
+        const typeParam = String(req.query.type || 'ALL').trim();
         const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '50'), 10) || 50));
         const validStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'AUTO_APPROVED', 'ALL'];
         if (!validStatuses.includes(statusParam)) {
@@ -4195,9 +4211,8 @@ app.post('/push-tokens/register', async (req, res) => {
 
         console.log(`[PushToken] Registered token for user ${userId}: ${expoPushToken.substring(0, 20)}...`);
         res.json({ success: true, tokenId: token.id });
-    } catch (error: any) {
-        console.error('[PushToken] Registration failed:', error);
-        res.status(500).json({ error: 'Failed to register push token', details: error.message });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'push-tokens.register', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to register push token' });
     }
 });
 
@@ -4217,9 +4232,8 @@ app.delete('/push-tokens/deregister', async (req, res) => {
 
         console.log(`[PushToken] Deregistered token for user ${userId}`);
         res.json({ success: true });
-    } catch (error: any) {
-        console.error('[PushToken] Deregistration failed:', error);
-        res.status(500).json({ error: 'Failed to deregister push token', details: error.message });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'push-tokens.deregister', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to deregister push token' });
     }
 });
 
@@ -4281,9 +4295,8 @@ app.get('/merchants/:id/inventory', async (req, res) => {
         });
 
         res.json(inventory);
-    } catch (error) {
-        console.error('Merchant Inventory API Error:', error);
-        res.status(500).json({ error: 'Failed to fetch merchant inventory' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'merchants.inventory', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to fetch merchant inventory' });
     }
 });
 
@@ -4314,9 +4327,8 @@ app.get('/merchants/:id/branches', async (req, res) => {
         });
 
         res.json(branches);
-    } catch (error) {
-        console.error('Merchant Branches API Error:', error);
-        res.status(500).json({ error: 'Failed to fetch merchant branches' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'merchants.branches', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to fetch merchant branches' });
     }
 });
 
@@ -4377,9 +4389,8 @@ app.post('/merchants/export-selected', async (req, res) => {
         await workbook.xlsx.write(res);
         res.end();
 
-    } catch (error) {
-        console.error('Merchant export failed:', error);
-        res.status(500).json({ error: 'Failed to export merchants' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'merchants.export-selected', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to export merchants' });
     }
 });
 
@@ -4444,9 +4455,8 @@ app.patch('/stores/:id', async (req, res) => {
         logAudit(id, 'UPDATE_STORE', Object.keys(updateData).join(','), null, JSON.stringify(updateData), 'Merchant App').catch(() => { });
 
         res.json(updatedStore);
-    } catch (error) {
-        console.error('Update Store Failed:', error);
-        res.status(500).json({ error: 'Failed to update store details' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'stores', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to update store details' });
     }
 });
 
@@ -4473,9 +4483,8 @@ app.get('/coupons', async (req, res) => {
         });
 
         res.json({ data: coupon });
-    } catch (error) {
-        console.error('List Coupons Error:', error);
-        res.status(500).json({ error: 'Failed to fetch coupon' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'coupons', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to fetch coupon' });
     }
 });
 
@@ -4560,9 +4569,8 @@ app.post('/coupon', async (req, res) => {
         });
 
         res.status(201).json(coupon);
-    } catch (error) {
-        console.error('Create Coupon Error:', error);
-        res.status(500).json({ error: 'Failed to create coupon' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'coupon', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to create coupon' });
     }
 });
 
@@ -4615,9 +4623,8 @@ app.patch('/coupon/:id', async (req, res) => {
         });
 
         res.json(coupon);
-    } catch (error) {
-        console.error('Update Coupon Error:', error);
-        res.status(500).json({ error: 'Failed to update coupon' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'coupon', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to update coupon' });
     }
 });
 
@@ -4628,9 +4635,8 @@ app.delete('/coupon/:id', async (req, res) => {
         const { id } = req.params;
         await prisma.coupon.delete({ where: { id } });
         res.json({ message: 'Coupon deleted successfully' });
-    } catch (error) {
-        console.error('Delete Coupon Error:', error);
-        res.status(500).json({ error: 'Failed to delete coupon' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'coupon', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to delete coupon' });
     }
 });
 
@@ -4680,9 +4686,8 @@ app.get('/coupons/available', async (req, res) => {
         });
 
         res.json({ data: eligible });
-    } catch (error) {
-        console.error('List Available Coupons Error:', error);
-        res.status(500).json({ error: 'Failed to fetch available coupons' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'coupons.available', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to fetch available coupons' });
     }
 });
 
@@ -4779,9 +4784,8 @@ app.post('/checkout/validate-coupon', async (req, res) => {
             bogo,
             minOrder: coupon.minOrder ?? null,
         });
-    } catch (error) {
-        console.error('Validate Coupon Error:', error);
-        res.status(500).json({ error: 'Failed to validate coupon' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'checkout.validate-coupon', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to validate coupon' });
     }
 });
 
@@ -4854,6 +4858,8 @@ app.get('/debug/list-merchants', async (req, res) => {
         // sanitize sensitive data if any
         res.json(merchants);
     } catch (e: any) {
+        Sentry.captureException(e, { tags: { area: 'debug.list-merchants' }, extra: {} });
+        markResponseAsReported(res);
         res.status(500).json({ error: e.message });
     }
 });
@@ -4863,6 +4869,8 @@ app.get('/debug/list-users', async (req, res) => {
         const users = await prisma.user.findMany();
         res.json(users);
     } catch (e: any) {
+        Sentry.captureException(e, { tags: { area: 'debug.list-users' }, extra: {} });
+        markResponseAsReported(res);
         res.status(500).json({ error: e.message });
     }
 });
@@ -4959,15 +4967,8 @@ app.post('/auth/send-otp', async (req, res) => {
 
         console.log(`[Auth] OTP sent to ${phone}`);
         res.json({ success: true, message: 'OTP sent via WhatsApp' });
-    } catch (error: any) {
-        console.error('[Auth] Send OTP Error:', error?.message, '\nStack:', error?.stack, '\nFull:', error);
-        // Temporary verbose-error response to diagnose iOS Send OTP 500 — strip after fix
-        res.status(500).json({
-            error: 'Internal Server Error',
-            detail: (error?.message || String(error) || 'unknown').slice(0, 500),
-            code: error?.code,
-            meta: error?.meta,
-        });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'auth.send-otp', extra: undefined, userMessage: 'Internal Server Error' });
     }
 });
 
@@ -5218,9 +5219,8 @@ app.post('/auth/verify-otp', async (req, res) => {
             isNewUser
         });
         console.log(`[Auth] verify-otp response sent successfully.`);
-    } catch (error: any) {
-        console.error('[Auth] Verify OTP Error:', error);
-        res.status(500).json({ error: 'OTP verification failed' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'auth.verify-otp', extra: undefined, userMessage: 'OTP verification failed' });
     }
 });
 
@@ -5259,6 +5259,8 @@ app.post('/admin/allowlist', async (req, res) => {
             return res.status(401).json({ error: 'Unauthorized' });
         }
         console.error('[Admin] add allowlist error:', e);
+        Sentry.captureException(e, { tags: { area: 'admin.allowlist' }, extra: {} });
+        markResponseAsReported(res);
         return res.status(500).json({ error: 'Failed to add admin' });
     }
 });
@@ -5292,9 +5294,8 @@ app.get('/admin/merchant-signup-coupons', async (req, res) => {
             updatedAt: c.updatedAt.toISOString(),
             redemptionCount: c._count.redemptions,
         })));
-    } catch (e: any) {
-        console.error('[Admin] list merchant-signup-coupons error:', e);
-        return res.status(500).json({ error: 'Failed to list coupons' });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'admin.merchant-signup-coupons', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to list coupons' });
     }
 });
 
@@ -5359,9 +5360,8 @@ app.post('/admin/merchant-signup-coupons', async (req, res) => {
             updatedAt: created.updatedAt.toISOString(),
             redemptionCount: 0,
         });
-    } catch (e: any) {
-        console.error('[Admin] create merchant-signup-coupon error:', e);
-        return res.status(500).json({ error: 'Failed to create coupon' });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'admin.merchant-signup-coupons', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to create coupon' });
     }
 });
 
@@ -5429,6 +5429,8 @@ app.patch('/admin/merchant-signup-coupons/:id', async (req, res) => {
             return res.status(404).json({ error: 'Coupon not found.' });
         }
         console.error('[Admin] update merchant-signup-coupon error:', e);
+        Sentry.captureException(e, { tags: { area: 'admin.merchant-signup-coupons' }, extra: { id: req.params.id } });
+        markResponseAsReported(res);
         return res.status(500).json({ error: 'Failed to update coupon' });
     }
 });
@@ -5459,9 +5461,8 @@ app.get('/admin/merchant-signup-coupons/:id/redemptions', async (req, res) => {
             appliedAt: r.appliedAt.toISOString(),
             merchant: r.merchant,
         })));
-    } catch (e: any) {
-        console.error('[Admin] list redemptions error:', e);
-        return res.status(500).json({ error: 'Failed to list redemptions' });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'admin.merchant-signup-coupons.redemptions', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to list redemptions' });
     }
 });
 
@@ -5551,6 +5552,8 @@ app.delete('/auth/delete-account', async (req, res) => {
         if (error.message === 'Missing or invalid token' || error.message === 'Unauthorized') {
             return res.status(401).json({ error: 'Unauthorized' });
         }
+        Sentry.captureException(error, { tags: { area: 'auth.delete-account' }, extra: {} });
+        markResponseAsReported(res);
         res.status(500).json({ error: 'Account deletion failed. Please try again.' });
     }
 });
@@ -5599,9 +5602,8 @@ app.get('/auth/merchant/draft', async (req, res) => {
                 amount: subscription.amount
             } : null
         });
-    } catch (e: any) {
-        console.error('[Draft] GET Error:', e);
-        res.status(500).json({ error: 'Failed to fetch draft', details: e.message });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'auth.merchant.draft', extra: undefined, userMessage: 'Failed to fetch draft' });
     }
 });
 
@@ -5667,9 +5669,8 @@ app.post('/auth/merchant/draft', async (req, res) => {
         });
 
         res.json({ success: true, message: 'Draft created' });
-    } catch (e: any) {
-        console.error('[Draft] POST Error:', e);
-        res.status(500).json({ error: 'Failed to create draft', details: e.message });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'auth.merchant.draft', extra: undefined, userMessage: 'Failed to create draft' });
     }
 });
 
@@ -5994,9 +5995,8 @@ app.patch('/auth/merchant/draft', async (req, res) => {
         }
 
         res.json({ success: true, message: 'Draft updated' });
-    } catch (e: any) {
-        console.error('[Draft] PATCH Error:', e);
-        res.status(500).json({ error: `Backend Error: ${e.message}`, details: e.message });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'auth.merchant.draft', extra: undefined });
     }
 });
 
@@ -6067,9 +6067,8 @@ app.post('/merchants/:id/kyc-decision', async (req, res) => {
         }
 
         res.json({ success: true, decision });
-    } catch (e: any) {
-        console.error('[KYC Decision] Error:', e);
-        res.status(500).json({ error: e.message });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'merchants.kyc-decision', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined } });
     }
 });
 
@@ -6325,9 +6324,8 @@ app.post('/auth/merchant/signup', async (req, res) => {
 
         res.json({ success: true, message: 'Merchant successfully registered' });
 
-    } catch (error: any) {
-        console.error('[Auth] Merchant Signup Error:', error);
-        res.status(500).json({ error: 'Internal Server Error during registration', details: error?.message || String(error) });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'auth.merchant.signup', extra: undefined, userMessage: 'Internal Server Error during registration' });
     }
 });
 
@@ -6367,9 +6365,8 @@ app.get('/auth/me', async (req, res) => {
             },
             profile: profile || { tier: 'Member', credits: 0 } // Fallback if profile row is missing
         });
-    } catch (error: any) {
-        console.error('[Auth] /auth/me Error:', error);
-        res.status(500).json({ error: 'Failed to fetch user context' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'auth.me', extra: undefined, userMessage: 'Failed to fetch user context' });
     }
 });
 
@@ -6405,9 +6402,8 @@ app.post('/debug-resend', async (req, res) => {
             await sendApplicationReceivedEmail(to, name);
         }
         res.json({ success: true, to, template, triggeredBy: caller.id });
-    } catch (e: any) {
-        console.error('[debug-resend] Error:', e);
-        res.status(500).json({ error: e?.message || 'Email send failed' });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'debug-resend', extra: { userId: (req as any)?.user?.id ?? undefined } });
     }
 });
 
@@ -6513,6 +6509,8 @@ app.post('/admin/users/invite', async (req, res) => {
         } catch (profileErr: any) {
             console.error('[InviteAdmin] User row insert failed, rolling back auth user:', profileErr);
             await supabaseAdmin.auth.admin.deleteUser(created.user.id).catch(() => {});
+            Sentry.captureException(profileErr, { tags: { area: 'admin.users.invite' }, extra: {} });
+            markResponseAsReported(res);
             return res.status(500).json({ error: profileErr?.message || 'Failed to create user profile' });
         }
         try {
@@ -6522,9 +6520,8 @@ app.post('/admin/users/invite', async (req, res) => {
         }
         console.log(`[InviteAdmin] Email-created ${targetRole} ${targetEmail} (invited by ${caller.id})`);
         res.json({ success: true, method: 'email', id: created.user.id, email: targetEmail, role: targetRole });
-    } catch (e: any) {
-        console.error('[InviteAdmin] error:', e);
-        res.status(500).json({ error: e?.message || 'Invite failed' });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'admin.users.invite', extra: { userId: (req as any)?.user?.id ?? undefined } });
     }
 });
 
@@ -6613,9 +6610,8 @@ app.patch('/admin/users/:id', async (req, res) => {
         });
         console.log(`[AdminEdit] ${target.email}: ${JSON.stringify(updates)} (by ${caller.id})`);
         res.json({ success: true, user: updated });
-    } catch (e: any) {
-        console.error('[AdminEdit] error:', e);
-        res.status(500).json({ error: e?.message || 'Edit failed' });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'admin.users', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined } });
     }
 });
 
@@ -6690,9 +6686,8 @@ app.get('/wati/inbox', async (req, res) => {
             take: limit,
         });
         res.json({ data: rows, count: rows.length });
-    } catch (e: any) {
-        console.error('[wati-inbox] list error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to fetch inbox' });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'wati.inbox', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to fetch inbox' });
     }
 });
 
@@ -6970,9 +6965,8 @@ app.get('/admin/customers', async (req, res) => {
             limit, offset,
             hasMore:  offset + customers.length < totalCount,
         });
-    } catch (e: any) {
-        console.error('[admin/customers] list error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to fetch customers' });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'admin.customers', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to fetch customers' });
     }
 });
 
@@ -7034,9 +7028,8 @@ app.get('/admin/orders', async (req, res) => {
         }));
 
         res.json({ orders, count: orders.length });
-    } catch (e: any) {
-        console.error('[admin/orders] list error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to fetch orders' });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'admin.orders', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to fetch orders' });
     }
 });
 
@@ -7092,6 +7085,8 @@ app.patch('/admin/orders/:id', async (req, res) => {
     } catch (e: any) {
         console.error('[admin/orders] patch error:', e?.message || e);
         if (e?.code === 'P2025') return res.status(404).json({ error: 'Order not found' });
+        Sentry.captureException(e, { tags: { area: 'admin.orders' }, extra: { id: req.params.id } });
+        markResponseAsReported(res);
         res.status(500).json({ error: 'Failed to update order' });
     }
 });
@@ -7124,9 +7119,8 @@ app.get('/admin/customers/:id/orders', async (req, res) => {
             created_at:   o.createdAt,
         }));
         res.json({ orders });
-    } catch (e: any) {
-        console.error('[admin/customers/:id/orders] error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to fetch customer orders' });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'admin.customers.orders', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to fetch customer orders' });
     }
 });
 
@@ -7165,9 +7159,8 @@ app.get('/admin/merchants/:id/orders', async (req, res) => {
                 order_type:   o.order_type,
             })),
         });
-    } catch (e: any) {
-        console.error('[admin/merchants/:id/orders] error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to fetch merchant orders' });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'admin.merchants.orders', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to fetch merchant orders' });
     }
 });
 
@@ -7202,9 +7195,8 @@ app.get('/admin/customers/:id/addresses', async (req, res) => {
                 created_at: a.created_at,
             })),
         });
-    } catch (e: any) {
-        console.error('[admin/customers/:id/addresses] error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to fetch customer addresses' });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'admin.customers.addresses', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to fetch customer addresses' });
     }
 });
 
@@ -7253,6 +7245,8 @@ app.patch('/admin/customers/:id/name', async (req, res) => {
     } catch (e: any) {
         console.error('[admin/customers/:id/name] error:', e?.message || e);
         if (e?.code === 'P2025') return res.status(404).json({ error: 'User not found' });
+        Sentry.captureException(e, { tags: { area: 'admin.customers.name' }, extra: { id: req.params.id } });
+        markResponseAsReported(res);
         res.status(500).json({ error: 'Failed to update customer name' });
     }
 });
@@ -7308,9 +7302,8 @@ app.get('/admin/home/super-admin', async (req, res) => {
                 id: m.id, store_name: m.storeName, status: m.status, created_at: m.createdAt,
             })),
         });
-    } catch (e: any) {
-        console.error('[admin/home/super-admin] error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to load super-admin home' });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'admin.home.super-admin', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to load super-admin home' });
     }
 });
 
@@ -7382,9 +7375,8 @@ app.get('/admin/home/operations', async (req, res) => {
             })),
             todaysOrdersHourly,
         });
-    } catch (e: any) {
-        console.error('[admin/home/operations] error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to load operations home' });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'admin.home.operations', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to load operations home' });
     }
 });
 
@@ -7438,9 +7430,8 @@ app.get('/admin/home/support', async (req, res) => {
                 created_at: o.createdAt, cancelled_reason: o.cancelledReason,
             })),
         });
-    } catch (e: any) {
-        console.error('[admin/home/support] error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to load support home' });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'admin.home.support', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to load support home' });
     }
 });
 
@@ -7456,9 +7447,8 @@ app.get('/admin/home/finance', async (req, res) => {
             where: { status: { in: ['CANCELLED', 'REFUNDED'] } },
         });
         res.json({ refundLike });
-    } catch (e: any) {
-        console.error('[admin/home/finance] error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to load finance home' });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'admin.home.finance', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to load finance home' });
     }
 });
 
@@ -7532,9 +7522,8 @@ app.post('/me/profile', async (req, res) => {
         ]);
 
         res.json({ ok: true, name: cleanName });
-    } catch (e: any) {
-        console.error('[me/profile] update error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to update profile' });
+        } catch (e: any) {
+        return handleApiError(res, e, { area: 'me.profile', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to update profile' });
     }
 });
 
@@ -7699,9 +7688,8 @@ app.get('/auth/merchant/profile', async (req, res) => {
 
         res.json(profileResponse);
 
-    } catch (error: any) {
-        console.error('[Auth] Merchant Profile Fetch Error:', error);
-        res.status(500).json({ error: 'Internal Server Error while fetching profile' });
+        } catch (error: any) {
+        return handleApiError(res, error, { area: 'auth.merchant.profile', extra: undefined, userMessage: 'Internal Server Error while fetching profile' });
     }
 });
 
