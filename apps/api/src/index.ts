@@ -46,9 +46,19 @@ import {
 const app = express();
 const port = process.env.PORT || 3000;
 
+// --- Request ID middleware MUST run first (round-7 fix) ---
+// Assigns the UUID before anything else logs or runs so the X-Request-Id
+// in the response header matches the [API Request] log line and any Sentry
+// event captured later in the request lifecycle. The other Sentry
+// middleware (sentryUserContext, fivexxInterceptor) are mounted lower down
+// after express.json so they can read the body, but requestId has no body
+// dependency and benefits from being absolute first.
+app.use(requestIdMiddleware);
+
 // --- Request Logger ---
 app.use((req, res, next) => {
-    console.log(`[API Request] ${req.method} ${req.url}`);
+    const reqId = (req as any).id ?? '?';
+    console.log(`[API Request] req=${reqId} ${req.method} ${req.url}`);
     next();
 });
 
@@ -78,14 +88,14 @@ app.use(express.json({ limit: '50mb' }));
 
 // --- Sentry observability (round-6) ---
 // Order matters:
-//   1. requestId — assigns UUID, must run FIRST so other middleware + the
-//      error handler can correlate logs ↔ Sentry events via X-Request-Id.
+//   1. requestId — mounted ABOVE the request logger (round-7 audit fix), so
+//      the very first log line of every request includes the UUID. See
+//      app.use(requestIdMiddleware) ~line 56.
 //   2. sentryUserContext — decodes JWT for Sentry user scope. Runs before
 //      routes so every captured event knows who hit it.
 //   3. fivexxInterceptor — defense-in-depth fallback that captures any 5xx
 //      response we missed via handleApiError. Runs LAST so it wraps res.json
 //      after other middleware has had a chance to modify it.
-app.use(requestIdMiddleware);
 app.use(sentryUserContextMiddleware);
 app.use(fivexxInterceptorMiddleware);
 
@@ -3051,6 +3061,7 @@ app.patch('/orders/:id/status', async (req, res) => {
             tags: { area: 'ws2.legacyStatus' },
             extra: { orderId: req.params.id, userId: user.id, requestedStatus: req.body?.status },
         });
+        markResponseAsReported(res);
         res.status(500).json({ error: 'Failed to update order status' });
     }
 });
@@ -3166,6 +3177,7 @@ app.post('/orders/:id/refund', async (req, res) => {
             extra: { orderId: req.params.id, userId: user.id },
         });
         // Ensure JSON response even on crash
+        markResponseAsReported(res);
         res.status(500).json({ error: 'Failed to process refund', details: error.message });
     }
 });
@@ -3408,6 +3420,7 @@ app.get('/orders/issues/inbox', async (req, res) => {
     } catch (err: any) {
         console.error('[issues inbox] error:', err);
         Sentry.captureException(err, { tags: { area: 'ws2.inbox' }, extra: { userId: user.id } });
+        markResponseAsReported(res);
         return res.status(500).json({ error: 'Failed to list issues.', details: err?.message });
     }
 });
@@ -3673,6 +3686,7 @@ app.post('/orders/:id/cancel', async (req, res) => {
     } catch (err: any) {
         console.error('[cancel] error:', err);
         Sentry.captureException(err, { tags: { area: 'ws2.cancel' }, extra: { orderId: req.params.id, userId: user.id } });
+        markResponseAsReported(res);
         return res.status(500).json({ error: 'Failed to cancel order.', details: err?.message });
     }
 });
@@ -3750,6 +3764,7 @@ app.post('/orders/:id/reschedule', async (req, res) => {
     } catch (err: any) {
         console.error('[reschedule] error:', err);
         Sentry.captureException(err, { tags: { area: 'ws2.reschedule' }, extra: { orderId: req.params.id, userId: user.id } });
+        markResponseAsReported(res);
         return res.status(500).json({ error: 'Failed to reschedule order.', details: err?.message });
     }
 });
@@ -3894,6 +3909,7 @@ app.post('/orders/:id/return', async (req, res) => {
     } catch (err: any) {
         console.error('[return] error:', err);
         Sentry.captureException(err, { tags: { area: 'ws2.return' }, extra: { orderId: req.params.id, userId: user.id } });
+        markResponseAsReported(res);
         return res.status(500).json({ error: 'Failed to create return request.', details: err?.message });
     }
 });
@@ -4002,6 +4018,7 @@ app.post('/orders/:id/exchange', async (req, res) => {
     } catch (err: any) {
         console.error('[exchange] error:', err);
         Sentry.captureException(err, { tags: { area: 'ws2.exchange' }, extra: { orderId: req.params.id, userId: user.id } });
+        markResponseAsReported(res);
         return res.status(500).json({ error: 'Failed to create exchange request.', details: err?.message });
     }
 });
@@ -4173,6 +4190,7 @@ app.patch('/orders/:id/issue/:issueId', async (req, res) => {
     } catch (err: any) {
         console.error('[issue PATCH] error:', err);
         Sentry.captureException(err, { tags: { area: 'ws2.merchantPatch' }, extra: { orderId: req.params.id, issueId: req.params.issueId, userId: user.id } });
+        markResponseAsReported(res);
         return res.status(500).json({ error: 'Failed to update issue.', details: err?.message });
     }
 });
@@ -4840,6 +4858,7 @@ app.post('/coupons/redeem', async (req, res) => {
     } catch (error) {
         console.error('Redeem Coupon Error:', error);
         Sentry.captureException(error, { tags: { area: 'coupons.redeem' } });
+        markResponseAsReported(res);
         res.status(500).json({ error: 'Failed to redeem coupon' });
     }
 });
@@ -5996,7 +6015,8 @@ app.patch('/auth/merchant/draft', async (req, res) => {
 
         res.json({ success: true, message: 'Draft updated' });
         } catch (e: any) {
-        return handleApiError(res, e, { area: 'auth.merchant.draft', extra: undefined });
+        // Round-7 fix: restore admin-visible message (regression from auto-refactor).
+        return handleApiError(res, e, { area: 'auth.merchant.draft', extra: undefined, userMessage: e?.message || 'Failed to update draft' });
     }
 });
 
@@ -6068,7 +6088,8 @@ app.post('/merchants/:id/kyc-decision', async (req, res) => {
 
         res.json({ success: true, decision });
         } catch (e: any) {
-        return handleApiError(res, e, { area: 'merchants.kyc-decision', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined } });
+        // Round-7 fix: KYC reviewers need to see the specific reason (already_approved, invalid_transition, DB error).
+        return handleApiError(res, e, { area: 'merchants.kyc-decision', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined }, userMessage: e?.message || 'KYC decision failed' });
     }
 });
 
@@ -6403,7 +6424,8 @@ app.post('/debug-resend', async (req, res) => {
         }
         res.json({ success: true, to, template, triggeredBy: caller.id });
         } catch (e: any) {
-        return handleApiError(res, e, { area: 'debug-resend', extra: { userId: (req as any)?.user?.id ?? undefined } });
+        // Round-7 fix: the entire point of /debug-resend is to surface Resend errors.
+        return handleApiError(res, e, { area: 'debug-resend', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: e?.message || 'Email send failed' });
     }
 });
 
@@ -6521,7 +6543,8 @@ app.post('/admin/users/invite', async (req, res) => {
         console.log(`[InviteAdmin] Email-created ${targetRole} ${targetEmail} (invited by ${caller.id})`);
         res.json({ success: true, method: 'email', id: created.user.id, email: targetEmail, role: targetRole });
         } catch (e: any) {
-        return handleApiError(res, e, { area: 'admin.users.invite', extra: { userId: (req as any)?.user?.id ?? undefined } });
+        // Round-7 fix: admin needs to see "Email already exists" / "Phone already allowlisted" / etc, not generic.
+        return handleApiError(res, e, { area: 'admin.users.invite', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: e?.message || 'Invite failed' });
     }
 });
 
@@ -6611,7 +6634,8 @@ app.patch('/admin/users/:id', async (req, res) => {
         console.log(`[AdminEdit] ${target.email}: ${JSON.stringify(updates)} (by ${caller.id})`);
         res.json({ success: true, user: updated });
         } catch (e: any) {
-        return handleApiError(res, e, { area: 'admin.users', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined } });
+        // Round-7 fix: admin needs to see "Cannot demote yourself" / "Role conflict" / etc, not generic.
+        return handleApiError(res, e, { area: 'admin.users', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined }, userMessage: e?.message || 'Edit failed' });
     }
 });
 

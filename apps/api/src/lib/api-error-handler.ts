@@ -208,6 +208,10 @@ export function fivexxInterceptorMiddleware(req: Request, res: Response, next: N
                     })(),
                 },
             });
+            // Set the marker AFTER capture so any subsequent wrapped-call
+            // (Express's res.json internally calls this.send → second wrapper
+            // would otherwise fire a duplicate event for the same response).
+            (res as any)[ALREADY_REPORTED] = true;
         } catch {
             // Sentry SDK problem — don't break the response.
         }
