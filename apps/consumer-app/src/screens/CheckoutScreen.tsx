@@ -395,11 +395,9 @@ export default function CheckoutScreen() {
     }, [rejectedRequests]);
 
     useEffect(() => {
-        // Phase 4 (2026-06-09): selectedCoupon route param is now only a "wake up"
-        // signal from CouponsScreen — the real applied-coupon state lives in
-        // CartContext.appliedCoupon (set by CouponsScreen before navigating back).
-        // We DON'T copy code/discount into local state here anymore; we render
-        // directly from appliedCoupon below.
+        // Phase 4 audit re-fix (2026-06-09 evening): selectedCoupon route param
+        // was dropped in this same audit pass. Only specialInstructions remains
+        // on Checkout/DiningCheckout. Coupon state is read from CartContext below.
         if (route.params?.specialInstructions) {
             setSpecialInstructions(route.params.specialInstructions);
         }

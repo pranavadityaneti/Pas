@@ -20,7 +20,10 @@ export type MainTabParamList = {
     Home: undefined;
     Pickup: undefined;
     Dining: undefined;
-    Cart: { selectedCoupon?: { code: string; discount: number } } | undefined;
+    // Phase 4 audit re-fix (2026-06-09 evening): selectedCoupon dropped — Cart
+    // tab no longer reads or writes it post-Phase 4 (CartContext.appliedCoupon
+    // is the authoritative source set by OffersScreen / CouponsScreen).
+    Cart: undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();

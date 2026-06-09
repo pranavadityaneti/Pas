@@ -547,7 +547,13 @@ export default function DiningCheckoutScreen() {
         const localRestaurantName = restaurantName;
         const localSubtotal = subtotal;
         const localGst = exactGst;
-        const localTotal = finalTotalToPay || total;
+        // Phase 4 audit re-fix (2026-06-09 evening): use finalTotalToPay
+        // unconditionally — handlePaymentSuccess only fires after Razorpay
+        // returns, which means confirmAccepted has already called
+        // setFinalTotalToPay(effectiveTotal). The `|| total` fallback would
+        // silently record the pre-discount amount in Order.totalAmount for
+        // a free-coupon dining order (data integrity bleed).
+        const localTotal = finalTotalToPay;
         const localGuestCount = guestCount;
 
         try {
@@ -618,7 +624,8 @@ export default function DiningCheckoutScreen() {
                         quantity: item.quantity,
                         price: item.price
                     })),
-                    totalAmount: finalTotalToPay || total,
+                    // Phase 4 audit re-fix (2026-06-09 evening): see localTotal comment above.
+                    totalAmount: finalTotalToPay,
                     paid: true,
                     paymentId: id,
                     orderRequestId: acceptedRequests[0]?.id,
@@ -917,7 +924,10 @@ export default function DiningCheckoutScreen() {
             items: [],
             subtotal: 0,
             gstAmount: 0,
-            totalAmount: finalTotalToPay || 0,
+            // Phase 4 audit re-fix (2026-06-09 evening): finalTotalToPay
+            // unconditionally — same precondition holds (this runs after
+            // confirmAccepted has set the state).
+            totalAmount: finalTotalToPay,
             orderNumber: confirmedOrderNumber,
             otp: confirmedOtp
         };
