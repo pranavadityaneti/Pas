@@ -208,6 +208,71 @@ async function requireUser(req: express.Request, res: express.Response) {
     }
 }
 
+/**
+ * Phase 2J (hot-fix 2026-06-09) — Soft auth for endpoints that Option A patches
+ * #1A/#1B/#1C hard-cut behind requireUser (POST /orders, PATCH /order-requests/:id/status).
+ *
+ * Background: the deployed API requires auth on those endpoints, but main's
+ * consumer-app still uses plain fetch() without an Authorization header.
+ * Pre-OTA installs return 401 on every checkout / cancel — this helper restores
+ * legacy behavior for those clients while preserving Option A #1B's impersonation
+ * guard for authenticated callers.
+ *
+ * Behavior:
+ *  - REQUIRE_ORDERS_AUTH=true → hard-require auth (matches requireUser exactly).
+ *  - Else, Authorization header PRESENT but invalid → 401 (don't let attackers
+ *    send garbage to bypass the eventual hard-require).
+ *  - Else, Authorization header MISSING → soft-pass. Returns { user: null }.
+ *    Sentry captures a count for OTA-rollout visibility.
+ *  - Else, Authorization header VALID → returns { user: <User> }. Caller MUST
+ *    enforce its own userId/ownership guards conditionally on user being non-null.
+ *
+ * Return convention:
+ *  - null          → response already sent (401); caller does `if (!auth) return;`
+ *  - { user: ... } → proceed; check `auth.user` for null vs authenticated
+ *
+ * Flip REQUIRE_ORDERS_AUTH=true once Sentry shows zero soft-auth pre-OTA
+ * messages for 24+ hours.
+ */
+async function softRequireUser(req: express.Request, res: express.Response): Promise<{ user: any } | null> {
+    const authHeader = req.headers.authorization;
+    if (process.env.REQUIRE_ORDERS_AUTH === 'true') {
+        try {
+            const user = await getAuthUser(req);
+            return { user };
+        } catch {
+            res.status(401).json({ error: 'Authentication required' });
+            return null;
+        }
+    }
+    // Soft mode — flag is off (default during pre-OTA window).
+    if (authHeader) {
+        // Header present → must be valid; else 401. This keeps post-OTA clients
+        // strict and prevents garbage-header bypass attempts.
+        try {
+            const user = await getAuthUser(req);
+            return { user };
+        } catch {
+            res.status(401).json({ error: 'Invalid authentication token' });
+            return null;
+        }
+    }
+    // No header at all → legacy pre-OTA client. Log for OTA-rollout monitoring.
+    try {
+        Sentry.captureMessage('soft-auth: pre-OTA unauth request', {
+            level: 'info',
+            tags: {
+                phase: 'pre-ota-soft-auth',
+                endpoint: req.path,
+                method: req.method,
+            },
+        });
+    } catch {
+        // Swallow — Sentry shouldn't take down /orders.
+    }
+    return { user: null };
+}
+
 // Phase 2 (Coupon foolproof) — minimal server-side capability map for coupon
 // endpoints. Mirrors apps/admin-web/src/lib/rbac.ts. SUPER_ADMIN is handled by
 // the wildcard check inside requireCapability (matches isAdmin/role==='SUPER_ADMIN'
@@ -2483,8 +2548,16 @@ app.post('/orders', async (req, res) => {
         // Option A patch #1B (2026-06-08): backend requireUser hardening.
         // Previously any anonymous caller could submit { userId: <victim>, paid: true,
         // paymentId: 'fake' } and create a paid order in another customer's name.
-        const user = await requireUser(req, res);
-        if (!user) return;
+        //
+        // Phase 2J hot-fix (2026-06-09): soft-auth gate. Pre-OTA consumer-app
+        // installs still use plain fetch() with no Authorization header and would
+        // 401 on every checkout. Until REQUIRE_ORDERS_AUTH=true (post-OTA), we
+        // accept unauth requests and skip the impersonation guard for them. The
+        // impersonation guard below STILL runs for authenticated callers, so
+        // Option A #1B's no-impersonation guarantee is preserved for that path.
+        const auth = await softRequireUser(req, res);
+        if (!auth) return;
+        const user = auth.user;
 
         const {
             userId,
@@ -2519,7 +2592,11 @@ app.post('/orders', async (req, res) => {
         // Option A patch #1B: ownership guard — body.userId must match the
         // authenticated user's id. Prevents creating an order in another
         // customer's name even when a valid token is presented.
-        if (user.id !== userId) {
+        //
+        // Phase 2J: only enforced when authenticated. Soft-auth pre-OTA clients
+        // (user === null) skip this guard — same as the pre-Option-A baseline.
+        // Once REQUIRE_ORDERS_AUTH=true, softRequireUser ensures user is non-null.
+        if (user && user.id !== userId) {
             return res.status(403).json({ error: 'userId mismatch — cannot create order for another user' });
         }
 
@@ -3144,8 +3221,15 @@ app.patch('/order-requests/:id/status', async (req, res) => {
         // Previously any anonymous caller could ACCEPT/REJECT/CANCEL any
         // order_request. Authorization (verify user owns consumer_user_id or
         // branch.merchant_id) is a separate follow-up — harness Task #36.
-        const user = await requireUser(req, res);
-        if (!user) return;
+        //
+        // Phase 2J hot-fix (2026-06-09): soft-auth gate. Pre-OTA consumer-app
+        // installs still use plain fetch() with no Authorization header and
+        // would 401 on every cancel. Until REQUIRE_ORDERS_AUTH=true (post-OTA),
+        // accept unauth requests and skip the #1C ownership checks for them.
+        // Authenticated callers still go through the full #1C check below.
+        const auth = await softRequireUser(req, res);
+        if (!auth) return;
+        const user = auth.user;
 
         const { id } = req.params;
         const { status, reason } = req.body;
@@ -3168,21 +3252,25 @@ app.patch('/order-requests/:id/status', async (req, res) => {
         if (!existing) {
             return res.status(404).json({ error: 'Order request not found' });
         }
-        if (status === 'CANCELLED') {
-            if (user.id !== existing.consumer_user_id) {
-                return res.status(403).json({ error: 'Only the order owner can cancel this request' });
-            }
-        } else {
-            // ACCEPTED or REJECTED — must be the merchant of this branch
-            const branch = await prisma.merchantBranch.findUnique({
-                where: { id: existing.branch_id },
-                select: { merchantId: true }
-            });
-            if (!branch || !branch.merchantId) {
-                return res.status(403).json({ error: 'Branch ownership cannot be verified' });
-            }
-            if (user.id !== branch.merchantId) {
-                return res.status(403).json({ error: 'Only the branch merchant can accept or reject this request' });
+        // Phase 2J: ownership checks only enforced when authenticated. Soft-auth
+        // pre-OTA clients (user === null) skip — pre-Option-A baseline.
+        if (user) {
+            if (status === 'CANCELLED') {
+                if (user.id !== existing.consumer_user_id) {
+                    return res.status(403).json({ error: 'Only the order owner can cancel this request' });
+                }
+            } else {
+                // ACCEPTED or REJECTED — must be the merchant of this branch
+                const branch = await prisma.merchantBranch.findUnique({
+                    where: { id: existing.branch_id },
+                    select: { merchantId: true }
+                });
+                if (!branch || !branch.merchantId) {
+                    return res.status(403).json({ error: 'Branch ownership cannot be verified' });
+                }
+                if (user.id !== branch.merchantId) {
+                    return res.status(403).json({ error: 'Only the branch merchant can accept or reject this request' });
+                }
             }
         }
 
