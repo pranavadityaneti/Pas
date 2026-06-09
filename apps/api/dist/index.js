@@ -2384,6 +2384,12 @@ app.get('/consumer/products/search', async (req, res) => {
 // --- Order Routes ---
 // Create Order (for testing/Consumer App)
 app.post('/orders', async (req, res) => {
+    // Phase 2K hot-fix (2026-06-09): hoist `user` so the orphan-refund block in
+    // the catch can do the ownership check (paymentId must belong to this user's
+    // order, or no order exists for it). Stays null on softRequireUser-fail or
+    // soft-pass (REQUIRE_ORDERS_AUTH=false + no Authorization header) — catch
+    // block treats null as "can't auto-refund, let the SLA cron reconcile".
+    let user = null;
     try {
         // Option A patch #1B (2026-06-08): backend requireUser hardening.
         // Previously any anonymous caller could submit { userId: <victim>, paid: true,
@@ -2398,7 +2404,7 @@ app.post('/orders', async (req, res) => {
         const auth = await softRequireUser(req, res);
         if (!auth)
             return;
-        const user = auth.user;
+        user = auth.user;
         const { userId, storeId, branchId, items, totalAmount, paid, // Consumer sends true after successful payment
         paymentId, // Razorpay payment ID for audit trail
         orderRequestId, // Reference to the original order_request
@@ -2633,16 +2639,27 @@ app.post('/orders', async (req, res) => {
             });
             console.log(`[POST /orders] Created order ${orderNumber} in tx`);
             if (orderRequestId) {
-                try {
-                    await tx.order_requests.update({
-                        where: { id: orderRequestId },
-                        data: { status: 'COMPLETED' }
-                    });
-                    console.log(`[POST /orders] Updated order_request ${orderRequestId} to COMPLETED`);
+                // Phase 2K hot-fix (2026-06-09): atomic conditional update prevents
+                // the TOCTOU race the adversarial review found. Previously the
+                // outside-txn read of status='ACCEPTED' could go stale by the time
+                // this inner update fired, and an unconditional update silently
+                // overwrote CANCELLED/REJECTED/EXPIRED with COMPLETED. The original
+                // try/catch swallowed any error too, making the race invisible.
+                // updateMany with status + expires_at guards rolls the whole order
+                // back if the request transitioned during checkout — caller's
+                // outer catch returns ORDER_CREATE_FAILED + retryable=true.
+                const updateResult = await tx.order_requests.updateMany({
+                    where: {
+                        id: orderRequestId,
+                        status: 'ACCEPTED',
+                        expires_at: { gt: new Date() },
+                    },
+                    data: { status: 'COMPLETED' },
+                });
+                if (updateResult.count === 0) {
+                    throw new Error(`ORDER_REQUEST_INVALID_STATE: ${orderRequestId} no longer ACCEPTED or has expired`);
                 }
-                catch (err) {
-                    console.error(`[POST /orders] Failed to update order_request ${orderRequestId}:`, err.message);
-                }
+                console.log(`[POST /orders] Updated order_request ${orderRequestId} to COMPLETED`);
             }
             // Phase 2 (2F) — coupon redemption inside the transaction. Either both
             // the Order and the redemption succeed, or both roll back. Atomic
@@ -2860,17 +2877,72 @@ app.post('/orders', async (req, res) => {
             // amount. (A separate processOrphanedPaymentsSla cron — out of Option A
             // scope — will catch any orphans this misses due to request-process
             // death or async failures.)
+            //
+            // Phase 2K hot-fix (2026-06-09): adversarial review (PR #1) found this
+            // path was a financial-sabotage vector. Client-controlled paymentId +
+            // totalAmount with no ownership check meant any auth'd user could
+            // submit a victim's paymentId with guaranteed-to-fail items and force
+            // a refund on the VICTIM's prior payment. Fix: (1) skip auto-refund
+            // on soft-auth unauth requests (let the SLA cron handle), (2) require
+            // the paymentId to either match an order owned by this user OR have
+            // no existing order at all, (3) cap refund at Razorpay-fetched
+            // captured amount (never trust req.body.totalAmount).
             const paymentId = req.body?.paymentId;
-            const amountInr = req.body?.totalAmount;
-            if (paymentId && amountInr) {
+            const requestedAmount = Number(req.body?.totalAmount ?? 0);
+            if (!user) {
+                // Soft-auth pre-OTA request — we can't verify ownership. Skip
+                // auto-refund and let processOrphanedPaymentsSla cron handle.
+                console.warn(`[ORPHANED-PAYMENT][REFUND][SKIPPED] unauthenticated request — cron will reconcile paymentId=${paymentId}`);
                 try {
-                    await processRazorpayRefund({ razorpayPaymentId: paymentId }, amountInr);
-                    console.log(`[ORPHANED-PAYMENT][REFUND] Initiated refund for paymentId=${paymentId} amount=₹${amountInr}`);
+                    Sentry.captureMessage('orphan-payment auto-refund skipped (no auth user)', { level: 'warning', extra: { paymentId, requestedAmount } });
+                }
+                catch { }
+            }
+            else if (paymentId && requestedAmount > 0) {
+                try {
+                    // Ownership check: paymentId must either belong to an order
+                    // owned by this user, OR have no existing order (truly orphan).
+                    const existingForPayment = await prisma.order.findFirst({
+                        where: { metadata: { path: ['razorpayPaymentId'], equals: paymentId } },
+                        select: { userId: true },
+                    });
+                    if (existingForPayment && existingForPayment.userId !== user.id) {
+                        console.error(`[ORPHANED-PAYMENT][REFUND][REFUSED] paymentId=${paymentId} belongs to user ${existingForPayment.userId} not ${user.id}`);
+                        try {
+                            Sentry.captureMessage('orphan-refund auth gap — paymentId belongs to another user, refused', {
+                                level: 'warning',
+                                extra: { paymentId, claimUserId: user.id, actualUserId: existingForPayment.userId },
+                            });
+                        }
+                        catch { }
+                    }
+                    else {
+                        // Cap amount at Razorpay-fetched captured value (never trust body.totalAmount).
+                        let capturedAmountInr = null;
+                        try {
+                            if (razorpayInstance) {
+                                const rzpPayment = await razorpayInstance.payments.fetch(paymentId);
+                                const amountPaise = Number(rzpPayment?.amount ?? 0);
+                                if (amountPaise > 0)
+                                    capturedAmountInr = Math.round(amountPaise / 100);
+                            }
+                        }
+                        catch (fetchErr) {
+                            console.warn(`[ORPHANED-PAYMENT][REFUND] could not fetch Razorpay payment ${paymentId}: ${fetchErr?.message || fetchErr}`);
+                        }
+                        const refundAmount = capturedAmountInr !== null
+                            ? Math.min(capturedAmountInr, requestedAmount)
+                            : requestedAmount;
+                        if (refundAmount > 0) {
+                            await processRazorpayRefund({ razorpayPaymentId: paymentId }, refundAmount);
+                            console.log(`[ORPHANED-PAYMENT][REFUND] Initiated refund for paymentId=${paymentId} amount=₹${refundAmount} (captured=${capturedAmountInr ?? 'unknown'})`);
+                        }
+                    }
                 }
                 catch (refundErr) {
                     console.error('[ORPHANED-PAYMENT][REFUND][FAILED]', refundErr?.message || refundErr);
                     try {
-                        Sentry.captureException(refundErr, { extra: { paymentId, amount: amountInr, area: 'orphaned-payment-refund' } });
+                        Sentry.captureException(refundErr, { extra: { paymentId, amount: requestedAmount, area: 'orphaned-payment-refund' } });
                     }
                     catch { }
                 }
@@ -3043,16 +3115,16 @@ app.patch('/order-requests/:id/status', async (req, res) => {
                 }
             }
             else {
-                // ACCEPTED or REJECTED — must be the merchant of this branch
-                const branch = await prisma.merchantBranch.findUnique({
-                    where: { id: existing.branch_id },
-                    select: { merchantId: true }
-                });
-                if (!branch || !branch.merchantId) {
-                    return res.status(403).json({ error: 'Branch ownership cannot be verified' });
-                }
-                if (user.id !== branch.merchantId) {
-                    return res.status(403).json({ error: 'Only the branch merchant can accept or reject this request' });
+                // Phase 2K hot-fix (2026-06-09): ACCEPTED or REJECTED — must be
+                // able to manage this branch. Previously this was owner-only
+                // (user.id === branch.merchantId) which 403'd non-owner staff
+                // (8 store_staff + 15 phone-managers verified on prod). The
+                // userCanManageBranch helper allows owner OR store_staff OR
+                // phone-matched manager — mirrors the merchant-app's actual
+                // login paths (StoreContext.tsx).
+                const canManage = await userCanManageBranch(user.id, existing.branch_id);
+                if (!canManage) {
+                    return res.status(403).json({ error: 'Only the branch merchant, manager, or staff can accept or reject this request' });
                 }
             }
         }
@@ -3584,6 +3656,55 @@ async function userCanManageOrderStore(userId, storeId) {
     return false;
 }
 /**
+ * Phase 2K (hot-fix 2026-06-09) — RBAC for PATCH /order-requests/:id/status
+ * ACCEPTED/REJECTED transitions.
+ *
+ * Adversarial pre-merge review (PR #1) found that Option A patch #1C's bare
+ * `user.id === branch.merchantId` check was owner-only, which would 403 the
+ * non-owner merchant users on prod (verified via scripts/check_staff_users.ts:
+ * 8 store_staff + 15 phone-managers) the moment merchant-app OTAs commit 2.
+ *
+ * Allows the call if the user is:
+ *   (a) the branch's owner (merchant_branches.merchant_id)
+ *   (b) a phone-matched branch manager (user.phone === merchant_branches.phone)
+ *   (c) a store_staff row whose user_id or auth_user_id matches the user,
+ *       scoped to this branch (store_staff.store_id = branch_id in PAS)
+ *
+ * Mirrors the spirit of userCanManageOrderStore but for the order_request /
+ * branch context (different table — merchant_branches vs Store).
+ */
+async function userCanManageBranch(userId, branchId) {
+    const branch = await prisma.merchantBranch.findUnique({
+        where: { id: branchId },
+        select: { merchantId: true, phone: true },
+    });
+    if (!branch)
+        return false;
+    // (a) Owner
+    if (branch.merchantId && branch.merchantId === userId)
+        return true;
+    // (b) Phone-matched manager — only check if the branch has a phone configured
+    if (branch.phone) {
+        const u = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { phone: true },
+        });
+        if (u?.phone && u.phone === branch.phone)
+            return true;
+    }
+    // (c) Staff — store_staff.store_id is the branch_id in PAS
+    const staffRow = await prisma.storeStaff.findFirst({
+        where: {
+            storeId: branchId,
+            OR: [{ user_id: userId }, { authUserId: userId }],
+        },
+        select: { id: true },
+    });
+    if (staffRow)
+        return true;
+    return false;
+}
+/**
  * Attempt a Razorpay refund using the payment_id stored in order.metadata.
  * Returns { razorpayRefundId, simulated } — if Razorpay isn't configured or
  * the order has no paymentId on record, falls back to a stub refund id
@@ -3852,11 +3973,17 @@ app.post('/orders/:id/cancel', async (req, res) => {
                         try {
                             await tx.auditLog.create({
                                 data: {
-                                    actorUserId: order.userId,
+                                    // Phase 2K hot-fix (2026-06-09): actor is the
+                                    // authenticated caller (consumer / merchant /
+                                    // admin) — NOT the order owner. Previously
+                                    // this misattributed merchant/admin-initiated
+                                    // cancels to the customer, defeating the
+                                    // audit-log integrity guarantee.
+                                    actorUserId: user.id,
                                     action: 'coupon.redemption_reversed',
                                     targetType: 'coupon',
                                     targetId: couponId,
-                                    beforeJson: { orderId: id, count },
+                                    beforeJson: { orderId: id, orderOwnerUserId: order.userId, count },
                                     afterJson: undefined,
                                 },
                             });
@@ -5180,16 +5307,33 @@ app.post('/coupons/redeem', async (req, res) => {
         // redemption (Phase 2F's transactional path), return alreadyRedeemed
         // immediately. Prevents legacy consumer-app builds (pre-Phase-4 OTA)
         // from double-counting when they call this AFTER their /orders call.
+        //
+        // Phase 2K hot-fix (2026-06-09): adversarial review (PR #1) found the
+        // shim returned alreadyRedeemed based only on orderCouponId presence —
+        // any authed user could probe arbitrary orderIds to detect order
+        // existence + coupon-applied status. Fix: (1) scope the lookup to
+        // orders owned by THIS user, (2) require the request's code to match
+        // the stored orderCouponCode. If either fails, fall through to the
+        // normal redemption path instead of leaking alreadyRedeemed.
         if (orderId) {
-            const orderRow = await prisma.order.findUnique({
-                where: { id: orderId },
-                select: { orderCouponId: true },
+            const orderRow = await prisma.order.findFirst({
+                where: { id: orderId, userId: u.id },
+                select: { orderCouponId: true, orderCouponCode: true },
             });
-            if (orderRow?.orderCouponId) {
+            if (orderRow?.orderCouponId &&
+                orderRow.orderCouponCode &&
+                orderRow.orderCouponCode.toUpperCase() === String(code).toUpperCase()) {
                 return res.status(200).json({ alreadyRedeemed: true, source: 'phase2f' });
             }
         }
-        const coupon = await prisma.coupon.findUnique({ where: { code: String(code).toUpperCase() } });
+        // Phase 2K hot-fix (2026-06-09): filter soft-deleted coupons. Previously
+        // legacy /coupons/redeem used findUnique on code only — an archived
+        // (deletedAt set) coupon could still be redeemed by clients holding the
+        // code. GET /coupons/available + /checkout/validate-coupon already
+        // filter correctly; only this legacy path was leaky.
+        const coupon = await prisma.coupon.findFirst({
+            where: { code: String(code).toUpperCase(), deletedAt: null },
+        });
         if (!coupon)
             return res.status(404).json({ error: 'Invalid coupon code' });
         // Idempotency: if this order already redeemed this coupon, return the existing record.
@@ -5204,13 +5348,63 @@ app.post('/coupons/redeem', async (req, res) => {
         // makes the parallel-redeem race surface as Prisma P2002 on the
         // second writer. Catch that and return the existing redemption
         // (idempotent 200) — mirrors the line 4764-4765 fast path.
+        //
+        // Phase 2K hot-fix (2026-06-09): adversarial review (PR #1) found that
+        // this legacy path was incrementing usedCount with no CAS and ignoring
+        // dailyUsageCount/dailyUsageResetAt entirely. Until consumer-app OTA
+        // rolls AND REQUIRE_COUPON_TOKEN=true, most prod coupon traffic flows
+        // here — so usageLimit + dailyUsageLimit were both silently bypassable.
+        // Now mirrors Phase 2F's atomic compare-and-swap contract from POST /orders.
         let redemption;
         try {
             redemption = await prisma.$transaction(async (tx) => {
                 const r = await tx.couponRedemption.create({
                     data: { couponId: coupon.id, userId, orderId: orderId || null, issuedCode: issuedCode || null },
                 });
-                await tx.coupon.update({ where: { id: coupon.id }, data: { usedCount: { increment: 1 } } });
+                // Phase 2K — fetch caps inside the txn for atomic CAS.
+                const couponRow = await tx.coupon.findUnique({
+                    where: { id: coupon.id },
+                    select: { usageLimit: true, dailyUsageLimit: true, dailyUsageResetAt: true, dailyUsageCount: true },
+                });
+                // Total usage limit — atomic compare-and-swap (mirrors POST /orders L2885).
+                if (couponRow?.usageLimit) {
+                    const u = await tx.coupon.updateMany({
+                        where: { id: coupon.id, usedCount: { lt: couponRow.usageLimit } },
+                        data: { usedCount: { increment: 1 } },
+                    });
+                    if (u.count === 0) {
+                        throw new Error('Coupon usage limit reached');
+                    }
+                }
+                else {
+                    await tx.coupon.update({
+                        where: { id: coupon.id },
+                        data: { usedCount: { increment: 1 } },
+                    });
+                }
+                // Daily usage limit with IST midnight reset (mirrors POST /orders L2901).
+                if (couponRow?.dailyUsageLimit) {
+                    const nowD = new Date();
+                    const istNowD = new Date(nowD.getTime() + (5.5 * 60 * 60 * 1000));
+                    const istMidnightUtcMsD = Date.UTC(istNowD.getUTCFullYear(), istNowD.getUTCMonth(), istNowD.getUTCDate(), 0, 0, 0, 0) - (5.5 * 60 * 60 * 1000);
+                    const istMidnightTodayD = new Date(istMidnightUtcMsD);
+                    // Step 1: reset stale counter.
+                    await tx.coupon.updateMany({
+                        where: { id: coupon.id, OR: [
+                                { dailyUsageResetAt: null },
+                                { dailyUsageResetAt: { lt: istMidnightTodayD } },
+                            ] },
+                        data: { dailyUsageCount: 0, dailyUsageResetAt: istMidnightTodayD },
+                    });
+                    // Step 2: atomic increment with limit check.
+                    const d = await tx.coupon.updateMany({
+                        where: { id: coupon.id, dailyUsageCount: { lt: couponRow.dailyUsageLimit } },
+                        data: { dailyUsageCount: { increment: 1 } },
+                    });
+                    if (d.count === 0) {
+                        throw new Error('Coupon daily usage limit reached');
+                    }
+                }
                 return r;
             });
         }
@@ -5222,6 +5416,11 @@ app.post('/coupons/redeem', async (req, res) => {
                 if (existing) {
                     return res.status(200).json({ redemptionId: existing.id, alreadyRedeemed: true });
                 }
+            }
+            // Phase 2K — surface CAS limit-reached errors as 400 with the
+            // friendly message (otherwise the outer catch buries them in a 500).
+            if (err instanceof Error && (err.message === 'Coupon usage limit reached' || err.message === 'Coupon daily usage limit reached')) {
+                return res.status(400).json({ error: err.message });
             }
             throw err;
         }
