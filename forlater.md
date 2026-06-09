@@ -579,6 +579,16 @@
 - **Date added:** 2026-05-26
 - **Originated from:** May 26 session, immediately after Varsha's issue.
 
+### CouponBuilder refactor for Phase 1+2 new fields — DEFERRED FROM PHASE 3 (2026-06-08)
+- **What:** Extend `apps/admin-web/src/components/modules/marketing/CouponBuilder.tsx` to expose the new schema fields the backend now supports: `dailyUsageLimit` (number), `eligibleVerticals` (multi-select from Vertical table), `eligibleOrderTypes` (multi-select: PICKUP / DINE_IN), `bogoMode` (radio: CHEAPEST default | SAME_PRODUCT), `inactiveSinceDays` (number, default 30, shown only when audience=INACTIVE_USERS). PLUS in the list view: rename "Delete" button to "Archive" with an explainer modal (because Phase 2D made delete a soft-delete); add Status filter chips (Active / Inactive / Archived) wired to the new `includeArchived` query param. PLUS build an `EditCouponModal` that reuses the form components and calls `updateCoupon` (the API already supports PATCH on all 21 fields; only the UI is missing). PLUS the debounced code-uniqueness check via `checkCodeAvailability` + a client-generated UUID `Idempotency-Key` header on `createCoupon` submit.
+- **Why it matters:** Phase 1 added 8 new coupon columns + an `audit_log` table. Phase 2 hardened the entire validate-coupon → POST /orders pipeline to honor those new fields. Phase 3 backend (5 new endpoints) + service layer (`couponService.ts`) is ready. Admin can already SET these fields via direct API call (Postman, curl) — the only gap is the form UI. Without this refactor, the admin team will need to know which API fields to send via JSON body. With it, they get checkboxes and number inputs and a live preview.
+- **Why deferred:** `CouponBuilder.tsx` is a single 600+ line component with tight coupling between form state, live preview, and theme picker. A correct extension needs careful refactoring (state hooks, validation, the live preview, sequential UI for "BOGO mode appears only when discountType=BOGO" etc.). Doing it in the same turn as the rest of Phase 3 risked introducing regressions on existing flows we couldn't fully verify. Better to do it as a focused single-component refactor with diff + tsc + Pranav review.
+- **Scope:** `apps/admin-web/src/components/modules/marketing/CouponBuilder.tsx` (the existing list+create file — extend, don't rewrite). Possibly extract `EditCouponModal.tsx` as a sibling. No backend changes — couponService.ts already has every method needed.
+- **Estimated effort:** ~90-120 min of focused work in one session.
+- **Status:** Queued — Phase 1+2 ready to deploy without this; admin will be able to manage all old fields after deploy; the new fields will need direct API calls until this lands.
+- **Date added:** 2026-06-08
+- **Originated from:** Phase 3 session 2026-06-08 — completed backend endpoints, types/methods, analytics pages, audit log wiring, but explicitly deferred the CouponBuilder form refresh.
+
 ---
 
 ## In progress

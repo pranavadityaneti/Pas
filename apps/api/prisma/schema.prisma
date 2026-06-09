@@ -255,10 +255,22 @@ model Coupon {
   logoUrl          String? @map("logo_url")
   autoCode         Boolean @default(false) @map("auto_code")
   theme            String  @default("classic") // preset id: classic|bold|modern|festive (validated app-side)
+  // Phase 1 — coupon_extensions migration (2026-06-08): foolproof coupon support.
+  // All fields nullable or defaulted — purely additive, safe for existing rows.
+  deletedAt          DateTime? @map("deleted_at") @db.Timestamptz(6)
+  dailyUsageLimit    Int?      @map("daily_usage_limit")
+  dailyUsageCount    Int       @default(0) @map("daily_usage_count")
+  dailyUsageResetAt  DateTime? @map("daily_usage_reset_at") @db.Timestamptz(6)
+  eligibleVerticals  String[]  @default([]) @map("eligible_verticals")
+  eligibleOrderTypes String[]  @default([]) @map("eligible_order_types")
+  bogoMode           String?   @map("bogo_mode")
+  inactiveSinceDays  Int?      @default(30) @map("inactive_since_days")
   redemptions      CouponRedemption[]
+  ordersWithCoupon Order[] @relation("OrderToCoupon")
 
   @@index([code], map: "Coupon_code_idx")
   @@index([storeId], map: "Coupon_store_id_idx")
+  @@index([deletedAt], map: "Coupon_deleted_at_idx")
   @@map("coupons")
   @@schema("public")
 }
@@ -272,9 +284,39 @@ model CouponRedemption {
   issuedCode String?  @map("issued_code")
   createdAt  DateTime @default(now()) @map("created_at")
 
+  // Phase 1 — redemption_ledger_fields migration (2026-06-08): foolproof ledger.
+  // discountAmount: actual ₹ discount applied to this redemption (feeds analytics).
+  // fundingSource: snapshot of PLATFORM/MERCHANT at redeem time (immutable).
+  // splitOrderIds: array of Order IDs when one coupon spans multi-store carts.
+  discountAmount Decimal? @map("discount_amount") @db.Decimal(10, 2)
+  fundingSource  String?  @map("funding_source")
+  splitOrderIds  String[] @default([]) @map("split_order_ids")
+
+  @@unique([couponId, orderId], map: "coupon_redemptions_coupon_order_key")
   @@index([couponId], map: "CouponRedemption_coupon_id_idx")
   @@index([userId], map: "CouponRedemption_user_id_idx")
   @@map("coupon_redemptions")
+  @@schema("public")
+}
+
+model AuditLog {
+  // Phase 1 — audit_log migration (2026-06-08): immutable trail of admin
+  // mutations. Coupon mutations (create/update/deactivate/archive) will write
+  // here in Phase 2 via writeAuditLog(req, action, before, after) helper.
+  // Future: any sensitive mutation can write here. Append-only — no updates.
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actorUserId String   @map("actor_user_id") @db.Uuid
+  action      String
+  targetType  String?  @map("target_type")
+  targetId    String?  @map("target_id")
+  beforeJson  Json?    @map("before_json") @db.JsonB
+  afterJson   Json?    @map("after_json") @db.JsonB
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([actorUserId], map: "AuditLog_actor_user_id_idx")
+  @@index([targetType, targetId], map: "AuditLog_target_idx")
+  @@index([createdAt], map: "AuditLog_created_at_idx")
+  @@map("audit_log")
   @@schema("public")
 }
 
@@ -401,6 +443,15 @@ model Order {
   guests_count         Int?
   slot_time_at         DateTime?      @map("slot_time_at") @db.Timestamptz(6)
   branchId             String         @map("branch_id")
+  // Phase 1 — order_coupon_fields migration (2026-06-08): coupon snapshot on order.
+  // Snapshots (code, discount, fundingSource, discountType) survive coupon archive/edit.
+  // FK uses ON DELETE SET NULL so soft-deleting/archiving a coupon doesn't cascade-delete orders.
+  orderCouponId            String?  @map("order_coupon_id")
+  orderCouponCode          String?  @map("order_coupon_code")
+  orderCouponDiscount      Decimal? @map("order_coupon_discount") @db.Decimal(10, 2)
+  orderCouponFundingSource String?  @map("order_coupon_funding_source")
+  orderCouponDiscountType  String?  @map("order_coupon_discount_type")
+  orderCoupon              Coupon?  @relation("OrderToCoupon", fields: [orderCouponId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_orders_coupon")
   items                OrderItem[]
   store                Store          @relation(fields: [storeId], references: [id], onUpdate: NoAction, map: "fk_orders_store")
   user                 User           @relation("CustomerOrders", fields: [userId], references: [id], onUpdate: NoAction, map: "fk_orders_user")
@@ -411,6 +462,7 @@ model Order {
   @@index([storeId], map: "Order_store_id_idx")
   @@index([userId], map: "Order_user_id_idx")
   @@index([branchId])
+  @@index([orderCouponId], map: "Order_order_coupon_id_idx")
   @@map("orders")
   @@schema("public")
 }

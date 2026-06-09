@@ -1,5 +1,6 @@
 import { Expo, ExpoPushMessage, ExpoPushTicket } from 'expo-server-sdk';
 import { PrismaClient } from '@prisma/client';
+import * as Sentry from '@sentry/node';
 
 const expo = new Expo();
 
@@ -51,6 +52,7 @@ class NotificationService {
             
             if (!recipientUserId) {
                 console.warn(`[NotificationService] No recipient found for store ${storeId}. Notification dropped.`);
+                try { Sentry.captureException(new Error('Notification recipient resolution returned null'), { extra: { storeId, type, referenceId } }); } catch {}
                 return; // Gracefully return void. We do not throw to avoid rolling back the transaction.
             }
 
@@ -74,6 +76,7 @@ class NotificationService {
                 console.log(`[NotificationService] DB Insert success | notificationId=${dbResult.id} storeId=${storeId} recipientUserId=${recipientUserId} referenceId=${referenceId}`);
             } catch (dbError) {
                 console.error('[NotificationService] Failed to create notification record:', dbError);
+                try { Sentry.captureException(dbError, { extra: { storeId, type, referenceId, area: 'notification.dbCreate' } }); } catch {}
                 // If tx is provided, we MUST throw to roll back the transaction!
                 // An invisible order is worse than a failed order.
                 if (tx) throw dbError;
@@ -88,6 +91,7 @@ class NotificationService {
 
             if (!tokens || tokens.length === 0) {
                 console.log(`[NotificationService] No active push tokens for user ${recipientUserId}. In-app notification saved.`);
+                try { Sentry.captureException(new Error('No active push tokens for merchant'), { extra: { storeId, type, referenceId, recipientUserId } }); } catch {}
                 return;
             }
 
