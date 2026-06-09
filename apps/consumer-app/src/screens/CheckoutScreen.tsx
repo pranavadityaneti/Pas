@@ -454,10 +454,10 @@ export default function CheckoutScreen() {
 
     const handleRemoveCoupon = () => {
         // Phase 4: clear CartContext.appliedCoupon (single source of truth).
-        // The route-param `selectedCoupon` is a wake-up signal only; clearing it
-        // here is belt-and-braces in case the user navigates back to Coupons.
+        // Phase 4 audit re-fix (2026-06-09 evening): dropped the
+        // navigation.setParams({ selectedCoupon: undefined }) call — the
+        // selectedCoupon route param itself was dropped from RootStackParamList.
         clearAppliedCoupon();
-        navigation.setParams({ selectedCoupon: undefined });
     };
 
     const selectContact = async () => {
@@ -605,21 +605,29 @@ export default function CheckoutScreen() {
                     specialInstructions: specialInstructions,
                     arrivalTime: selectedTime[req.branch_id] || selectedTime[req.store_id] || 'ASAP',
                     otp: storeOtp,
-                    items: req.items.map((item: any) => ({
-                        name: item.name,
-                        quantity: item.quantity,
-                        price: item.price,
-                        // Phase 4 fix C2 (2026-06-09): on coupon orders use ONLY
-                        // item.storeProductId (no fallback) so the cartHash
-                        // recompute on the server is deterministic. Fix D2's
-                        // invariant check at confirmAccepted entry guarantees
-                        // we never get here without storeProductId. On non-coupon
-                        // orders keep the legacy item.id || item.storeProductId
-                        // fallback so existing stock-decrement keeps working.
-                        storeProductId: appliedCoupon
-                            ? (item.storeProductId ?? null)
-                            : (item.id || item.storeProductId || null)
-                    })),
+                    items: req.items.map((item: any) => {
+                        // Phase 4 audit re-fix (2026-06-09 evening): look up
+                        // storeProductId from CartContext.items (durable post-C1)
+                        // because req.items has storeProductId stripped by
+                        // useOrderRequests.createRequests. Match by product .id.
+                        const cartMatch = items.find((ci) => String(ci.id) === String(item.id));
+                        const trustedStoreProductId = cartMatch?.storeProductId ?? null;
+                        return {
+                            name: item.name,
+                            quantity: item.quantity,
+                            price: item.price,
+                            // Phase 4 fix C2 (2026-06-09): on coupon orders use ONLY
+                            // the trusted storeProductId from CartContext (no fallback)
+                            // so the server's cartHash recompute is deterministic.
+                            // The D2 eligibility gate above guarantees the cart has
+                            // a storeProductId match for every item on coupon orders.
+                            // Non-coupon orders keep the legacy fallback path so
+                            // existing stock-decrement keeps working.
+                            storeProductId: appliedCoupon
+                                ? trustedStoreProductId
+                                : (trustedStoreProductId || item.id || null)
+                        };
+                    }),
                     // Phase 4 (2026-06-09): include the server-signed validation token
                     // so the server (Phase 2F) can verify the discount before applying
                     // it to this Order's snapshot columns. Only present when a coupon
@@ -815,12 +823,24 @@ export default function CheckoutScreen() {
             // multi-store coupon orders (rejected until Phase 5 ships allocation).
             // If the order is ineligible, drop the coupon and abort — user
             // re-taps Pay to retry without the coupon at the updated total.
+            //
+            // Phase 4 audit re-fix (2026-06-09 evening): source storeProductId
+            // from CartContext.items (durable post-C1), not from
+            // acceptedRequests[].items where useOrderRequests.createRequests
+            // strips the field. Match by product id (cart item .id == order
+            // request item .id, both come from the same upstream feed).
             if (appliedCoupon) {
+                const cartItemsByProductId = new Map(
+                    items.map((ci) => [String(ci.id), ci])
+                );
                 const orderItemsFlat = acceptedRequests.flatMap((req: any) =>
-                    (req.items || []).map((it: any) => ({
-                        storeProductId: it.storeProductId ?? null,
-                        storeId: req.store_id,
-                    }))
+                    (req.items || []).map((it: any) => {
+                        const cartMatch = cartItemsByProductId.get(String(it.id));
+                        return {
+                            storeProductId: cartMatch?.storeProductId ?? null,
+                            storeId: req.store_id,
+                        };
+                    })
                 );
                 const elig = checkCouponOrderEligibility(orderItemsFlat, appliedCoupon);
                 if (!elig.ok) {
@@ -1115,7 +1135,7 @@ export default function CheckoutScreen() {
                         </TouchableOpacity>
                     )}
                 </View>
-                <RazorpayCheckout visible={showPayment} onClose={() => setShowPayment(false)} onSuccess={handlePaymentSuccess} onError={handlePaymentError} amount={finalTotalToPay || total} restaurantName={storeNamesList} orderId={razorpayOrderId} />
+                <RazorpayCheckout visible={showPayment} onClose={() => setShowPayment(false)} onSuccess={handlePaymentSuccess} onError={handlePaymentError} amount={finalTotalToPay} restaurantName={storeNamesList} orderId={razorpayOrderId} />
             </SafeAreaView>
         );
     }
@@ -1291,27 +1311,40 @@ export default function CheckoutScreen() {
                 </View>
 
                 {/* Phase 4 fix B1 (2026-06-09): Apply Coupon entry-point row.
-                    Previously the Phase 4 typed validateCoupon → setAppliedCoupon
-                    pipeline existed but no UI navigated to CouponsScreen — the
-                    whole flow was unreachable. This row navigates the customer
-                    to the Coupons screen, passing subtotal + storeId + the
-                    current applied couponId so the user can swap or browse. */}
-                <View className="mx-5 mt-4 mb-3">
+                    Re-fixed 2026-06-09 evening: (a) restructured so the Remove
+                    button is a SIBLING of the navigate-to-Coupons row, not a
+                    nested TouchableOpacity (the prior nested pattern could
+                    intermittently fire both handlers — coupon cleared AND
+                    CouponsScreen opened); (b) disabled the row when the cart
+                    is multi-store, since A2's eligibility check would reject
+                    a coupon order at confirmAccepted anyway (silent UX trap). */}
+                <View className="mx-5 mt-4 mb-3 flex-row items-center bg-white border border-gray-100 rounded-2xl p-4">
                     <TouchableOpacity
-                        onPress={() => navigation.navigate('Coupons' as any, {
-                            subtotal,
-                            storeId: groupedStores[0]?.storeId || '',
-                            appliedCouponId: appliedCoupon?.couponId,
-                            returnTo: 'Checkout',
-                        })}
-                        className="flex-row items-center bg-white border border-gray-100 rounded-2xl p-4"
+                        onPress={() => {
+                            if (groupedStores.length > 1) return; // disabled multi-store
+                            navigation.navigate('Coupons' as any, {
+                                subtotal,
+                                storeId: groupedStores[0]?.storeId || '',
+                                appliedCouponId: appliedCoupon?.couponId,
+                                returnTo: 'Checkout',
+                            });
+                        }}
+                        disabled={groupedStores.length > 1}
+                        activeOpacity={groupedStores.length > 1 ? 1 : 0.7}
+                        className="flex-1 flex-row items-center"
                     >
-                        <Ticket size={20} color="#B52725" />
+                        <Ticket size={20} color={groupedStores.length > 1 ? '#9CA3AF' : '#B52725'} />
                         <View className="flex-1 ml-3">
-                            <Text className="text-[14px] font-bold text-gray-900">
-                                {appliedCoupon ? `${appliedCoupon.code} applied` : 'Apply Coupon'}
+                            <Text className={`text-[14px] font-bold ${groupedStores.length > 1 ? 'text-gray-400' : 'text-gray-900'}`}>
+                                {groupedStores.length > 1
+                                    ? 'Coupons (multi-store cart)'
+                                    : appliedCoupon ? `${appliedCoupon.code} applied` : 'Apply Coupon'}
                             </Text>
-                            {appliedCoupon ? (
+                            {groupedStores.length > 1 ? (
+                                <Text className="text-[12px] text-gray-400 font-medium mt-0.5">
+                                    Single-store carts only for now
+                                </Text>
+                            ) : appliedCoupon ? (
                                 <Text className="text-[12px] text-green-600 font-semibold mt-0.5">
                                     You saved ₹{appliedCoupon.discount.toFixed(2)} · Tap to change
                                 </Text>
@@ -1321,18 +1354,19 @@ export default function CheckoutScreen() {
                                 </Text>
                             )}
                         </View>
-                        {appliedCoupon ? (
-                            <TouchableOpacity
-                                onPress={handleRemoveCoupon}
-                                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                                className="ml-2 px-3 py-1.5 rounded-full bg-gray-100"
-                            >
-                                <Text className="text-[12px] font-bold text-gray-700">Remove</Text>
-                            </TouchableOpacity>
-                        ) : (
+                        {appliedCoupon && groupedStores.length === 1 ? null : groupedStores.length === 1 ? (
                             <ChevronRight size={18} color="#B52725" />
-                        )}
+                        ) : null}
                     </TouchableOpacity>
+                    {appliedCoupon && (
+                        <TouchableOpacity
+                            onPress={handleRemoveCoupon}
+                            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                            className="ml-2 px-3 py-1.5 rounded-full bg-gray-100"
+                        >
+                            <Text className="text-[12px] font-bold text-gray-700">Remove</Text>
+                        </TouchableOpacity>
+                    )}
                 </View>
 
                 <View className="px-5 mt-4 mb-3"><Text className="text-[12px] font-extrabold text-[#B52725] uppercase tracking-wider">Bill Details</Text></View>
@@ -1415,7 +1449,7 @@ export default function CheckoutScreen() {
                 </View>
             </Modal>
 
-            <RazorpayCheckout visible={showPayment} onClose={() => setShowPayment(false)} onSuccess={handlePaymentSuccess} onError={handlePaymentError} amount={finalTotalToPay || total} restaurantName={storeNamesList} orderId={razorpayOrderId} />
+            <RazorpayCheckout visible={showPayment} onClose={() => setShowPayment(false)} onSuccess={handlePaymentSuccess} onError={handlePaymentError} amount={finalTotalToPay} restaurantName={storeNamesList} orderId={razorpayOrderId} />
         </SafeAreaView>
     );
 }

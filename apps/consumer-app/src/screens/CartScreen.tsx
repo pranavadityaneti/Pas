@@ -59,9 +59,9 @@ export default function CartScreen() {
             // Phase 4 fix B2 (2026-06-09): no selectedCoupon param — checkout
             // screens read CartContext.appliedCoupon directly.
             if (isRestaurantOrder) {
-                navigation.navigate('DiningCheckout' as any);
+                navigation.navigate('DiningCheckout');
             } else {
-                navigation.navigate('Checkout' as any);
+                navigation.navigate('Checkout');
             }
             return; // Exit early
         }
@@ -96,9 +96,9 @@ export default function CartScreen() {
         const isRestaurantOrder = items.length > 0 && items[0].isDining;
         // Phase 4 fix B2 (2026-06-09): no selectedCoupon param.
         if (isRestaurantOrder) {
-            navigation.navigate('DiningCheckout' as any);
+            navigation.navigate('DiningCheckout');
         } else {
-            navigation.navigate('Checkout' as any);
+            navigation.navigate('Checkout');
         }
     };
 

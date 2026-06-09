@@ -166,18 +166,12 @@ export default function CouponsScreen() {
         // (Root → Main(tabs) → Cart(tab) → CartStack → Checkout), so a flat
         // navigate({name:'Checkout'}) from the root-level CouponsScreen fails
         // ("not handled by any navigator"). Use a nested target so React Navigation
-        // walks the tree, finds the existing Checkout instance, and merges params.
+        // walks the tree, finds the existing Checkout instance.
         //
-        // Phase 4: selectedCoupon param kept ONLY as a "wake up" signal — the
-        // authoritative state now lives in CartContext.appliedCoupon. The
-        // checkout screens trust CartContext, not these params.
-        const selectedCoupon = {
-          couponId: result.couponId,
-          code: result.code,
-          discount: result.discount,
-          discountType: result.discountType,
-          bogo: result.bogo ?? null,
-        };
+        // Phase 4 audit re-fix (2026-06-09 evening): dropped the selectedCoupon
+        // route-param payload — CartContext.appliedCoupon is now the only
+        // source of truth (set by setAppliedCoupon above). The checkout screens
+        // read directly from context; no wake-up signal needed.
         navigation.dispatch(
           CommonActions.navigate({
             name: 'Main',
@@ -185,7 +179,6 @@ export default function CouponsScreen() {
               screen: 'Cart',
               params: {
                 screen: returnTo,
-                params: { selectedCoupon },
                 merge: true,
               },
               merge: true,

@@ -324,25 +324,39 @@ export function CartProvider({ children }: { children: ReactNode }) {
         }
 
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        // Phase 4 fix D1 (2026-06-09): only clear the applied coupon on the
-        // mutating path. The audit caught the previous "clear before setItems"
-        // pattern: it would fire on stock-cap short-circuits (no actual cart
-        // change). Compute the decision OUTSIDE setItems so the clear only runs
-        // when we're certain the cart will mutate.
+        // Phase 4 fix D1 (2026-06-09) — re-fixed after audit (2026-06-09 evening):
+        // Decide OUTSIDE setItems whether we'll mutate (so the coupon clear is
+        // gated on actual mutation per D1's original intent), but compute the
+        // QUANTITY INCREMENT INSIDE setItems(prev => ...) — using prev.find()
+        // — so rapid double-taps don't both read stale qty=1 and converge on
+        // qty=2 instead of qty=3 (audit's D1-regression finding).
+        //
+        // Trade-off: the stock-cap check uses closure `items` so a rapid double-
+        // tap against a stock cap could exceed by 1; this matches the audit's
+        // acknowledged minor edge ("RN batches state updates and useCart
+        // consumers gate UI on items") and is preferable to making setItems
+        // updaters call Alert.alert (anti-pattern).
         const existing = items.find(i => String(i.id) === String(item.id));
+        let willMutate = false;
         if (existing) {
             const maxStock = item.stock !== undefined ? item.stock : Infinity;
-            const nextQty = existing.quantity + 1;
-            if (nextQty > maxStock) {
+            if (existing.quantity + 1 > maxStock) {
                 Alert.alert('Max Stock', `Only ${maxStock} available.`);
                 return; // no mutation, no coupon clear
             }
-            clearAppliedCoupon();
-            setItems(prev => prev.map(i => String(i.id) === String(item.id) ? { ...i, quantity: nextQty } : i));
-            return;
+            willMutate = true;
+        } else {
+            willMutate = true;
         }
-        clearAppliedCoupon();
-        setItems(prev => [...prev, { ...item, id: String(item.id), storeId: String(item.storeId), quantity: 1, stock: item.stock }]);
+        if (willMutate) clearAppliedCoupon();
+        setItems(prev => {
+            const ex = prev.find(i => String(i.id) === String(item.id));
+            if (ex) {
+                // Use prev's quantity (the latest queued state) — NOT the closure's.
+                return prev.map(i => String(i.id) === String(item.id) ? { ...i, quantity: ex.quantity + 1 } : i);
+            }
+            return [...prev, { ...item, id: String(item.id), storeId: String(item.storeId), quantity: 1, stock: item.stock }];
+        });
     };
 
     const removeItem = (id: string) => {
@@ -365,10 +379,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
             removeItem(id);
             return;
         }
-        // Phase 4 fix D1 (2026-06-09): compute the mutation decision outside
-        // setItems so the coupon-clear only fires when the cart actually mutates.
-        // Previous code cleared the coupon even on stock-cap short-circuit; the
-        // audit flagged that as a "no bleeds" rule violation.
+        // Phase 4 fix D1 (2026-06-09) — re-fixed after audit (2026-06-09 evening):
+        // updateQuantity's `quantity` arg is explicit (not closure-derived), so
+        // there's no rapid-tap arithmetic issue here. Pattern matches addItem
+        // for consistency: decide outside (gates coupon clear on actual mutation),
+        // mutate inside setItems(prev =>) to use the latest queued state.
         const target = items.find(i => String(i.id) === String(id));
         if (!target) return; // no mutation, no coupon clear
 
@@ -380,7 +395,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
             }
         }
         clearAppliedCoupon();
-        setItems(prev => prev.map(i => String(i.id) === String(id) ? { ...i, quantity } : i));
+        setItems(prev => {
+            const t = prev.find(i => String(i.id) === String(id));
+            if (!t) return prev; // race: item removed between closure read and setItems flush
+            return prev.map(i => String(i.id) === String(id) ? { ...i, quantity } : i);
+        });
     };
 
     const clearCart = () => {

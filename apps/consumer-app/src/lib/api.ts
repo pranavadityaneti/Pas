@@ -220,7 +220,20 @@ export function checkCouponOrderEligibility(
         };
     }
     // A2 — multi-store coupon scope-limit until Phase 5 ships allocation.
-    const storeIds = new Set(orderItems.map((it) => String(it?.storeId || '')).filter((s) => s.length > 0));
+    // Phase 4 audit re-fix (2026-06-09 evening): use ?? (not ||) for null/undefined
+    // detection so a future numeric-zero storeId doesn't collapse silently. Treat
+    // missing storeId as a violation, not a silent drop (fail-closed).
+    const missingStore = orderItems.some((it) => {
+        const s = it?.storeId ?? null;
+        return s === null || s === '' || s === undefined;
+    });
+    if (missingStore) {
+        return {
+            ok: false,
+            reason: 'One or more items in your order are missing store information. Please refresh your cart and try again.',
+        };
+    }
+    const storeIds = new Set(orderItems.map((it) => String(it?.storeId ?? '')));
     if (storeIds.size > 1) {
         return {
             ok: false,

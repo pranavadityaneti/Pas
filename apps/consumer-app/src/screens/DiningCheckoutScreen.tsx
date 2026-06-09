@@ -902,7 +902,7 @@ export default function DiningCheckoutScreen() {
                 onError={handlePaymentError}
                 /* Phase 4 fix A1 (2026-06-09): bind to finalTotalToPay so the
                    charge matches /payments/create-order. */
-                amount={finalTotalToPay || total}
+                amount={finalTotalToPay}
                 restaurantName={restaurantName}
                 orderId={razorpayOrderId}
             />
@@ -1233,35 +1233,39 @@ export default function DiningCheckoutScreen() {
                     ))}
 
                     {/* Phase 4 fix B1 (2026-06-09): Apply Coupon entry-point row.
-                        Lives inside the bill block here (dining checkout is denser
-                        than pickup). Tapping the row navigates to CouponsScreen
-                        with subtotal + storeId + currently applied couponId. */}
+                        Re-fixed 2026-06-09 evening: Remove button is now a SIBLING
+                        of the navigate-to-Coupons TouchableOpacity, not nested
+                        inside it (avoids both handlers firing on Remove tap). */}
                     <View className="border-t border-gray-100 mt-3 pt-3 mb-3">
-                        <TouchableOpacity
-                            onPress={() => navigation.navigate('Coupons' as any, {
-                                subtotal,
-                                storeId: restaurantId || '',
-                                appliedCouponId: appliedCoupon?.couponId,
-                                returnTo: 'DiningCheckout',
-                            })}
-                            className="flex-row items-center bg-[#FDF7F7] border border-[#FCDADA] rounded-xl p-3"
-                        >
-                            <Ticket size={18} color="#B52725" />
-                            <View className="flex-1 ml-3">
-                                <Text className="text-[13px] font-bold text-gray-900">
-                                    {appliedCoupon ? `${appliedCoupon.code} applied` : 'Apply Coupon'}
-                                </Text>
-                                {appliedCoupon ? (
-                                    <Text className="text-[11px] text-green-600 font-semibold mt-0.5">
-                                        Saved ₹{appliedCoupon.discount.toFixed(2)} · Tap to change
+                        <View className="flex-row items-center bg-[#FDF7F7] border border-[#FCDADA] rounded-xl p-3">
+                            <TouchableOpacity
+                                onPress={() => navigation.navigate('Coupons' as any, {
+                                    subtotal,
+                                    storeId: restaurantId || '',
+                                    appliedCouponId: appliedCoupon?.couponId,
+                                    returnTo: 'DiningCheckout',
+                                })}
+                                className="flex-1 flex-row items-center"
+                                activeOpacity={0.7}
+                            >
+                                <Ticket size={18} color="#B52725" />
+                                <View className="flex-1 ml-3">
+                                    <Text className="text-[13px] font-bold text-gray-900">
+                                        {appliedCoupon ? `${appliedCoupon.code} applied` : 'Apply Coupon'}
                                     </Text>
-                                ) : (
-                                    <Text className="text-[11px] text-gray-500 font-medium mt-0.5">
-                                        Browse offers or enter a code
-                                    </Text>
-                                )}
-                            </View>
-                            {appliedCoupon ? (
+                                    {appliedCoupon ? (
+                                        <Text className="text-[11px] text-green-600 font-semibold mt-0.5">
+                                            Saved ₹{appliedCoupon.discount.toFixed(2)} · Tap to change
+                                        </Text>
+                                    ) : (
+                                        <Text className="text-[11px] text-gray-500 font-medium mt-0.5">
+                                            Browse offers or enter a code
+                                        </Text>
+                                    )}
+                                </View>
+                                {!appliedCoupon && <ChevronRight size={16} color="#B52725" />}
+                            </TouchableOpacity>
+                            {appliedCoupon && (
                                 <TouchableOpacity
                                     onPress={() => clearAppliedCoupon()}
                                     hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
@@ -1269,10 +1273,8 @@ export default function DiningCheckoutScreen() {
                                 >
                                     <Text className="text-[11px] font-bold text-gray-700">Remove</Text>
                                 </TouchableOpacity>
-                            ) : (
-                                <ChevronRight size={16} color="#B52725" />
                             )}
-                        </TouchableOpacity>
+                        </View>
                     </View>
 
                     {/* Bill */}
@@ -1321,7 +1323,7 @@ export default function DiningCheckoutScreen() {
                 onError={handlePaymentError}
                 /* Phase 4 fix A1 (2026-06-09): bind to finalTotalToPay (post re-validate)
                    so the charge matches what /payments/create-order received. */
-                amount={finalTotalToPay || total}
+                amount={finalTotalToPay}
                 restaurantName={restaurantName}
                 orderId={razorpayOrderId}
             />
