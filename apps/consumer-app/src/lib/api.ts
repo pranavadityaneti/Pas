@@ -158,3 +158,108 @@ export const purgeAuthSession = async () => {
         console.error('[Auth] Error during session purge:', err);
     }
 };
+
+// ============================================================================
+// Phase 4 (2026-06-09) — typed helper for POST /checkout/validate-coupon.
+//
+// Centralizes the request/response contract so CouponsScreen + CouponsSection
+// use identical shapes. Pairs with Phase 2L's strict server policy: every
+// cart item MUST include storeProductId; the server reconciles unit prices
+// against StoreProduct.price and signs the resulting discount into a 10-min
+// HMAC validationToken. POST /orders verifies the token at order placement.
+// ============================================================================
+
+/** Phase 2L strict shape — every cart item MUST have storeProductId. */
+export interface ValidateCouponCartItem {
+    storeProductId: string;
+    quantity: number;
+    /** Optional client-side hint, ignored server-side (StoreProduct.price wins). */
+    price?: number;
+    /** Optional informational fields, ignored server-side. */
+    id?: string;
+    name?: string;
+}
+
+export interface ValidateCouponRequest {
+    code: string;
+    cartItems: ValidateCouponCartItem[];
+    storeIds?: string[];
+    orderType?: 'pickup' | 'dining';
+    /** Legacy single-store hint — still accepted server-side. */
+    storeId?: string;
+}
+
+export interface ValidateCouponSuccess {
+    valid: true;
+    couponId: string;
+    code: string;
+    discount: number;
+    discountType: 'PERCENTAGE' | 'FLAT' | 'BOGO';
+    fundingSource: 'PLATFORM' | 'MERCHANT' | null;
+    /** Server-signed HMAC — pass back to POST /orders. */
+    validationToken: string;
+    /** Unix seconds — client-computed: now + 10 min (matches server token.exp). */
+    expiresAt: number;
+    bogo?: { buy: number; get: number } | null;
+}
+
+export interface ValidateCouponFailure {
+    valid: false;
+    error: string;
+    /** HTTP status — useful for distinguishing expired / not-found / limit-hit. */
+    status: number;
+}
+
+export type ValidateCouponResult = ValidateCouponSuccess | ValidateCouponFailure;
+
+/**
+ * Apply a coupon code to the current cart. Caller passes the FULL cartItems[]
+ * (every item with storeProductId — Phase 2L strict policy) and the server
+ * returns a signed validationToken to use at POST /orders.
+ *
+ * On any failure (network, 4xx, server-side reject) returns a discriminated
+ * { valid: false, error, status } — callers should NOT throw on this; surface
+ * the error string to the user.
+ */
+export async function validateCoupon(req: ValidateCouponRequest): Promise<ValidateCouponResult> {
+    try {
+        const r = await apiClient.fetch('/checkout/validate-coupon', {
+            method: 'POST',
+            body: JSON.stringify({
+                code: String(req.code || '').toUpperCase(),
+                cartItems: req.cartItems,
+                storeIds: req.storeIds,
+                orderType: req.orderType,
+                storeId: req.storeId,
+            }),
+        });
+        const j: any = await r.json().catch(() => ({}));
+        if (!r.ok || !j?.valid) {
+            return {
+                valid: false,
+                error: j?.error || 'This coupon could not be applied.',
+                status: r.status,
+            };
+        }
+        // Server's token has exp = now + 600s; mirror that client-side so the
+        // checkout countdown UX doesn't need to decode the token.
+        const expiresAt = Math.floor(Date.now() / 1000) + 10 * 60;
+        return {
+            valid: true,
+            couponId: String(j.couponId),
+            code: String(j.code),
+            discount: Number(j.discount) || 0,
+            discountType: j.discountType,
+            fundingSource: j.fundingSource ?? null,
+            validationToken: String(j.validationToken),
+            expiresAt,
+            bogo: j.bogo ?? null,
+        };
+    } catch {
+        return {
+            valid: false,
+            error: 'Network hiccup. Please try again in a moment.',
+            status: 0,
+        };
+    }
+}

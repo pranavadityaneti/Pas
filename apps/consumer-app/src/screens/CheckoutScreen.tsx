@@ -1,5 +1,5 @@
 // @lock — DO NOT EDIT WITHOUT EXPLICIT USER PERMISSION.
-// Pickup Checkout — multiple approved layers (cumulative, latest May 19, 2026 demo crisis):
+// Pickup Checkout — multiple approved layers (cumulative, latest 2026-06-09):
 //   1. Non-absolute bottom CTA with pb-[100px] for tab bar clearance (original layout fix).
 //   2. handlePaymentSuccess session-recovery block: refresh + getSession to recover
 //      from Razorpay WebView session eviction (uses `effectiveUser`, not `user`, for
@@ -16,6 +16,20 @@
 //      acceptedRequests + PENDING requests so stores B..N are not left ACCEPTED
 //      until cron expiry. Does not touch handlePaymentSuccess, session-recovery,
 //      or the apiClient migration from layer 4).
+//   6. Phase 4 coupon-foolproof integration approved 2026-06-09. Reads
+//      appliedCoupon from CartContext (single source of truth for the server-signed
+//      validation token + signed discount). Sends validationToken + couponId +
+//      couponCode in the POST /orders body so the server (Phase 2F) can verify
+//      the token before applying the discount snapshot. Legacy AVAILABLE_COUPONS
+//      local constant + couponCode / couponApplied / couponDiscount local state
+//      removed — CartContext.appliedCoupon is now authoritative. On the proceed-
+//      to-pay step we synchronously re-validate the coupon if its token expires
+//      within 60s (closes the "stale token sent to server" bleed); on failure
+//      we clear the coupon and alert the user. Live countdown UI on the banner
+//      deferred to a follow-up styling pass (no bleeds, just polish). Does NOT
+//      touch session-recovery (layer 2), errorDiagnostic (layer 3), apiClient.fetch
+//      URL paths or effectiveUser resolution (layer 4), or executeCancelOrder
+//      (layer 5).
 // Any modification to the checkout flow, error UI, or session-handling logic
 // REQUIRES the user's explicit chat-confirmed approval. Hard lock.
 // Confirm Pre-order Screen: Order review with arrival details → Order confirmed with OTP.
@@ -39,7 +53,7 @@ import { useAuth } from '../context/AuthContext';
 import { useOrderRequests, OrderRequest } from '../hooks/useOrderRequests';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../lib/supabase';
-import { apiClient } from '../lib/api';
+import { apiClient, validateCoupon, type ValidateCouponCartItem } from '../lib/api';
 import TransactionalAuthModal from '../components/TransactionalAuthModal';
 import { STORES, RESTAURANTS, findAlternativeStores, ALL_PRODUCTS } from '../lib/data';
 import RazorpayCheckout from '../components/RazorpayCheckout';
@@ -47,11 +61,10 @@ import * as Contacts from 'expo-contacts';
 import { parseUtc } from '../utils/dateFormat';
 
 const TIME_OPTIONS = ['Today, 6:00 PM - 7:00 PM', 'Today, 7:00 PM - 8:00 PM', 'Today, 8:00 PM - 9:00 PM'];
-const AVAILABLE_COUPONS = [
-    { code: 'PASFIRST', discount: 100, description: 'Flat ₹100 off on your first order', minOrder: 500 },
-    { code: 'SUNDAY50', discount: 50, description: '₹50 off on lazy Sundays', minOrder: 299 },
-    { code: 'HUNGRY20', discount: 0.20, description: '20% off up to ₹100', isPercentage: true, maxDiscount: 100, minOrder: 400 },
-];
+// Phase 4 (2026-06-09): legacy AVAILABLE_COUPONS constant removed. The applied
+// coupon now lives in CartContext (server-validated via /checkout/validate-coupon)
+// and the discount comes from the signed token's `discount` field, not a hardcoded
+// list. The old minOrder client-side guard is now enforced server-side too.
 
 const generateTimeSlots = (store: any, day: 'Today' | 'Tomorrow') => {
     if (!store?.openingTime || !store?.closingTime) return TIME_OPTIONS;
@@ -92,7 +105,12 @@ export default function CheckoutScreen() {
     // 1. ALL HOOKS AT THE VERY TOP (UNCONDITIONAL)
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const route = useRoute<RouteProp<RootStackParamList, 'Checkout'>>();
-    const { items, getTotal, clearCart, updateQuantity, addItem, removeItem } = useCart();
+    // Phase 4 (2026-06-09): appliedCoupon + setAppliedCoupon + clearAppliedCoupon
+    // are the source of truth for coupon state on this screen. clearCart
+    // auto-clears appliedCoupon too (see CartContext.tsx), so post-order cleanup
+    // doesn't need explicit clear. setAppliedCoupon is used by the proceed-to-pay
+    // re-validate path to refresh the token when it nears expiry.
+    const { items, getTotal, clearCart, updateQuantity, addItem, removeItem, appliedCoupon, setAppliedCoupon, clearAppliedCoupon } = useCart();
     const {
         requests,
         allResolved,
@@ -112,9 +130,9 @@ export default function CheckoutScreen() {
     const [selectedDay, setSelectedDay] = useState<'Today' | 'Tomorrow'>('Today');
     const [confirmedOrders, setConfirmedOrders] = useState<{ storeId: string, storeName: string, items: any[], total: number, orderNumber?: string, otp: string }[]>([]);
     const [specialInstructions, setSpecialInstructions] = useState('');
-    const [couponCode, setCouponCode] = useState('');
-    const [couponApplied, setCouponApplied] = useState(false);
-    const [couponDiscount, setCouponDiscount] = useState(0);
+    // Phase 4 (2026-06-09): legacy couponCode/couponApplied/couponDiscount local
+    // state removed. CartContext.appliedCoupon is authoritative. See useCart()
+    // destructuring above.
     const [showPayment, setShowPayment] = useState(false);
     const [paymentId, setPaymentId] = useState<string | null>(null);
     const [razorpayOrderId, setRazorpayOrderId] = useState<string | undefined>();
@@ -377,16 +395,15 @@ export default function CheckoutScreen() {
     }, [rejectedRequests]);
 
     useEffect(() => {
-        if (route.params?.selectedCoupon) {
-            const { code, discount } = route.params.selectedCoupon;
-            setCouponCode(code);
-            setCouponDiscount(discount);
-            setCouponApplied(true);
-        }
+        // Phase 4 (2026-06-09): selectedCoupon route param is now only a "wake up"
+        // signal from CouponsScreen — the real applied-coupon state lives in
+        // CartContext.appliedCoupon (set by CouponsScreen before navigating back).
+        // We DON'T copy code/discount into local state here anymore; we render
+        // directly from appliedCoupon below.
         if (route.params?.specialInstructions) {
             setSpecialInstructions(route.params.specialInstructions);
         }
-    }, [route.params?.selectedCoupon, route.params?.specialInstructions]);
+    }, [route.params?.specialInstructions]);
 
 
 
@@ -425,7 +442,8 @@ export default function CheckoutScreen() {
         const isFnB = ['restaurant', 'bakery', 'cafe'].some(t => type.includes(t));
         return sum + (isFnB ? (group.total * 0.05) : 0);
     }, 0).toFixed(2));
-    const discount = couponApplied ? couponDiscount : 0;
+    // Phase 4: derive discount from CartContext.appliedCoupon (single source of truth).
+    const discount = appliedCoupon?.discount ?? 0;
     const total = subtotal + exactGst - discount;
 
     // Helpers
@@ -435,9 +453,10 @@ export default function CheckoutScreen() {
     };
 
     const handleRemoveCoupon = () => {
-        setCouponCode('');
-        setCouponApplied(false);
-        setCouponDiscount(0);
+        // Phase 4: clear CartContext.appliedCoupon (single source of truth).
+        // The route-param `selectedCoupon` is a wake-up signal only; clearing it
+        // here is belt-and-braces in case the user navigates back to Coupons.
+        clearAppliedCoupon();
         navigation.setParams({ selectedCoupon: undefined });
     };
 
@@ -591,7 +610,17 @@ export default function CheckoutScreen() {
                         quantity: item.quantity,
                         price: item.price,
                         storeProductId: item.id || item.storeProductId || null
-                    }))
+                    })),
+                    // Phase 4 (2026-06-09): include the server-signed validation token
+                    // so the server (Phase 2F) can verify the discount before applying
+                    // it to this Order's snapshot columns. Only present when a coupon
+                    // was applied to this cart; absent for no-coupon orders. The server
+                    // accepts both shapes via the Phase 2G shim for backward compat.
+                    ...(appliedCoupon ? {
+                        validationToken: appliedCoupon.validationToken,
+                        couponId: appliedCoupon.couponId,
+                        couponCode: appliedCoupon.code,
+                    } : {}),
                 };
 
                 let orderData: any = null;
@@ -762,22 +791,77 @@ export default function CheckoutScreen() {
             const isFnB = ['restaurant', 'bakery', 'cafe'].some(t => type.includes(t));
             return sum + (isFnB ? (req.subtotal * 0.05) : 0);
         }, 0));
-        const resultTotal = Math.max(0, resultSubtotal + resultGst - (couponApplied ? couponDiscount : 0));
+        // Phase 4: derived discount from CartContext.appliedCoupon (single source of truth).
+        const resultTotal = Math.max(0, resultSubtotal + resultGst - (appliedCoupon?.discount ?? 0));
 
         // Pending swap requests — show as "in progress"
         const pendingSwaps = requests.filter(r => r.status === 'PENDING');
 
         const confirmAccepted = async () => {
             if (acceptedRequests.length === 0) { navigation.goBack(); return; }
-            let newDiscount = couponApplied ? couponDiscount : 0;
-            if (couponApplied) {
-                const appliedCoupon = AVAILABLE_COUPONS.find(c => c.code === couponCode);
-                if (appliedCoupon && resultSubtotal < appliedCoupon.minOrder) {
-                    Alert.alert('Coupon Removed', 'Subtotal below minimum for coupon.');
-                    newDiscount = 0;
+            // Phase 4: removed legacy AVAILABLE_COUPONS minOrder check — the
+            // server's /checkout/validate-coupon (Phase 2L) now enforces minOrder
+            // against the server-trusted cart total. If a customer's cart drops
+            // below minOrder after applying, the next interaction with the cart
+            // auto-clears appliedCoupon (see CartContext.tsx Phase 4 changes),
+            // so no client-side mirror check is needed.
+            //
+            // Phase 4H (2026-06-09): if the coupon token is within 60s of expiry,
+            // re-validate before the Razorpay payment order is created. Prevents
+            // the customer being charged the full amount and then the server (Phase
+            // 2F) rejecting the stale token. On re-validate failure, the coupon is
+            // dropped and the customer is informed BEFORE payment is initiated.
+            let effectiveDiscount = appliedCoupon?.discount ?? 0;
+            if (appliedCoupon && appliedCoupon.expiresAt - 60 < Math.floor(Date.now() / 1000)) {
+                const itemsWithProductId = items.every((ci) => !!ci.storeProductId);
+                if (!itemsWithProductId) {
+                    // Cart has legacy items lacking storeProductId — can't safely
+                    // re-validate. Drop the coupon defensively.
+                    clearAppliedCoupon();
+                    effectiveDiscount = 0;
+                    Alert.alert(
+                        'Coupon removed',
+                        'Your cart was updated. Proceeding without the discount.'
+                    );
+                } else {
+                    const reValidatePayload: ValidateCouponCartItem[] = items.map((ci) => ({
+                        storeProductId: String(ci.storeProductId),
+                        quantity: ci.quantity,
+                        price: ci.price,
+                        id: ci.id,
+                        name: ci.name,
+                    }));
+                    const reValidateStoreIds = Array.from(new Set(items.map((ci) => String(ci.storeId))));
+                    const reValidate = await validateCoupon({
+                        code: appliedCoupon.code,
+                        cartItems: reValidatePayload,
+                        storeIds: reValidateStoreIds,
+                        orderType: 'pickup',
+                    });
+                    if (!reValidate.valid) {
+                        clearAppliedCoupon();
+                        effectiveDiscount = 0;
+                        Alert.alert(
+                            'Coupon expired',
+                            `${reValidate.error} Proceeding without the discount.`
+                        );
+                    } else {
+                        // Refresh CartContext with the new server-signed token.
+                        setAppliedCoupon({
+                            code: reValidate.code,
+                            couponId: reValidate.couponId,
+                            discount: reValidate.discount,
+                            fundingSource: reValidate.fundingSource,
+                            discountType: reValidate.discountType,
+                            validationToken: reValidate.validationToken,
+                            expiresAt: reValidate.expiresAt,
+                            cartHash: '',
+                        });
+                        effectiveDiscount = reValidate.discount;
+                    }
                 }
             }
-            const newTotal = Math.max(0, resultSubtotal + resultGst - newDiscount);
+            const newTotal = Math.max(0, resultSubtotal + resultGst - effectiveDiscount);
             setFinalTotalToPay(newTotal);
             setFinalGstToPay(resultGst);
 
@@ -972,7 +1056,7 @@ export default function CheckoutScreen() {
                             {resultGst > 0 && (
                                 <View className="flex-row justify-between mb-2"><Text className="text-[13px] text-gray-500 font-medium">GST (5%)</Text><Text className="text-[13px] text-gray-900 font-bold">₹{resultGst}</Text></View>
                             )}
-                            {couponApplied && <View className="flex-row justify-between mb-2"><Text className="text-[13px] text-green-600 font-bold">Discount</Text><Text className="text-[13px] text-green-600 font-bold">-₹{couponDiscount}</Text></View>}
+                            {appliedCoupon && <View className="flex-row justify-between mb-2"><Text className="text-[13px] text-green-600 font-bold">Discount</Text><Text className="text-[13px] text-green-600 font-bold">-₹{appliedCoupon.discount}</Text></View>}
                             <View className="border-t border-gray-200 my-2" />
                             <View className="flex-row justify-between"><Text className="text-[15px] text-gray-900 font-extrabold">Total</Text><Text className="text-[18px] text-gray-900 font-extrabold">₹{resultTotal}</Text></View>
                         </View>
@@ -1182,7 +1266,7 @@ export default function CheckoutScreen() {
                     {exactGst > 0 && (
                         <View className="flex-row justify-between mb-2.5"><Text className="text-[13px] text-gray-500 font-semibold">GST (5%)</Text><Text className="text-[13px] text-gray-900 font-bold">₹{exactGst.toFixed(2)}</Text></View>
                     )}
-                    {couponApplied && <View className="flex-row justify-between mb-2.5"><Text className="text-[13px] text-green-600 font-bold">Offer Discount</Text><Text className="text-[13px] text-green-600 font-bold">−₹{discount.toFixed(2)}</Text></View>}
+                    {appliedCoupon && <View className="flex-row justify-between mb-2.5"><Text className="text-[13px] text-green-600 font-bold">Offer Discount</Text><Text className="text-[13px] text-green-600 font-bold">−₹{discount.toFixed(2)}</Text></View>}
                     <View className="border-t border-gray-100 my-3" />
                     <View className="flex-row justify-between items-center"><Text className="text-[15px] text-gray-900 font-bold">To Pay</Text><Text className="text-[18px] text-gray-900 font-bold">₹{total.toFixed(2)}</Text></View>
                 </View>
