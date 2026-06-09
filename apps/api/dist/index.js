@@ -5101,8 +5101,54 @@ app.post('/checkout/validate-coupon', async (req, res) => {
         if (!hasCartItems && (typeof clientCartTotal === 'undefined' || clientCartTotal === null)) {
             return res.status(400).json({ error: 'cartItems[] or cartTotal is required' });
         }
+        // Phase 2L hot-fix (2026-06-09) — server-side price reconciliation.
+        // Adversarial pre-merge review (PR #1, medium #11) found that
+        // effectiveCartTotal + BOGO were computed from client-supplied unit
+        // prices in cartItems[] with no server-side reconciliation. The HMAC
+        // token then signed the client-trusted discount, polluting analytics +
+        // PLATFORM-funded settlement math. Fix: when cartItems[] is present,
+        // fetch StoreProduct.price for every storeProductId; require
+        // storeProductId on every item; reject if any item references a
+        // missing/deleted/inactive product. Trusted prices are used everywhere
+        // below (effectiveCartTotal + BOGO) instead of item.price.
+        //
+        // Strict policy ("no temporary patches" per Pranav 2026-06-09): if
+        // cartItems[] is provided but ANY item lacks storeProductId or its
+        // product can't be resolved, reject the whole request. No silent fallback
+        // to client prices — that's exactly the gap this hot-fix closes.
+        let trustedPrices = null;
+        if (hasCartItems) {
+            const storeProductIds = [];
+            for (const item of cartItems) {
+                const id = item?.storeProductId;
+                if (!id) {
+                    return res.status(400).json({
+                        valid: false,
+                        error: 'Every cart item must include storeProductId so the server can verify price. Please refresh your cart.',
+                    });
+                }
+                storeProductIds.push(String(id));
+            }
+            // Single query fetches all server-trusted prices. Filter deleted /
+            // inactive — those shouldn't be orderable; if they're in the cart,
+            // the user must refresh.
+            const rows = await prisma.storeProduct.findMany({
+                where: { id: { in: storeProductIds }, is_deleted: false, active: true },
+                select: { id: true, price: true },
+            });
+            trustedPrices = new Map(rows.map((r) => [r.id, Number(r.price) || 0]));
+            const missing = storeProductIds.filter((id) => !trustedPrices.has(id));
+            if (missing.length > 0) {
+                return res.status(400).json({
+                    valid: false,
+                    error: 'One or more cart items reference a product that is no longer available. Please refresh your cart.',
+                });
+            }
+        }
+        // Phase 2L — effectiveCartTotal now uses server-trusted prices
+        // (trustedPrices Map keyed by storeProductId) rather than item.price.
         const effectiveCartTotal = hasCartItems
-            ? cartItems.reduce((sum, item) => sum + (Number(item?.price) || 0) * (Number(item?.quantity) || 0), 0)
+            ? cartItems.reduce((sum, item) => sum + (trustedPrices.get(String(item.storeProductId)) || 0) * (Number(item?.quantity) || 0), 0)
             : (Number(clientCartTotal) || 0);
         // Phase 2 (2E-1) — exclude archived coupons (deletedAt set by sub-task 2D).
         const coupon = await prisma.coupon.findFirst({ where: { code: String(code).toUpperCase(), deletedAt: null } });
@@ -5204,13 +5250,17 @@ app.post('/checkout/validate-coupon', async (req, res) => {
                 const batchSize = buy + get;
                 const mode = String(coupon.bogoMode || 'CHEAPEST').toUpperCase();
                 if (mode === 'SAME_PRODUCT') {
-                    // Group items by product key (storeProductId or fallback to name).
-                    // For each group with quantity >= batchSize, discount `get` units per
-                    // complete batch at that product's price.
+                    // Group items by storeProductId. For each group with
+                    // quantity >= batchSize, discount `get` units per complete
+                    // batch at that product's server-trusted price.
+                    //
+                    // Phase 2L: keyed on storeProductId only (legacy fallbacks to
+                    // id/name removed) — server-trusted prices require the FK.
+                    // Validated above; trustedPrices is non-null here.
                     const groups = new Map();
                     for (const item of cartItems) {
-                        const key = String(item?.storeProductId || item?.id || item?.name || 'unknown');
-                        const price = Number(item?.price) || 0;
+                        const key = String(item.storeProductId);
+                        const price = trustedPrices.get(key) || 0;
                         const qty = Number(item?.quantity) || 0;
                         const existing = groups.get(key);
                         if (existing) {
@@ -5229,9 +5279,12 @@ app.post('/checkout/validate-coupon', async (req, res) => {
                     // CHEAPEST mode (default per business config) — expand all cart items
                     // to per-unit prices, sort ascending, then for every batch of
                     // (buy+get) units, discount the first `get` (cheapest) units.
+                    //
+                    // Phase 2L: uses server-trusted prices (trustedPrices map)
+                    // instead of item.price. trustedPrices is non-null here.
                     const unitPrices = [];
                     for (const item of cartItems) {
-                        const price = Number(item?.price) || 0;
+                        const price = trustedPrices.get(String(item.storeProductId)) || 0;
                         const qty = Number(item?.quantity) || 0;
                         for (let i = 0; i < qty; i++)
                             unitPrices.push(price);
