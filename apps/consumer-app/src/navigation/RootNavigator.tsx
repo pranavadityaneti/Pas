@@ -20,6 +20,7 @@ import PaymentMethodsScreen from '../screens/PaymentMethodsScreen';
 import SupportScreen from '../screens/SupportScreen';
 import AddPaymentMethodScreen from '../screens/AddPaymentMethodScreen';
 import SwapScreen from '../screens/SwapScreen';
+import CouponsScreen from '../screens/CouponsScreen';
 import { RootStackParamList } from './types';
 import { useAuth } from '../context/AuthContext';
 import FloatingCartBand from '../components/FloatingCartBand';
@@ -111,6 +112,7 @@ export default function RootNavigator() {
                 <Stack.Screen name="AddPaymentMethod" component={AddPaymentMethodScreen} />
                 <Stack.Screen name="SwapScreen" component={SwapScreen} />
                 <Stack.Screen name="Cart" component={CartScreen} />
+                <Stack.Screen name="Coupons" component={CouponsScreen} />
             </Stack.Navigator>
             <FloatingCartBand />
         </>

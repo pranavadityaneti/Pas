@@ -2,6 +2,11 @@
 // VERIFIED WORKING in production (Android pickup order, May 25 2026). Polling
 // fallback + AppState reconnect for Supabase Realtime. Do NOT edit without
 // explicit user approval — order acceptance UX hangs on this hook.
+//
+// Approved layers:
+//   1. store_id silent-fallback fix (approved 2026-06-08, Option A patch #7 —
+//      makes merchant-resolution failures loud instead of silently writing
+//      branch_id as store_id. Does not touch realtime/polling/timer logic.)
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { AppState } from 'react-native';
 import { supabase } from '../lib/supabase';
@@ -96,6 +101,20 @@ export function useOrderRequests(): UseOrderRequestsReturn {
                 .select('id, merchant_id')
                 .in('id', branchIds);
 
+            // Option A patch #7 (2026-06-08): loud merchant-resolution failure.
+            // Previously the silent fallback `merchantIdMap.get(bId) || bId` would write
+            // branch_id into store_id when the merchant_branches lookup failed (RLS,
+            // null merchant_id, missing row). The merchant-app inbox filters by store_id,
+            // so the request would never be visible to the merchant → 2-min timeout →
+            // silent order death. Now we throw before building the requests.
+            if (!branchData || branchData.length !== branchIds.length) {
+                throw new Error('Could not resolve merchant for one or more stores. Please refresh and try again.');
+            }
+            const missingMerchant = branchData.find((b: any) => !b.merchant_id);
+            if (missingMerchant) {
+                throw new Error('One or more stores are missing a merchant assignment. Please contact support.');
+            }
+
             const merchantIdMap = new Map(branchData?.map(b => [b.id, b.merchant_id]));
 
             const rows = stores.map(store => {
@@ -103,7 +122,11 @@ export function useOrderRequests(): UseOrderRequestsReturn {
                 return {
                     // Note: expires_at, created_at, and updated_at are handled server-side
                     consumer_user_id: user.id,
-                    store_id: merchantIdMap.get(bId) || bId,
+                    store_id: (() => {
+                        const mid = merchantIdMap.get(bId);
+                        if (!mid) throw new Error(`Missing merchant for branch ${bId}`);
+                        return mid;
+                    })(),
                     branch_id: bId,
                     store_name: store.storeName,
                     items: store.items.map(i => ({ id: i.id, name: i.name, quantity: i.quantity, price: i.price })),

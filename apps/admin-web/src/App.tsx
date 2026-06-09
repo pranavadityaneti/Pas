@@ -12,6 +12,9 @@ import { MerchantNetwork } from './components/modules/merchants/MerchantNetwork'
 import { MasterCatalog } from './components/modules/catalog/MasterCatalog';
 import { CustomerDatabase } from './components/modules/customers/CustomerDatabase';
 import { MarketingHub } from './components/modules/marketing/MarketingHub';
+// Phase 3 (3F/3G, 2026-06-08) — per-coupon detail page + cross-coupon analytics dashboard.
+import { CouponDetailPage } from './components/modules/marketing/CouponDetailPage';
+import { CouponAnalyticsHub } from './components/modules/marketing/CouponAnalyticsHub';
 import { EngagementHub } from './components/modules/engagement/EngagementHub';
 import { CityManager } from './components/modules/geography/CityManager';
 import { FinanceHub } from './components/modules/finance/FinanceHub';
@@ -74,6 +77,9 @@ export default function App() {
         <Route path="orders" element={<OrderManager />} />
         <Route path="customers" element={<CustomerDatabase />} />
         <Route path="marketing" element={<MarketingHub />} />
+        {/* Phase 3 (3F/3G) — coupon analytics surfaces. */}
+        <Route path="marketing/analytics" element={<CouponAnalyticsHub />} />
+        <Route path="marketing/coupons/:id" element={<CouponDetailPage />} />
         <Route path="engagement" element={<EngagementHub />} />
         <Route path="geography" element={<CityManager />} />
         <Route path="finance" element={<FinanceHub />} />

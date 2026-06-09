@@ -26,4 +26,10 @@ export type RootStackParamList = {
     AddPaymentMethod: undefined;
 
     SwapScreen: undefined;
+    Coupons: {
+        subtotal: number;
+        storeId: string;
+        appliedCouponId?: string;
+        returnTo: 'Checkout' | 'DiningCheckout';
+    };
 };

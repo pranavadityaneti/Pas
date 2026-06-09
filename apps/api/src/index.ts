@@ -16,6 +16,8 @@ import { Server } from 'socket.io';
 import multer from 'multer';
 import * as xlsx from 'xlsx';
 import fs from 'fs';
+// Note: `crypto` is already brought in via `require` at line ~469 (legacy pattern
+// shared with Razorpay). Phase 2 (2E-4) helpers below use that same `crypto`.
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { smsService } from './services/sms.service';
@@ -204,6 +206,252 @@ async function requireUser(req: express.Request, res: express.Response) {
         res.status(401).json({ error: 'Authentication required' });
         return null;
     }
+}
+
+/**
+ * Phase 2J (hot-fix 2026-06-09) — Soft auth for endpoints that Option A patches
+ * #1A/#1B/#1C hard-cut behind requireUser (POST /orders, PATCH /order-requests/:id/status).
+ *
+ * Background: the deployed API requires auth on those endpoints, but main's
+ * consumer-app still uses plain fetch() without an Authorization header.
+ * Pre-OTA installs return 401 on every checkout / cancel — this helper restores
+ * legacy behavior for those clients while preserving Option A #1B's impersonation
+ * guard for authenticated callers.
+ *
+ * Behavior:
+ *  - REQUIRE_ORDERS_AUTH=true → hard-require auth (matches requireUser exactly).
+ *  - Else, Authorization header PRESENT but invalid → 401 (don't let attackers
+ *    send garbage to bypass the eventual hard-require).
+ *  - Else, Authorization header MISSING → soft-pass. Returns { user: null }.
+ *    Sentry captures a count for OTA-rollout visibility.
+ *  - Else, Authorization header VALID → returns { user: <User> }. Caller MUST
+ *    enforce its own userId/ownership guards conditionally on user being non-null.
+ *
+ * Return convention:
+ *  - null          → response already sent (401); caller does `if (!auth) return;`
+ *  - { user: ... } → proceed; check `auth.user` for null vs authenticated
+ *
+ * Flip REQUIRE_ORDERS_AUTH=true once Sentry shows zero soft-auth pre-OTA
+ * messages for 24+ hours.
+ */
+async function softRequireUser(req: express.Request, res: express.Response): Promise<{ user: any } | null> {
+    const authHeader = req.headers.authorization;
+    if (process.env.REQUIRE_ORDERS_AUTH === 'true') {
+        try {
+            const user = await getAuthUser(req);
+            return { user };
+        } catch {
+            res.status(401).json({ error: 'Authentication required' });
+            return null;
+        }
+    }
+    // Soft mode — flag is off (default during pre-OTA window).
+    if (authHeader) {
+        // Header present → must be valid; else 401. This keeps post-OTA clients
+        // strict and prevents garbage-header bypass attempts.
+        try {
+            const user = await getAuthUser(req);
+            return { user };
+        } catch {
+            res.status(401).json({ error: 'Invalid authentication token' });
+            return null;
+        }
+    }
+    // No header at all → legacy pre-OTA client. Log for OTA-rollout monitoring.
+    try {
+        Sentry.captureMessage('soft-auth: pre-OTA unauth request', {
+            level: 'info',
+            tags: {
+                phase: 'pre-ota-soft-auth',
+                endpoint: req.path,
+                method: req.method,
+            },
+        });
+    } catch {
+        // Swallow — Sentry shouldn't take down /orders.
+    }
+    return { user: null };
+}
+
+// Phase 2 (Coupon foolproof) — minimal server-side capability map for coupon
+// endpoints. Mirrors apps/admin-web/src/lib/rbac.ts. SUPER_ADMIN is handled by
+// the wildcard check inside requireCapability (matches isAdmin/role==='SUPER_ADMIN'
+// the same way requireAdmin / requireRole do), so it's not listed here. Add more
+// roles as they gain coupon capabilities. Future: move to a shared package
+// (apps/api/src/lib/rbac.ts already mirrors this map but is not yet wired into
+// index.ts — left untouched to keep this sub-task strictly additive).
+const ROLE_CAPABILITIES: Record<string, string[]> = {
+    FINANCE: ['coupons.view_analytics'],
+};
+
+/**
+ * Capability-based RBAC guard. Resolves the user's role → capability list and
+ * verifies the user has the requested capability. Returns the User on success,
+ * sends 403 and returns null on failure.
+ *
+ * Phase 2 (Coupon foolproof) — added to replace requireAdmin on coupon endpoints
+ * in a follow-up sub-task so server-side RBAC matches what
+ * apps/admin-web/src/lib/rbac.ts already declares. Not yet wired to any
+ * endpoint — sub-task 2A only adds the helper + capability declarations.
+ *
+ * Pattern matches requireUser / requireAdmin / requireRole — caller does:
+ *   const u = await requireCapability(req, res, 'coupons.create_edit_delete');
+ *   if (!u) return;
+ */
+async function requireCapability(
+    req: express.Request,
+    res: express.Response,
+    capability: string,
+) {
+    let caller;
+    try {
+        caller = await getAuthUser(req);
+    } catch {
+        res.status(401).json({ error: 'Authentication required' });
+        return null;
+    }
+    const callerProfile = await prisma.user.findUnique({
+        where: { id: caller.id },
+        select: { isAdmin: true, role: true },
+    });
+    if (!callerProfile) {
+        res.status(403).json({ error: 'Access denied' });
+        return null;
+    }
+    // SUPER_ADMIN wildcard — keeps current behaviour intact. The legacy isAdmin
+    // flag is treated as SUPER_ADMIN equivalent (mirrors requireAdmin /
+    // requireRole semantics for users created pre-Role-enum).
+    if (callerProfile.role === 'SUPER_ADMIN' || callerProfile.isAdmin === true) {
+        return caller;
+    }
+    const role = callerProfile.role || '';
+    const capabilities = ROLE_CAPABILITIES[role] || [];
+    if (capabilities.includes(capability)) {
+        return caller;
+    }
+    res.status(403).json({ error: 'Forbidden: missing capability ' + capability });
+    return null;
+}
+
+/**
+ * Append-only audit log writer. Records who did what (action), to what
+ * (targetType + targetId), with the JSON before/after diff.
+ *
+ * Phase 2 (Coupon foolproof) — called from coupon mutation endpoints
+ * (POST/PATCH/DELETE /coupon). Future: any sensitive mutation can call this.
+ *
+ * Failure handling: NEVER throws or fails the parent mutation. If the audit
+ * write itself fails, captures to Sentry and continues. Audit gaps are loud
+ * (in Sentry) but never block business logic.
+ */
+async function writeAuditLog(
+    actorUserId: string,
+    action: string,
+    targetType: string | null,
+    targetId: string | null,
+    beforeJson: any,
+    afterJson: any,
+): Promise<void> {
+    try {
+        await prisma.auditLog.create({
+            data: {
+                actorUserId,
+                action,
+                targetType: targetType || null,
+                targetId: targetId || null,
+                beforeJson: (beforeJson ?? null) as any,
+                afterJson: (afterJson ?? null) as any,
+            },
+        });
+    } catch (err: any) {
+        console.error('[writeAuditLog] failed:', err?.message || err);
+        try {
+            Sentry.captureException(err, {
+                extra: { actorUserId, action, targetType, targetId, area: 'audit-log.write' },
+            });
+        } catch {
+            // Sentry SDK failure — already in degraded state, don't double-fail.
+        }
+    }
+}
+
+/**
+ * Phase 2 (2E-4) — Coupon validation token helpers.
+ *
+ * Issues a signed HMAC-SHA256 token from POST /checkout/validate-coupon. The token
+ * binds a specific coupon+user+cart to a specific discount, with a 10-min TTL.
+ * POST /orders (Phase 2F) verifies the token before applying any discount —
+ * closes the cart-spoof attack the audit flagged.
+ *
+ * NOT a true JWT (avoids new dep) but functionally equivalent: base64url(payload)
+ * + '.' + base64url(HMAC-SHA256). Constant-time signature comparison on verify.
+ *
+ * Env var: COUPON_VALIDATION_SECRET (set on EB via `eb setenv ... ; eb deploy`
+ * chained per ERRORS.md before Phase 4 OTA flip-over). If unset locally, sign
+ * returns null (logs a warning); verify throws (caught by the endpoint).
+ */
+function computeCartHash(cartItems: any[]): string {
+    const normalized = (Array.isArray(cartItems) ? cartItems : []).map((item) => ({
+        id: String(item?.storeProductId || item?.id || item?.name || ''),
+        p: Number(item?.price) || 0,
+        q: Number(item?.quantity) || 0,
+    })).sort((a, b) => a.id.localeCompare(b.id));
+    return crypto.createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
+}
+
+function signCouponToken(payload: Record<string, any>): string | null {
+    const secret = process.env.COUPON_VALIDATION_SECRET;
+    if (!secret) {
+        console.warn('[coupon-token] COUPON_VALIDATION_SECRET not set — token omitted (set on EB before Phase 4 OTA flip-over)');
+        return null;
+    }
+    const json = JSON.stringify(payload);
+    const data = Buffer.from(json, 'utf8').toString('base64url');
+    const sig = crypto.createHmac('sha256', secret).update(data).digest('base64url');
+    return `${data}.${sig}`;
+}
+
+function verifyCouponToken(token: string): Record<string, any> {
+    const secret = process.env.COUPON_VALIDATION_SECRET;
+    if (!secret) {
+        throw new Error('COUPON_VALIDATION_SECRET not configured');
+    }
+    const parts = token.split('.');
+    if (parts.length !== 2) {
+        throw new Error('Malformed coupon token');
+    }
+    const [data, sig] = parts;
+    const expected = crypto.createHmac('sha256', secret).update(data).digest('base64url');
+    const sigBuf = Buffer.from(sig);
+    const expBuf = Buffer.from(expected);
+    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+        throw new Error('Invalid coupon token signature');
+    }
+    const payload = JSON.parse(Buffer.from(data, 'base64url').toString('utf8'));
+    if (typeof payload.exp !== 'number' || payload.exp < Math.floor(Date.now() / 1000)) {
+        throw new Error('Coupon token expired');
+    }
+    return payload;
+}
+
+/**
+ * Phase 2 (2I) — Tiny per-process in-memory rate limiter for abuse defense on
+ * coupon endpoints. Per-key 60-second sliding window. Per-process means each
+ * EB instance tracks separately — sufficient as a defensive backstop; the real
+ * limiter (CloudFlare / API gateway) lives upstream. Returns true if the
+ * request is allowed, false if it exceeds the cap.
+ */
+const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+function checkRateLimit(key: string, maxPerMinute: number): boolean {
+    const now = Date.now();
+    const bucket = rateLimitBuckets.get(key);
+    if (!bucket || bucket.resetAt < now) {
+        rateLimitBuckets.set(key, { count: 1, resetAt: now + 60_000 });
+        return true;
+    }
+    if (bucket.count >= maxPerMinute) return false;
+    bucket.count++;
+    return true;
 }
 
 async function logAudit(productId: string, action: string, field: string | null, oldValue: any, newValue: any, changedBy: string = 'System') {
@@ -2296,7 +2544,27 @@ app.get('/consumer/products/search', async (req, res) => {
 
 // Create Order (for testing/Consumer App)
 app.post('/orders', async (req, res) => {
+    // Phase 2K hot-fix (2026-06-09): hoist `user` so the orphan-refund block in
+    // the catch can do the ownership check (paymentId must belong to this user's
+    // order, or no order exists for it). Stays null on softRequireUser-fail or
+    // soft-pass (REQUIRE_ORDERS_AUTH=false + no Authorization header) — catch
+    // block treats null as "can't auto-refund, let the SLA cron reconcile".
+    let user: any = null;
     try {
+        // Option A patch #1B (2026-06-08): backend requireUser hardening.
+        // Previously any anonymous caller could submit { userId: <victim>, paid: true,
+        // paymentId: 'fake' } and create a paid order in another customer's name.
+        //
+        // Phase 2J hot-fix (2026-06-09): soft-auth gate. Pre-OTA consumer-app
+        // installs still use plain fetch() with no Authorization header and would
+        // 401 on every checkout. Until REQUIRE_ORDERS_AUTH=true (post-OTA), we
+        // accept unauth requests and skip the impersonation guard for them. The
+        // impersonation guard below STILL runs for authenticated callers, so
+        // Option A #1B's no-impersonation guarantee is preserved for that path.
+        const auth = await softRequireUser(req, res);
+        if (!auth) return;
+        user = auth.user;
+
         const {
             userId,
             storeId,
@@ -2313,11 +2581,74 @@ app.post('/orders', async (req, res) => {
             arrivalTime,
             otp,                // OTP generated by consumer app
             orderType,          // 'pickup' | 'dine-in' (defaults to 'pickup')
-            guestsCount         // Number of guests for dine-in orders
+            guestsCount,        // Number of guests for dine-in orders
+            // Phase 2 (2F) — coupon snapshot fields. validationToken is the HMAC
+            // proof from POST /checkout/validate-coupon. couponId/couponCode are
+            // snapshot info; discount/fundingSource/discountType come from the
+            // trusted token payload (not body — body is client-controlled).
+            validationToken,
+            couponId,
+            couponCode,
         } = req.body;
 
         if (!userId || !storeId || !branchId || !items || !totalAmount) {
             return res.status(400).json({ error: 'Missing required fields: userId, storeId, branchId, items, totalAmount' });
+        }
+
+        // Option A patch #1B: ownership guard — body.userId must match the
+        // authenticated user's id. Prevents creating an order in another
+        // customer's name even when a valid token is presented.
+        //
+        // Phase 2J: only enforced when authenticated. Soft-auth pre-OTA clients
+        // (user === null) skip this guard — same as the pre-Option-A baseline.
+        // Once REQUIRE_ORDERS_AUTH=true, softRequireUser ensures user is non-null.
+        if (user && user.id !== userId) {
+            return res.status(403).json({ error: 'userId mismatch — cannot create order for another user' });
+        }
+
+        // Phase 2 (2F) — coupon validation token check. If a token is provided,
+        // verify HMAC signature + expiry + userId binding + cartHash match. If
+        // valid, populate couponContext for the transactional redemption write
+        // below. Feature-flagged: REQUIRE_COUPON_TOKEN=true (post-Phase-4)
+        // makes any client-claimed couponId without a valid token a 400; until
+        // then, legacy clients without tokens still work (no discount applied).
+        let couponContext: {
+            couponId: string;
+            code: string;
+            discount: number;
+            fundingSource: string;
+            discountType: string;
+        } | null = null;
+        const requireCouponToken = String(process.env.REQUIRE_COUPON_TOKEN || 'false').toLowerCase() === 'true';
+
+        if (validationToken) {
+            try {
+                const decoded = verifyCouponToken(String(validationToken));
+                if (decoded.userId !== userId) {
+                    return res.status(400).json({ error: 'Coupon token does not match this user' });
+                }
+                // cartHash binding — only enforce strictly when REQUIRE_COUPON_TOKEN
+                // is on. Until then a mismatch is logged but allowed (backward compat
+                // with legacy consumer-app builds that haven't OTA'd yet).
+                const observedCartHash = computeCartHash(items || []);
+                if (decoded.cartHash !== observedCartHash) {
+                    if (requireCouponToken) {
+                        return res.status(400).json({ error: 'Cart changed since coupon was applied — please re-apply' });
+                    }
+                    console.warn(`[POST /orders] coupon cartHash mismatch — will reject when REQUIRE_COUPON_TOKEN=true. userId=${userId}`);
+                }
+                couponContext = {
+                    couponId: String(decoded.couponId),
+                    code: String(couponCode || ''),
+                    discount: Number(decoded.discount) || 0,
+                    fundingSource: String(decoded.fundingSource || ''),
+                    discountType: String(decoded.discountType || ''),
+                };
+            } catch (err: any) {
+                return res.status(400).json({ error: err?.message || 'Invalid coupon token' });
+            }
+        } else if (requireCouponToken && couponId) {
+            return res.status(400).json({ error: 'Coupon discount requires a validation token. Please re-apply the coupon.' });
         }
 
         // ── Store Status Gate: reject orders for offline/closed stores ──
@@ -2387,13 +2718,45 @@ app.post('/orders', async (req, res) => {
         // creating a duplicate. Makes client auto-retries safe (no double order /
         // double charge) after a transient failure.
         if (paymentId) {
+            // Option A patch #3 (2026-06-08): multi-store idempotency tightening.
+            // Previously keyed only on paymentId, which is intentionally shared across
+            // N orders in a multi-store cart — store B's POST would silently get store
+            // A's order back. Adding storeId + orderRequestId discriminators fixes that.
             const existingForPayment = await prisma.order.findFirst({
-                where: { metadata: { path: ['razorpayPaymentId'], equals: paymentId } },
+                where: {
+                    AND: [
+                        { metadata: { path: ['razorpayPaymentId'], equals: paymentId } },
+                        { storeId: storeId },
+                        ...(orderRequestId ? [{ metadata: { path: ['orderRequestId'], equals: orderRequestId } as any }] : [])
+                    ]
+                },
                 include: { items: { include: { storeProduct: { include: { product: true } } } }, store: true },
             });
             if (existingForPayment) {
                 console.log(`[POST /orders] Idempotent hit — order already exists for payment ${paymentId}`);
                 return res.status(200).json(existingForPayment);
+            }
+        }
+
+        // Option A patch #4 (2026-06-08): server-side TTL + status guard.
+        // Verify the order_request is still ACCEPTED and not expired before
+        // creating a paid order from it. Without this, an expired or non-ACCEPTED
+        // request can still produce an order that should have been refunded per
+        // business rules. Skip the check if no orderRequestId (legacy callers).
+        if (orderRequestId) {
+            const orq = await prisma.order_requests.findUnique({
+                where: { id: orderRequestId },
+                select: { status: true, expires_at: true }
+            });
+            if (!orq) {
+                return res.status(404).json({ error: 'Order request not found' });
+            }
+            if (orq.status !== 'ACCEPTED') {
+                return res.status(410).json({ error: `Order request is in state ${orq.status}, expected ACCEPTED` });
+            }
+            const expiresMs = new Date(orq.expires_at as any).getTime();
+            if (expiresMs < Date.now()) {
+                return res.status(410).json({ error: 'Order request has expired' });
             }
         }
 
@@ -2470,14 +2833,111 @@ app.post('/orders', async (req, res) => {
             console.log(`[POST /orders] Created order ${orderNumber} in tx`);
 
             if (orderRequestId) {
-                try {
-                    await tx.order_requests.update({
-                        where: { id: orderRequestId },
-                        data: { status: 'COMPLETED' }
+                // Phase 2K hot-fix (2026-06-09): atomic conditional update prevents
+                // the TOCTOU race the adversarial review found. Previously the
+                // outside-txn read of status='ACCEPTED' could go stale by the time
+                // this inner update fired, and an unconditional update silently
+                // overwrote CANCELLED/REJECTED/EXPIRED with COMPLETED. The original
+                // try/catch swallowed any error too, making the race invisible.
+                // updateMany with status + expires_at guards rolls the whole order
+                // back if the request transitioned during checkout — caller's
+                // outer catch returns ORDER_CREATE_FAILED + retryable=true.
+                const updateResult = await tx.order_requests.updateMany({
+                    where: {
+                        id: orderRequestId,
+                        status: 'ACCEPTED',
+                        expires_at: { gt: new Date() },
+                    },
+                    data: { status: 'COMPLETED' },
+                });
+                if (updateResult.count === 0) {
+                    throw new Error(`ORDER_REQUEST_INVALID_STATE: ${orderRequestId} no longer ACCEPTED or has expired`);
+                }
+                console.log(`[POST /orders] Updated order_request ${orderRequestId} to COMPLETED`);
+            }
+
+            // Phase 2 (2F) — coupon redemption inside the transaction. Either both
+            // the Order and the redemption succeed, or both roll back. Atomic
+            // increments via updateMany+where prevent usageLimit/dailyUsageLimit
+            // from being exceeded under parallel checkout race. Idempotent on
+            // (couponId, orderId) — the partial unique index from Phase 1 #4
+            // means duplicate inserts are no-ops.
+            if (couponContext) {
+                // Snapshot the coupon on the Order row (immune to future archive/edit)
+                await tx.order.update({
+                    where: { id: createdOrder.id },
+                    data: {
+                        orderCouponId: couponContext.couponId,
+                        orderCouponCode: couponContext.code,
+                        orderCouponDiscount: couponContext.discount,
+                        orderCouponFundingSource: couponContext.fundingSource,
+                        orderCouponDiscountType: couponContext.discountType,
+                    },
+                });
+
+                // Idempotent ledger insert. If a redemption already exists for
+                // this (couponId, orderId), skip the increments — this is the
+                // retry/double-call defense.
+                const existingRedemption = await tx.couponRedemption.findFirst({
+                    where: { couponId: couponContext.couponId, orderId: createdOrder.id },
+                    select: { id: true },
+                });
+                if (!existingRedemption) {
+                    await tx.couponRedemption.create({
+                        data: {
+                            couponId: couponContext.couponId,
+                            userId,
+                            orderId: createdOrder.id,
+                            discountAmount: couponContext.discount,
+                            fundingSource: couponContext.fundingSource,
+                        },
                     });
-                    console.log(`[POST /orders] Updated order_request ${orderRequestId} to COMPLETED`);
-                } catch (err: any) {
-                    console.error(`[POST /orders] Failed to update order_request ${orderRequestId}:`, err.message);
+
+                    // Fetch coupon caps (single read) for limit checks.
+                    const couponRow = await tx.coupon.findUnique({
+                        where: { id: couponContext.couponId },
+                        select: { usageLimit: true, dailyUsageLimit: true, dailyUsageResetAt: true, dailyUsageCount: true },
+                    });
+
+                    // Total usage limit — atomic compare-and-swap.
+                    if (couponRow?.usageLimit) {
+                        const u = await tx.coupon.updateMany({
+                            where: { id: couponContext.couponId, usedCount: { lt: couponRow.usageLimit } },
+                            data: { usedCount: { increment: 1 } },
+                        });
+                        if (u.count === 0) {
+                            throw new Error('Coupon usage limit reached');
+                        }
+                    } else {
+                        await tx.coupon.update({
+                            where: { id: couponContext.couponId },
+                            data: { usedCount: { increment: 1 } },
+                        });
+                    }
+
+                    // Daily usage limit with IST midnight reset.
+                    if (couponRow?.dailyUsageLimit) {
+                        const nowD = new Date();
+                        const istNowD = new Date(nowD.getTime() + (5.5 * 60 * 60 * 1000));
+                        const istMidnightUtcMsD = Date.UTC(istNowD.getUTCFullYear(), istNowD.getUTCMonth(), istNowD.getUTCDate(), 0, 0, 0, 0) - (5.5 * 60 * 60 * 1000);
+                        const istMidnightTodayD = new Date(istMidnightUtcMsD);
+                        // Step 1: reset stale counter.
+                        await tx.coupon.updateMany({
+                            where: { id: couponContext.couponId, OR: [
+                                { dailyUsageResetAt: null },
+                                { dailyUsageResetAt: { lt: istMidnightTodayD } },
+                            ] },
+                            data: { dailyUsageCount: 0, dailyUsageResetAt: istMidnightTodayD },
+                        });
+                        // Step 2: atomic increment with limit check.
+                        const d = await tx.coupon.updateMany({
+                            where: { id: couponContext.couponId, dailyUsageCount: { lt: couponRow.dailyUsageLimit } },
+                            data: { dailyUsageCount: { increment: 1 } },
+                        });
+                        if (d.count === 0) {
+                            throw new Error('Coupon daily usage limit reached');
+                        }
+                    }
                 }
             }
 
@@ -2613,10 +3073,77 @@ app.post('/orders', async (req, res) => {
 
         // ── Layer 4: orphaned-payment safety ──
         // Payment captured but order not created → money taken with nothing to show.
-        // Emit a loud, structured ALERT so ops/Sentry can reconcile + refund. (Auto-refund
-        // wiring is a fast-follow once Razorpay refunds are enabled/tested.)
+        // Emit a loud, structured ALERT so ops/Sentry can reconcile + refund.
+        // Option A patch #5 (2026-06-08): synchronous refund now wired below; a
+        // processOrphanedPaymentsSla cron is still TODO to catch async/process-death
+        // gaps.
         if (wasPaid) {
             console.error(`[POST /orders][ORPHANED-PAYMENT][ALERT] payment=${req.body.paymentId} user=${req.body.userId} amount=${req.body.totalAmount} store=${req.body.storeId} reason="${raw}"`);
+
+            // Option A patch #5 (2026-06-08): inline orphan-payment refund.
+            // Previously this only logged and left the customer waiting for manual
+            // ops. Now we trigger the refund immediately for the failed store's
+            // amount. (A separate processOrphanedPaymentsSla cron — out of Option A
+            // scope — will catch any orphans this misses due to request-process
+            // death or async failures.)
+            //
+            // Phase 2K hot-fix (2026-06-09): adversarial review (PR #1) found this
+            // path was a financial-sabotage vector. Client-controlled paymentId +
+            // totalAmount with no ownership check meant any auth'd user could
+            // submit a victim's paymentId with guaranteed-to-fail items and force
+            // a refund on the VICTIM's prior payment. Fix: (1) skip auto-refund
+            // on soft-auth unauth requests (let the SLA cron handle), (2) require
+            // the paymentId to either match an order owned by this user OR have
+            // no existing order at all, (3) cap refund at Razorpay-fetched
+            // captured amount (never trust req.body.totalAmount).
+            const paymentId = req.body?.paymentId;
+            const requestedAmount = Number(req.body?.totalAmount ?? 0);
+            if (!user) {
+                // Soft-auth pre-OTA request — we can't verify ownership. Skip
+                // auto-refund and let processOrphanedPaymentsSla cron handle.
+                console.warn(`[ORPHANED-PAYMENT][REFUND][SKIPPED] unauthenticated request — cron will reconcile paymentId=${paymentId}`);
+                try { Sentry.captureMessage('orphan-payment auto-refund skipped (no auth user)', { level: 'warning', extra: { paymentId, requestedAmount } }); } catch {}
+            } else if (paymentId && requestedAmount > 0) {
+                try {
+                    // Ownership check: paymentId must either belong to an order
+                    // owned by this user, OR have no existing order (truly orphan).
+                    const existingForPayment = await prisma.order.findFirst({
+                        where: { metadata: { path: ['razorpayPaymentId'], equals: paymentId } },
+                        select: { userId: true },
+                    });
+                    if (existingForPayment && existingForPayment.userId !== user.id) {
+                        console.error(`[ORPHANED-PAYMENT][REFUND][REFUSED] paymentId=${paymentId} belongs to user ${existingForPayment.userId} not ${user.id}`);
+                        try {
+                            Sentry.captureMessage('orphan-refund auth gap — paymentId belongs to another user, refused', {
+                                level: 'warning',
+                                extra: { paymentId, claimUserId: user.id, actualUserId: existingForPayment.userId },
+                            });
+                        } catch {}
+                    } else {
+                        // Cap amount at Razorpay-fetched captured value (never trust body.totalAmount).
+                        let capturedAmountInr: number | null = null;
+                        try {
+                            if (razorpayInstance) {
+                                const rzpPayment: any = await razorpayInstance.payments.fetch(paymentId);
+                                const amountPaise = Number(rzpPayment?.amount ?? 0);
+                                if (amountPaise > 0) capturedAmountInr = Math.round(amountPaise / 100);
+                            }
+                        } catch (fetchErr: any) {
+                            console.warn(`[ORPHANED-PAYMENT][REFUND] could not fetch Razorpay payment ${paymentId}: ${fetchErr?.message || fetchErr}`);
+                        }
+                        const refundAmount = capturedAmountInr !== null
+                            ? Math.min(capturedAmountInr, requestedAmount)
+                            : requestedAmount;
+                        if (refundAmount > 0) {
+                            await processRazorpayRefund({ razorpayPaymentId: paymentId }, refundAmount);
+                            console.log(`[ORPHANED-PAYMENT][REFUND] Initiated refund for paymentId=${paymentId} amount=₹${refundAmount} (captured=${capturedAmountInr ?? 'unknown'})`);
+                        }
+                    }
+                } catch (refundErr: any) {
+                    console.error('[ORPHANED-PAYMENT][REFUND][FAILED]', refundErr?.message || refundErr);
+                    try { Sentry.captureException(refundErr, { extra: { paymentId, amount: requestedAmount, area: 'orphaned-payment-refund' } }); } catch {}
+                }
+            }
         }
 
         res.status(isStock ? 409 : 500).json({
@@ -2739,7 +3266,10 @@ app.post('/order-requests', async (req, res) => {
         // Dispatch all collected notifications safely outside the transaction
         for (const notif of notificationsToDispatch) {
             notificationService.sendMerchantNotification(notif)
-                .catch(e => console.error('[POST /order-requests] Notif failed:', e));
+                .catch(e => {
+                    console.error('[POST /order-requests] Notif failed:', e);
+                    try { Sentry.captureException(e, { extra: { storeId: notif.storeId, type: notif.type, area: 'order-requests.notify' } }); } catch {}
+                });
         }
 
         res.status(201).json(createdRequests);
@@ -2752,12 +3282,61 @@ app.post('/order-requests', async (req, res) => {
 // Update Order Request Status (Cancel/Reject)
 app.patch('/order-requests/:id/status', async (req, res) => {
     try {
+        // Option A patch #1A (2026-06-08): backend requireUser hardening.
+        // Previously any anonymous caller could ACCEPT/REJECT/CANCEL any
+        // order_request. Authorization (verify user owns consumer_user_id or
+        // branch.merchant_id) is a separate follow-up — harness Task #36.
+        //
+        // Phase 2J hot-fix (2026-06-09): soft-auth gate. Pre-OTA consumer-app
+        // installs still use plain fetch() with no Authorization header and
+        // would 401 on every cancel. Until REQUIRE_ORDERS_AUTH=true (post-OTA),
+        // accept unauth requests and skip the #1C ownership checks for them.
+        // Authenticated callers still go through the full #1C check below.
+        const auth = await softRequireUser(req, res);
+        if (!auth) return;
+        const user = auth.user;
+
         const { id } = req.params;
         const { status, reason } = req.body;
 
         const allowedStatuses = ['CANCELLED', 'REJECTED', 'ACCEPTED'];
         if (!allowedStatuses.includes(status)) {
             return res.status(400).json({ error: `Invalid status. Allowed: ${allowedStatuses.join(', ')}` });
+        }
+
+        // Option A patch #1C (2026-06-08): backend authorization check.
+        // Verify the caller has the right role for the requested transition:
+        //   - CANCELLED can only be triggered by the order's consumer
+        //   - ACCEPTED / REJECTED can only be triggered by the merchant who
+        //     owns the branch the request was sent to
+        // Returns 404 if the request doesn't exist, 403 on role mismatch.
+        const existing = await prisma.order_requests.findUnique({
+            where: { id },
+            select: { consumer_user_id: true, branch_id: true }
+        });
+        if (!existing) {
+            return res.status(404).json({ error: 'Order request not found' });
+        }
+        // Phase 2J: ownership checks only enforced when authenticated. Soft-auth
+        // pre-OTA clients (user === null) skip — pre-Option-A baseline.
+        if (user) {
+            if (status === 'CANCELLED') {
+                if (user.id !== existing.consumer_user_id) {
+                    return res.status(403).json({ error: 'Only the order owner can cancel this request' });
+                }
+            } else {
+                // Phase 2K hot-fix (2026-06-09): ACCEPTED or REJECTED — must be
+                // able to manage this branch. Previously this was owner-only
+                // (user.id === branch.merchantId) which 403'd non-owner staff
+                // (8 store_staff + 15 phone-managers verified on prod). The
+                // userCanManageBranch helper allows owner OR store_staff OR
+                // phone-matched manager — mirrors the merchant-app's actual
+                // login paths (StoreContext.tsx).
+                const canManage = await userCanManageBranch(user.id, existing.branch_id);
+                if (!canManage) {
+                    return res.status(403).json({ error: 'Only the branch merchant, manager, or staff can accept or reject this request' });
+                }
+            }
         }
 
         const updated = await prisma.order_requests.update({
@@ -3318,6 +3897,52 @@ async function userCanManageOrderStore(userId: string, storeId: string): Promise
 }
 
 /**
+ * Phase 2K (hot-fix 2026-06-09) — RBAC for PATCH /order-requests/:id/status
+ * ACCEPTED/REJECTED transitions.
+ *
+ * Adversarial pre-merge review (PR #1) found that Option A patch #1C's bare
+ * `user.id === branch.merchantId` check was owner-only, which would 403 the
+ * non-owner merchant users on prod (verified via scripts/check_staff_users.ts:
+ * 8 store_staff + 15 phone-managers) the moment merchant-app OTAs commit 2.
+ *
+ * Allows the call if the user is:
+ *   (a) the branch's owner (merchant_branches.merchant_id)
+ *   (b) a phone-matched branch manager (user.phone === merchant_branches.phone)
+ *   (c) a store_staff row whose user_id or auth_user_id matches the user,
+ *       scoped to this branch (store_staff.store_id = branch_id in PAS)
+ *
+ * Mirrors the spirit of userCanManageOrderStore but for the order_request /
+ * branch context (different table — merchant_branches vs Store).
+ */
+async function userCanManageBranch(userId: string, branchId: string): Promise<boolean> {
+    const branch = await prisma.merchantBranch.findUnique({
+        where: { id: branchId },
+        select: { merchantId: true, phone: true },
+    });
+    if (!branch) return false;
+    // (a) Owner
+    if (branch.merchantId && branch.merchantId === userId) return true;
+    // (b) Phone-matched manager — only check if the branch has a phone configured
+    if (branch.phone) {
+        const u = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { phone: true },
+        });
+        if (u?.phone && u.phone === branch.phone) return true;
+    }
+    // (c) Staff — store_staff.store_id is the branch_id in PAS
+    const staffRow = await prisma.storeStaff.findFirst({
+        where: {
+            storeId: branchId,
+            OR: [{ user_id: userId }, { authUserId: userId }],
+        },
+        select: { id: true },
+    });
+    if (staffRow) return true;
+    return false;
+}
+
+/**
  * Attempt a Razorpay refund using the payment_id stored in order.metadata.
  * Returns { razorpayRefundId, simulated } — if Razorpay isn't configured or
  * the order has no paymentId on record, falls back to a stub refund id
@@ -3560,6 +4185,55 @@ app.post('/orders/:id/cancel', async (req, res) => {
                             where: { id: couponId, usedCount: { gte: count } },
                             data: { usedCount: { decrement: count } },
                         });
+                    }
+
+                    // Phase 2 (2H) — additional reversal work:
+                    // (a) decrement dailyUsageCount for redemptions made today (IST)
+                    // (b) clear Order snapshot columns
+                    // (c) write AuditLog row per reversed coupon
+                    const nowH = new Date();
+                    const istNowH = new Date(nowH.getTime() + (5.5 * 60 * 60 * 1000));
+                    const istMidnightUtcMsH = Date.UTC(istNowH.getUTCFullYear(), istNowH.getUTCMonth(), istNowH.getUTCDate(), 0, 0, 0, 0) - (5.5 * 60 * 60 * 1000);
+                    const istMidnightTodayH = new Date(istMidnightUtcMsH);
+                    for (const r of redemptions) {
+                        if (r.createdAt >= istMidnightTodayH) {
+                            await tx.coupon.updateMany({
+                                where: { id: r.couponId, dailyUsageCount: { gte: 1 } },
+                                data: { dailyUsageCount: { decrement: 1 } },
+                            });
+                        }
+                    }
+                    await tx.order.update({
+                        where: { id },
+                        data: {
+                            orderCouponId: null,
+                            orderCouponCode: null,
+                            orderCouponDiscount: null,
+                            orderCouponFundingSource: null,
+                            orderCouponDiscountType: null,
+                        },
+                    });
+                    for (const [couponId, count] of countByCoupon) {
+                        try {
+                            await tx.auditLog.create({
+                                data: {
+                                    // Phase 2K hot-fix (2026-06-09): actor is the
+                                    // authenticated caller (consumer / merchant /
+                                    // admin) — NOT the order owner. Previously
+                                    // this misattributed merchant/admin-initiated
+                                    // cancels to the customer, defeating the
+                                    // audit-log integrity guarantee.
+                                    actorUserId: user.id,
+                                    action: 'coupon.redemption_reversed',
+                                    targetType: 'coupon',
+                                    targetId: couponId,
+                                    beforeJson: { orderId: id, orderOwnerUserId: order.userId, count } as any,
+                                    afterJson: undefined,
+                                },
+                            });
+                        } catch (auditErr) {
+                            console.error('[2H reversal audit log] failed:', auditErr);
+                        }
                     }
                 }
 
@@ -4487,7 +5161,7 @@ app.patch('/stores/:id', async (req, res) => {
 // List Coupons (with filtering)
 app.get('/coupons', async (req, res) => {
     try {
-        const caller = await requireAdmin(req, res); if (!caller) return;
+        const caller = await requireCapability(req, res, 'coupons.create_edit_delete'); if (!caller) return;
         const { storeId, isActive, fundingSource, search } = req.query;
 
         const where: any = {};
@@ -4497,6 +5171,13 @@ app.get('/coupons', async (req, res) => {
         if (fundingSource) where.fundingSource = String(fundingSource).toUpperCase();
         if (search) {
             where.code = { contains: String(search).toUpperCase(), mode: 'insensitive' };
+        }
+
+        // Phase 2 (2D) — by default exclude soft-deleted coupons. Admin can pass
+        // ?includeArchived=true to see archived ones (for the Status=Archived filter
+        // in the admin list view — added in Phase 3).
+        if (req.query.includeArchived !== 'true') {
+            (where as any).deletedAt = null;
         }
 
         const coupon = await prisma.coupon.findMany({
@@ -4513,7 +5194,7 @@ app.get('/coupons', async (req, res) => {
 // Create Coupon
 app.post('/coupon', async (req, res) => {
     try {
-        const caller = await requireAdmin(req, res); if (!caller) return;
+        const caller = await requireCapability(req, res, 'coupons.create_edit_delete'); if (!caller) return;
         const {
             code,
             discountType,
@@ -4590,6 +5271,8 @@ app.post('/coupon', async (req, res) => {
             }
         });
 
+        await writeAuditLog(caller.id, 'coupon.create', 'coupon', coupon.id, null, coupon);
+
         res.status(201).json(coupon);
         } catch (error: any) {
         return handleApiError(res, error, { area: 'coupon', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to create coupon' });
@@ -4599,7 +5282,7 @@ app.post('/coupon', async (req, res) => {
 // Update Coupon
 app.patch('/coupon/:id', async (req, res) => {
     try {
-        const caller = await requireAdmin(req, res); if (!caller) return;
+        const caller = await requireCapability(req, res, 'coupons.create_edit_delete'); if (!caller) return;
         const { id } = req.params;
         const updateData: any = {};
 
@@ -4639,10 +5322,14 @@ app.patch('/coupon/:id', async (req, res) => {
             }
         }
 
+        const existing = await prisma.coupon.findUnique({ where: { id } });
+
         const coupon = await prisma.coupon.update({
             where: { id },
             data: updateData
         });
+
+        await writeAuditLog(caller.id, 'coupon.update', 'coupon', id, existing, coupon);
 
         res.json(coupon);
         } catch (error: any) {
@@ -4653,9 +5340,11 @@ app.patch('/coupon/:id', async (req, res) => {
 // Delete Coupon
 app.delete('/coupon/:id', async (req, res) => {
     try {
-        const caller = await requireAdmin(req, res); if (!caller) return;
+        const caller = await requireCapability(req, res, 'coupons.create_edit_delete'); if (!caller) return;
         const { id } = req.params;
-        await prisma.coupon.delete({ where: { id } });
+        const existing = await prisma.coupon.findUnique({ where: { id } });
+        await prisma.coupon.update({ where: { id }, data: { deletedAt: new Date() } });
+        await writeAuditLog(caller.id, 'coupon.archive', 'coupon', id, existing, null);
         res.json({ message: 'Coupon deleted successfully' });
         } catch (error: any) {
         return handleApiError(res, error, { area: 'coupon', extra: { id: req.params.id, userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to delete coupon' });
@@ -4676,6 +5365,7 @@ app.get('/coupons/available', async (req, res) => {
             where: {
                 isActive: true,
                 startDate: { lte: now },
+                deletedAt: null, // Phase 2 (2D) — customers must NEVER see archived coupons. Unconditional.
                 AND: [
                     { OR: [{ endDate: null }, { endDate: { gt: now } }] },
                     storeId
@@ -4717,14 +5407,34 @@ app.get('/coupons/available', async (req, res) => {
 app.post('/checkout/validate-coupon', async (req, res) => {
     try {
         const u = await requireUser(req, res); if (!u) return;
-        const { code, cartTotal, storeId } = req.body;
+        // Phase 2 (2I) — per-user rate limit (10/min). Defensive backstop for abuse.
+        if (!checkRateLimit(`coupon:validate:${u.id}`, 10)) {
+            return res.status(429).json({ error: 'Too many coupon validation requests. Please wait a moment and try again.' });
+        }
+        // Phase 2 (2E-1) — body shape extended: cartItems[]/storeIds/orderType are
+        // the new shape. Legacy clients still send code + cartTotal — both work.
+        const { code, cartTotal: clientCartTotal, cartItems, storeIds, orderType, storeId } = req.body;
         const userId = u.id; // derived from verified token, NOT trusted from body
 
-        if (!code || !cartTotal) {
-            return res.status(400).json({ error: 'code and cartTotal are required' });
+        if (!code) {
+            return res.status(400).json({ error: 'code is required' });
         }
+        // Phase 2 (2E-1) — server-side cart total. If the client sends cartItems[],
+        // we recompute and IGNORE the client-supplied cartTotal (anti-spoof). Legacy
+        // clients that send only cartTotal continue to work — fall back to that value.
+        const hasCartItems = Array.isArray(cartItems) && cartItems.length > 0;
+        if (!hasCartItems && (typeof clientCartTotal === 'undefined' || clientCartTotal === null)) {
+            return res.status(400).json({ error: 'cartItems[] or cartTotal is required' });
+        }
+        const effectiveCartTotal: number = hasCartItems
+            ? cartItems.reduce(
+                (sum: number, item: any) => sum + (Number(item?.price) || 0) * (Number(item?.quantity) || 0),
+                0,
+            )
+            : (Number(clientCartTotal) || 0);
 
-        const coupon = await prisma.coupon.findUnique({ where: { code: String(code).toUpperCase() } });
+        // Phase 2 (2E-1) — exclude archived coupons (deletedAt set by sub-task 2D).
+        const coupon = await prisma.coupon.findFirst({ where: { code: String(code).toUpperCase(), deletedAt: null } });
 
         if (!coupon) {
             return res.status(404).json({ valid: false, error: 'Invalid coupon code' });
@@ -4750,9 +5460,48 @@ app.post('/checkout/validate-coupon', async (req, res) => {
             return res.status(400).json({ valid: false, error: 'This coupon has reached its usage limit' });
         }
 
+        // Phase 2 (2E-2) — daily usage limit (IST midnight reset). Counter logically
+        // resets at IST midnight; if dailyUsageResetAt is from before today, treat
+        // count as 0. The actual reset happens at redeem-time (Phase 2F transaction).
+        if (coupon.dailyUsageLimit) {
+            const now = new Date();
+            const istNow = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+            const istMidnightUtcMs = Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate(), 0, 0, 0, 0) - (5.5 * 60 * 60 * 1000);
+            const istMidnightToday = new Date(istMidnightUtcMs);
+            const counterIsCurrent = coupon.dailyUsageResetAt && coupon.dailyUsageResetAt >= istMidnightToday;
+            const effectiveDailyCount = counterIsCurrent ? coupon.dailyUsageCount : 0;
+            if (effectiveDailyCount >= coupon.dailyUsageLimit) {
+                return res.status(400).json({ valid: false, error: 'This coupon has reached its daily usage limit. Please try again tomorrow.' });
+            }
+        }
+
         // Check store-specific restriction
         if (coupon.storeId && storeId && coupon.storeId !== storeId) {
             return res.status(400).json({ valid: false, error: 'This coupon is not valid for this store' });
+        }
+
+        // Phase 2 (2E-2) — vertical scope. If coupon.eligibleVerticals is non-empty,
+        // every cart store's vertical must be in the allowlist (vertical IDs).
+        if (coupon.eligibleVerticals && coupon.eligibleVerticals.length > 0 && Array.isArray(storeIds) && storeIds.length > 0) {
+            const cartStoreIds = storeIds.map((s: any) => String(s));
+            const cartStores = await prisma.store.findMany({
+                where: { id: { in: cartStoreIds } },
+                select: { id: true, verticalId: true },
+            });
+            const allowedVerticalIds = new Set(coupon.eligibleVerticals);
+            const allMatch = cartStores.length === cartStoreIds.length
+                && cartStores.every((s) => !!s.verticalId && allowedVerticalIds.has(s.verticalId));
+            if (!allMatch) {
+                return res.status(400).json({ valid: false, error: 'This coupon is not valid for one or more stores in your cart' });
+            }
+        }
+
+        // Phase 2 (2E-2) — order type restriction (PICKUP / DINE_IN). Empty = no
+        // restriction. If set, the requested orderType must be in the allowlist.
+        if (coupon.eligibleOrderTypes && coupon.eligibleOrderTypes.length > 0 && orderType) {
+            if (!coupon.eligibleOrderTypes.includes(String(orderType))) {
+                return res.status(400).json({ valid: false, error: `This coupon is only valid for ${coupon.eligibleOrderTypes.join(', ')} orders` });
+            }
         }
 
         // Check audience (requires userId for NEW_USERS check)
@@ -4763,8 +5512,8 @@ app.post('/checkout/validate-coupon', async (req, res) => {
             }
         }
 
-        // Check minimum order value
-        if (coupon.minOrder && Number(cartTotal) < coupon.minOrder) {
+        // Check minimum order value (Phase 2 2E-1: server-recomputed total)
+        if (coupon.minOrder && Number(effectiveCartTotal) < coupon.minOrder) {
             return res.status(400).json({ valid: false, error: `Minimum order of ₹${coupon.minOrder} required to use this coupon` });
         }
 
@@ -4780,31 +5529,95 @@ app.post('/checkout/validate-coupon', async (req, res) => {
         let discount = 0;
         let bogo: { buy: number; get: number } | null = null;
         if (coupon.discountType === 'PERCENTAGE') {
-            discount = (Number(cartTotal) * coupon.discountValue) / 100;
+            discount = (Number(effectiveCartTotal) * coupon.discountValue) / 100;
             if (coupon.maxDiscountCap) {
                 discount = Math.min(discount, coupon.maxDiscountCap);
             }
         } else if (coupon.discountType === 'BOGO') {
-            // BOGO applies at the line-item level (cheapest-free etc.) — surface the rule,
-            // not a flat ₹ off. The cart computes the actual saving from buy/get.
-            bogo = { buy: coupon.bogoBuy ?? 1, get: coupon.bogoGet ?? 1 };
+            const buy = Number(coupon.bogoBuy ?? 1);
+            const get = Number(coupon.bogoGet ?? 1);
+            bogo = { buy, get };
+
+            // Phase 2 (2E-3) — server-side BOGO discount computation.
+            // When cartItems[] is provided (new shape), server computes the ₹ saving.
+            // Legacy clients (no cartItems[]) still receive just the buy/get rule and
+            // compute the saving themselves — discount stays 0 in that case (backward-compat).
+            if (hasCartItems) {
+                const batchSize = buy + get;
+                const mode = String(coupon.bogoMode || 'CHEAPEST').toUpperCase();
+                if (mode === 'SAME_PRODUCT') {
+                    // Group items by product key (storeProductId or fallback to name).
+                    // For each group with quantity >= batchSize, discount `get` units per
+                    // complete batch at that product's price.
+                    const groups = new Map<string, { price: number; quantity: number }>();
+                    for (const item of cartItems) {
+                        const key = String(item?.storeProductId || item?.id || item?.name || 'unknown');
+                        const price = Number(item?.price) || 0;
+                        const qty = Number(item?.quantity) || 0;
+                        const existing = groups.get(key);
+                        if (existing) { existing.quantity += qty; }
+                        else { groups.set(key, { price, quantity: qty }); }
+                    }
+                    for (const g of groups.values()) {
+                        const completeBatches = Math.floor(g.quantity / batchSize);
+                        discount += completeBatches * get * g.price;
+                    }
+                } else {
+                    // CHEAPEST mode (default per business config) — expand all cart items
+                    // to per-unit prices, sort ascending, then for every batch of
+                    // (buy+get) units, discount the first `get` (cheapest) units.
+                    const unitPrices: number[] = [];
+                    for (const item of cartItems) {
+                        const price = Number(item?.price) || 0;
+                        const qty = Number(item?.quantity) || 0;
+                        for (let i = 0; i < qty; i++) unitPrices.push(price);
+                    }
+                    unitPrices.sort((a, b) => a - b);
+                    for (let i = 0; i + batchSize <= unitPrices.length; i += batchSize) {
+                        for (let j = 0; j < get; j++) discount += unitPrices[i + j];
+                    }
+                }
+                // Apply maxDiscountCap if set — admin can cap BOGO discount value too.
+                if (coupon.maxDiscountCap) {
+                    discount = Math.min(discount, coupon.maxDiscountCap);
+                }
+            }
         } else {
             discount = coupon.discountValue; // FLAT
         }
 
-        // Don't let discount exceed cart total
-        discount = Math.min(discount, Number(cartTotal));
+        // Don't let discount exceed cart total (Phase 2 2E-1: server-recomputed)
+        discount = Math.min(discount, Number(effectiveCartTotal));
+
+        // Phase 2 (2E-4) — sign a 10-min HMAC token binding (couponId, userId,
+        // cartHash, discount, fundingSource, discountType). POST /orders verifies
+        // this before applying the discount — closes the cart-spoof attack.
+        const roundedDiscount = Math.round(discount * 100) / 100;
+        const cartHash = computeCartHash(hasCartItems ? cartItems : []);
+        const tokenPayload = {
+            couponId: coupon.id,
+            userId,
+            cartHash,
+            discount: roundedDiscount,
+            fundingSource: coupon.fundingSource,
+            discountType: coupon.discountType,
+            exp: Math.floor(Date.now() / 1000) + 10 * 60,
+            iat: Math.floor(Date.now() / 1000),
+        };
+        const validationToken = signCouponToken(tokenPayload);
 
         res.json({
             valid: true,
             couponId: coupon.id,
             code: coupon.code,
-            discount: Math.round(discount * 100) / 100,
+            discount: roundedDiscount,
             discountType: coupon.discountType,
             discountValue: coupon.discountValue,
             maxDiscountCap: coupon.maxDiscountCap,
             bogo,
+            fundingSource: coupon.fundingSource,
             minOrder: coupon.minOrder ?? null,
+            validationToken,
         });
         } catch (error: any) {
         return handleApiError(res, error, { area: 'checkout.validate-coupon', extra: { userId: (req as any)?.user?.id ?? undefined }, userMessage: 'Failed to validate coupon' });
@@ -4816,13 +5629,50 @@ app.post('/checkout/validate-coupon', async (req, res) => {
 app.post('/coupons/redeem', async (req, res) => {
     try {
         const u = await requireUser(req, res); if (!u) return;
+        // Phase 2 (2I) — per-user rate limit (5/min). Tighter than validate.
+        if (!checkRateLimit(`coupon:redeem:${u.id}`, 5)) {
+            return res.status(429).json({ error: 'Too many coupon redemption attempts. Please wait a moment and try again.' });
+        }
         const { code, orderId, issuedCode } = req.body;
         const userId = u.id; // derived from verified token, NOT trusted from body
         if (!code) {
             return res.status(400).json({ error: 'code is required' });
         }
 
-        const coupon = await prisma.coupon.findUnique({ where: { code: String(code).toUpperCase() } });
+        // Phase 2 (2G) — backward-compat shim. If POST /orders already wrote a
+        // redemption (Phase 2F's transactional path), return alreadyRedeemed
+        // immediately. Prevents legacy consumer-app builds (pre-Phase-4 OTA)
+        // from double-counting when they call this AFTER their /orders call.
+        //
+        // Phase 2K hot-fix (2026-06-09): adversarial review (PR #1) found the
+        // shim returned alreadyRedeemed based only on orderCouponId presence —
+        // any authed user could probe arbitrary orderIds to detect order
+        // existence + coupon-applied status. Fix: (1) scope the lookup to
+        // orders owned by THIS user, (2) require the request's code to match
+        // the stored orderCouponCode. If either fails, fall through to the
+        // normal redemption path instead of leaking alreadyRedeemed.
+        if (orderId) {
+            const orderRow = await prisma.order.findFirst({
+                where: { id: orderId, userId: u.id },
+                select: { orderCouponId: true, orderCouponCode: true },
+            });
+            if (
+                orderRow?.orderCouponId &&
+                orderRow.orderCouponCode &&
+                orderRow.orderCouponCode.toUpperCase() === String(code).toUpperCase()
+            ) {
+                return res.status(200).json({ alreadyRedeemed: true, source: 'phase2f' });
+            }
+        }
+
+        // Phase 2K hot-fix (2026-06-09): filter soft-deleted coupons. Previously
+        // legacy /coupons/redeem used findUnique on code only — an archived
+        // (deletedAt set) coupon could still be redeemed by clients holding the
+        // code. GET /coupons/available + /checkout/validate-coupon already
+        // filter correctly; only this legacy path was leaky.
+        const coupon = await prisma.coupon.findFirst({
+            where: { code: String(code).toUpperCase(), deletedAt: null },
+        });
         if (!coupon) return res.status(404).json({ error: 'Invalid coupon code' });
 
         // Idempotency: if this order already redeemed this coupon, return the existing record.
@@ -4837,13 +5687,66 @@ app.post('/coupons/redeem', async (req, res) => {
         // makes the parallel-redeem race surface as Prisma P2002 on the
         // second writer. Catch that and return the existing redemption
         // (idempotent 200) — mirrors the line 4764-4765 fast path.
+        //
+        // Phase 2K hot-fix (2026-06-09): adversarial review (PR #1) found that
+        // this legacy path was incrementing usedCount with no CAS and ignoring
+        // dailyUsageCount/dailyUsageResetAt entirely. Until consumer-app OTA
+        // rolls AND REQUIRE_COUPON_TOKEN=true, most prod coupon traffic flows
+        // here — so usageLimit + dailyUsageLimit were both silently bypassable.
+        // Now mirrors Phase 2F's atomic compare-and-swap contract from POST /orders.
         let redemption: { id: string };
         try {
             redemption = await prisma.$transaction(async (tx) => {
                 const r = await tx.couponRedemption.create({
                     data: { couponId: coupon.id, userId, orderId: orderId || null, issuedCode: issuedCode || null },
                 });
-                await tx.coupon.update({ where: { id: coupon.id }, data: { usedCount: { increment: 1 } } });
+
+                // Phase 2K — fetch caps inside the txn for atomic CAS.
+                const couponRow = await tx.coupon.findUnique({
+                    where: { id: coupon.id },
+                    select: { usageLimit: true, dailyUsageLimit: true, dailyUsageResetAt: true, dailyUsageCount: true },
+                });
+
+                // Total usage limit — atomic compare-and-swap (mirrors POST /orders L2885).
+                if (couponRow?.usageLimit) {
+                    const u = await tx.coupon.updateMany({
+                        where: { id: coupon.id, usedCount: { lt: couponRow.usageLimit } },
+                        data: { usedCount: { increment: 1 } },
+                    });
+                    if (u.count === 0) {
+                        throw new Error('Coupon usage limit reached');
+                    }
+                } else {
+                    await tx.coupon.update({
+                        where: { id: coupon.id },
+                        data: { usedCount: { increment: 1 } },
+                    });
+                }
+
+                // Daily usage limit with IST midnight reset (mirrors POST /orders L2901).
+                if (couponRow?.dailyUsageLimit) {
+                    const nowD = new Date();
+                    const istNowD = new Date(nowD.getTime() + (5.5 * 60 * 60 * 1000));
+                    const istMidnightUtcMsD = Date.UTC(istNowD.getUTCFullYear(), istNowD.getUTCMonth(), istNowD.getUTCDate(), 0, 0, 0, 0) - (5.5 * 60 * 60 * 1000);
+                    const istMidnightTodayD = new Date(istMidnightUtcMsD);
+                    // Step 1: reset stale counter.
+                    await tx.coupon.updateMany({
+                        where: { id: coupon.id, OR: [
+                            { dailyUsageResetAt: null },
+                            { dailyUsageResetAt: { lt: istMidnightTodayD } },
+                        ] },
+                        data: { dailyUsageCount: 0, dailyUsageResetAt: istMidnightTodayD },
+                    });
+                    // Step 2: atomic increment with limit check.
+                    const d = await tx.coupon.updateMany({
+                        where: { id: coupon.id, dailyUsageCount: { lt: couponRow.dailyUsageLimit } },
+                        data: { dailyUsageCount: { increment: 1 } },
+                    });
+                    if (d.count === 0) {
+                        throw new Error('Coupon daily usage limit reached');
+                    }
+                }
+
                 return r;
             });
         } catch (err: any) {
@@ -4855,6 +5758,11 @@ app.post('/coupons/redeem', async (req, res) => {
                     return res.status(200).json({ redemptionId: existing.id, alreadyRedeemed: true });
                 }
             }
+            // Phase 2K — surface CAS limit-reached errors as 400 with the
+            // friendly message (otherwise the outer catch buries them in a 500).
+            if (err instanceof Error && (err.message === 'Coupon usage limit reached' || err.message === 'Coupon daily usage limit reached')) {
+                return res.status(400).json({ error: err.message });
+            }
             throw err;
         }
 
@@ -4864,6 +5772,239 @@ app.post('/coupons/redeem', async (req, res) => {
         Sentry.captureException(error, { tags: { area: 'coupons.redeem' } });
         markResponseAsReported(res);
         res.status(500).json({ error: 'Failed to redeem coupon' });
+    }
+});
+
+// ============================================================================
+// Phase 3 (3A) — Admin coupon endpoints.
+// Reads (analytics, redemptions, audit log) use 'coupons.view_analytics'.
+// Writes (check-code, upload-logo) use 'coupons.create_edit_delete'.
+// ============================================================================
+
+// Code uniqueness check — frontend debounces against this while typing in CouponBuilder.
+app.get('/coupons/check-code', async (req, res) => {
+    try {
+        const caller = await requireCapability(req, res, 'coupons.create_edit_delete'); if (!caller) return;
+        const code = String(req.query.code || '').trim().toUpperCase();
+        if (!code) return res.status(400).json({ error: 'code is required' });
+        const existing = await prisma.coupon.findFirst({
+            where: { code, deletedAt: null },
+            select: { id: true },
+        });
+        res.json({ available: !existing });
+    } catch (error: any) {
+        return handleApiError(res, error, { area: 'coupons.check-code', userMessage: 'Failed to check code' });
+    }
+});
+
+// Per-coupon analytics — KPIs + time series + breakdowns. Feeds CouponDetailPage.
+app.get('/admin/coupons/:id/analytics', async (req, res) => {
+    try {
+        const caller = await requireCapability(req, res, 'coupons.view_analytics'); if (!caller) return;
+        const { id } = req.params;
+
+        const coupon = await prisma.coupon.findUnique({
+            where: { id },
+            select: {
+                id: true, code: true, fundingSource: true, usedCount: true, usageLimit: true,
+                dailyUsageLimit: true, dailyUsageCount: true, startDate: true, endDate: true,
+                isActive: true, deletedAt: true, discountType: true, discountValue: true,
+            },
+        });
+        if (!coupon) return res.status(404).json({ error: 'Coupon not found' });
+
+        const allRedemptions = await prisma.couponRedemption.findMany({
+            where: { couponId: id },
+            select: {
+                id: true, userId: true, orderId: true, discountAmount: true,
+                fundingSource: true, createdAt: true,
+            },
+        });
+
+        const totalRedemptions = allRedemptions.length;
+        const totalDiscountValue = allRedemptions.reduce((sum, r) => sum + Number(r.discountAmount || 0), 0);
+        const platformFundedTotal = allRedemptions
+            .filter(r => r.fundingSource === 'PLATFORM')
+            .reduce((sum, r) => sum + Number(r.discountAmount || 0), 0);
+        const merchantFundedTotal = totalDiscountValue - platformFundedTotal;
+        const uniqueCustomers = new Set(allRedemptions.map(r => r.userId)).size;
+        const avgDiscountPerOrder = totalRedemptions > 0 ? totalDiscountValue / totalRedemptions : 0;
+
+        // IST-bucketed daily time series
+        const byDay = new Map<string, { redemptions: number; discount: number }>();
+        for (const r of allRedemptions) {
+            const d = new Date(r.createdAt);
+            const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000);
+            const key = ist.toISOString().slice(0, 10);
+            const bucket = byDay.get(key) || { redemptions: 0, discount: 0 };
+            bucket.redemptions += 1;
+            bucket.discount += Number(r.discountAmount || 0);
+            byDay.set(key, bucket);
+        }
+        const timeSeries = Array.from(byDay.entries()).sort(([a], [b]) => a.localeCompare(b))
+            .map(([date, v]) => ({ date, redemptions: v.redemptions, discount: Math.round(v.discount * 100) / 100 }));
+
+        // Top stores via Order join
+        const orderIdsList = allRedemptions.map(r => r.orderId).filter(Boolean) as string[];
+        const orders = orderIdsList.length > 0
+            ? await prisma.order.findMany({
+                where: { id: { in: orderIdsList } },
+                select: { id: true, storeId: true, order_type: true, store_name: true },
+            })
+            : [];
+        const storeCount = new Map<string, { storeId: string; storeName: string | null; count: number }>();
+        for (const o of orders) {
+            const ex = storeCount.get(o.storeId) || { storeId: o.storeId, storeName: o.store_name, count: 0 };
+            ex.count += 1;
+            storeCount.set(o.storeId, ex);
+        }
+        const topStores = Array.from(storeCount.values()).sort((a, b) => b.count - a.count).slice(0, 10);
+
+        // Top users
+        const userCount = new Map<string, number>();
+        for (const r of allRedemptions) userCount.set(r.userId, (userCount.get(r.userId) || 0) + 1);
+        const topUserEntries = Array.from(userCount.entries()).sort(([, a], [, b]) => b - a).slice(0, 10);
+        const topUserIds = topUserEntries.map(([uid]) => uid);
+        const userRows = topUserIds.length > 0
+            ? await prisma.user.findMany({
+                where: { id: { in: topUserIds } },
+                select: { id: true, name: true, phone: true },
+            })
+            : [];
+        const userMap = new Map(userRows.map(u => [u.id, u]));
+        const topUsers = topUserEntries.map(([uid, count]) => ({
+            userId: uid,
+            name: userMap.get(uid)?.name || null,
+            phone: userMap.get(uid)?.phone || null,
+            count,
+        }));
+
+        // Per-order-type breakdown
+        const orderTypeBreakdown: Record<string, number> = {};
+        for (const o of orders) {
+            const k = o.order_type || 'pickup';
+            orderTypeBreakdown[k] = (orderTypeBreakdown[k] || 0) + 1;
+        }
+
+        res.json({
+            coupon,
+            kpis: {
+                totalRedemptions,
+                totalDiscountValue: Math.round(totalDiscountValue * 100) / 100,
+                platformFundedTotal: Math.round(platformFundedTotal * 100) / 100,
+                merchantFundedTotal: Math.round(merchantFundedTotal * 100) / 100,
+                uniqueCustomers,
+                avgDiscountPerOrder: Math.round(avgDiscountPerOrder * 100) / 100,
+            },
+            timeSeries,
+            topStores,
+            topUsers,
+            orderTypeBreakdown,
+        });
+    } catch (error: any) {
+        return handleApiError(res, error, { area: 'admin.coupons.analytics', userMessage: 'Failed to load coupon analytics' });
+    }
+});
+
+// Paginated redemption ledger for one coupon.
+app.get('/admin/coupons/:id/redemptions', async (req, res) => {
+    try {
+        const caller = await requireCapability(req, res, 'coupons.view_analytics'); if (!caller) return;
+        const { id } = req.params;
+        const page = Math.max(1, Number(req.query.page) || 1);
+        const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+        const skip = (page - 1) * limit;
+
+        const [items, total] = await Promise.all([
+            prisma.couponRedemption.findMany({
+                where: { couponId: id },
+                orderBy: { createdAt: 'desc' },
+                skip, take: limit,
+                select: {
+                    id: true, userId: true, orderId: true,
+                    discountAmount: true, fundingSource: true, createdAt: true,
+                },
+            }),
+            prisma.couponRedemption.count({ where: { couponId: id } }),
+        ]);
+
+        const userIds = Array.from(new Set(items.map(i => i.userId)));
+        const orderIdsList = Array.from(new Set(items.map(i => i.orderId).filter(Boolean) as string[]));
+        const [users, orders] = await Promise.all([
+            userIds.length > 0
+                ? prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, phone: true } })
+                : Promise.resolve([] as any[]),
+            orderIdsList.length > 0
+                ? prisma.order.findMany({ where: { id: { in: orderIdsList } }, select: { id: true, orderNumber: true, totalAmount: true, store_name: true } })
+                : Promise.resolve([] as any[]),
+        ]);
+        const userMap = new Map(users.map(u => [u.id, u]));
+        const orderMap = new Map(orders.map(o => [o.id, o]));
+
+        const enriched = items.map(i => ({
+            ...i,
+            user: userMap.get(i.userId) || null,
+            order: i.orderId ? orderMap.get(i.orderId) || null : null,
+        }));
+
+        res.json({ data: enriched, total, page, limit, totalPages: Math.ceil(total / limit) });
+    } catch (error: any) {
+        return handleApiError(res, error, { area: 'admin.coupons.redemptions', userMessage: 'Failed to load redemptions' });
+    }
+});
+
+// Audit log — paginated, optionally filtered by action prefix (e.g. 'coupon.').
+app.get('/admin/audit-log', async (req, res) => {
+    try {
+        const caller = await requireCapability(req, res, 'coupons.view_analytics'); if (!caller) return;
+        const page = Math.max(1, Number(req.query.page) || 1);
+        const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+        const skip = (page - 1) * limit;
+        const actionPrefix = req.query.actionPrefix ? String(req.query.actionPrefix) : null;
+
+        const where: any = actionPrefix ? { action: { startsWith: actionPrefix } } : {};
+        const [items, total] = await Promise.all([
+            prisma.auditLog.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take: limit }),
+            prisma.auditLog.count({ where }),
+        ]);
+
+        res.json({ data: items, total, page, limit, totalPages: Math.ceil(total / limit) });
+    } catch (error: any) {
+        return handleApiError(res, error, { area: 'admin.audit-log', userMessage: 'Failed to load audit log' });
+    }
+});
+
+// Coupon logo upload to Supabase Storage 'coupons' bucket (per Pranav's choice — no AWS S3).
+// Mirrors POST /products/upload-image. Requires create_edit_delete capability.
+app.post('/coupons/upload-logo', upload.single('file'), async (req, res) => {
+    try {
+        const caller = await requireCapability(req, res, 'coupons.create_edit_delete'); if (!caller) return;
+        if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+        const fileContent = fs.readFileSync(req.file.path);
+        const safeName = req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const fileName = `${Date.now()}-${safeName}`;
+        const BUCKET_NAME = 'coupons';
+
+        const { data, error } = await supabase.storage
+            .from(BUCKET_NAME)
+            .upload(fileName, fileContent, { contentType: req.file.mimetype, upsert: false });
+
+        fs.unlinkSync(req.file.path);
+
+        if (error) {
+            const err = error as any;
+            if (err.statusCode === '404' || err.error === 'Bucket not found') {
+                return res.status(500).json({ error: `Bucket '${BUCKET_NAME}' not found. Create a PUBLIC Supabase Storage bucket named 'coupons'.` });
+            }
+            return res.status(500).json({ error: 'Supabase upload failed', details: error.message });
+        }
+
+        const { data: { publicUrl } } = supabase.storage.from(BUCKET_NAME).getPublicUrl(fileName);
+        res.json({ url: publicUrl });
+    } catch (error: any) {
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return handleApiError(res, error, { area: 'coupons.upload-logo', userMessage: 'Failed to upload logo' });
     }
 });
 

@@ -52,6 +52,8 @@ const socket_io_1 = require("socket.io");
 const multer_1 = __importDefault(require("multer"));
 const xlsx = __importStar(require("xlsx"));
 const fs_1 = __importDefault(require("fs"));
+// Note: `crypto` is already brought in via `require` at line ~469 (legacy pattern
+// shared with Razorpay). Phase 2 (2E-4) helpers below use that same `crypto`.
 const supabase_js_1 = require("@supabase/supabase-js");
 const zod_1 = require("zod");
 const sms_service_1 = require("./services/sms.service");
@@ -63,12 +65,29 @@ const scheduled_jobs_1 = require("./services/scheduled-jobs");
 const parseArrivalTime_1 = require("./utils/parseArrivalTime");
 const staff_1 = __importDefault(require("./routes/staff"));
 const bookings_1 = __importDefault(require("./routes/bookings"));
+// WS2.B rules engine — typed namespace import (replaces lazy require so TS
+// catches wrong-shape inputs like the 'dine-in' vs 'dining' enum mismatch).
+const orderLifecycleRules = __importStar(require("./orderLifecycle/rules"));
+// Round-6 Sentry observability — centralized error handler + middleware.
+// Before this shipped, ~91% of catch blocks here logged to console and
+// returned 500 without notifying Sentry. The errors-outages view showed
+// 2 events in 30 days for what should have been a noisy production API.
+const api_error_handler_1 = require("./lib/api-error-handler");
 // --- Configuration ---
 const app = (0, express_1.default)();
 const port = process.env.PORT || 3000;
+// --- Request ID middleware MUST run first (round-7 fix) ---
+// Assigns the UUID before anything else logs or runs so the X-Request-Id
+// in the response header matches the [API Request] log line and any Sentry
+// event captured later in the request lifecycle. The other Sentry
+// middleware (sentryUserContext, fivexxInterceptor) are mounted lower down
+// after express.json so they can read the body, but requestId has no body
+// dependency and benefits from being absolute first.
+app.use(api_error_handler_1.requestIdMiddleware);
 // --- Request Logger ---
 app.use((req, res, next) => {
-    console.log(`[API Request] ${req.method} ${req.url}`);
+    const reqId = req.id ?? '?';
+    console.log(`[API Request] req=${reqId} ${req.method} ${req.url}`);
     next();
 });
 app.disable('x-powered-by');
@@ -90,6 +109,18 @@ const supabaseAdmin = (0, supabase_js_1.createClient)(supabaseUrl, supabaseServi
 app.use((0, helmet_1.default)());
 app.use((0, cors_1.default)({ origin: true, credentials: true }));
 app.use(express_1.default.json({ limit: '50mb' }));
+// --- Sentry observability (round-6) ---
+// Order matters:
+//   1. requestId — mounted ABOVE the request logger (round-7 audit fix), so
+//      the very first log line of every request includes the UUID. See
+//      app.use(requestIdMiddleware) ~line 56.
+//   2. sentryUserContext — decodes JWT for Sentry user scope. Runs before
+//      routes so every captured event knows who hit it.
+//   3. fivexxInterceptor — defense-in-depth fallback that captures any 5xx
+//      response we missed via handleApiError. Runs LAST so it wraps res.json
+//      after other middleware has had a chance to modify it.
+app.use(api_error_handler_1.sentryUserContextMiddleware);
+app.use(api_error_handler_1.fivexxInterceptorMiddleware);
 // --- Staff RBAC Routes ---
 app.use('/api/staff', staff_1.default);
 // --- Table Booking Routes ---
@@ -188,6 +219,240 @@ async function requireUser(req, res) {
         res.status(401).json({ error: 'Authentication required' });
         return null;
     }
+}
+/**
+ * Phase 2J (hot-fix 2026-06-09) — Soft auth for endpoints that Option A patches
+ * #1A/#1B/#1C hard-cut behind requireUser (POST /orders, PATCH /order-requests/:id/status).
+ *
+ * Background: the deployed API requires auth on those endpoints, but main's
+ * consumer-app still uses plain fetch() without an Authorization header.
+ * Pre-OTA installs return 401 on every checkout / cancel — this helper restores
+ * legacy behavior for those clients while preserving Option A #1B's impersonation
+ * guard for authenticated callers.
+ *
+ * Behavior:
+ *  - REQUIRE_ORDERS_AUTH=true → hard-require auth (matches requireUser exactly).
+ *  - Else, Authorization header PRESENT but invalid → 401 (don't let attackers
+ *    send garbage to bypass the eventual hard-require).
+ *  - Else, Authorization header MISSING → soft-pass. Returns { user: null }.
+ *    Sentry captures a count for OTA-rollout visibility.
+ *  - Else, Authorization header VALID → returns { user: <User> }. Caller MUST
+ *    enforce its own userId/ownership guards conditionally on user being non-null.
+ *
+ * Return convention:
+ *  - null          → response already sent (401); caller does `if (!auth) return;`
+ *  - { user: ... } → proceed; check `auth.user` for null vs authenticated
+ *
+ * Flip REQUIRE_ORDERS_AUTH=true once Sentry shows zero soft-auth pre-OTA
+ * messages for 24+ hours.
+ */
+async function softRequireUser(req, res) {
+    const authHeader = req.headers.authorization;
+    if (process.env.REQUIRE_ORDERS_AUTH === 'true') {
+        try {
+            const user = await getAuthUser(req);
+            return { user };
+        }
+        catch {
+            res.status(401).json({ error: 'Authentication required' });
+            return null;
+        }
+    }
+    // Soft mode — flag is off (default during pre-OTA window).
+    if (authHeader) {
+        // Header present → must be valid; else 401. This keeps post-OTA clients
+        // strict and prevents garbage-header bypass attempts.
+        try {
+            const user = await getAuthUser(req);
+            return { user };
+        }
+        catch {
+            res.status(401).json({ error: 'Invalid authentication token' });
+            return null;
+        }
+    }
+    // No header at all → legacy pre-OTA client. Log for OTA-rollout monitoring.
+    try {
+        Sentry.captureMessage('soft-auth: pre-OTA unauth request', {
+            level: 'info',
+            tags: {
+                phase: 'pre-ota-soft-auth',
+                endpoint: req.path,
+                method: req.method,
+            },
+        });
+    }
+    catch {
+        // Swallow — Sentry shouldn't take down /orders.
+    }
+    return { user: null };
+}
+// Phase 2 (Coupon foolproof) — minimal server-side capability map for coupon
+// endpoints. Mirrors apps/admin-web/src/lib/rbac.ts. SUPER_ADMIN is handled by
+// the wildcard check inside requireCapability (matches isAdmin/role==='SUPER_ADMIN'
+// the same way requireAdmin / requireRole do), so it's not listed here. Add more
+// roles as they gain coupon capabilities. Future: move to a shared package
+// (apps/api/src/lib/rbac.ts already mirrors this map but is not yet wired into
+// index.ts — left untouched to keep this sub-task strictly additive).
+const ROLE_CAPABILITIES = {
+    FINANCE: ['coupons.view_analytics'],
+};
+/**
+ * Capability-based RBAC guard. Resolves the user's role → capability list and
+ * verifies the user has the requested capability. Returns the User on success,
+ * sends 403 and returns null on failure.
+ *
+ * Phase 2 (Coupon foolproof) — added to replace requireAdmin on coupon endpoints
+ * in a follow-up sub-task so server-side RBAC matches what
+ * apps/admin-web/src/lib/rbac.ts already declares. Not yet wired to any
+ * endpoint — sub-task 2A only adds the helper + capability declarations.
+ *
+ * Pattern matches requireUser / requireAdmin / requireRole — caller does:
+ *   const u = await requireCapability(req, res, 'coupons.create_edit_delete');
+ *   if (!u) return;
+ */
+async function requireCapability(req, res, capability) {
+    let caller;
+    try {
+        caller = await getAuthUser(req);
+    }
+    catch {
+        res.status(401).json({ error: 'Authentication required' });
+        return null;
+    }
+    const callerProfile = await prisma.user.findUnique({
+        where: { id: caller.id },
+        select: { isAdmin: true, role: true },
+    });
+    if (!callerProfile) {
+        res.status(403).json({ error: 'Access denied' });
+        return null;
+    }
+    // SUPER_ADMIN wildcard — keeps current behaviour intact. The legacy isAdmin
+    // flag is treated as SUPER_ADMIN equivalent (mirrors requireAdmin /
+    // requireRole semantics for users created pre-Role-enum).
+    if (callerProfile.role === 'SUPER_ADMIN' || callerProfile.isAdmin === true) {
+        return caller;
+    }
+    const role = callerProfile.role || '';
+    const capabilities = ROLE_CAPABILITIES[role] || [];
+    if (capabilities.includes(capability)) {
+        return caller;
+    }
+    res.status(403).json({ error: 'Forbidden: missing capability ' + capability });
+    return null;
+}
+/**
+ * Append-only audit log writer. Records who did what (action), to what
+ * (targetType + targetId), with the JSON before/after diff.
+ *
+ * Phase 2 (Coupon foolproof) — called from coupon mutation endpoints
+ * (POST/PATCH/DELETE /coupon). Future: any sensitive mutation can call this.
+ *
+ * Failure handling: NEVER throws or fails the parent mutation. If the audit
+ * write itself fails, captures to Sentry and continues. Audit gaps are loud
+ * (in Sentry) but never block business logic.
+ */
+async function writeAuditLog(actorUserId, action, targetType, targetId, beforeJson, afterJson) {
+    try {
+        await prisma.auditLog.create({
+            data: {
+                actorUserId,
+                action,
+                targetType: targetType || null,
+                targetId: targetId || null,
+                beforeJson: (beforeJson ?? null),
+                afterJson: (afterJson ?? null),
+            },
+        });
+    }
+    catch (err) {
+        console.error('[writeAuditLog] failed:', err?.message || err);
+        try {
+            Sentry.captureException(err, {
+                extra: { actorUserId, action, targetType, targetId, area: 'audit-log.write' },
+            });
+        }
+        catch {
+            // Sentry SDK failure — already in degraded state, don't double-fail.
+        }
+    }
+}
+/**
+ * Phase 2 (2E-4) — Coupon validation token helpers.
+ *
+ * Issues a signed HMAC-SHA256 token from POST /checkout/validate-coupon. The token
+ * binds a specific coupon+user+cart to a specific discount, with a 10-min TTL.
+ * POST /orders (Phase 2F) verifies the token before applying any discount —
+ * closes the cart-spoof attack the audit flagged.
+ *
+ * NOT a true JWT (avoids new dep) but functionally equivalent: base64url(payload)
+ * + '.' + base64url(HMAC-SHA256). Constant-time signature comparison on verify.
+ *
+ * Env var: COUPON_VALIDATION_SECRET (set on EB via `eb setenv ... ; eb deploy`
+ * chained per ERRORS.md before Phase 4 OTA flip-over). If unset locally, sign
+ * returns null (logs a warning); verify throws (caught by the endpoint).
+ */
+function computeCartHash(cartItems) {
+    const normalized = (Array.isArray(cartItems) ? cartItems : []).map((item) => ({
+        id: String(item?.storeProductId || item?.id || item?.name || ''),
+        p: Number(item?.price) || 0,
+        q: Number(item?.quantity) || 0,
+    })).sort((a, b) => a.id.localeCompare(b.id));
+    return crypto.createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
+}
+function signCouponToken(payload) {
+    const secret = process.env.COUPON_VALIDATION_SECRET;
+    if (!secret) {
+        console.warn('[coupon-token] COUPON_VALIDATION_SECRET not set — token omitted (set on EB before Phase 4 OTA flip-over)');
+        return null;
+    }
+    const json = JSON.stringify(payload);
+    const data = Buffer.from(json, 'utf8').toString('base64url');
+    const sig = crypto.createHmac('sha256', secret).update(data).digest('base64url');
+    return `${data}.${sig}`;
+}
+function verifyCouponToken(token) {
+    const secret = process.env.COUPON_VALIDATION_SECRET;
+    if (!secret) {
+        throw new Error('COUPON_VALIDATION_SECRET not configured');
+    }
+    const parts = token.split('.');
+    if (parts.length !== 2) {
+        throw new Error('Malformed coupon token');
+    }
+    const [data, sig] = parts;
+    const expected = crypto.createHmac('sha256', secret).update(data).digest('base64url');
+    const sigBuf = Buffer.from(sig);
+    const expBuf = Buffer.from(expected);
+    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+        throw new Error('Invalid coupon token signature');
+    }
+    const payload = JSON.parse(Buffer.from(data, 'base64url').toString('utf8'));
+    if (typeof payload.exp !== 'number' || payload.exp < Math.floor(Date.now() / 1000)) {
+        throw new Error('Coupon token expired');
+    }
+    return payload;
+}
+/**
+ * Phase 2 (2I) — Tiny per-process in-memory rate limiter for abuse defense on
+ * coupon endpoints. Per-key 60-second sliding window. Per-process means each
+ * EB instance tracks separately — sufficient as a defensive backstop; the real
+ * limiter (CloudFlare / API gateway) lives upstream. Returns true if the
+ * request is allowed, false if it exceeds the cap.
+ */
+const rateLimitBuckets = new Map();
+function checkRateLimit(key, maxPerMinute) {
+    const now = Date.now();
+    const bucket = rateLimitBuckets.get(key);
+    if (!bucket || bucket.resetAt < now) {
+        rateLimitBuckets.set(key, { count: 1, resetAt: now + 60000 });
+        return true;
+    }
+    if (bucket.count >= maxPerMinute)
+        return false;
+    bucket.count++;
+    return true;
 }
 async function logAudit(productId, action, field, oldValue, newValue, changedBy = 'System') {
     try {
@@ -327,8 +592,8 @@ app.post('/payments/create-order', async (req, res) => {
         res.json({ order_id: order.id, receipt, amount: options.amount, currency: options.currency, details: order });
     }
     catch (error) {
-        console.error('Failed to create Razorpay order:', error);
-        res.status(500).json({ error: 'Order creation failed', details: error.message });
+        // Round-7 fix: surface Razorpay/DB cause (was generic since the auto-refactor).
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'payments.create-order', extra: { userId: req?.user?.id ?? undefined }, userMessage: error?.message || 'Order creation failed' });
     }
 });
 /**
@@ -409,8 +674,7 @@ app.post('/merchant-signup/validate-coupon', async (req, res) => {
         });
     }
     catch (err) {
-        console.error('[validate-coupon] error:', err);
-        return res.status(500).json({ valid: false, error: 'Server error validating coupon.' });
+        return (0, api_error_handler_1.handleApiError)(res, err, { area: 'merchant-signup.validate-coupon', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Server error validating coupon.' });
     }
 });
 app.post('/payments/verify', (req, res) => {
@@ -431,8 +695,8 @@ app.post('/payments/verify', (req, res) => {
         }
     }
     catch (error) {
-        console.error('Signature verification failed:', error);
-        res.status(500).json({ error: 'Verification failed', details: error.message });
+        // Round-7 fix: surface signature/HMAC failure cause so the merchant sees what went wrong.
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'payments.verify', extra: { userId: req?.user?.id ?? undefined }, userMessage: error?.message || 'Verification failed' });
     }
 });
 /**
@@ -505,9 +769,7 @@ app.post('/webhooks/razorpay', async (req, res) => {
         return res.json({ received: true });
     }
     catch (err) {
-        console.error('[razorpay-webhook] handler error:', err);
-        // Return 500 so Razorpay retries the delivery later.
-        return res.status(500).json({ error: 'Webhook handler failed', details: err.message });
+        return (0, api_error_handler_1.handleApiError)(res, err, { area: 'webhooks.razorpay', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Webhook handler failed' });
     }
 });
 /**
@@ -805,8 +1067,7 @@ app.get('/products/template', async (req, res) => {
         res.end();
     }
     catch (error) {
-        console.error('Template generation failed:', error);
-        res.status(500).json({ error: 'Failed to generate template' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'products.template', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to generate template' });
     }
 });
 // Export Products
@@ -833,8 +1094,7 @@ app.get('/products/export', async (req, res) => {
         res.send(buffer);
     }
     catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Failed to export products' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'products.export', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to export products' });
     }
 });
 // Export Selected Products (Template Format)
@@ -886,8 +1146,7 @@ app.post('/products/export-selected', async (req, res) => {
         res.end();
     }
     catch (error) {
-        console.error('Export selected failed:', error);
-        res.status(500).json({ error: 'Failed to export selected products' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'products.export-selected', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to export selected products' });
     }
 });
 const upload = (0, multer_1.default)({ dest: 'uploads/' });
@@ -938,6 +1197,8 @@ app.post('/products/upload-image', upload.single('file'), async (req, res) => {
         // Ensure cleanup on error
         if (req.file && fs_1.default.existsSync(req.file.path))
             fs_1.default.unlinkSync(req.file.path);
+        Sentry.captureException(error, { tags: { area: 'products.upload-image' }, extra: {} });
+        (0, api_error_handler_1.markResponseAsReported)(res);
         res.status(500).json({ error: 'Failed to upload image' });
     }
 });
@@ -1166,8 +1427,7 @@ app.post('/catalog/sync/trigger', async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Sync Trigger Error:', error);
-        res.status(500).json({ error: 'Failed to trigger sync', details: error.message });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'catalog.sync.trigger', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to trigger sync' });
     }
 });
 // Get run status and fetch results to queue
@@ -1184,8 +1444,7 @@ app.get('/catalog/sync/status/:runId', async (req, res) => {
         res.json({ status: run.status, progress: run.status });
     }
     catch (error) {
-        console.error('Sync Status Error:', error);
-        res.status(500).json({ error: 'Failed to fetch sync status', details: error.message });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'catalog.sync.status', extra: { runId: req.params.runId, userId: req?.user?.id ?? undefined }, userMessage: 'Failed to fetch sync status' });
     }
 });
 // Webhook listener for Apify
@@ -1201,6 +1460,8 @@ app.post('/catalog/sync/webhook', async (req, res) => {
     }
     catch (error) {
         console.error('Webhook Error:', error);
+        Sentry.captureException(error, { tags: { area: 'catalog.sync.webhook' }, extra: {} });
+        (0, api_error_handler_1.markResponseAsReported)(res);
         res.status(500).send('Server Error');
     }
 });
@@ -1221,6 +1482,8 @@ app.get('/catalog/sync/queue', async (req, res) => {
         res.json(mapped);
     }
     catch (error) {
+        Sentry.captureException(error, { tags: { area: 'catalog.sync.queue' }, extra: {} });
+        (0, api_error_handler_1.markResponseAsReported)(res);
         res.status(500).json({ error: 'Failed to fetch sync queue' });
     }
 });
@@ -1265,6 +1528,8 @@ app.get('/verticals', async (req, res) => {
         res.json(verticals);
     }
     catch (error) {
+        Sentry.captureException(error, { tags: { area: 'verticals' }, extra: {} });
+        (0, api_error_handler_1.markResponseAsReported)(res);
         res.status(500).json({ error: 'Failed to fetch verticals' });
     }
 });
@@ -1288,8 +1553,7 @@ app.delete('/verticals/:id', async (req, res) => {
         res.json({ success: true, message: 'Vertical deleted and products gracefully uncategorized' });
     }
     catch (error) {
-        console.error('Vertical deletion error:', error);
-        res.status(500).json({ error: 'Failed to delete vertical' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'verticals', extra: { id: req.params.id, userId: req?.user?.id ?? undefined }, userMessage: 'Failed to delete vertical' });
     }
 });
 // Delete Category (Atomic with Product Audit)
@@ -1312,8 +1576,7 @@ app.delete('/categories/:id', async (req, res) => {
         res.json({ success: true, message: 'Category deleted and products gracefully uncategorized' });
     }
     catch (error) {
-        console.error('Category deletion error:', error);
-        res.status(500).json({ error: 'Failed to delete category' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'categories', extra: { id: req.params.id, userId: req?.user?.id ?? undefined }, userMessage: 'Failed to delete category' });
     }
 });
 // Approve items from sync queue to master catalog (O(1) Raw SQL Batch)
@@ -1402,8 +1665,7 @@ app.post('/catalog/sync/approve', async (req, res) => {
         res.json({ success: true, message: `Successfully approved ${items.length} items with O(1) performance` });
     }
     catch (error) {
-        console.error('High-performance sync approval error:', error);
-        res.status(500).json({ error: 'Failed to approve items due to database pressure or constraint violation' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'catalog.sync.approve', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to approve items due to database pressure or constraint violation' });
     }
 });
 // Reject and delete junk items from sync queue
@@ -1422,8 +1684,7 @@ app.post('/catalog/sync/reject', async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Reject Sync Error:', error);
-        res.status(500).json({ error: 'Failed to reject sync items', details: error.message });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'catalog.sync.reject', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to reject sync items' });
     }
 });
 // Bulk Import
@@ -1511,8 +1772,7 @@ app.post('/products/bulk', upload.single('file'), async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Bulk import failed:', error);
-        res.status(500).json({ error: 'Failed to import products' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'products.bulk', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to import products' });
     }
 });
 // Delete Product
@@ -1529,6 +1789,8 @@ app.delete('/products/:id', async (req, res) => {
         res.json({ message: 'Product deleted successfully' });
     }
     catch (error) {
+        Sentry.captureException(error, { tags: { area: 'products' }, extra: { id: req.params.id } });
+        (0, api_error_handler_1.markResponseAsReported)(res);
         res.status(500).json({ error: 'Failed to delete product' });
     }
 });
@@ -1557,8 +1819,7 @@ app.post('/products/bulk-delete', async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Bulk delete error:', error);
-        res.status(500).json({ error: 'Failed to delete products' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'products.bulk-delete', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to delete products' });
     }
 });
 // BULK UPDATE Products (category, GST rate, etc.)
@@ -1613,8 +1874,7 @@ app.post('/products/bulk-update', async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Bulk update error:', error);
-        res.status(500).json({ error: 'Failed to update products' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'products.bulk-update', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to update products' });
     }
 });
 // Patch Product (with Audit)
@@ -1738,8 +1998,7 @@ app.delete('/products/images/:imageId', async (req, res) => {
         res.json({ message: 'Image removed' });
     }
     catch (error) {
-        console.error('Delete Image Error:', error);
-        res.status(500).json({ error: 'Failed to delete image' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'products.images', extra: { imageId: req.params.imageId, userId: req?.user?.id ?? undefined }, userMessage: 'Failed to delete image' });
     }
 });
 // Update Image Details (Name/Primary)
@@ -1759,6 +2018,8 @@ app.patch('/products/images/:imageId', async (req, res) => {
         res.json(image);
     }
     catch (error) {
+        Sentry.captureException(error, { tags: { area: 'products.images' }, extra: { imageId: req.params.imageId } });
+        (0, api_error_handler_1.markResponseAsReported)(res);
         res.status(500).json({ error: 'Failed to update image' });
     }
 });
@@ -1930,8 +2191,7 @@ app.post('/products/bulk-import-json', express_1.default.json({ limit: '100mb' }
         });
     }
     catch (error) {
-        console.error('JSON Bulk import failed:', error);
-        res.status(500).json({ error: 'Bulk import failed', details: error.message });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'products.bulk-import-json', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Bulk import failed' });
     }
 });
 // --- Consumer-Facing APIs (for Consumer App) ---
@@ -1993,8 +2253,7 @@ app.get('/consumer/stores', async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Consumer stores error:', error);
-        res.status(500).json({ error: 'Failed to fetch stores', details: error.message });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'consumer.stores', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to fetch stores' });
     }
 });
 // GET /consumer/stores/:id - Store detail with products
@@ -2076,8 +2335,7 @@ app.get('/consumer/stores/:id', async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Consumer store detail error:', error);
-        res.status(500).json({ error: 'Failed to fetch store details', details: error.message });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'consumer.stores', extra: { id: req.params.id, userId: req?.user?.id ?? undefined }, userMessage: 'Failed to fetch store details' });
     }
 });
 // GET /consumer/products/search - Search products across all stores
@@ -2120,14 +2378,33 @@ app.get('/consumer/products/search', async (req, res) => {
         res.json({ data: results, total: results.length });
     }
     catch (error) {
-        console.error('Product search error:', error);
-        res.status(500).json({ error: 'Search failed', details: error.message });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'consumer.products.search', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Search failed' });
     }
 });
 // --- Order Routes ---
 // Create Order (for testing/Consumer App)
 app.post('/orders', async (req, res) => {
+    // Phase 2K hot-fix (2026-06-09): hoist `user` so the orphan-refund block in
+    // the catch can do the ownership check (paymentId must belong to this user's
+    // order, or no order exists for it). Stays null on softRequireUser-fail or
+    // soft-pass (REQUIRE_ORDERS_AUTH=false + no Authorization header) — catch
+    // block treats null as "can't auto-refund, let the SLA cron reconcile".
+    let user = null;
     try {
+        // Option A patch #1B (2026-06-08): backend requireUser hardening.
+        // Previously any anonymous caller could submit { userId: <victim>, paid: true,
+        // paymentId: 'fake' } and create a paid order in another customer's name.
+        //
+        // Phase 2J hot-fix (2026-06-09): soft-auth gate. Pre-OTA consumer-app
+        // installs still use plain fetch() with no Authorization header and would
+        // 401 on every checkout. Until REQUIRE_ORDERS_AUTH=true (post-OTA), we
+        // accept unauth requests and skip the impersonation guard for them. The
+        // impersonation guard below STILL runs for authenticated callers, so
+        // Option A #1B's no-impersonation guarantee is preserved for that path.
+        const auth = await softRequireUser(req, res);
+        if (!auth)
+            return;
+        user = auth.user;
         const { userId, storeId, branchId, items, totalAmount, paid, // Consumer sends true after successful payment
         paymentId, // Razorpay payment ID for audit trail
         orderRequestId, // Reference to the original order_request
@@ -2136,10 +2413,63 @@ app.post('/orders', async (req, res) => {
         storeName, // Store display name
         specialInstructions, arrivalTime, otp, // OTP generated by consumer app
         orderType, // 'pickup' | 'dine-in' (defaults to 'pickup')
-        guestsCount // Number of guests for dine-in orders
-         } = req.body;
+        guestsCount, // Number of guests for dine-in orders
+        // Phase 2 (2F) — coupon snapshot fields. validationToken is the HMAC
+        // proof from POST /checkout/validate-coupon. couponId/couponCode are
+        // snapshot info; discount/fundingSource/discountType come from the
+        // trusted token payload (not body — body is client-controlled).
+        validationToken, couponId, couponCode, } = req.body;
         if (!userId || !storeId || !branchId || !items || !totalAmount) {
             return res.status(400).json({ error: 'Missing required fields: userId, storeId, branchId, items, totalAmount' });
+        }
+        // Option A patch #1B: ownership guard — body.userId must match the
+        // authenticated user's id. Prevents creating an order in another
+        // customer's name even when a valid token is presented.
+        //
+        // Phase 2J: only enforced when authenticated. Soft-auth pre-OTA clients
+        // (user === null) skip this guard — same as the pre-Option-A baseline.
+        // Once REQUIRE_ORDERS_AUTH=true, softRequireUser ensures user is non-null.
+        if (user && user.id !== userId) {
+            return res.status(403).json({ error: 'userId mismatch — cannot create order for another user' });
+        }
+        // Phase 2 (2F) — coupon validation token check. If a token is provided,
+        // verify HMAC signature + expiry + userId binding + cartHash match. If
+        // valid, populate couponContext for the transactional redemption write
+        // below. Feature-flagged: REQUIRE_COUPON_TOKEN=true (post-Phase-4)
+        // makes any client-claimed couponId without a valid token a 400; until
+        // then, legacy clients without tokens still work (no discount applied).
+        let couponContext = null;
+        const requireCouponToken = String(process.env.REQUIRE_COUPON_TOKEN || 'false').toLowerCase() === 'true';
+        if (validationToken) {
+            try {
+                const decoded = verifyCouponToken(String(validationToken));
+                if (decoded.userId !== userId) {
+                    return res.status(400).json({ error: 'Coupon token does not match this user' });
+                }
+                // cartHash binding — only enforce strictly when REQUIRE_COUPON_TOKEN
+                // is on. Until then a mismatch is logged but allowed (backward compat
+                // with legacy consumer-app builds that haven't OTA'd yet).
+                const observedCartHash = computeCartHash(items || []);
+                if (decoded.cartHash !== observedCartHash) {
+                    if (requireCouponToken) {
+                        return res.status(400).json({ error: 'Cart changed since coupon was applied — please re-apply' });
+                    }
+                    console.warn(`[POST /orders] coupon cartHash mismatch — will reject when REQUIRE_COUPON_TOKEN=true. userId=${userId}`);
+                }
+                couponContext = {
+                    couponId: String(decoded.couponId),
+                    code: String(couponCode || ''),
+                    discount: Number(decoded.discount) || 0,
+                    fundingSource: String(decoded.fundingSource || ''),
+                    discountType: String(decoded.discountType || ''),
+                };
+            }
+            catch (err) {
+                return res.status(400).json({ error: err?.message || 'Invalid coupon token' });
+            }
+        }
+        else if (requireCouponToken && couponId) {
+            return res.status(400).json({ error: 'Coupon discount requires a validation token. Please re-apply the coupon.' });
         }
         // ── Store Status Gate: reject orders for offline/closed stores ──
         const branch = await prisma.merchantBranch.findUnique({
@@ -2199,13 +2529,44 @@ app.post('/orders', async (req, res) => {
         // creating a duplicate. Makes client auto-retries safe (no double order /
         // double charge) after a transient failure.
         if (paymentId) {
+            // Option A patch #3 (2026-06-08): multi-store idempotency tightening.
+            // Previously keyed only on paymentId, which is intentionally shared across
+            // N orders in a multi-store cart — store B's POST would silently get store
+            // A's order back. Adding storeId + orderRequestId discriminators fixes that.
             const existingForPayment = await prisma.order.findFirst({
-                where: { metadata: { path: ['razorpayPaymentId'], equals: paymentId } },
+                where: {
+                    AND: [
+                        { metadata: { path: ['razorpayPaymentId'], equals: paymentId } },
+                        { storeId: storeId },
+                        ...(orderRequestId ? [{ metadata: { path: ['orderRequestId'], equals: orderRequestId } }] : [])
+                    ]
+                },
                 include: { items: { include: { storeProduct: { include: { product: true } } } }, store: true },
             });
             if (existingForPayment) {
                 console.log(`[POST /orders] Idempotent hit — order already exists for payment ${paymentId}`);
                 return res.status(200).json(existingForPayment);
+            }
+        }
+        // Option A patch #4 (2026-06-08): server-side TTL + status guard.
+        // Verify the order_request is still ACCEPTED and not expired before
+        // creating a paid order from it. Without this, an expired or non-ACCEPTED
+        // request can still produce an order that should have been refunded per
+        // business rules. Skip the check if no orderRequestId (legacy callers).
+        if (orderRequestId) {
+            const orq = await prisma.order_requests.findUnique({
+                where: { id: orderRequestId },
+                select: { status: true, expires_at: true }
+            });
+            if (!orq) {
+                return res.status(404).json({ error: 'Order request not found' });
+            }
+            if (orq.status !== 'ACCEPTED') {
+                return res.status(410).json({ error: `Order request is in state ${orq.status}, expected ACCEPTED` });
+            }
+            const expiresMs = new Date(orq.expires_at).getTime();
+            if (expiresMs < Date.now()) {
+                return res.status(410).json({ error: 'Order request has expired' });
             }
         }
         // Transaction Block: Order Create + Stock Decrement + Notification Create
@@ -2250,7 +2611,17 @@ app.post('/orders', async (req, res) => {
                     // Parse arrival_time text → absolute UTC timestamp for cron-based slot reminders.
                     // Returns null if format unrecognized; order just won't get scheduled reminders.
                     slot_time_at: (0, parseArrivalTime_1.parseArrivalTime)(arrivalTime, new Date()),
-                    metadata: paymentId ? { razorpayPaymentId: paymentId, orderRequestId: orderRequestId || null } : undefined,
+                    // Persist orderRequestId whenever we have one, regardless of paymentId
+                    // (round-4 audit fix for Bug N7: the cancel-time order_requests cleanup
+                    // reads metadata.orderRequestId — leaving it undefined for non-Razorpay
+                    // flows meant the cleanup silently no-op'd. Now we set metadata if
+                    // EITHER paymentId or orderRequestId is present.)
+                    metadata: (paymentId || orderRequestId)
+                        ? {
+                            ...(paymentId ? { razorpayPaymentId: paymentId } : {}),
+                            ...(orderRequestId ? { orderRequestId } : {}),
+                        }
+                        : undefined,
                     items: {
                         create: items.map((item) => ({
                             storeProductId: item.storeProductId || null,
@@ -2268,15 +2639,107 @@ app.post('/orders', async (req, res) => {
             });
             console.log(`[POST /orders] Created order ${orderNumber} in tx`);
             if (orderRequestId) {
-                try {
-                    await tx.order_requests.update({
-                        where: { id: orderRequestId },
-                        data: { status: 'COMPLETED' }
-                    });
-                    console.log(`[POST /orders] Updated order_request ${orderRequestId} to COMPLETED`);
+                // Phase 2K hot-fix (2026-06-09): atomic conditional update prevents
+                // the TOCTOU race the adversarial review found. Previously the
+                // outside-txn read of status='ACCEPTED' could go stale by the time
+                // this inner update fired, and an unconditional update silently
+                // overwrote CANCELLED/REJECTED/EXPIRED with COMPLETED. The original
+                // try/catch swallowed any error too, making the race invisible.
+                // updateMany with status + expires_at guards rolls the whole order
+                // back if the request transitioned during checkout — caller's
+                // outer catch returns ORDER_CREATE_FAILED + retryable=true.
+                const updateResult = await tx.order_requests.updateMany({
+                    where: {
+                        id: orderRequestId,
+                        status: 'ACCEPTED',
+                        expires_at: { gt: new Date() },
+                    },
+                    data: { status: 'COMPLETED' },
+                });
+                if (updateResult.count === 0) {
+                    throw new Error(`ORDER_REQUEST_INVALID_STATE: ${orderRequestId} no longer ACCEPTED or has expired`);
                 }
-                catch (err) {
-                    console.error(`[POST /orders] Failed to update order_request ${orderRequestId}:`, err.message);
+                console.log(`[POST /orders] Updated order_request ${orderRequestId} to COMPLETED`);
+            }
+            // Phase 2 (2F) — coupon redemption inside the transaction. Either both
+            // the Order and the redemption succeed, or both roll back. Atomic
+            // increments via updateMany+where prevent usageLimit/dailyUsageLimit
+            // from being exceeded under parallel checkout race. Idempotent on
+            // (couponId, orderId) — the partial unique index from Phase 1 #4
+            // means duplicate inserts are no-ops.
+            if (couponContext) {
+                // Snapshot the coupon on the Order row (immune to future archive/edit)
+                await tx.order.update({
+                    where: { id: createdOrder.id },
+                    data: {
+                        orderCouponId: couponContext.couponId,
+                        orderCouponCode: couponContext.code,
+                        orderCouponDiscount: couponContext.discount,
+                        orderCouponFundingSource: couponContext.fundingSource,
+                        orderCouponDiscountType: couponContext.discountType,
+                    },
+                });
+                // Idempotent ledger insert. If a redemption already exists for
+                // this (couponId, orderId), skip the increments — this is the
+                // retry/double-call defense.
+                const existingRedemption = await tx.couponRedemption.findFirst({
+                    where: { couponId: couponContext.couponId, orderId: createdOrder.id },
+                    select: { id: true },
+                });
+                if (!existingRedemption) {
+                    await tx.couponRedemption.create({
+                        data: {
+                            couponId: couponContext.couponId,
+                            userId,
+                            orderId: createdOrder.id,
+                            discountAmount: couponContext.discount,
+                            fundingSource: couponContext.fundingSource,
+                        },
+                    });
+                    // Fetch coupon caps (single read) for limit checks.
+                    const couponRow = await tx.coupon.findUnique({
+                        where: { id: couponContext.couponId },
+                        select: { usageLimit: true, dailyUsageLimit: true, dailyUsageResetAt: true, dailyUsageCount: true },
+                    });
+                    // Total usage limit — atomic compare-and-swap.
+                    if (couponRow?.usageLimit) {
+                        const u = await tx.coupon.updateMany({
+                            where: { id: couponContext.couponId, usedCount: { lt: couponRow.usageLimit } },
+                            data: { usedCount: { increment: 1 } },
+                        });
+                        if (u.count === 0) {
+                            throw new Error('Coupon usage limit reached');
+                        }
+                    }
+                    else {
+                        await tx.coupon.update({
+                            where: { id: couponContext.couponId },
+                            data: { usedCount: { increment: 1 } },
+                        });
+                    }
+                    // Daily usage limit with IST midnight reset.
+                    if (couponRow?.dailyUsageLimit) {
+                        const nowD = new Date();
+                        const istNowD = new Date(nowD.getTime() + (5.5 * 60 * 60 * 1000));
+                        const istMidnightUtcMsD = Date.UTC(istNowD.getUTCFullYear(), istNowD.getUTCMonth(), istNowD.getUTCDate(), 0, 0, 0, 0) - (5.5 * 60 * 60 * 1000);
+                        const istMidnightTodayD = new Date(istMidnightUtcMsD);
+                        // Step 1: reset stale counter.
+                        await tx.coupon.updateMany({
+                            where: { id: couponContext.couponId, OR: [
+                                    { dailyUsageResetAt: null },
+                                    { dailyUsageResetAt: { lt: istMidnightTodayD } },
+                                ] },
+                            data: { dailyUsageCount: 0, dailyUsageResetAt: istMidnightTodayD },
+                        });
+                        // Step 2: atomic increment with limit check.
+                        const d = await tx.coupon.updateMany({
+                            where: { id: couponContext.couponId, dailyUsageCount: { lt: couponRow.dailyUsageLimit } },
+                            data: { dailyUsageCount: { increment: 1 } },
+                        });
+                        if (d.count === 0) {
+                            throw new Error('Coupon daily usage limit reached');
+                        }
+                    }
                 }
             }
             // 2. Decrement Stock & Check Low Inventory within tx
@@ -2402,10 +2865,88 @@ app.post('/orders', async (req, res) => {
         const wasPaid = !!(req.body?.paid && req.body?.paymentId);
         // ── Layer 4: orphaned-payment safety ──
         // Payment captured but order not created → money taken with nothing to show.
-        // Emit a loud, structured ALERT so ops/Sentry can reconcile + refund. (Auto-refund
-        // wiring is a fast-follow once Razorpay refunds are enabled/tested.)
+        // Emit a loud, structured ALERT so ops/Sentry can reconcile + refund.
+        // Option A patch #5 (2026-06-08): synchronous refund now wired below; a
+        // processOrphanedPaymentsSla cron is still TODO to catch async/process-death
+        // gaps.
         if (wasPaid) {
             console.error(`[POST /orders][ORPHANED-PAYMENT][ALERT] payment=${req.body.paymentId} user=${req.body.userId} amount=${req.body.totalAmount} store=${req.body.storeId} reason="${raw}"`);
+            // Option A patch #5 (2026-06-08): inline orphan-payment refund.
+            // Previously this only logged and left the customer waiting for manual
+            // ops. Now we trigger the refund immediately for the failed store's
+            // amount. (A separate processOrphanedPaymentsSla cron — out of Option A
+            // scope — will catch any orphans this misses due to request-process
+            // death or async failures.)
+            //
+            // Phase 2K hot-fix (2026-06-09): adversarial review (PR #1) found this
+            // path was a financial-sabotage vector. Client-controlled paymentId +
+            // totalAmount with no ownership check meant any auth'd user could
+            // submit a victim's paymentId with guaranteed-to-fail items and force
+            // a refund on the VICTIM's prior payment. Fix: (1) skip auto-refund
+            // on soft-auth unauth requests (let the SLA cron handle), (2) require
+            // the paymentId to either match an order owned by this user OR have
+            // no existing order at all, (3) cap refund at Razorpay-fetched
+            // captured amount (never trust req.body.totalAmount).
+            const paymentId = req.body?.paymentId;
+            const requestedAmount = Number(req.body?.totalAmount ?? 0);
+            if (!user) {
+                // Soft-auth pre-OTA request — we can't verify ownership. Skip
+                // auto-refund and let processOrphanedPaymentsSla cron handle.
+                console.warn(`[ORPHANED-PAYMENT][REFUND][SKIPPED] unauthenticated request — cron will reconcile paymentId=${paymentId}`);
+                try {
+                    Sentry.captureMessage('orphan-payment auto-refund skipped (no auth user)', { level: 'warning', extra: { paymentId, requestedAmount } });
+                }
+                catch { }
+            }
+            else if (paymentId && requestedAmount > 0) {
+                try {
+                    // Ownership check: paymentId must either belong to an order
+                    // owned by this user, OR have no existing order (truly orphan).
+                    const existingForPayment = await prisma.order.findFirst({
+                        where: { metadata: { path: ['razorpayPaymentId'], equals: paymentId } },
+                        select: { userId: true },
+                    });
+                    if (existingForPayment && existingForPayment.userId !== user.id) {
+                        console.error(`[ORPHANED-PAYMENT][REFUND][REFUSED] paymentId=${paymentId} belongs to user ${existingForPayment.userId} not ${user.id}`);
+                        try {
+                            Sentry.captureMessage('orphan-refund auth gap — paymentId belongs to another user, refused', {
+                                level: 'warning',
+                                extra: { paymentId, claimUserId: user.id, actualUserId: existingForPayment.userId },
+                            });
+                        }
+                        catch { }
+                    }
+                    else {
+                        // Cap amount at Razorpay-fetched captured value (never trust body.totalAmount).
+                        let capturedAmountInr = null;
+                        try {
+                            if (razorpayInstance) {
+                                const rzpPayment = await razorpayInstance.payments.fetch(paymentId);
+                                const amountPaise = Number(rzpPayment?.amount ?? 0);
+                                if (amountPaise > 0)
+                                    capturedAmountInr = Math.round(amountPaise / 100);
+                            }
+                        }
+                        catch (fetchErr) {
+                            console.warn(`[ORPHANED-PAYMENT][REFUND] could not fetch Razorpay payment ${paymentId}: ${fetchErr?.message || fetchErr}`);
+                        }
+                        const refundAmount = capturedAmountInr !== null
+                            ? Math.min(capturedAmountInr, requestedAmount)
+                            : requestedAmount;
+                        if (refundAmount > 0) {
+                            await processRazorpayRefund({ razorpayPaymentId: paymentId }, refundAmount);
+                            console.log(`[ORPHANED-PAYMENT][REFUND] Initiated refund for paymentId=${paymentId} amount=₹${refundAmount} (captured=${capturedAmountInr ?? 'unknown'})`);
+                        }
+                    }
+                }
+                catch (refundErr) {
+                    console.error('[ORPHANED-PAYMENT][REFUND][FAILED]', refundErr?.message || refundErr);
+                    try {
+                        Sentry.captureException(refundErr, { extra: { paymentId, amount: requestedAmount, area: 'orphaned-payment-refund' } });
+                    }
+                    catch { }
+                }
+            }
         }
         res.status(isStock ? 409 : 500).json({
             error: isStock ? 'OUT_OF_STOCK' : 'ORDER_CREATE_FAILED',
@@ -2514,23 +3055,78 @@ app.post('/order-requests', async (req, res) => {
         // Dispatch all collected notifications safely outside the transaction
         for (const notif of notificationsToDispatch) {
             notificationService.sendMerchantNotification(notif)
-                .catch(e => console.error('[POST /order-requests] Notif failed:', e));
+                .catch(e => {
+                console.error('[POST /order-requests] Notif failed:', e);
+                try {
+                    Sentry.captureException(e, { extra: { storeId: notif.storeId, type: notif.type, area: 'order-requests.notify' } });
+                }
+                catch { }
+            });
         }
         res.status(201).json(createdRequests);
     }
     catch (error) {
-        console.error('Create Order Requests Error:', error);
-        res.status(500).json({ error: 'Failed to create order requests', details: error.message });
+        // Round-7 fix: customer placing an order needs to see the real reason (store closed, item out of stock, Prisma FK error, etc.).
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'order-requests', extra: { userId: req?.user?.id ?? undefined }, userMessage: error?.message || 'Failed to create order requests' });
     }
 });
 // Update Order Request Status (Cancel/Reject)
 app.patch('/order-requests/:id/status', async (req, res) => {
     try {
+        // Option A patch #1A (2026-06-08): backend requireUser hardening.
+        // Previously any anonymous caller could ACCEPT/REJECT/CANCEL any
+        // order_request. Authorization (verify user owns consumer_user_id or
+        // branch.merchant_id) is a separate follow-up — harness Task #36.
+        //
+        // Phase 2J hot-fix (2026-06-09): soft-auth gate. Pre-OTA consumer-app
+        // installs still use plain fetch() with no Authorization header and
+        // would 401 on every cancel. Until REQUIRE_ORDERS_AUTH=true (post-OTA),
+        // accept unauth requests and skip the #1C ownership checks for them.
+        // Authenticated callers still go through the full #1C check below.
+        const auth = await softRequireUser(req, res);
+        if (!auth)
+            return;
+        const user = auth.user;
         const { id } = req.params;
         const { status, reason } = req.body;
         const allowedStatuses = ['CANCELLED', 'REJECTED', 'ACCEPTED'];
         if (!allowedStatuses.includes(status)) {
             return res.status(400).json({ error: `Invalid status. Allowed: ${allowedStatuses.join(', ')}` });
+        }
+        // Option A patch #1C (2026-06-08): backend authorization check.
+        // Verify the caller has the right role for the requested transition:
+        //   - CANCELLED can only be triggered by the order's consumer
+        //   - ACCEPTED / REJECTED can only be triggered by the merchant who
+        //     owns the branch the request was sent to
+        // Returns 404 if the request doesn't exist, 403 on role mismatch.
+        const existing = await prisma.order_requests.findUnique({
+            where: { id },
+            select: { consumer_user_id: true, branch_id: true }
+        });
+        if (!existing) {
+            return res.status(404).json({ error: 'Order request not found' });
+        }
+        // Phase 2J: ownership checks only enforced when authenticated. Soft-auth
+        // pre-OTA clients (user === null) skip — pre-Option-A baseline.
+        if (user) {
+            if (status === 'CANCELLED') {
+                if (user.id !== existing.consumer_user_id) {
+                    return res.status(403).json({ error: 'Only the order owner can cancel this request' });
+                }
+            }
+            else {
+                // Phase 2K hot-fix (2026-06-09): ACCEPTED or REJECTED — must be
+                // able to manage this branch. Previously this was owner-only
+                // (user.id === branch.merchantId) which 403'd non-owner staff
+                // (8 store_staff + 15 phone-managers verified on prod). The
+                // userCanManageBranch helper allows owner OR store_staff OR
+                // phone-matched manager — mirrors the merchant-app's actual
+                // login paths (StoreContext.tsx).
+                const canManage = await userCanManageBranch(user.id, existing.branch_id);
+                if (!canManage) {
+                    return res.status(403).json({ error: 'Only the branch merchant, manager, or staff can accept or reject this request' });
+                }
+            }
         }
         const updated = await prisma.order_requests.update({
             where: { id },
@@ -2596,12 +3192,18 @@ app.patch('/order-requests/:id/status', async (req, res) => {
         res.json(updated);
     }
     catch (error) {
-        console.error('Update Order Request Status Error:', error);
-        res.status(500).json({ error: 'Failed to update order request', details: error.message });
+        // Round-7 fix: merchant rejecting/accepting an order request needs to see the real cause if it fails.
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'order-requests.status', extra: { id: req.params.id, userId: req?.user?.id ?? undefined }, userMessage: error?.message || 'Failed to update order request' });
     }
 });
 // Update Order Status (Merchant Side)
 app.patch('/orders/:id/status', async (req, res) => {
+    // Round-5 hardening (forlater #12): auth was completely absent. Any
+    // caller could flip any order to any status, doubling stock restoration
+    // on CANCELLED retries and bypassing the WS2 lifecycle endpoints.
+    const user = await requireUser(req, res);
+    if (!user)
+        return;
     try {
         const { id } = req.params;
         const { status, reason } = req.body; // Accept reason
@@ -2613,6 +3215,10 @@ app.patch('/orders/:id/status', async (req, res) => {
         if (!currentOrder) {
             return res.status(404).json({ error: 'Order not found' });
         }
+        const canManage = await userCanManageOrderStore(user.id, currentOrder.storeId);
+        if (!canManage) {
+            return res.status(403).json({ error: 'You do not have merchant access to this order.' });
+        }
         // 2. Validate Transitions & Safeguards
         if (['COMPLETED', 'REFUNDED', 'RETURN_APPROVED'].includes(currentOrder.status)) {
             // Allow formatting changes if needed, but generally these states are final regarding cancellation
@@ -2620,9 +3226,43 @@ app.patch('/orders/:id/status', async (req, res) => {
                 return res.status(400).json({ error: 'Cannot cancel a completed or refunded order.' });
             }
         }
-        if (status === 'RETURN_APPROVED' && currentOrder.status !== 'RETURN_REQUESTED') {
-            return res.status(400).json({ error: 'Order must be in RETURN_REQUESTED state to approve return.' });
+        // Round-5 hardening: idempotency guard on CANCELLED → CANCELLED.
+        // Without this, calling this endpoint twice with status='CANCELLED'
+        // restores stock a second time (the loop below runs unconditionally
+        // on CANCELLED), inflating inventory.
+        if (status === 'CANCELLED' && currentOrder.status === 'CANCELLED') {
+            return res.status(400).json({ error: 'Order is already cancelled.' });
         }
+        // Round-5 hardening (revised round-6 after adversarial review XC1):
+        //
+        // The merchant rejection path in apps/merchant-app calls this endpoint
+        // with status='CANCELLED' to reject paid orders. We MUST allow that —
+        // customers cannot reach this endpoint anyway because they can't pass
+        // userCanManageOrderStore. So the auth check above is already the
+        // gate that keeps customers out of the merchant flow; we don't need
+        // a redundant CANCELLED-redirect that would break legitimate
+        // merchant rejections.
+        //
+        // We DO still block WS2-OWNED transitions (RETURN_* / EXCHANGE_* /
+        // REFUNDED) because those must go through the dedicated endpoints
+        // that emit the right events and update OrderIssue rows.
+        if (['RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED',
+            'EXCHANGE_REQUESTED', 'EXCHANGE_APPROVED', 'EXCHANGE_REJECTED'].includes(status)) {
+            return res.status(400).json({
+                error: 'Use the WS2 endpoints (POST /orders/:id/return, /exchange, PATCH /orders/:id/issue/:issueId) for return/exchange lifecycle transitions.',
+            });
+        }
+        // Round-6 (audit finding H4): block status='REFUNDED' direct input.
+        // Without this, a merchant can lie that an order was refunded without
+        // any actual Razorpay refund being issued — finance dashboards drift.
+        if (status === 'REFUNDED') {
+            return res.status(400).json({
+                error: 'Use POST /orders/:id/refund to issue an actual refund.',
+            });
+        }
+        // Round-6 (audit finding H2): drop the now-dead RETURN_APPROVED
+        // precondition check — the WS2 block above already rejects
+        // RETURN_APPROVED inputs.
         // CRITICAL: Block Manual Completion
         if (status === 'COMPLETED') {
             return res.status(400).json({ error: 'Cannot manually set status to COMPLETED. Use OTP verification endpoint.' });
@@ -2772,11 +3412,26 @@ app.patch('/orders/:id/status', async (req, res) => {
     }
     catch (error) {
         console.error('Update Status Error:', error);
-        res.status(500).json({ error: 'Failed to update order status', details: error.message, stack: error.stack });
+        // Round-6 (H2): no longer return error.stack — info disclosure
+        // (file paths, line numbers, ORM internals). Sentry has the full
+        // trace for debugging server-side.
+        Sentry.captureException(error, {
+            tags: { area: 'ws2.legacyStatus' },
+            extra: { orderId: req.params.id, userId: user.id, requestedStatus: req.body?.status },
+        });
+        (0, api_error_handler_1.markResponseAsReported)(res);
+        res.status(500).json({ error: 'Failed to update order status' });
     }
 });
 // Refund Order Endpoint
 app.post('/orders/:id/refund', async (req, res) => {
+    // Round-5 hardening (forlater #11): auth was completely absent on this
+    // endpoint. Any unauthenticated caller could refund any order and wipe
+    // its metadata. Now requires (a) a valid user token and (b) merchant
+    // access to the order's store.
+    const user = await requireUser(req, res);
+    if (!user)
+        return;
     try {
         const { id } = req.params;
         const { amount, reason } = req.body; // Optional partial refund later
@@ -2786,10 +3441,23 @@ app.post('/orders/:id/refund', async (req, res) => {
         });
         if (!order)
             return res.status(404).json({ error: 'Order not found' });
+        const canManage = await userCanManageOrderStore(user.id, order.storeId);
+        if (!canManage) {
+            return res.status(403).json({ error: 'You do not have merchant access to this order.' });
+        }
         if (!order.isPaid)
             return res.status(400).json({ error: 'Cannot refund an unpaid order' });
         if (order.status === 'REFUNDED')
             return res.status(400).json({ error: 'Order already refunded' });
+        // Round-5 hardening: block WS2 lifecycle states. The WS2 flows have
+        // their own refund handling — going through this legacy endpoint
+        // would wipe the WS2 metadata and bypass the issue-tracking flow.
+        if (['CANCELLED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'RETURN_REQUESTED',
+            'EXCHANGE_APPROVED', 'EXCHANGE_REJECTED', 'EXCHANGE_REQUESTED'].includes(order.status)) {
+            return res.status(400).json({
+                error: `Order is in ${order.status} — use the WS2 endpoints (cancel / issue PATCH) instead.`,
+            });
+        }
         // Initialize Razorpay (Safely)
         let razorpayInstance = null;
         try {
@@ -2826,13 +3494,23 @@ app.post('/orders/:id/refund', async (req, res) => {
             }
         }
         // Update Status to REFUNDED (Local Database)
+        // Round-5 hardening: spread existing metadata instead of replacing.
+        // Previous behavior wiped razorpayPaymentId, orderRequestId, and any
+        // WS2 audit fields. Now we merge — the refund id is added alongside
+        // the existing record.
         const refundedOrder = await prisma.order.update({
             where: { id },
             data: {
                 status: 'REFUNDED',
                 isPaid: false,
                 returnReason: reason || 'Refund processed',
-                metadata: refundResult ? { razorpayRefundId: refundResult.id } : undefined
+                metadata: refundResult
+                    ? {
+                        ...(typeof order.metadata === 'object' && order.metadata !== null ? order.metadata : {}),
+                        razorpayRefundId: refundResult.id,
+                        legacyRefundAt: new Date().toISOString(),
+                    }
+                    : order.metadata ?? undefined,
             },
             include: { user: true }
         });
@@ -2845,7 +3523,13 @@ app.post('/orders/:id/refund', async (req, res) => {
     }
     catch (error) {
         console.error('Refund Error:', error);
+        // Round-6 (cross-cutting medium): Sentry parity with WS2 endpoints.
+        Sentry.captureException(error, {
+            tags: { area: 'ws2.legacyRefund' },
+            extra: { orderId: req.params.id, userId: user.id },
+        });
         // Ensure JSON response even on crash
+        (0, api_error_handler_1.markResponseAsReported)(res);
         res.status(500).json({ error: 'Failed to process refund', details: error.message });
     }
 });
@@ -2865,24 +3549,50 @@ app.post('/webhooks/payment', async (req, res) => {
         res.status(400).json({ error: 'Payment failed' });
     }
     catch (error) {
-        console.error('Webhook processing failed', error);
-        res.status(500).json({ error: 'Webhook error' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'webhooks.payment', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Webhook error' });
     }
 });
 // Verify OTP for Completion
 app.post('/orders/:id/verify-otp', async (req, res) => {
+    // Round-6 hardening (XC3): previously NO auth + NO CAS + NO state guard.
+    // Anyone with a leaked OTP could mark any order COMPLETED, including a
+    // CANCELLED / REFUNDED / RETURN_APPROVED order — breaking every WS2
+    // invariant. Now requires merchant store auth + atomic compare-and-set
+    // limited to orders currently in READY (the only state where OTP
+    // verification is legitimate).
+    const user = await requireUser(req, res);
+    if (!user)
+        return;
     try {
         const { id } = req.params;
         const { otp } = req.body;
         const order = await prisma.order.findUnique({ where: { id } });
-        if (!order || order.otp !== otp) {
+        if (!order)
+            return res.status(404).json({ error: 'Order not found' });
+        const canManage = await userCanManageOrderStore(user.id, order.storeId);
+        if (!canManage) {
+            return res.status(403).json({ error: 'You do not have merchant access to this order.' });
+        }
+        if (order.otp !== otp) {
             return res.status(400).json({ error: 'Invalid PIN' });
         }
-        const updatedOrder = await prisma.order.update({
-            where: { id },
+        // Atomic compare-and-set: only flip if still READY.
+        const flipped = await prisma.order.updateMany({
+            where: { id, status: 'READY', otp },
             data: { status: 'COMPLETED' },
+        });
+        if (flipped.count === 0) {
+            return res.status(409).json({
+                error: 'Order is not in READY state (already completed, cancelled, or moved elsewhere). Refresh and try again.',
+            });
+        }
+        const updatedOrder = await prisma.order.findUnique({
+            where: { id },
             include: { user: true, items: { include: { storeProduct: { include: { product: true } } } } }
         });
+        if (!updatedOrder) {
+            return res.status(500).json({ error: 'Verify-OTP committed but order vanished — please refresh.' });
+        }
         io.emit('order_updated', updatedOrder);
         // Dispatch COMPLETED notification to the merchant
         if (updatedOrder.storeId) {
@@ -2917,8 +3627,7 @@ app.post('/orders/:id/verify-otp', async (req, res) => {
         res.json({ success: true, order: updatedOrder });
     }
     catch (error) {
-        console.error('Verify OTP Error:', error);
-        res.status(500).json({ error: 'OTP verification failed' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'orders.verify-otp', extra: { id: req.params.id, userId: req?.user?.id ?? undefined }, userMessage: 'OTP verification failed' });
     }
 });
 // --- Auto-Reject logic ---
@@ -2928,9 +3637,9 @@ app.post('/orders/:id/verify-otp', async (req, res) => {
 // All thin wrappers around the WS2.B rules engine + DB writes +
 // fire-and-forget notifications.
 // =====================================================================
-// Lazy require to keep the module import surface unchanged.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const orderLifecycleRules = require('./orderLifecycle/rules');
+// Note: orderLifecycleRules is imported at the top of the file as a typed
+// namespace import so TypeScript can catch input-shape mismatches at compile
+// time (this avoids regressions like the 'dine-in'/'dining' enum slip).
 /**
  * Check the auth'd user has merchant-side access to an order's store.
  * Returns true if user is the store's managerId, or has a store_staff row.
@@ -2947,6 +3656,55 @@ async function userCanManageOrderStore(userId, storeId) {
     return false;
 }
 /**
+ * Phase 2K (hot-fix 2026-06-09) — RBAC for PATCH /order-requests/:id/status
+ * ACCEPTED/REJECTED transitions.
+ *
+ * Adversarial pre-merge review (PR #1) found that Option A patch #1C's bare
+ * `user.id === branch.merchantId` check was owner-only, which would 403 the
+ * non-owner merchant users on prod (verified via scripts/check_staff_users.ts:
+ * 8 store_staff + 15 phone-managers) the moment merchant-app OTAs commit 2.
+ *
+ * Allows the call if the user is:
+ *   (a) the branch's owner (merchant_branches.merchant_id)
+ *   (b) a phone-matched branch manager (user.phone === merchant_branches.phone)
+ *   (c) a store_staff row whose user_id or auth_user_id matches the user,
+ *       scoped to this branch (store_staff.store_id = branch_id in PAS)
+ *
+ * Mirrors the spirit of userCanManageOrderStore but for the order_request /
+ * branch context (different table — merchant_branches vs Store).
+ */
+async function userCanManageBranch(userId, branchId) {
+    const branch = await prisma.merchantBranch.findUnique({
+        where: { id: branchId },
+        select: { merchantId: true, phone: true },
+    });
+    if (!branch)
+        return false;
+    // (a) Owner
+    if (branch.merchantId && branch.merchantId === userId)
+        return true;
+    // (b) Phone-matched manager — only check if the branch has a phone configured
+    if (branch.phone) {
+        const u = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { phone: true },
+        });
+        if (u?.phone && u.phone === branch.phone)
+            return true;
+    }
+    // (c) Staff — store_staff.store_id is the branch_id in PAS
+    const staffRow = await prisma.storeStaff.findFirst({
+        where: {
+            storeId: branchId,
+            OR: [{ user_id: userId }, { authUserId: userId }],
+        },
+        select: { id: true },
+    });
+    if (staffRow)
+        return true;
+    return false;
+}
+/**
  * Attempt a Razorpay refund using the payment_id stored in order.metadata.
  * Returns { razorpayRefundId, simulated } — if Razorpay isn't configured or
  * the order has no paymentId on record, falls back to a stub refund id
@@ -2955,7 +3713,11 @@ async function userCanManageOrderStore(userId, storeId) {
  * Razorpay" which ops can reconcile manually from the dashboard.
  */
 async function processRazorpayRefund(orderMetadata, amountInr) {
-    const paymentId = orderMetadata?.paymentId || orderMetadata?.razorpay_payment_id;
+    // POST /orders persists Razorpay's payment id at metadata.razorpayPaymentId
+    // (camelCase) — see index.ts ~line 2414 and InvoiceModal.tsx line 64. This
+    // helper previously looked for `paymentId` / `razorpay_payment_id` and
+    // therefore ALWAYS fell through to the simulated path. Fixed 2026-06-05.
+    const paymentId = orderMetadata?.razorpayPaymentId;
     if (!razorpayInstance || !paymentId) {
         const stubId = `rfnd_sim_${Date.now()}`;
         console.warn('[refund] Razorpay missing or no paymentId — simulating refund id:', stubId);
@@ -2977,6 +3739,81 @@ async function processRazorpayRefund(orderMetadata, amountInr) {
  * POST /orders/:id/cancel — customer cancels an order.
  * Body: { reason?: string }
  */
+/**
+ * GET /orders/issues/inbox — merchant inbox of return/exchange requests.
+ * Lists OrderIssue rows for stores the auth'd user manages (Store.managerId
+ * OR store_staff). Query params: status, type, limit.
+ */
+app.get('/orders/issues/inbox', async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user)
+        return;
+    try {
+        const statusParam = String(req.query.status || 'PENDING').toUpperCase();
+        // Round-6 inbox fix: previously `.toLowerCase()` here broke the default
+        // 'ALL' sentinel because the validTypes check below uses uppercase
+        // 'ALL'. The merchant app's "All" tab filter was returning 400 on
+        // every load since WS2.F shipped. Keep the original casing —
+        // type values are 'return' / 'exchange' (lowercase) and 'ALL' is
+        // the uppercase sentinel.
+        const typeParam = String(req.query.type || 'ALL').trim();
+        const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '50'), 10) || 50));
+        const validStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'AUTO_APPROVED', 'ALL'];
+        if (!validStatuses.includes(statusParam)) {
+            return res.status(400).json({ error: `status must be one of ${validStatuses.join(', ')}` });
+        }
+        const validTypes = ['return', 'exchange', 'ALL'];
+        if (!validTypes.includes(typeParam)) {
+            return res.status(400).json({ error: `type must be one of ${validTypes.join(', ')}` });
+        }
+        const [managedStores, staffStoreRows] = await Promise.all([
+            prisma.store.findMany({ where: { managerId: user.id }, select: { id: true } }),
+            prisma.storeStaff.findMany({
+                where: { OR: [{ user_id: user.id }, { authUserId: user.id }] },
+                select: { storeId: true },
+            }),
+        ]);
+        const storeIdSet = new Set([
+            ...managedStores.map(s => s.id),
+            ...staffStoreRows.map(s => s.storeId),
+        ]);
+        if (storeIdSet.size === 0)
+            return res.json([]);
+        const where = { order: { storeId: { in: Array.from(storeIdSet) } } };
+        if (statusParam !== 'ALL')
+            where.status = statusParam;
+        if (typeParam !== 'ALL')
+            where.type = typeParam;
+        const issues = await prisma.orderIssue.findMany({
+            where,
+            orderBy: [{ status: 'asc' }, { slaDueAt: 'asc' }],
+            take: limit,
+            include: {
+                order: {
+                    select: {
+                        id: true, orderNumber: true, status: true, totalAmount: true,
+                        customer_name: true, customer_phone: true, store_name: true,
+                        order_type: true, createdAt: true, isPaid: true,
+                        user: { select: { name: true, phone: true, email: true } },
+                        items: {
+                            select: {
+                                id: true, quantity: true, price: true, product_name: true,
+                                storeProduct: { select: { product: { select: { name: true, returnable: true } } } },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        return res.json(issues);
+    }
+    catch (err) {
+        console.error('[issues inbox] error:', err);
+        Sentry.captureException(err, { tags: { area: 'ws2.inbox' }, extra: { userId: user.id } });
+        (0, api_error_handler_1.markResponseAsReported)(res);
+        return res.status(500).json({ error: 'Failed to list issues.', details: err?.message });
+    }
+});
 app.post('/orders/:id/cancel', async (req, res) => {
     const user = await requireUser(req, res);
     if (!user)
@@ -2984,17 +3821,26 @@ app.post('/orders/:id/cancel', async (req, res) => {
     try {
         const { id } = req.params;
         const { reason } = req.body || {};
+        // Items pulled in so we can restore stock atomically with the
+        // status flip (Bug 5 fix — the legacy PATCH /orders/:id/status
+        // endpoint restored stock on CANCELLED, this one was silently
+        // skipping it).
         const order = await prisma.order.findUnique({
             where: { id },
-            include: { user: true, store: true },
+            include: { user: true, items: true },
         });
         if (!order)
             return res.status(404).json({ error: 'Order not found.' });
         if (order.userId !== user.id) {
             return res.status(403).json({ error: 'You do not have permission to cancel this order.' });
         }
+        // DB stores order_type='dine-in' (see DiningCheckoutScreen + InvoiceModal),
+        // but the rules engine's OrderTypeKind uses 'dining'. Normalize here to
+        // keep the rules vocabulary stable. Fixed 2026-06-05 (Bug A).
+        const rawOrderType = order.order_type;
+        const normalizedOrderType = rawOrderType === 'dine-in' ? 'dining' : (rawOrderType || 'pickup');
         const decision = orderLifecycleRules.evaluateCancel({
-            orderType: (order.order_type || 'pickup'),
+            orderType: normalizedOrderType,
             orderStatus: order.status,
             orderTotalInr: order.totalAmount,
             isPaid: order.isPaid,
@@ -3005,29 +3851,216 @@ app.post('/orders/:id/cancel', async (req, res) => {
         if (!decision.allowed) {
             return res.status(400).json({ error: decision.reason });
         }
-        // If refund needed, attempt Razorpay refund FIRST so we don't update
-        // the order to CANCELLED until we know whether money moved (or
-        // simulated, in which case ops reconciles).
+        // FLIP STATUS FIRST inside a transaction (Bug 1 fix).
+        //
+        // Previously the Razorpay refund was called BEFORE the status update.
+        // If the refund succeeded but the order.update transaction then failed
+        // (DB blip, contention, anything transient), the order would still be
+        // PENDING/CONFIRMED — so the customer could tap Cancel again and the
+        // rules engine would approve it, refunding the same payment a second
+        // time. By committing CANCELLED first, any retry is blocked by the
+        // rules engine's terminal-status check.
+        //
+        // Stock restoration runs in the same transaction so inventory and
+        // status are atomic — neither without the other.
+        const cancelledAt = new Date();
+        let updated;
+        try {
+            updated = await prisma.$transaction(async (tx) => {
+                // ATOMIC COMPARE-AND-SET on order.status (round-5 hardening).
+                //
+                // Mirror of the N2 fix: re-check the order is still in a
+                // cancellable state INSIDE the transaction. Without this,
+                // two parallel POST /orders/:id/cancel calls (double-tap,
+                // two tabs, client retry) can both pass the rules engine
+                // precheck and both commit — double stock restoration,
+                // double consumer notif, and a cross-fix race with cron
+                // auto-approve flipping the order to RETURN_APPROVED in
+                // between.
+                //
+                // Allowed pre-states match rules.evaluateCancel's accept
+                // set: {PENDING, CONFIRMED, PREPARING}. READY is blocked
+                // by the rules engine outside this tx; we just enforce
+                // the post-conditions atomically here.
+                const flipped = await tx.order.updateMany({
+                    where: { id, status: { in: ['PENDING', 'CONFIRMED', 'PREPARING'] } },
+                    data: {
+                        status: 'CANCELLED',
+                        cancelledReason: reason ? String(reason).slice(0, 500) : decision.reason,
+                        metadata: {
+                            ...(typeof order.metadata === 'object' && order.metadata !== null ? order.metadata : {}),
+                            cancellationFeeInr: decision.feeInr,
+                            refundInr: decision.refundInr,
+                            autoRefundEligible: decision.autoRefundEligible,
+                            cancelledAt: cancelledAt.toISOString(),
+                        },
+                    },
+                });
+                if (flipped.count === 0) {
+                    throw new Error('CONCURRENT_DECISION');
+                }
+                // Stock restoration — every item back to its storeProduct.
+                // Inner .catch removed (round-5 hardening): swallowing per-item
+                // errors leaves the underlying Postgres tx in an aborted state,
+                // which then breaks the subsequent couponRedemption + order
+                // operations with a confusing 'transaction aborted' message
+                // instead of the original cause. Let it bubble so the outer
+                // catch rolls back cleanly.
+                for (const item of order.items ?? []) {
+                    if (item.storeProductId) {
+                        await tx.storeProduct.update({
+                            where: { id: item.storeProductId },
+                            data: { stock: { increment: item.quantity ?? 0 } },
+                        });
+                    }
+                }
+                // Coupon redemption reversal (Bug N4 fix, refined round-5 with userId scope).
+                //
+                // userId: order.userId is defense-in-depth — guards against a malformed
+                // redemption row from a different user pointing at this orderId from being
+                // deleted on cancel. The redeem endpoint should already enforce userId
+                // matches, but if it ever doesn't this prevents collateral damage.
+                //
+                // findMany + group-by-coupon handles the legitimate multi-coupon case
+                // (one order can have multiple CouponRedemption rows for distinct
+                // coupons because /coupons/redeem only deduplicates on the
+                // (couponId, orderId) pair). `usedCount: { gte: count }` guard prevents
+                // going below zero per coupon.
+                const redemptions = await tx.couponRedemption.findMany({
+                    where: { orderId: id, userId: order.userId },
+                });
+                if (redemptions.length > 0) {
+                    await tx.couponRedemption.deleteMany({
+                        where: { orderId: id, userId: order.userId },
+                    });
+                    const countByCoupon = new Map();
+                    for (const r of redemptions) {
+                        countByCoupon.set(r.couponId, (countByCoupon.get(r.couponId) || 0) + 1);
+                    }
+                    for (const [couponId, count] of countByCoupon) {
+                        await tx.coupon.updateMany({
+                            where: { id: couponId, usedCount: { gte: count } },
+                            data: { usedCount: { decrement: count } },
+                        });
+                    }
+                    // Phase 2 (2H) — additional reversal work:
+                    // (a) decrement dailyUsageCount for redemptions made today (IST)
+                    // (b) clear Order snapshot columns
+                    // (c) write AuditLog row per reversed coupon
+                    const nowH = new Date();
+                    const istNowH = new Date(nowH.getTime() + (5.5 * 60 * 60 * 1000));
+                    const istMidnightUtcMsH = Date.UTC(istNowH.getUTCFullYear(), istNowH.getUTCMonth(), istNowH.getUTCDate(), 0, 0, 0, 0) - (5.5 * 60 * 60 * 1000);
+                    const istMidnightTodayH = new Date(istMidnightUtcMsH);
+                    for (const r of redemptions) {
+                        if (r.createdAt >= istMidnightTodayH) {
+                            await tx.coupon.updateMany({
+                                where: { id: r.couponId, dailyUsageCount: { gte: 1 } },
+                                data: { dailyUsageCount: { decrement: 1 } },
+                            });
+                        }
+                    }
+                    await tx.order.update({
+                        where: { id },
+                        data: {
+                            orderCouponId: null,
+                            orderCouponCode: null,
+                            orderCouponDiscount: null,
+                            orderCouponFundingSource: null,
+                            orderCouponDiscountType: null,
+                        },
+                    });
+                    for (const [couponId, count] of countByCoupon) {
+                        try {
+                            await tx.auditLog.create({
+                                data: {
+                                    // Phase 2K hot-fix (2026-06-09): actor is the
+                                    // authenticated caller (consumer / merchant /
+                                    // admin) — NOT the order owner. Previously
+                                    // this misattributed merchant/admin-initiated
+                                    // cancels to the customer, defeating the
+                                    // audit-log integrity guarantee.
+                                    actorUserId: user.id,
+                                    action: 'coupon.redemption_reversed',
+                                    targetType: 'coupon',
+                                    targetId: couponId,
+                                    beforeJson: { orderId: id, orderOwnerUserId: order.userId, count },
+                                    afterJson: undefined,
+                                },
+                            });
+                        }
+                        catch (auditErr) {
+                            console.error('[2H reversal audit log] failed:', auditErr);
+                        }
+                    }
+                }
+                // Re-fetch the row we just CAS-updated so the rest of the
+                // endpoint has the canonical post-flip state.
+                return tx.order.findUnique({ where: { id } });
+            });
+        }
+        catch (err) {
+            if (err?.message === 'CONCURRENT_DECISION') {
+                return res.status(409).json({
+                    error: 'This order was already cancelled or moved out of a cancellable state by another process. Refresh and try again.',
+                });
+            }
+            throw err;
+        }
+        if (!updated) {
+            return res.status(500).json({ error: 'Cancel committed but order vanished — please refresh.' });
+        }
+        // order_requests cleanup (Bug N7 fix — third-pass audit).
+        //
+        // When the order was created from an order_request, `POST /orders`
+        // sets that request's status to 'COMPLETED'. After a cancel, that
+        // request would otherwise stay 'COMPLETED' forever — misleading
+        // for merchant request-queue dashboards. Flip it to 'CANCELLED'.
+        //
+        // Best-effort and OUTSIDE the transaction on purpose: the
+        // order_requests table is a String-typed status with no defined
+        // CHECK constraint at the Prisma level, but production may have
+        // one. If 'CANCELLED' is rejected, we log + move on — we will
+        // not roll back the successful cancel just because the request
+        // queue couldn't be updated.
+        const orderRequestId = order.metadata?.orderRequestId;
+        if (orderRequestId && typeof orderRequestId === 'string' && /^[0-9a-f-]{36}$/i.test(orderRequestId)) {
+            // Awaited (round-4 audit fix): a SIGTERM during EB deploy between
+            // the response send and the SQL round-trip would silently lose
+            // the cleanup. Latency cost is one indexed updateMany (~5ms).
+            // The .catch still keeps this best-effort — if the DB rejects
+            // 'CANCELLED' for any reason the cancel itself does not roll back.
+            // The UUID regex above guards against malformed legacy metadata.
+            await prisma.order_requests.updateMany({
+                where: { id: orderRequestId, status: 'COMPLETED' },
+                data: { status: 'CANCELLED', updated_at: cancelledAt },
+            }).catch((e) => {
+                console.error('[cancel] order_request cleanup failed:', e);
+                Sentry.captureException(e, {
+                    tags: { area: 'ws2.cancel.orderRequestCleanup' },
+                    extra: { orderId: id, orderRequestId },
+                });
+            });
+        }
+        // Razorpay refund AFTER status is committed. Safe to retry the
+        // overall endpoint now — the rules engine blocks CANCELLED orders,
+        // so this code path runs at most once per order.
         let refundResult = null;
         if (decision.refundInr > 0) {
             refundResult = await processRazorpayRefund(order.metadata, decision.refundInr);
-        }
-        const updated = await prisma.order.update({
-            where: { id },
-            data: {
-                status: 'CANCELLED',
-                cancelledReason: reason ? String(reason).slice(0, 500) : decision.reason,
-                metadata: {
-                    ...(typeof order.metadata === 'object' && order.metadata !== null ? order.metadata : {}),
-                    cancellationFeeInr: decision.feeInr,
-                    refundInr: decision.refundInr,
-                    autoRefundEligible: decision.autoRefundEligible,
-                    razorpayRefundId: refundResult?.razorpayRefundId ?? null,
-                    refundSimulated: refundResult?.simulated ?? false,
-                    cancelledAt: new Date().toISOString(),
+            // Persist the refund id back to metadata. If this write fails
+            // after Razorpay succeeded, ops reconciles via the Razorpay
+            // dashboard — but no money is at risk.
+            await prisma.order.update({
+                where: { id },
+                data: {
+                    metadata: {
+                        ...(typeof updated.metadata === 'object' && updated.metadata !== null ? updated.metadata : {}),
+                        razorpayRefundId: refundResult.razorpayRefundId,
+                        refundSimulated: refundResult.simulated,
+                    },
                 },
-            },
-        });
+            }).catch((e) => console.error('[cancel] metadata refund write failed:', e));
+        }
         // Notifications — fire-and-forget per existing pattern.
         notificationService.sendMerchantNotification({
             storeId: order.storeId,
@@ -3038,6 +4071,31 @@ app.post('/orders/:id/cancel', async (req, res) => {
             link: '/(main)/orders',
             metadata: { orderNumber: order.orderNumber, feeInr: decision.feeInr, refundInr: decision.refundInr },
         }).catch(e => console.error('[cancel] merchant notif failed:', e));
+        // Consumer in-app notif (Bug N5 fix — third-pass audit). Previously
+        // the customer only got an SMS, which carriers may delay by minutes
+        // or filter as spam. Now they also get the immediate in-app receipt.
+        //
+        // Body branches (round-4 audit fix — explicit dining-forfeit case):
+        //  1. autoRefundEligible       → full refund inside the 5-min window
+        //  2. refundInr > 0            → late-cancel fee + partial refund
+        //  3. feeInr > 0 & refund = 0  → dining non-refund policy (full forfeit)
+        //  4. else (both = 0)          → free cancel (unpaid)
+        notificationService.sendConsumerNotification({
+            userId: order.userId,
+            title: 'Order cancelled',
+            body: decision.autoRefundEligible
+                ? `Order #${order.orderNumber} cancelled. Full refund of ₹${decision.refundInr} on the way.`
+                : decision.refundInr > 0
+                    ? `Order #${order.orderNumber} cancelled. Refund ₹${decision.refundInr} (fee ₹${decision.feeInr}).`
+                    : decision.feeInr > 0
+                        ? `Order #${order.orderNumber} cancelled. Per the dining cancellation policy, the booking total of ₹${decision.feeInr} is non-refundable.`
+                        : `Order #${order.orderNumber} cancelled.`,
+            type: 'ORDER_CANCELLED',
+            referenceId: order.id,
+            storeId: order.storeId,
+            link: '/orders',
+            metadata: { orderNumber: order.orderNumber, feeInr: decision.feeInr, refundInr: decision.refundInr },
+        }).catch(e => console.error('[cancel] consumer notif failed:', e));
         if (order.user?.phone) {
             sms_service_1.smsService.sendOrderUpdate(order.user.phone, id, 'Order Cancelled').catch(e => console.error('[cancel] SMS failed:', e));
         }
@@ -3057,6 +4115,8 @@ app.post('/orders/:id/cancel', async (req, res) => {
     }
     catch (err) {
         console.error('[cancel] error:', err);
+        Sentry.captureException(err, { tags: { area: 'ws2.cancel' }, extra: { orderId: req.params.id, userId: user.id } });
+        (0, api_error_handler_1.markResponseAsReported)(res);
         return res.status(500).json({ error: 'Failed to cancel order.', details: err?.message });
     }
 });
@@ -3087,8 +4147,11 @@ app.post('/orders/:id/reschedule', async (req, res) => {
         if (order.userId !== user.id) {
             return res.status(403).json({ error: 'You do not have permission to reschedule this order.' });
         }
+        // Normalize 'dine-in' → 'dining' for the rules engine (Bug A fix).
+        const rawOrderType = order.order_type;
+        const normalizedOrderType = rawOrderType === 'dine-in' ? 'dining' : (rawOrderType || 'pickup');
         const decision = orderLifecycleRules.evaluateReschedule({
-            orderType: (order.order_type || 'pickup'),
+            orderType: normalizedOrderType,
             orderStatus: order.status,
             slotTimeAt: order.slot_time_at || null,
             newSlotAt: newSlot,
@@ -3127,6 +4190,8 @@ app.post('/orders/:id/reschedule', async (req, res) => {
     }
     catch (err) {
         console.error('[reschedule] error:', err);
+        Sentry.captureException(err, { tags: { area: 'ws2.reschedule' }, extra: { orderId: req.params.id, userId: user.id } });
+        (0, api_error_handler_1.markResponseAsReported)(res);
         return res.status(500).json({ error: 'Failed to reschedule order.', details: err?.message });
     }
 });
@@ -3160,13 +4225,19 @@ app.post('/orders/:id/return', async (req, res) => {
         }
         // Product returnable check — pessimistic across all items.
         const anyNonReturnable = order.items?.some((it) => it?.storeProduct?.product?.returnable === false);
+        // Clamp the requested refund to the order total. Without this a
+        // customer could submit refundInr=99999 on a ₹100 order and the
+        // merchant would see (and potentially approve) the inflated amount.
+        // Razorpay would silently reject anything over the captured amount,
+        // leaving the order in a half-resolved state. Fixed 2026-06-05 (Bug E).
+        const clampedRefund = Math.min(requestedRefund, Number(order.totalAmount));
         const decision = orderLifecycleRules.evaluateReturn({
             orderStatus: order.status,
             completedAt: order.updatedAt,
             requestedAt: new Date(),
             reason,
             productReturnable: !anyNonReturnable,
-            requestedRefundInr: requestedRefund,
+            requestedRefundInr: clampedRefund,
             photoCount: photoList.length,
         });
         if (!decision.allowed) {
@@ -3174,26 +4245,52 @@ app.post('/orders/:id/return', async (req, res) => {
         }
         const createdAt = new Date();
         const slaDueAt = orderLifecycleRules.computeSlaDueAt(createdAt);
-        const result = await prisma.$transaction(async (tx) => {
-            const issue = await tx.orderIssue.create({
-                data: {
-                    orderId: order.id,
-                    type: 'return',
-                    reason,
-                    description: description ? String(description).slice(0, 1000) : null,
-                    photos: photoList,
-                    status: 'PENDING',
-                    refundAmountInr: decision.refundInr,
-                    slaDueAt,
-                    createdAt,
-                },
+        // ATOMIC COMPARE-AND-SET on order.status (round-5 hardening).
+        //
+        // Status flip MUST happen before issue.create. Without this, two
+        // parallel POST /orders/:id/return calls both pass the rules check
+        // (status === COMPLETED), both enter the transaction, and each
+        // creates its own OrderIssue row. Customer sees two "Return
+        // submitted" pushes; merchant queue has two PENDING issues; cron
+        // auto-approves both → double refund in 24h.
+        //
+        // CAS gate: only the writer that finds status='COMPLETED' wins.
+        // The second writer sees count===0 → CONCURRENT_DECISION → 409.
+        let result;
+        try {
+            result = await prisma.$transaction(async (tx) => {
+                const flipped = await tx.order.updateMany({
+                    where: { id: order.id, status: 'COMPLETED' },
+                    data: { status: 'RETURN_REQUESTED', returnReason: reason, returnImages: photoList },
+                });
+                if (flipped.count === 0) {
+                    throw new Error('CONCURRENT_DECISION');
+                }
+                const issue = await tx.orderIssue.create({
+                    data: {
+                        orderId: order.id,
+                        type: 'return',
+                        reason,
+                        description: description ? String(description).slice(0, 1000) : null,
+                        photos: photoList,
+                        status: 'PENDING',
+                        refundAmountInr: decision.refundInr,
+                        slaDueAt,
+                        createdAt,
+                    },
+                });
+                const updatedOrder = await tx.order.findUnique({ where: { id: order.id } });
+                return { issue, updatedOrder };
             });
-            const updatedOrder = await tx.order.update({
-                where: { id: order.id },
-                data: { status: 'RETURN_REQUESTED', returnReason: reason, returnImages: photoList },
-            });
-            return { issue, updatedOrder };
-        });
+        }
+        catch (err) {
+            if (err?.message === 'CONCURRENT_DECISION') {
+                return res.status(409).json({
+                    error: 'This order is no longer in a returnable state (another request may have just moved it). Refresh and try again.',
+                });
+            }
+            throw err;
+        }
         notificationService.sendMerchantNotification({
             storeId: order.storeId,
             title: 'Return requested',
@@ -3203,6 +4300,21 @@ app.post('/orders/:id/return', async (req, res) => {
             link: '/(main)/orders',
             metadata: { orderNumber: order.orderNumber, issueId: result.issue.id, refundInr: decision.refundInr, refundWithoutReturn: decision.refundWithoutReturn },
         }).catch(e => console.error('[return] merchant notif failed:', e));
+        // Consumer in-app notif (Bug N5 fix — third-pass audit). Customer
+        // sees an immediate receipt that the return request landed and the
+        // merchant has 24h to respond.
+        notificationService.sendConsumerNotification({
+            userId: order.userId,
+            title: 'Return request submitted',
+            body: decision.refundWithoutReturn
+                ? `Return for order #${order.orderNumber} sent. No need to bring the item back — refund of ₹${decision.refundInr} pending merchant review (24h SLA).`
+                : `Return for order #${order.orderNumber} sent. Drop the item at the store; refund of ₹${decision.refundInr} processes after merchant approves (24h SLA).`,
+            type: 'RETURN_REQUESTED',
+            referenceId: order.id,
+            storeId: order.storeId,
+            link: '/orders',
+            metadata: { orderNumber: order.orderNumber, issueId: result.issue.id, refundInr: decision.refundInr, refundWithoutReturn: decision.refundWithoutReturn },
+        }).catch(e => console.error('[return] consumer notif failed:', e));
         io.emit('order_updated', result.updatedOrder);
         return res.status(201).json({
             success: true,
@@ -3213,6 +4325,8 @@ app.post('/orders/:id/return', async (req, res) => {
     }
     catch (err) {
         console.error('[return] error:', err);
+        Sentry.captureException(err, { tags: { area: 'ws2.return' }, extra: { orderId: req.params.id, userId: user.id } });
+        (0, api_error_handler_1.markResponseAsReported)(res);
         return res.status(500).json({ error: 'Failed to create return request.', details: err?.message });
     }
 });
@@ -3247,25 +4361,43 @@ app.post('/orders/:id/exchange', async (req, res) => {
         }
         const createdAt = new Date();
         const slaDueAt = orderLifecycleRules.computeSlaDueAt(createdAt);
-        const result = await prisma.$transaction(async (tx) => {
-            const issue = await tx.orderIssue.create({
-                data: {
-                    orderId: order.id,
-                    type: 'exchange',
-                    reason,
-                    description: description ? String(description).slice(0, 1000) : null,
-                    photos: [],
-                    status: 'PENDING',
-                    slaDueAt,
-                    createdAt,
-                },
+        // ATOMIC COMPARE-AND-SET on order.status (round-5 hardening — mirror of A2).
+        // Without this, two parallel exchange submits both create OrderIssue
+        // rows; cron auto-approves both in 24h.
+        let result;
+        try {
+            result = await prisma.$transaction(async (tx) => {
+                const flipped = await tx.order.updateMany({
+                    where: { id: order.id, status: 'COMPLETED' },
+                    data: { status: 'EXCHANGE_REQUESTED' },
+                });
+                if (flipped.count === 0) {
+                    throw new Error('CONCURRENT_DECISION');
+                }
+                const issue = await tx.orderIssue.create({
+                    data: {
+                        orderId: order.id,
+                        type: 'exchange',
+                        reason,
+                        description: description ? String(description).slice(0, 1000) : null,
+                        photos: [],
+                        status: 'PENDING',
+                        slaDueAt,
+                        createdAt,
+                    },
+                });
+                const updatedOrder = await tx.order.findUnique({ where: { id: order.id } });
+                return { issue, updatedOrder };
             });
-            const updatedOrder = await tx.order.update({
-                where: { id: order.id },
-                data: { status: 'EXCHANGE_REQUESTED' },
-            });
-            return { issue, updatedOrder };
-        });
+        }
+        catch (err) {
+            if (err?.message === 'CONCURRENT_DECISION') {
+                return res.status(409).json({
+                    error: 'This order is no longer in an exchangeable state (another request may have just moved it). Refresh and try again.',
+                });
+            }
+            throw err;
+        }
         notificationService.sendMerchantNotification({
             storeId: order.storeId,
             title: 'Exchange requested',
@@ -3275,11 +4407,29 @@ app.post('/orders/:id/exchange', async (req, res) => {
             link: '/(main)/orders',
             metadata: { orderNumber: order.orderNumber, issueId: result.issue.id },
         }).catch(e => console.error('[exchange] merchant notif failed:', e));
+        // Consumer in-app notif (Bug N5 fix — third-pass audit).
+        // Body wording fix from review-round-4: the 24h is the MERCHANT'S
+        // SLA to decide, not a customer-side deadline. Previous copy told
+        // the customer to "visit the store within 24 hours to complete the
+        // exchange", but they can't complete anything until the merchant
+        // approves and status flips to EXCHANGE_APPROVED.
+        notificationService.sendConsumerNotification({
+            userId: order.userId,
+            title: 'Exchange request submitted',
+            body: `Exchange for order #${order.orderNumber} sent. The merchant has 24 hours to respond — you'll get an update when they decide.`,
+            type: 'EXCHANGE_REQUESTED',
+            referenceId: order.id,
+            storeId: order.storeId,
+            link: '/orders',
+            metadata: { orderNumber: order.orderNumber, issueId: result.issue.id },
+        }).catch(e => console.error('[exchange] consumer notif failed:', e));
         io.emit('order_updated', result.updatedOrder);
         return res.status(201).json({ success: true, issue: result.issue, exchange: { reason: decision.reason }, order: result.updatedOrder });
     }
     catch (err) {
         console.error('[exchange] error:', err);
+        Sentry.captureException(err, { tags: { area: 'ws2.exchange' }, extra: { orderId: req.params.id, userId: user.id } });
+        (0, api_error_handler_1.markResponseAsReported)(res);
         return res.status(500).json({ error: 'Failed to create exchange request.', details: err?.message });
     }
 });
@@ -3316,11 +4466,6 @@ app.patch('/orders/:id/issue/:issueId', async (req, res) => {
         if (issue.status !== 'PENDING') {
             return res.status(400).json({ error: `Issue is already ${issue.status}; cannot decide twice.` });
         }
-        // Process Razorpay refund FIRST on approved returns.
-        let refundResult = null;
-        if (decision === 'APPROVED' && issue.type === 'return' && (issue.refundAmountInr ?? 0) > 0) {
-            refundResult = await processRazorpayRefund(order.metadata, issue.refundAmountInr);
-        }
         const now = new Date();
         const newIssueStatus = decision === 'APPROVED' ? 'APPROVED' : 'REJECTED';
         const newOrderStatus = decision === 'APPROVED' && issue.type === 'return' ? 'RETURN_APPROVED' :
@@ -3328,39 +4473,99 @@ app.patch('/orders/:id/issue/:issueId', async (req, res) => {
                 decision === 'APPROVED' && issue.type === 'exchange' ? 'EXCHANGE_APPROVED' :
                     decision === 'REJECTED' && issue.type === 'exchange' ? 'EXCHANGE_REJECTED' :
                         order.status;
-        const result = await prisma.$transaction(async (tx) => {
-            const updatedIssue = await tx.orderIssue.update({
-                where: { id: issueId },
-                data: {
-                    status: newIssueStatus,
-                    merchantDecisionReason: merchantDecisionReason ? String(merchantDecisionReason).slice(0, 500) : null,
-                    resolvedBy: user.id,
-                    resolvedAt: now,
-                    ...(refundResult && {
-                        refundRazorpayId: refundResult.razorpayRefundId,
-                        refundProcessedAt: now,
-                    }),
-                },
+        const needsRefund = decision === 'APPROVED' && issue.type === 'return' && (issue.refundAmountInr ?? 0) > 0;
+        // FLIP STATUS FIRST inside a transaction (Bug 2 fix).
+        //
+        // Previously the Razorpay refund was called BEFORE this transaction.
+        // If the refund succeeded but the transaction then failed, the issue
+        // would still be PENDING — so the merchant could click Approve again
+        // and refund the same payment a second time. By committing the
+        // APPROVED/REJECTED state first, the `issue.status !== 'PENDING'`
+        // guard at the top of this endpoint blocks any retry.
+        //
+        // isPaid is also flipped here for refund-bearing approvals so that
+        // the customer's perceived state ("refund issued") matches the
+        // merchant's intent the moment they tap Approve. If Razorpay fails
+        // afterward, metadata.returnRefundSimulated stays absent / 'rfnd_err'
+        // and ops reconciles from the dashboard.
+        // ATOMIC COMPARE-AND-SET (Bug N2 fix — third-pass audit).
+        //
+        // Previously this used `tx.orderIssue.update` which is unconditional —
+        // it doesn't re-check the row's current status. That left a TOCTOU
+        // race window: between the `issue.status !== 'PENDING'` check above
+        // and this transaction, the cron SLA job (or a parallel merchant tab)
+        // could have flipped the issue to AUTO_APPROVED/APPROVED. Both
+        // processes would then commit their own status change (last-write-
+        // wins) AND each would call Razorpay → double refund.
+        //
+        // `updateMany` with `status: 'PENDING'` in the WHERE clause makes
+        // this an atomic compare-and-set: the row only updates if its
+        // current status is still PENDING. If another process won the race,
+        // `count === 0` and we throw a sentinel error that the outer
+        // try/catch maps to a 409 — the refund block below is skipped
+        // because we never get there.
+        let result;
+        try {
+            result = await prisma.$transaction(async (tx) => {
+                const updateRes = await tx.orderIssue.updateMany({
+                    where: { id: issueId, status: 'PENDING' },
+                    data: {
+                        status: newIssueStatus,
+                        merchantDecisionReason: merchantDecisionReason ? String(merchantDecisionReason).slice(0, 500) : null,
+                        resolvedBy: user.id,
+                        resolvedAt: now,
+                    },
+                });
+                if (updateRes.count === 0) {
+                    // Another process (cron auto-approve or a second merchant tab)
+                    // already moved this issue out of PENDING. Bail before doing
+                    // anything else — the refund must not fire a second time.
+                    throw new Error('CONCURRENT_DECISION');
+                }
+                const updatedIssue = await tx.orderIssue.findUnique({ where: { id: issueId } });
+                const updatedOrder = await tx.order.update({
+                    where: { id: order.id },
+                    data: {
+                        status: newOrderStatus,
+                        ...(needsRefund && { isPaid: false }),
+                    },
+                });
+                return { issue: updatedIssue, order: updatedOrder };
             });
-            const updatedOrder = await tx.order.update({
-                where: { id: order.id },
-                data: {
-                    status: newOrderStatus,
-                    // On approved RETURN refund → also mark REFUNDED + isPaid=false
-                    ...(decision === 'APPROVED' && issue.type === 'return' && refundResult && {
-                        isPaid: false,
-                    }),
-                    metadata: {
-                        ...(typeof order.metadata === 'object' && order.metadata !== null ? order.metadata : {}),
-                        ...(refundResult && {
+        }
+        catch (err) {
+            if (err?.message === 'CONCURRENT_DECISION') {
+                return res.status(409).json({
+                    error: 'This issue was already decided by another process (cron auto-approve or another session). Refresh and try again.',
+                });
+            }
+            throw err;
+        }
+        // Razorpay refund AFTER status is committed. Safe to retry the
+        // endpoint now — `issue.status !== 'PENDING'` blocks duplicates.
+        let refundResult = null;
+        if (needsRefund) {
+            refundResult = await processRazorpayRefund(order.metadata, issue.refundAmountInr);
+            // Persist refund id back to issue + order metadata. If this
+            // post-refund write fails, ops reconciles from Razorpay; the
+            // status above is the canonical "approved" record.
+            await prisma.$transaction(async (tx) => {
+                await tx.orderIssue.update({
+                    where: { id: issueId },
+                    data: { refundRazorpayId: refundResult.razorpayRefundId, refundProcessedAt: now },
+                });
+                await tx.order.update({
+                    where: { id: order.id },
+                    data: {
+                        metadata: {
+                            ...(typeof result.order.metadata === 'object' && result.order.metadata !== null ? result.order.metadata : {}),
                             returnRazorpayRefundId: refundResult.razorpayRefundId,
                             returnRefundSimulated: refundResult.simulated,
-                        }),
+                        },
                     },
-                },
-            });
-            return { issue: updatedIssue, order: updatedOrder };
-        });
+                });
+            }).catch((e) => console.error('[issue PATCH] metadata refund write failed:', e));
+        }
         // Customer notification
         notificationService.sendConsumerNotification({
             userId: order.userId,
@@ -3388,6 +4593,8 @@ app.patch('/orders/:id/issue/:issueId', async (req, res) => {
     }
     catch (err) {
         console.error('[issue PATCH] error:', err);
+        Sentry.captureException(err, { tags: { area: 'ws2.merchantPatch' }, extra: { orderId: req.params.id, issueId: req.params.issueId, userId: user.id } });
+        (0, api_error_handler_1.markResponseAsReported)(res);
         return res.status(500).json({ error: 'Failed to update issue.', details: err?.message });
     }
 });
@@ -3423,8 +4630,7 @@ app.post('/push-tokens/register', async (req, res) => {
         res.json({ success: true, tokenId: token.id });
     }
     catch (error) {
-        console.error('[PushToken] Registration failed:', error);
-        res.status(500).json({ error: 'Failed to register push token', details: error.message });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'push-tokens.register', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to register push token' });
     }
 });
 // Deregister push token (called on logout)
@@ -3442,8 +4648,7 @@ app.delete('/push-tokens/deregister', async (req, res) => {
         res.json({ success: true });
     }
     catch (error) {
-        console.error('[PushToken] Deregistration failed:', error);
-        res.status(500).json({ error: 'Failed to deregister push token', details: error.message });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'push-tokens.deregister', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to deregister push token' });
     }
 });
 const startAutoRejectTimer = () => {
@@ -3497,8 +4702,7 @@ app.get('/merchants/:id/inventory', async (req, res) => {
         res.json(inventory);
     }
     catch (error) {
-        console.error('Merchant Inventory API Error:', error);
-        res.status(500).json({ error: 'Failed to fetch merchant inventory' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchants.inventory', extra: { id: req.params.id, userId: req?.user?.id ?? undefined }, userMessage: 'Failed to fetch merchant inventory' });
     }
 });
 // Get Merchant Branches
@@ -3526,8 +4730,7 @@ app.get('/merchants/:id/branches', async (req, res) => {
         res.json(branches);
     }
     catch (error) {
-        console.error('Merchant Branches API Error:', error);
-        res.status(500).json({ error: 'Failed to fetch merchant branches' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchants.branches', extra: { id: req.params.id, userId: req?.user?.id ?? undefined }, userMessage: 'Failed to fetch merchant branches' });
     }
 });
 // Export Selected Merchants
@@ -3581,8 +4784,7 @@ app.post('/merchants/export-selected', async (req, res) => {
         res.end();
     }
     catch (error) {
-        console.error('Merchant export failed:', error);
-        res.status(500).json({ error: 'Failed to export merchants' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchants.export-selected', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to export merchants' });
     }
 });
 // Update Store Details & Sync to Merchants Table
@@ -3642,15 +4844,14 @@ app.patch('/stores/:id', async (req, res) => {
         res.json(updatedStore);
     }
     catch (error) {
-        console.error('Update Store Failed:', error);
-        res.status(500).json({ error: 'Failed to update store details' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'stores', extra: { id: req.params.id, userId: req?.user?.id ?? undefined }, userMessage: 'Failed to update store details' });
     }
 });
 // --- Coupon Routes ---
 // List Coupons (with filtering)
 app.get('/coupons', async (req, res) => {
     try {
-        const caller = await requireAdmin(req, res);
+        const caller = await requireCapability(req, res, 'coupons.create_edit_delete');
         if (!caller)
             return;
         const { storeId, isActive, fundingSource, search } = req.query;
@@ -3665,6 +4866,12 @@ app.get('/coupons', async (req, res) => {
         if (search) {
             where.code = { contains: String(search).toUpperCase(), mode: 'insensitive' };
         }
+        // Phase 2 (2D) — by default exclude soft-deleted coupons. Admin can pass
+        // ?includeArchived=true to see archived ones (for the Status=Archived filter
+        // in the admin list view — added in Phase 3).
+        if (req.query.includeArchived !== 'true') {
+            where.deletedAt = null;
+        }
         const coupon = await prisma.coupon.findMany({
             where,
             orderBy: { createdAt: 'desc' }
@@ -3672,14 +4879,13 @@ app.get('/coupons', async (req, res) => {
         res.json({ data: coupon });
     }
     catch (error) {
-        console.error('List Coupons Error:', error);
-        res.status(500).json({ error: 'Failed to fetch coupon' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'coupons', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to fetch coupon' });
     }
 });
 // Create Coupon
 app.post('/coupon', async (req, res) => {
     try {
-        const caller = await requireAdmin(req, res);
+        const caller = await requireCapability(req, res, 'coupons.create_edit_delete');
         if (!caller)
             return;
         const { code, discountType, discountValue, maxDiscountCap, fundingSource, targetAudience, storeId, usageLimit, startDate, endDate, 
@@ -3740,17 +4946,17 @@ app.post('/coupon', async (req, res) => {
                 updatedAt: new Date(),
             }
         });
+        await writeAuditLog(caller.id, 'coupon.create', 'coupon', coupon.id, null, coupon);
         res.status(201).json(coupon);
     }
     catch (error) {
-        console.error('Create Coupon Error:', error);
-        res.status(500).json({ error: 'Failed to create coupon' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'coupon', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to create coupon' });
     }
 });
 // Update Coupon
 app.patch('/coupon/:id', async (req, res) => {
     try {
-        const caller = await requireAdmin(req, res);
+        const caller = await requireCapability(req, res, 'coupons.create_edit_delete');
         if (!caller)
             return;
         const { id } = req.params;
@@ -3789,30 +4995,32 @@ app.patch('/coupon/:id', async (req, res) => {
                 updateData[prismaField] = value;
             }
         }
+        const existing = await prisma.coupon.findUnique({ where: { id } });
         const coupon = await prisma.coupon.update({
             where: { id },
             data: updateData
         });
+        await writeAuditLog(caller.id, 'coupon.update', 'coupon', id, existing, coupon);
         res.json(coupon);
     }
     catch (error) {
-        console.error('Update Coupon Error:', error);
-        res.status(500).json({ error: 'Failed to update coupon' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'coupon', extra: { id: req.params.id, userId: req?.user?.id ?? undefined }, userMessage: 'Failed to update coupon' });
     }
 });
 // Delete Coupon
 app.delete('/coupon/:id', async (req, res) => {
     try {
-        const caller = await requireAdmin(req, res);
+        const caller = await requireCapability(req, res, 'coupons.create_edit_delete');
         if (!caller)
             return;
         const { id } = req.params;
-        await prisma.coupon.delete({ where: { id } });
+        const existing = await prisma.coupon.findUnique({ where: { id } });
+        await prisma.coupon.update({ where: { id }, data: { deletedAt: new Date() } });
+        await writeAuditLog(caller.id, 'coupon.archive', 'coupon', id, existing, null);
         res.json({ message: 'Coupon deleted successfully' });
     }
     catch (error) {
-        console.error('Delete Coupon Error:', error);
-        res.status(500).json({ error: 'Failed to delete coupon' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'coupon', extra: { id: req.params.id, userId: req?.user?.id ?? undefined }, userMessage: 'Failed to delete coupon' });
     }
 });
 // List coupons the logged-in customer is eligible to see on checkout.
@@ -3830,6 +5038,7 @@ app.get('/coupons/available', async (req, res) => {
             where: {
                 isActive: true,
                 startDate: { lte: now },
+                deletedAt: null, // Phase 2 (2D) — customers must NEVER see archived coupons. Unconditional.
                 AND: [
                     { OR: [{ endDate: null }, { endDate: { gt: now } }] },
                     storeId
@@ -3865,8 +5074,7 @@ app.get('/coupons/available', async (req, res) => {
         res.json({ data: eligible });
     }
     catch (error) {
-        console.error('List Available Coupons Error:', error);
-        res.status(500).json({ error: 'Failed to fetch available coupons' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'coupons.available', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to fetch available coupons' });
     }
 });
 // Validate Coupon (for Consumer Checkout)
@@ -3875,12 +5083,29 @@ app.post('/checkout/validate-coupon', async (req, res) => {
         const u = await requireUser(req, res);
         if (!u)
             return;
-        const { code, cartTotal, storeId } = req.body;
-        const userId = u.id; // derived from verified token, NOT trusted from body
-        if (!code || !cartTotal) {
-            return res.status(400).json({ error: 'code and cartTotal are required' });
+        // Phase 2 (2I) — per-user rate limit (10/min). Defensive backstop for abuse.
+        if (!checkRateLimit(`coupon:validate:${u.id}`, 10)) {
+            return res.status(429).json({ error: 'Too many coupon validation requests. Please wait a moment and try again.' });
         }
-        const coupon = await prisma.coupon.findUnique({ where: { code: String(code).toUpperCase() } });
+        // Phase 2 (2E-1) — body shape extended: cartItems[]/storeIds/orderType are
+        // the new shape. Legacy clients still send code + cartTotal — both work.
+        const { code, cartTotal: clientCartTotal, cartItems, storeIds, orderType, storeId } = req.body;
+        const userId = u.id; // derived from verified token, NOT trusted from body
+        if (!code) {
+            return res.status(400).json({ error: 'code is required' });
+        }
+        // Phase 2 (2E-1) — server-side cart total. If the client sends cartItems[],
+        // we recompute and IGNORE the client-supplied cartTotal (anti-spoof). Legacy
+        // clients that send only cartTotal continue to work — fall back to that value.
+        const hasCartItems = Array.isArray(cartItems) && cartItems.length > 0;
+        if (!hasCartItems && (typeof clientCartTotal === 'undefined' || clientCartTotal === null)) {
+            return res.status(400).json({ error: 'cartItems[] or cartTotal is required' });
+        }
+        const effectiveCartTotal = hasCartItems
+            ? cartItems.reduce((sum, item) => sum + (Number(item?.price) || 0) * (Number(item?.quantity) || 0), 0)
+            : (Number(clientCartTotal) || 0);
+        // Phase 2 (2E-1) — exclude archived coupons (deletedAt set by sub-task 2D).
+        const coupon = await prisma.coupon.findFirst({ where: { code: String(code).toUpperCase(), deletedAt: null } });
         if (!coupon) {
             return res.status(404).json({ valid: false, error: 'Invalid coupon code' });
         }
@@ -3900,9 +5125,45 @@ app.post('/checkout/validate-coupon', async (req, res) => {
         if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
             return res.status(400).json({ valid: false, error: 'This coupon has reached its usage limit' });
         }
+        // Phase 2 (2E-2) — daily usage limit (IST midnight reset). Counter logically
+        // resets at IST midnight; if dailyUsageResetAt is from before today, treat
+        // count as 0. The actual reset happens at redeem-time (Phase 2F transaction).
+        if (coupon.dailyUsageLimit) {
+            const now = new Date();
+            const istNow = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+            const istMidnightUtcMs = Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate(), 0, 0, 0, 0) - (5.5 * 60 * 60 * 1000);
+            const istMidnightToday = new Date(istMidnightUtcMs);
+            const counterIsCurrent = coupon.dailyUsageResetAt && coupon.dailyUsageResetAt >= istMidnightToday;
+            const effectiveDailyCount = counterIsCurrent ? coupon.dailyUsageCount : 0;
+            if (effectiveDailyCount >= coupon.dailyUsageLimit) {
+                return res.status(400).json({ valid: false, error: 'This coupon has reached its daily usage limit. Please try again tomorrow.' });
+            }
+        }
         // Check store-specific restriction
         if (coupon.storeId && storeId && coupon.storeId !== storeId) {
             return res.status(400).json({ valid: false, error: 'This coupon is not valid for this store' });
+        }
+        // Phase 2 (2E-2) — vertical scope. If coupon.eligibleVerticals is non-empty,
+        // every cart store's vertical must be in the allowlist (vertical IDs).
+        if (coupon.eligibleVerticals && coupon.eligibleVerticals.length > 0 && Array.isArray(storeIds) && storeIds.length > 0) {
+            const cartStoreIds = storeIds.map((s) => String(s));
+            const cartStores = await prisma.store.findMany({
+                where: { id: { in: cartStoreIds } },
+                select: { id: true, verticalId: true },
+            });
+            const allowedVerticalIds = new Set(coupon.eligibleVerticals);
+            const allMatch = cartStores.length === cartStoreIds.length
+                && cartStores.every((s) => !!s.verticalId && allowedVerticalIds.has(s.verticalId));
+            if (!allMatch) {
+                return res.status(400).json({ valid: false, error: 'This coupon is not valid for one or more stores in your cart' });
+            }
+        }
+        // Phase 2 (2E-2) — order type restriction (PICKUP / DINE_IN). Empty = no
+        // restriction. If set, the requested orderType must be in the allowlist.
+        if (coupon.eligibleOrderTypes && coupon.eligibleOrderTypes.length > 0 && orderType) {
+            if (!coupon.eligibleOrderTypes.includes(String(orderType))) {
+                return res.status(400).json({ valid: false, error: `This coupon is only valid for ${coupon.eligibleOrderTypes.join(', ')} orders` });
+            }
         }
         // Check audience (requires userId for NEW_USERS check)
         if (coupon.targetAudience === 'NEW_USERS' && userId) {
@@ -3911,8 +5172,8 @@ app.post('/checkout/validate-coupon', async (req, res) => {
                 return res.status(400).json({ valid: false, error: 'This coupon is only for new users' });
             }
         }
-        // Check minimum order value
-        if (coupon.minOrder && Number(cartTotal) < coupon.minOrder) {
+        // Check minimum order value (Phase 2 2E-1: server-recomputed total)
+        if (coupon.minOrder && Number(effectiveCartTotal) < coupon.minOrder) {
             return res.status(400).json({ valid: false, error: `Minimum order of ₹${coupon.minOrder} required to use this coupon` });
         }
         // Check per-customer limit (counts this user's prior redemptions)
@@ -3926,36 +5187,104 @@ app.post('/checkout/validate-coupon', async (req, res) => {
         let discount = 0;
         let bogo = null;
         if (coupon.discountType === 'PERCENTAGE') {
-            discount = (Number(cartTotal) * coupon.discountValue) / 100;
+            discount = (Number(effectiveCartTotal) * coupon.discountValue) / 100;
             if (coupon.maxDiscountCap) {
                 discount = Math.min(discount, coupon.maxDiscountCap);
             }
         }
         else if (coupon.discountType === 'BOGO') {
-            // BOGO applies at the line-item level (cheapest-free etc.) — surface the rule,
-            // not a flat ₹ off. The cart computes the actual saving from buy/get.
-            bogo = { buy: coupon.bogoBuy ?? 1, get: coupon.bogoGet ?? 1 };
+            const buy = Number(coupon.bogoBuy ?? 1);
+            const get = Number(coupon.bogoGet ?? 1);
+            bogo = { buy, get };
+            // Phase 2 (2E-3) — server-side BOGO discount computation.
+            // When cartItems[] is provided (new shape), server computes the ₹ saving.
+            // Legacy clients (no cartItems[]) still receive just the buy/get rule and
+            // compute the saving themselves — discount stays 0 in that case (backward-compat).
+            if (hasCartItems) {
+                const batchSize = buy + get;
+                const mode = String(coupon.bogoMode || 'CHEAPEST').toUpperCase();
+                if (mode === 'SAME_PRODUCT') {
+                    // Group items by product key (storeProductId or fallback to name).
+                    // For each group with quantity >= batchSize, discount `get` units per
+                    // complete batch at that product's price.
+                    const groups = new Map();
+                    for (const item of cartItems) {
+                        const key = String(item?.storeProductId || item?.id || item?.name || 'unknown');
+                        const price = Number(item?.price) || 0;
+                        const qty = Number(item?.quantity) || 0;
+                        const existing = groups.get(key);
+                        if (existing) {
+                            existing.quantity += qty;
+                        }
+                        else {
+                            groups.set(key, { price, quantity: qty });
+                        }
+                    }
+                    for (const g of groups.values()) {
+                        const completeBatches = Math.floor(g.quantity / batchSize);
+                        discount += completeBatches * get * g.price;
+                    }
+                }
+                else {
+                    // CHEAPEST mode (default per business config) — expand all cart items
+                    // to per-unit prices, sort ascending, then for every batch of
+                    // (buy+get) units, discount the first `get` (cheapest) units.
+                    const unitPrices = [];
+                    for (const item of cartItems) {
+                        const price = Number(item?.price) || 0;
+                        const qty = Number(item?.quantity) || 0;
+                        for (let i = 0; i < qty; i++)
+                            unitPrices.push(price);
+                    }
+                    unitPrices.sort((a, b) => a - b);
+                    for (let i = 0; i + batchSize <= unitPrices.length; i += batchSize) {
+                        for (let j = 0; j < get; j++)
+                            discount += unitPrices[i + j];
+                    }
+                }
+                // Apply maxDiscountCap if set — admin can cap BOGO discount value too.
+                if (coupon.maxDiscountCap) {
+                    discount = Math.min(discount, coupon.maxDiscountCap);
+                }
+            }
         }
         else {
             discount = coupon.discountValue; // FLAT
         }
-        // Don't let discount exceed cart total
-        discount = Math.min(discount, Number(cartTotal));
+        // Don't let discount exceed cart total (Phase 2 2E-1: server-recomputed)
+        discount = Math.min(discount, Number(effectiveCartTotal));
+        // Phase 2 (2E-4) — sign a 10-min HMAC token binding (couponId, userId,
+        // cartHash, discount, fundingSource, discountType). POST /orders verifies
+        // this before applying the discount — closes the cart-spoof attack.
+        const roundedDiscount = Math.round(discount * 100) / 100;
+        const cartHash = computeCartHash(hasCartItems ? cartItems : []);
+        const tokenPayload = {
+            couponId: coupon.id,
+            userId,
+            cartHash,
+            discount: roundedDiscount,
+            fundingSource: coupon.fundingSource,
+            discountType: coupon.discountType,
+            exp: Math.floor(Date.now() / 1000) + 10 * 60,
+            iat: Math.floor(Date.now() / 1000),
+        };
+        const validationToken = signCouponToken(tokenPayload);
         res.json({
             valid: true,
             couponId: coupon.id,
             code: coupon.code,
-            discount: Math.round(discount * 100) / 100,
+            discount: roundedDiscount,
             discountType: coupon.discountType,
             discountValue: coupon.discountValue,
             maxDiscountCap: coupon.maxDiscountCap,
             bogo,
+            fundingSource: coupon.fundingSource,
             minOrder: coupon.minOrder ?? null,
+            validationToken,
         });
     }
     catch (error) {
-        console.error('Validate Coupon Error:', error);
-        res.status(500).json({ error: 'Failed to validate coupon' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'checkout.validate-coupon', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to validate coupon' });
     }
 });
 // Redeem a coupon — records the usage atomically. Call this at order placement.
@@ -3965,12 +5294,46 @@ app.post('/coupons/redeem', async (req, res) => {
         const u = await requireUser(req, res);
         if (!u)
             return;
+        // Phase 2 (2I) — per-user rate limit (5/min). Tighter than validate.
+        if (!checkRateLimit(`coupon:redeem:${u.id}`, 5)) {
+            return res.status(429).json({ error: 'Too many coupon redemption attempts. Please wait a moment and try again.' });
+        }
         const { code, orderId, issuedCode } = req.body;
         const userId = u.id; // derived from verified token, NOT trusted from body
         if (!code) {
             return res.status(400).json({ error: 'code is required' });
         }
-        const coupon = await prisma.coupon.findUnique({ where: { code: String(code).toUpperCase() } });
+        // Phase 2 (2G) — backward-compat shim. If POST /orders already wrote a
+        // redemption (Phase 2F's transactional path), return alreadyRedeemed
+        // immediately. Prevents legacy consumer-app builds (pre-Phase-4 OTA)
+        // from double-counting when they call this AFTER their /orders call.
+        //
+        // Phase 2K hot-fix (2026-06-09): adversarial review (PR #1) found the
+        // shim returned alreadyRedeemed based only on orderCouponId presence —
+        // any authed user could probe arbitrary orderIds to detect order
+        // existence + coupon-applied status. Fix: (1) scope the lookup to
+        // orders owned by THIS user, (2) require the request's code to match
+        // the stored orderCouponCode. If either fails, fall through to the
+        // normal redemption path instead of leaking alreadyRedeemed.
+        if (orderId) {
+            const orderRow = await prisma.order.findFirst({
+                where: { id: orderId, userId: u.id },
+                select: { orderCouponId: true, orderCouponCode: true },
+            });
+            if (orderRow?.orderCouponId &&
+                orderRow.orderCouponCode &&
+                orderRow.orderCouponCode.toUpperCase() === String(code).toUpperCase()) {
+                return res.status(200).json({ alreadyRedeemed: true, source: 'phase2f' });
+            }
+        }
+        // Phase 2K hot-fix (2026-06-09): filter soft-deleted coupons. Previously
+        // legacy /coupons/redeem used findUnique on code only — an archived
+        // (deletedAt set) coupon could still be redeemed by clients holding the
+        // code. GET /coupons/available + /checkout/validate-coupon already
+        // filter correctly; only this legacy path was leaky.
+        const coupon = await prisma.coupon.findFirst({
+            where: { code: String(code).toUpperCase(), deletedAt: null },
+        });
         if (!coupon)
             return res.status(404).json({ error: 'Invalid coupon code' });
         // Idempotency: if this order already redeemed this coupon, return the existing record.
@@ -3980,18 +5343,322 @@ app.post('/coupons/redeem', async (req, res) => {
                 return res.status(200).json({ redemptionId: existing.id, alreadyRedeemed: true });
         }
         // Record redemption + bump usedCount in one transaction.
-        const redemption = await prisma.$transaction(async (tx) => {
-            const r = await tx.couponRedemption.create({
-                data: { couponId: coupon.id, userId, orderId: orderId || null, issuedCode: issuedCode || null },
+        // Round-6 (XC2): the new partial unique index on
+        // coupon_redemptions(coupon_id, order_id) WHERE order_id IS NOT NULL
+        // makes the parallel-redeem race surface as Prisma P2002 on the
+        // second writer. Catch that and return the existing redemption
+        // (idempotent 200) — mirrors the line 4764-4765 fast path.
+        //
+        // Phase 2K hot-fix (2026-06-09): adversarial review (PR #1) found that
+        // this legacy path was incrementing usedCount with no CAS and ignoring
+        // dailyUsageCount/dailyUsageResetAt entirely. Until consumer-app OTA
+        // rolls AND REQUIRE_COUPON_TOKEN=true, most prod coupon traffic flows
+        // here — so usageLimit + dailyUsageLimit were both silently bypassable.
+        // Now mirrors Phase 2F's atomic compare-and-swap contract from POST /orders.
+        let redemption;
+        try {
+            redemption = await prisma.$transaction(async (tx) => {
+                const r = await tx.couponRedemption.create({
+                    data: { couponId: coupon.id, userId, orderId: orderId || null, issuedCode: issuedCode || null },
+                });
+                // Phase 2K — fetch caps inside the txn for atomic CAS.
+                const couponRow = await tx.coupon.findUnique({
+                    where: { id: coupon.id },
+                    select: { usageLimit: true, dailyUsageLimit: true, dailyUsageResetAt: true, dailyUsageCount: true },
+                });
+                // Total usage limit — atomic compare-and-swap (mirrors POST /orders L2885).
+                if (couponRow?.usageLimit) {
+                    const u = await tx.coupon.updateMany({
+                        where: { id: coupon.id, usedCount: { lt: couponRow.usageLimit } },
+                        data: { usedCount: { increment: 1 } },
+                    });
+                    if (u.count === 0) {
+                        throw new Error('Coupon usage limit reached');
+                    }
+                }
+                else {
+                    await tx.coupon.update({
+                        where: { id: coupon.id },
+                        data: { usedCount: { increment: 1 } },
+                    });
+                }
+                // Daily usage limit with IST midnight reset (mirrors POST /orders L2901).
+                if (couponRow?.dailyUsageLimit) {
+                    const nowD = new Date();
+                    const istNowD = new Date(nowD.getTime() + (5.5 * 60 * 60 * 1000));
+                    const istMidnightUtcMsD = Date.UTC(istNowD.getUTCFullYear(), istNowD.getUTCMonth(), istNowD.getUTCDate(), 0, 0, 0, 0) - (5.5 * 60 * 60 * 1000);
+                    const istMidnightTodayD = new Date(istMidnightUtcMsD);
+                    // Step 1: reset stale counter.
+                    await tx.coupon.updateMany({
+                        where: { id: coupon.id, OR: [
+                                { dailyUsageResetAt: null },
+                                { dailyUsageResetAt: { lt: istMidnightTodayD } },
+                            ] },
+                        data: { dailyUsageCount: 0, dailyUsageResetAt: istMidnightTodayD },
+                    });
+                    // Step 2: atomic increment with limit check.
+                    const d = await tx.coupon.updateMany({
+                        where: { id: coupon.id, dailyUsageCount: { lt: couponRow.dailyUsageLimit } },
+                        data: { dailyUsageCount: { increment: 1 } },
+                    });
+                    if (d.count === 0) {
+                        throw new Error('Coupon daily usage limit reached');
+                    }
+                }
+                return r;
             });
-            await tx.coupon.update({ where: { id: coupon.id }, data: { usedCount: { increment: 1 } } });
-            return r;
-        });
+        }
+        catch (err) {
+            // P2002 = Prisma unique constraint violation. With the new index,
+            // a parallel redeem for the same (couponId, orderId) hits this.
+            if (err?.code === 'P2002' && orderId) {
+                const existing = await prisma.couponRedemption.findFirst({ where: { couponId: coupon.id, orderId } });
+                if (existing) {
+                    return res.status(200).json({ redemptionId: existing.id, alreadyRedeemed: true });
+                }
+            }
+            // Phase 2K — surface CAS limit-reached errors as 400 with the
+            // friendly message (otherwise the outer catch buries them in a 500).
+            if (err instanceof Error && (err.message === 'Coupon usage limit reached' || err.message === 'Coupon daily usage limit reached')) {
+                return res.status(400).json({ error: err.message });
+            }
+            throw err;
+        }
         res.status(201).json({ redemptionId: redemption.id, couponId: coupon.id });
     }
     catch (error) {
         console.error('Redeem Coupon Error:', error);
+        Sentry.captureException(error, { tags: { area: 'coupons.redeem' } });
+        (0, api_error_handler_1.markResponseAsReported)(res);
         res.status(500).json({ error: 'Failed to redeem coupon' });
+    }
+});
+// ============================================================================
+// Phase 3 (3A) — Admin coupon endpoints.
+// Reads (analytics, redemptions, audit log) use 'coupons.view_analytics'.
+// Writes (check-code, upload-logo) use 'coupons.create_edit_delete'.
+// ============================================================================
+// Code uniqueness check — frontend debounces against this while typing in CouponBuilder.
+app.get('/coupons/check-code', async (req, res) => {
+    try {
+        const caller = await requireCapability(req, res, 'coupons.create_edit_delete');
+        if (!caller)
+            return;
+        const code = String(req.query.code || '').trim().toUpperCase();
+        if (!code)
+            return res.status(400).json({ error: 'code is required' });
+        const existing = await prisma.coupon.findFirst({
+            where: { code, deletedAt: null },
+            select: { id: true },
+        });
+        res.json({ available: !existing });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'coupons.check-code', userMessage: 'Failed to check code' });
+    }
+});
+// Per-coupon analytics — KPIs + time series + breakdowns. Feeds CouponDetailPage.
+app.get('/admin/coupons/:id/analytics', async (req, res) => {
+    try {
+        const caller = await requireCapability(req, res, 'coupons.view_analytics');
+        if (!caller)
+            return;
+        const { id } = req.params;
+        const coupon = await prisma.coupon.findUnique({
+            where: { id },
+            select: {
+                id: true, code: true, fundingSource: true, usedCount: true, usageLimit: true,
+                dailyUsageLimit: true, dailyUsageCount: true, startDate: true, endDate: true,
+                isActive: true, deletedAt: true, discountType: true, discountValue: true,
+            },
+        });
+        if (!coupon)
+            return res.status(404).json({ error: 'Coupon not found' });
+        const allRedemptions = await prisma.couponRedemption.findMany({
+            where: { couponId: id },
+            select: {
+                id: true, userId: true, orderId: true, discountAmount: true,
+                fundingSource: true, createdAt: true,
+            },
+        });
+        const totalRedemptions = allRedemptions.length;
+        const totalDiscountValue = allRedemptions.reduce((sum, r) => sum + Number(r.discountAmount || 0), 0);
+        const platformFundedTotal = allRedemptions
+            .filter(r => r.fundingSource === 'PLATFORM')
+            .reduce((sum, r) => sum + Number(r.discountAmount || 0), 0);
+        const merchantFundedTotal = totalDiscountValue - platformFundedTotal;
+        const uniqueCustomers = new Set(allRedemptions.map(r => r.userId)).size;
+        const avgDiscountPerOrder = totalRedemptions > 0 ? totalDiscountValue / totalRedemptions : 0;
+        // IST-bucketed daily time series
+        const byDay = new Map();
+        for (const r of allRedemptions) {
+            const d = new Date(r.createdAt);
+            const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000);
+            const key = ist.toISOString().slice(0, 10);
+            const bucket = byDay.get(key) || { redemptions: 0, discount: 0 };
+            bucket.redemptions += 1;
+            bucket.discount += Number(r.discountAmount || 0);
+            byDay.set(key, bucket);
+        }
+        const timeSeries = Array.from(byDay.entries()).sort(([a], [b]) => a.localeCompare(b))
+            .map(([date, v]) => ({ date, redemptions: v.redemptions, discount: Math.round(v.discount * 100) / 100 }));
+        // Top stores via Order join
+        const orderIdsList = allRedemptions.map(r => r.orderId).filter(Boolean);
+        const orders = orderIdsList.length > 0
+            ? await prisma.order.findMany({
+                where: { id: { in: orderIdsList } },
+                select: { id: true, storeId: true, order_type: true, store_name: true },
+            })
+            : [];
+        const storeCount = new Map();
+        for (const o of orders) {
+            const ex = storeCount.get(o.storeId) || { storeId: o.storeId, storeName: o.store_name, count: 0 };
+            ex.count += 1;
+            storeCount.set(o.storeId, ex);
+        }
+        const topStores = Array.from(storeCount.values()).sort((a, b) => b.count - a.count).slice(0, 10);
+        // Top users
+        const userCount = new Map();
+        for (const r of allRedemptions)
+            userCount.set(r.userId, (userCount.get(r.userId) || 0) + 1);
+        const topUserEntries = Array.from(userCount.entries()).sort(([, a], [, b]) => b - a).slice(0, 10);
+        const topUserIds = topUserEntries.map(([uid]) => uid);
+        const userRows = topUserIds.length > 0
+            ? await prisma.user.findMany({
+                where: { id: { in: topUserIds } },
+                select: { id: true, name: true, phone: true },
+            })
+            : [];
+        const userMap = new Map(userRows.map(u => [u.id, u]));
+        const topUsers = topUserEntries.map(([uid, count]) => ({
+            userId: uid,
+            name: userMap.get(uid)?.name || null,
+            phone: userMap.get(uid)?.phone || null,
+            count,
+        }));
+        // Per-order-type breakdown
+        const orderTypeBreakdown = {};
+        for (const o of orders) {
+            const k = o.order_type || 'pickup';
+            orderTypeBreakdown[k] = (orderTypeBreakdown[k] || 0) + 1;
+        }
+        res.json({
+            coupon,
+            kpis: {
+                totalRedemptions,
+                totalDiscountValue: Math.round(totalDiscountValue * 100) / 100,
+                platformFundedTotal: Math.round(platformFundedTotal * 100) / 100,
+                merchantFundedTotal: Math.round(merchantFundedTotal * 100) / 100,
+                uniqueCustomers,
+                avgDiscountPerOrder: Math.round(avgDiscountPerOrder * 100) / 100,
+            },
+            timeSeries,
+            topStores,
+            topUsers,
+            orderTypeBreakdown,
+        });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'admin.coupons.analytics', userMessage: 'Failed to load coupon analytics' });
+    }
+});
+// Paginated redemption ledger for one coupon.
+app.get('/admin/coupons/:id/redemptions', async (req, res) => {
+    try {
+        const caller = await requireCapability(req, res, 'coupons.view_analytics');
+        if (!caller)
+            return;
+        const { id } = req.params;
+        const page = Math.max(1, Number(req.query.page) || 1);
+        const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+        const skip = (page - 1) * limit;
+        const [items, total] = await Promise.all([
+            prisma.couponRedemption.findMany({
+                where: { couponId: id },
+                orderBy: { createdAt: 'desc' },
+                skip, take: limit,
+                select: {
+                    id: true, userId: true, orderId: true,
+                    discountAmount: true, fundingSource: true, createdAt: true,
+                },
+            }),
+            prisma.couponRedemption.count({ where: { couponId: id } }),
+        ]);
+        const userIds = Array.from(new Set(items.map(i => i.userId)));
+        const orderIdsList = Array.from(new Set(items.map(i => i.orderId).filter(Boolean)));
+        const [users, orders] = await Promise.all([
+            userIds.length > 0
+                ? prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, phone: true } })
+                : Promise.resolve([]),
+            orderIdsList.length > 0
+                ? prisma.order.findMany({ where: { id: { in: orderIdsList } }, select: { id: true, orderNumber: true, totalAmount: true, store_name: true } })
+                : Promise.resolve([]),
+        ]);
+        const userMap = new Map(users.map(u => [u.id, u]));
+        const orderMap = new Map(orders.map(o => [o.id, o]));
+        const enriched = items.map(i => ({
+            ...i,
+            user: userMap.get(i.userId) || null,
+            order: i.orderId ? orderMap.get(i.orderId) || null : null,
+        }));
+        res.json({ data: enriched, total, page, limit, totalPages: Math.ceil(total / limit) });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'admin.coupons.redemptions', userMessage: 'Failed to load redemptions' });
+    }
+});
+// Audit log — paginated, optionally filtered by action prefix (e.g. 'coupon.').
+app.get('/admin/audit-log', async (req, res) => {
+    try {
+        const caller = await requireCapability(req, res, 'coupons.view_analytics');
+        if (!caller)
+            return;
+        const page = Math.max(1, Number(req.query.page) || 1);
+        const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+        const skip = (page - 1) * limit;
+        const actionPrefix = req.query.actionPrefix ? String(req.query.actionPrefix) : null;
+        const where = actionPrefix ? { action: { startsWith: actionPrefix } } : {};
+        const [items, total] = await Promise.all([
+            prisma.auditLog.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take: limit }),
+            prisma.auditLog.count({ where }),
+        ]);
+        res.json({ data: items, total, page, limit, totalPages: Math.ceil(total / limit) });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'admin.audit-log', userMessage: 'Failed to load audit log' });
+    }
+});
+// Coupon logo upload to Supabase Storage 'coupons' bucket (per Pranav's choice — no AWS S3).
+// Mirrors POST /products/upload-image. Requires create_edit_delete capability.
+app.post('/coupons/upload-logo', upload.single('file'), async (req, res) => {
+    try {
+        const caller = await requireCapability(req, res, 'coupons.create_edit_delete');
+        if (!caller)
+            return;
+        if (!req.file)
+            return res.status(400).json({ error: 'No file uploaded' });
+        const fileContent = fs_1.default.readFileSync(req.file.path);
+        const safeName = req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const fileName = `${Date.now()}-${safeName}`;
+        const BUCKET_NAME = 'coupons';
+        const { data, error } = await supabase.storage
+            .from(BUCKET_NAME)
+            .upload(fileName, fileContent, { contentType: req.file.mimetype, upsert: false });
+        fs_1.default.unlinkSync(req.file.path);
+        if (error) {
+            const err = error;
+            if (err.statusCode === '404' || err.error === 'Bucket not found') {
+                return res.status(500).json({ error: `Bucket '${BUCKET_NAME}' not found. Create a PUBLIC Supabase Storage bucket named 'coupons'.` });
+            }
+            return res.status(500).json({ error: 'Supabase upload failed', details: error.message });
+        }
+        const { data: { publicUrl } } = supabase.storage.from(BUCKET_NAME).getPublicUrl(fileName);
+        res.json({ url: publicUrl });
+    }
+    catch (error) {
+        if (req.file && fs_1.default.existsSync(req.file.path))
+            fs_1.default.unlinkSync(req.file.path);
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'coupons.upload-logo', userMessage: 'Failed to upload logo' });
     }
 });
 // --- DEBUG: Fix DB Route ---
@@ -4008,6 +5675,8 @@ app.get('/debug/list-merchants', async (req, res) => {
         res.json(merchants);
     }
     catch (e) {
+        Sentry.captureException(e, { tags: { area: 'debug.list-merchants' }, extra: {} });
+        (0, api_error_handler_1.markResponseAsReported)(res);
         res.status(500).json({ error: e.message });
     }
 });
@@ -4017,6 +5686,8 @@ app.get('/debug/list-users', async (req, res) => {
         res.json(users);
     }
     catch (e) {
+        Sentry.captureException(e, { tags: { area: 'debug.list-users' }, extra: {} });
+        (0, api_error_handler_1.markResponseAsReported)(res);
         res.status(500).json({ error: e.message });
     }
 });
@@ -4099,14 +5770,7 @@ app.post('/auth/send-otp', async (req, res) => {
         res.json({ success: true, message: 'OTP sent via WhatsApp' });
     }
     catch (error) {
-        console.error('[Auth] Send OTP Error:', error?.message, '\nStack:', error?.stack, '\nFull:', error);
-        // Temporary verbose-error response to diagnose iOS Send OTP 500 — strip after fix
-        res.status(500).json({
-            error: 'Internal Server Error',
-            detail: (error?.message || String(error) || 'unknown').slice(0, 500),
-            code: error?.code,
-            meta: error?.meta,
-        });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'auth.send-otp', extra: undefined, userMessage: 'Internal Server Error' });
     }
 });
 /**
@@ -4322,8 +5986,7 @@ app.post('/auth/verify-otp', async (req, res) => {
         console.log(`[Auth] verify-otp response sent successfully.`);
     }
     catch (error) {
-        console.error('[Auth] Verify OTP Error:', error);
-        res.status(500).json({ error: 'OTP verification failed' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'auth.verify-otp', extra: undefined, userMessage: 'OTP verification failed' });
     }
 });
 /**
@@ -4360,6 +6023,8 @@ app.post('/admin/allowlist', async (req, res) => {
             return res.status(401).json({ error: 'Unauthorized' });
         }
         console.error('[Admin] add allowlist error:', e);
+        Sentry.captureException(e, { tags: { area: 'admin.allowlist' }, extra: {} });
+        (0, api_error_handler_1.markResponseAsReported)(res);
         return res.status(500).json({ error: 'Failed to add admin' });
     }
 });
@@ -4394,8 +6059,7 @@ app.get('/admin/merchant-signup-coupons', async (req, res) => {
         })));
     }
     catch (e) {
-        console.error('[Admin] list merchant-signup-coupons error:', e);
-        return res.status(500).json({ error: 'Failed to list coupons' });
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'admin.merchant-signup-coupons', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to list coupons' });
     }
 });
 /**
@@ -4459,8 +6123,7 @@ app.post('/admin/merchant-signup-coupons', async (req, res) => {
         });
     }
     catch (e) {
-        console.error('[Admin] create merchant-signup-coupon error:', e);
-        return res.status(500).json({ error: 'Failed to create coupon' });
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'admin.merchant-signup-coupons', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to create coupon' });
     }
 });
 /**
@@ -4527,6 +6190,8 @@ app.patch('/admin/merchant-signup-coupons/:id', async (req, res) => {
             return res.status(404).json({ error: 'Coupon not found.' });
         }
         console.error('[Admin] update merchant-signup-coupon error:', e);
+        Sentry.captureException(e, { tags: { area: 'admin.merchant-signup-coupons' }, extra: { id: req.params.id } });
+        (0, api_error_handler_1.markResponseAsReported)(res);
         return res.status(500).json({ error: 'Failed to update coupon' });
     }
 });
@@ -4559,8 +6224,7 @@ app.get('/admin/merchant-signup-coupons/:id/redemptions', async (req, res) => {
         })));
     }
     catch (e) {
-        console.error('[Admin] list redemptions error:', e);
-        return res.status(500).json({ error: 'Failed to list redemptions' });
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'admin.merchant-signup-coupons.redemptions', extra: { id: req.params.id, userId: req?.user?.id ?? undefined }, userMessage: 'Failed to list redemptions' });
     }
 });
 // =====================================================================
@@ -4637,6 +6301,8 @@ app.delete('/auth/delete-account', async (req, res) => {
         if (error.message === 'Missing or invalid token' || error.message === 'Unauthorized') {
             return res.status(401).json({ error: 'Unauthorized' });
         }
+        Sentry.captureException(error, { tags: { area: 'auth.delete-account' }, extra: {} });
+        (0, api_error_handler_1.markResponseAsReported)(res);
         res.status(500).json({ error: 'Account deletion failed. Please try again.' });
     }
 });
@@ -4682,8 +6348,8 @@ app.get('/auth/merchant/draft', async (req, res) => {
         });
     }
     catch (e) {
-        console.error('[Draft] GET Error:', e);
-        res.status(500).json({ error: 'Failed to fetch draft', details: e.message });
+        // Round-7 fix: merchant signup recovery — show real cause (auth error, RLS denial, etc.) not generic.
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'auth.merchant.draft', extra: undefined, userMessage: e?.message || 'Failed to fetch draft' });
     }
 });
 /**
@@ -4748,8 +6414,8 @@ app.post('/auth/merchant/draft', async (req, res) => {
         res.json({ success: true, message: 'Draft created' });
     }
     catch (e) {
-        console.error('[Draft] POST Error:', e);
-        res.status(500).json({ error: 'Failed to create draft', details: e.message });
+        // Round-7 fix: merchant signup step 1 — show real cause (duplicate phone, RLS denial, etc.).
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'auth.merchant.draft', extra: undefined, userMessage: e?.message || 'Failed to create draft' });
     }
 });
 /**
@@ -5089,8 +6755,8 @@ app.patch('/auth/merchant/draft', async (req, res) => {
         res.json({ success: true, message: 'Draft updated' });
     }
     catch (e) {
-        console.error('[Draft] PATCH Error:', e);
-        res.status(500).json({ error: `Backend Error: ${e.message}`, details: e.message });
+        // Round-7 fix: restore admin-visible message (regression from auto-refactor).
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'auth.merchant.draft', extra: undefined, userMessage: e?.message || 'Failed to update draft' });
     }
 });
 /**
@@ -5159,8 +6825,8 @@ app.post('/merchants/:id/kyc-decision', async (req, res) => {
         res.json({ success: true, decision });
     }
     catch (e) {
-        console.error('[KYC Decision] Error:', e);
-        res.status(500).json({ error: e.message });
+        // Round-7 fix: KYC reviewers need to see the specific reason (already_approved, invalid_transition, DB error).
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'merchants.kyc-decision', extra: { id: req.params.id, userId: req?.user?.id ?? undefined }, userMessage: e?.message || 'KYC decision failed' });
     }
 });
 /**
@@ -5404,8 +7070,10 @@ app.post('/auth/merchant/signup', async (req, res) => {
         res.json({ success: true, message: 'Merchant successfully registered' });
     }
     catch (error) {
-        console.error('[Auth] Merchant Signup Error:', error);
-        res.status(500).json({ error: 'Internal Server Error during registration', details: error?.message || String(error) });
+        // Round-7 fix: final-step signup failure must surface the specific reason
+        // (Wati error, Razorpay error, Prisma constraint, etc.) so the merchant
+        // knows whether to retry, fix the input, or contact support.
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'auth.merchant.signup', extra: undefined, userMessage: error?.message || 'Registration failed' });
     }
 });
 /**
@@ -5441,8 +7109,7 @@ app.get('/auth/me', async (req, res) => {
         });
     }
     catch (error) {
-        console.error('[Auth] /auth/me Error:', error);
-        res.status(500).json({ error: 'Failed to fetch user context' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'auth.me', extra: undefined, userMessage: 'Failed to fetch user context' });
     }
 });
 // --- Sentry test endpoint (admin-gated) ---
@@ -5485,8 +7152,8 @@ app.post('/debug-resend', async (req, res) => {
         res.json({ success: true, to, template, triggeredBy: caller.id });
     }
     catch (e) {
-        console.error('[debug-resend] Error:', e);
-        res.status(500).json({ error: e?.message || 'Email send failed' });
+        // Round-7 fix: the entire point of /debug-resend is to surface Resend errors.
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'debug-resend', extra: { userId: req?.user?.id ?? undefined }, userMessage: e?.message || 'Email send failed' });
     }
 });
 // --- Admin: invite a new admin-tier user (Super Admin only) ---
@@ -5590,6 +7257,8 @@ app.post('/admin/users/invite', async (req, res) => {
         catch (profileErr) {
             console.error('[InviteAdmin] User row insert failed, rolling back auth user:', profileErr);
             await supabaseAdmin.auth.admin.deleteUser(created.user.id).catch(() => { });
+            Sentry.captureException(profileErr, { tags: { area: 'admin.users.invite' }, extra: {} });
+            (0, api_error_handler_1.markResponseAsReported)(res);
             return res.status(500).json({ error: profileErr?.message || 'Failed to create user profile' });
         }
         try {
@@ -5602,8 +7271,8 @@ app.post('/admin/users/invite', async (req, res) => {
         res.json({ success: true, method: 'email', id: created.user.id, email: targetEmail, role: targetRole });
     }
     catch (e) {
-        console.error('[InviteAdmin] error:', e);
-        res.status(500).json({ error: e?.message || 'Invite failed' });
+        // Round-7 fix: admin needs to see "Email already exists" / "Phone already allowlisted" / etc, not generic.
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'admin.users.invite', extra: { userId: req?.user?.id ?? undefined }, userMessage: e?.message || 'Invite failed' });
     }
 });
 // --- Admin: edit role / status of an existing user (Super Admin only) ---
@@ -5691,8 +7360,8 @@ app.patch('/admin/users/:id', async (req, res) => {
         res.json({ success: true, user: updated });
     }
     catch (e) {
-        console.error('[AdminEdit] error:', e);
-        res.status(500).json({ error: e?.message || 'Edit failed' });
+        // Round-7 fix: admin needs to see "Cannot demote yourself" / "Role conflict" / etc, not generic.
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'admin.users', extra: { id: req.params.id, userId: req?.user?.id ?? undefined }, userMessage: e?.message || 'Edit failed' });
     }
 });
 // --- Wati inbound webhook ---
@@ -5766,8 +7435,7 @@ app.get('/wati/inbox', async (req, res) => {
         res.json({ data: rows, count: rows.length });
     }
     catch (e) {
-        console.error('[wati-inbox] list error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to fetch inbox' });
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'wati.inbox', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to fetch inbox' });
     }
 });
 // ────────────────────────────────────────────────────────────────────────────
@@ -6035,8 +7703,7 @@ app.get('/admin/customers', async (req, res) => {
         });
     }
     catch (e) {
-        console.error('[admin/customers] list error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to fetch customers' });
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'admin.customers', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to fetch customers' });
     }
 });
 /**
@@ -6098,8 +7765,7 @@ app.get('/admin/orders', async (req, res) => {
         res.json({ orders, count: orders.length });
     }
     catch (e) {
-        console.error('[admin/orders] list error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to fetch orders' });
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'admin.orders', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to fetch orders' });
     }
 });
 /**
@@ -6158,6 +7824,8 @@ app.patch('/admin/orders/:id', async (req, res) => {
         console.error('[admin/orders] patch error:', e?.message || e);
         if (e?.code === 'P2025')
             return res.status(404).json({ error: 'Order not found' });
+        Sentry.captureException(e, { tags: { area: 'admin.orders' }, extra: { id: req.params.id } });
+        (0, api_error_handler_1.markResponseAsReported)(res);
         res.status(500).json({ error: 'Failed to update order' });
     }
 });
@@ -6193,8 +7861,7 @@ app.get('/admin/customers/:id/orders', async (req, res) => {
         res.json({ orders });
     }
     catch (e) {
-        console.error('[admin/customers/:id/orders] error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to fetch customer orders' });
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'admin.customers.orders', extra: { id: req.params.id, userId: req?.user?.id ?? undefined }, userMessage: 'Failed to fetch customer orders' });
     }
 });
 /**
@@ -6236,8 +7903,7 @@ app.get('/admin/merchants/:id/orders', async (req, res) => {
         });
     }
     catch (e) {
-        console.error('[admin/merchants/:id/orders] error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to fetch merchant orders' });
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'admin.merchants.orders', extra: { id: req.params.id, userId: req?.user?.id ?? undefined }, userMessage: 'Failed to fetch merchant orders' });
     }
 });
 /**
@@ -6275,8 +7941,7 @@ app.get('/admin/customers/:id/addresses', async (req, res) => {
         });
     }
     catch (e) {
-        console.error('[admin/customers/:id/addresses] error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to fetch customer addresses' });
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'admin.customers.addresses', extra: { id: req.params.id, userId: req?.user?.id ?? undefined }, userMessage: 'Failed to fetch customer addresses' });
     }
 });
 /**
@@ -6325,6 +7990,8 @@ app.patch('/admin/customers/:id/name', async (req, res) => {
         console.error('[admin/customers/:id/name] error:', e?.message || e);
         if (e?.code === 'P2025')
             return res.status(404).json({ error: 'User not found' });
+        Sentry.captureException(e, { tags: { area: 'admin.customers.name' }, extra: { id: req.params.id } });
+        (0, api_error_handler_1.markResponseAsReported)(res);
         res.status(500).json({ error: 'Failed to update customer name' });
     }
 });
@@ -6381,8 +8048,7 @@ app.get('/admin/home/super-admin', async (req, res) => {
         });
     }
     catch (e) {
-        console.error('[admin/home/super-admin] error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to load super-admin home' });
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'admin.home.super-admin', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to load super-admin home' });
     }
 });
 /**
@@ -6451,8 +8117,7 @@ app.get('/admin/home/operations', async (req, res) => {
         });
     }
     catch (e) {
-        console.error('[admin/home/operations] error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to load operations home' });
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'admin.home.operations', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to load operations home' });
     }
 });
 /**
@@ -6505,8 +8170,7 @@ app.get('/admin/home/support', async (req, res) => {
         });
     }
     catch (e) {
-        console.error('[admin/home/support] error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to load support home' });
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'admin.home.support', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to load support home' });
     }
 });
 /**
@@ -6525,8 +8189,7 @@ app.get('/admin/home/finance', async (req, res) => {
         res.json({ refundLike });
     }
     catch (e) {
-        console.error('[admin/home/finance] error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to load finance home' });
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'admin.home.finance', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to load finance home' });
     }
 });
 // ────────────────────────────────────────────────────────────────────────────
@@ -6598,8 +8261,7 @@ app.post('/me/profile', async (req, res) => {
         res.json({ ok: true, name: cleanName });
     }
     catch (e) {
-        console.error('[me/profile] update error:', e?.message || e);
-        res.status(500).json({ error: 'Failed to update profile' });
+        return (0, api_error_handler_1.handleApiError)(res, e, { area: 'me.profile', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to update profile' });
     }
 });
 // --- 404 Handler ---
@@ -6745,8 +8407,7 @@ app.get('/auth/merchant/profile', async (req, res) => {
         res.json(profileResponse);
     }
     catch (error) {
-        console.error('[Auth] Merchant Profile Fetch Error:', error);
-        res.status(500).json({ error: 'Internal Server Error while fetching profile' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'auth.merchant.profile', extra: undefined, userMessage: 'Internal Server Error while fetching profile' });
     }
 });
 // --- Server Start ---

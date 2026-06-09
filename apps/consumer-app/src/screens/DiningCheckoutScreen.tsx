@@ -4,6 +4,22 @@
 //      handling, iOS-only spinner guard (original layout fix).
 //   2. handlePaymentSuccess session-recovery: refreshSession before reading
 //      getSession to defeat Razorpay WebView session eviction.
+//   3. apiClient.fetch migration for /order-requests/{id}/status PATCH and /orders POST
+//      (approved 2026-06-08, Option A patch #1 — adds Authorization Bearer header
+//      without changing the session-recovery semantics from layer #2; the recovered
+//      user id from refreshSession + getSession is preserved byte-for-byte and is
+//      still the user id passed in the body).
+//   4. executeCancelOrder multi-store loop (approved 2026-06-08, Option A patch
+//      #6 — replaces single-request cancel with Promise.allSettled over ALL
+//      acceptedRequests + PENDING requests so stores B..N are not left ACCEPTED
+//      until cron expiry. Does not touch handlePaymentSuccess, session-recovery,
+//      or the apiClient migration from layer 3).
+//   5. parseUtc timezone-parsing fix (approved 2026-06-08, Option A task #45 —
+//      swaps two bare new Date(req.expires_at/created_at) calls for parseUtc
+//      from utils/dateFormat.ts, matching CheckoutScreen.tsx and defending
+//      against any JSON pipeline that strips the Z suffix. Does not touch
+//      executeCancelOrder, handlePaymentSuccess, session-recovery, or imports
+//      other than adding parseUtc.)
 // Any modification to the checkout flow or session handling REQUIRES the user's
 // explicit chat-confirmed approval. Hard lock.
 // Dining Pre-order Checkout: Restaurant info → Arrival details → Order summary → Pay & Confirm.
@@ -26,8 +42,10 @@ import { useOrderRequests } from '../hooks/useOrderRequests';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../lib/supabase';
+import { apiClient } from '../lib/api';
 import TransactionalAuthModal from '../components/TransactionalAuthModal';
 import RazorpayCheckout from '../components/RazorpayCheckout';
+import { parseUtc } from '../utils/dateFormat';
 
 const GUEST_OPTIONS = Array.from({ length: 10 }, (_, i) => `${i + 1} ${i === 0 ? 'Person' : 'People'}`);
 
@@ -242,15 +260,27 @@ export default function DiningCheckoutScreen() {
     const executeCancelOrder = async () => {
         try {
             const apiUrl = process.env.EXPO_PUBLIC_API_URL;
-            const activeRequest = acceptedRequests[0] || requests.find(r => r.status === 'ACCEPTED' || r.status === 'PENDING');
-            if (activeRequest) {
-                const reqId = activeRequest.id.replace('req_', '');
-                await fetch(`${apiUrl}/order-requests/${reqId}/status`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status: 'CANCELLED', reason: 'Cancelled by customer' })
-                });
-                Alert.alert('Order Cancelled', 'Your order has been cancelled. No charges applied.');
+            const toCancel = [
+                ...acceptedRequests,
+                ...requests.filter(r => r.status === 'PENDING' && !acceptedRequests.some((ar) => ar.id === r.id))
+            ];
+            if (toCancel.length > 0) {
+                const cancelResults = await Promise.allSettled(
+                    toCancel.map((r) => {
+                        const reqId = r.id.replace('req_', '');
+                        return apiClient.fetch(`/order-requests/${reqId}/status`, {
+                            method: 'PATCH',
+                            body: JSON.stringify({ status: 'CANCELLED', reason: 'Cancelled by customer' })
+                        });
+                    })
+                );
+                const failures = cancelResults.filter(r => r.status === 'rejected');
+                if (failures.length === 0) {
+                    Alert.alert('Order Cancelled', 'Your order has been cancelled. No charges applied.');
+                } else {
+                    console.error(`[Cancel] ${failures.length}/${toCancel.length} cancel calls failed`, failures);
+                    Alert.alert('Partial cancellation', `${toCancel.length - failures.length} of ${toCancel.length} stores cancelled. The rest will expire automatically in 2 minutes.`);
+                }
             }
             forceNav.current = true;
         } catch (err) {
@@ -513,9 +543,8 @@ export default function DiningCheckoutScreen() {
                 // Idempotent on paymentId → safe to auto-retry transient failures.
                 let createdOrder: any = {};
                 for (let attempt = 1; attempt <= 3; attempt++) {
-                    const orderRes = await fetch(`${apiUrl}/orders`, {
+                    const orderRes = await apiClient.fetch(`/orders`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(orderPayload)
                     });
 
@@ -632,7 +661,7 @@ export default function DiningCheckoutScreen() {
                                             <View className="bg-orange-50 px-3 py-1.5 rounded-full border border-orange-100">
                                                 <Text className="text-[14px] font-bold text-orange-600">
                                                     {(() => {
-                                                        const expires = new Date(req.expires_at).getTime();
+                                                        const expires = parseUtc(req.expires_at).getTime();
                                                         const remaining = Math.max(0, Math.floor((expires - nowTimer) / 1000));
                                                         const mins = Math.floor(remaining / 60);
                                                         const secs = remaining % 60;
@@ -673,7 +702,7 @@ export default function DiningCheckoutScreen() {
                         <Text className="text-[18px] font-bold text-gray-900 mb-4">{isAccepted ? 'Booking Confirmed' : 'Booking Declined'}</Text>
                         {requests.map((req: any) => {
                             const reqIdShort = req.id.substring(0, 4).toUpperCase();
-                            const placedAt = new Date(req.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            const placedAt = parseUtc(req.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                             const subtotal = req.subtotal || 0;
                             const tax = subtotal * 0.05;
                             const totalAmount = subtotal + tax;

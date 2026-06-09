@@ -377,21 +377,36 @@ export function useOrders(dateRange?: DateRange) {
     }, [merchantId, activeStoreId]);
 
     const updateOrderStatus = async (orderId: string, status: OrderStatus, cancellationReason?: string) => {
-        // INTERCEPT: If this is an order_request, bypass the backend and update Supabase directly
+        // INTERCEPT: If this is an order_request, route to the backend PATCH endpoint
+        // (which fires the customer ORDER_CONFIRMED push) rather than the normal-order PATCH.
         if (orderId.startsWith('req_')) {
             const rawId = orderId.replace('req_', '');
-            
+
             // Map the merchant status intent to the request status
             const newReqStatus = (status === 'CONFIRMED' || status === 'PREPARING') ? 'ACCEPTED' : 'REJECTED';
-            
-            const { error } = await supabase
-                .from('order_requests')
-                .update({ status: newReqStatus, rejection_reason: cancellationReason })
-                .eq('id', rawId);
-                
-            if (error) return { success: false, error };
-            
-            // Optimistically remove the request from the UI. 
+
+            // Option A patch #2 (2026-06-08): route through backend PATCH endpoint.
+            // Previously this wrote directly to Supabase, bypassing the backend.
+            // But the customer-facing ORDER_CONFIRMED push notification is sent
+            // ONLY by the backend handler (see api/src/index.ts PATCH
+            // /order-requests/:id/status). Without it, the customer's 2-minute
+            // waiting timer expires and the order silently dies — which is
+            // exactly the "couldn't place orders" symptom the team reported.
+            // This restores the notification path. Backend Tasks #34 + #36
+            // gate this endpoint with requireUser + ownership checks.
+            const response = await fetch(`${API_URL}/order-requests/${rawId}/status`, {
+                method: 'PATCH',
+                headers: await authHeaders(),
+                body: JSON.stringify({ status: newReqStatus, reason: cancellationReason || null })
+            });
+
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                console.error('[useOrders] order_request PATCH failed:', err);
+                return { success: false, error: err.error || err.details || 'Failed to update request status' };
+            }
+
+            // Optimistically remove the request from the UI.
             // The real paid order will arrive via real-time websockets later.
             setOrders(prev => prev.filter(o => o.id !== orderId));
             return { success: true };

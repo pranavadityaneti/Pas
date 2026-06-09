@@ -7,6 +7,15 @@
 //   3. errorDiagnostic state + on-screen red diagnostic box that shows the actual
 //      exception message (e.g. Prisma FK violations) — this is what surfaced the
 //      missing-Prisma-User-row bug during the live demo.
+//   4. apiClient.fetch migration for /order-requests/{id}/status PATCH and /orders POST
+//      (approved 2026-06-08, Option A patch #1 — adds Authorization Bearer header
+//      without changing the session-recovery semantics from layer #2; effectiveUser
+//      resolution is preserved byte-for-byte and is still the user id passed in the body).
+//   5. executeCancelOrder multi-store loop (approved 2026-06-08, Option A patch
+//      #6 — replaces single-request cancel with Promise.allSettled over ALL
+//      acceptedRequests + PENDING requests so stores B..N are not left ACCEPTED
+//      until cron expiry. Does not touch handlePaymentSuccess, session-recovery,
+//      or the apiClient migration from layer 4).
 // Any modification to the checkout flow, error UI, or session-handling logic
 // REQUIRES the user's explicit chat-confirmed approval. Hard lock.
 // Confirm Pre-order Screen: Order review with arrival details → Order confirmed with OTP.
@@ -30,6 +39,7 @@ import { useAuth } from '../context/AuthContext';
 import { useOrderRequests, OrderRequest } from '../hooks/useOrderRequests';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../lib/supabase';
+import { apiClient } from '../lib/api';
 import TransactionalAuthModal from '../components/TransactionalAuthModal';
 import { STORES, RESTAURANTS, findAlternativeStores, ALL_PRODUCTS } from '../lib/data';
 import RazorpayCheckout from '../components/RazorpayCheckout';
@@ -142,15 +152,27 @@ export default function CheckoutScreen() {
     const executeCancelOrder = async () => {
         try {
             const apiUrl = process.env.EXPO_PUBLIC_API_URL;
-            const activeRequest = acceptedRequests[0] || requests.find(r => r.status === 'ACCEPTED' || r.status === 'PENDING');
-            if (activeRequest) {
-                const reqId = activeRequest.id.replace('req_', '');
-                await fetch(`${apiUrl}/order-requests/${reqId}/status`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status: 'CANCELLED', reason: 'Cancelled by customer' })
-                });
-                Alert.alert('Order Cancelled', 'Your order has been cancelled. No charges applied.');
+            const toCancel: OrderRequest[] = [
+                ...acceptedRequests,
+                ...requests.filter(r => r.status === 'PENDING' && !acceptedRequests.some((ar) => ar.id === r.id))
+            ];
+            if (toCancel.length > 0) {
+                const cancelResults = await Promise.allSettled(
+                    toCancel.map((r) => {
+                        const reqId = r.id.replace('req_', '');
+                        return apiClient.fetch(`/order-requests/${reqId}/status`, {
+                            method: 'PATCH',
+                            body: JSON.stringify({ status: 'CANCELLED', reason: 'Cancelled by customer' })
+                        });
+                    })
+                );
+                const failures = cancelResults.filter(r => r.status === 'rejected');
+                if (failures.length === 0) {
+                    Alert.alert('Order Cancelled', 'Your order has been cancelled. No charges applied.');
+                } else {
+                    console.error(`[Cancel] ${failures.length}/${toCancel.length} cancel calls failed`, failures);
+                    Alert.alert('Partial cancellation', `${toCancel.length - failures.length} of ${toCancel.length} stores cancelled. The rest will expire automatically in 2 minutes.`);
+                }
             }
             forceNav.current = true;
         } catch (err) {
@@ -574,9 +596,8 @@ export default function CheckoutScreen() {
 
                 let orderData: any = null;
                 for (let attempt = 1; attempt <= 3; attempt++) {
-                    const orderRes = await fetch(`${apiUrl}/orders`, {
+                    const orderRes = await apiClient.fetch(`/orders`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(orderPayload)
                     });
 
