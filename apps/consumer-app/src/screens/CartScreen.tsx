@@ -1,4 +1,12 @@
-// @lock — Do NOT overwrite. Approved layout & sync logic as of April 1, 2026.
+// @lock — Do NOT overwrite. Multiple approved layers (cumulative):
+//   1. Approved layout & sync logic as of April 1, 2026.
+//   2. Phase 4 fix B2 coupon-flow rewire approved 2026-06-09. Replaces the legacy
+//      local `coupon` state + route.params.selectedCoupon hand-off with the
+//      CartContext.appliedCoupon single source of truth (set by OffersScreen and
+//      CouponsScreen via the typed validateCoupon helper). Drops the navigate
+//      call's selectedCoupon param — checkout screens read CartContext.
+//      Does NOT touch the layout, isWaitingForAuthSync timer logic, or the
+//      Supabase sync from layer 1.
 import React, { useState, useMemo, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Image, Alert, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,39 +25,26 @@ import { STORES } from '../lib/data';
 export default function CartScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const route = useRoute<RouteProp<MainTabParamList, 'Cart'>>();
-    const { items, groupedItems, updateQuantity, getItemCount, getTotal, clearCart } = useCart();
+    // Phase 4 fix B2 (2026-06-09): appliedCoupon comes from CartContext now —
+    // OffersScreen + CouponsScreen call setAppliedCoupon after a real server
+    // validateCoupon. CartContext auto-clears the coupon on any cart mutation
+    // (addItem/removeItem/updateQuantity/clearCart), so the legacy minOrder
+    // watchdog is no longer needed here (server is the authoritative gate at
+    // confirmAccepted; client clears on any cart-shape change).
+    const { items, groupedItems, updateQuantity, getItemCount, getTotal, clearCart, appliedCoupon } = useCart();
     const { session: currentSession, isLoading: authLoading, user, isProfileLoading } = useAuth();
     const [authModalVisible, setAuthModalVisible] = useState(false);
     const [isWaitingForAuthSync, setIsWaitingForAuthSync] = useState(false);
-    const [coupon, setCoupon] = useState<any>(null);
 
-
-
-    // Receive coupon from OffersScreen
-    useEffect(() => {
-        const params = route.params as any;
-        if (params?.selectedCoupon) {
-            setCoupon(params.selectedCoupon);
-        }
-    }, [route.params]);
+    // Phase 4 fix B2 (2026-06-09): removed local `coupon` state, the
+    // route.params.selectedCoupon useEffect, and the minOrder watchdog.
+    // appliedCoupon lives in CartContext.
     const subtotal = getTotal();
     const itemCount = getItemCount();
     const isRestaurantOrder = items.some(item => item.isDining);
     const gst = isRestaurantOrder ? parseFloat((subtotal * 0.05).toFixed(2)) : 0;
 
-    useEffect(() => {
-        // Evaluate coupon minimum requirements
-        if (coupon && coupon.minOrder) {
-            if (subtotal < coupon.minOrder) {
-                // Remove coupon if threshold breaks
-                setCoupon(null);
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                Alert.alert("Coupon Removed", `Your cart total dropped below the minimum requirement of ₹${coupon.minOrder} for this coupon.`);
-            }
-        }
-    }, [subtotal, coupon]);
-
-    const discount = coupon ? coupon.discount : 0;
+    const discount = appliedCoupon?.discount ?? 0;
     const total = Math.max(0, subtotal + gst - discount);
 
     // Reactive Auth Sync Watcher
@@ -61,10 +56,12 @@ export default function CartScreen() {
         if (user && !isProfileLoading) {
             setIsWaitingForAuthSync(false);
             const isRestaurantOrder = items.length > 0 && items[0].isDining;
+            // Phase 4 fix B2 (2026-06-09): no selectedCoupon param — checkout
+            // screens read CartContext.appliedCoupon directly.
             if (isRestaurantOrder) {
-                navigation.navigate('DiningCheckout', { selectedCoupon: coupon } as any);
+                navigation.navigate('DiningCheckout' as any);
             } else {
-                navigation.navigate('Checkout', { selectedCoupon: coupon } as any);
+                navigation.navigate('Checkout' as any);
             }
             return; // Exit early
         }
@@ -80,10 +77,10 @@ export default function CartScreen() {
         }, 8000);
 
         // 3. The Cleanup
-        // If user or isProfileLoading changes BEFORE 8 seconds, this cleanup runs, 
+        // If user or isProfileLoading changes BEFORE 8 seconds, this cleanup runs,
         // kills the old timeout, and the effect re-evaluates with fresh state.
         return () => clearTimeout(timeoutId);
-    }, [user, isProfileLoading, isWaitingForAuthSync, navigation, items, coupon]);
+    }, [user, isProfileLoading, isWaitingForAuthSync, navigation, items]);
 
     const handleCheckout = async () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -97,10 +94,11 @@ export default function CartScreen() {
         }
 
         const isRestaurantOrder = items.length > 0 && items[0].isDining;
+        // Phase 4 fix B2 (2026-06-09): no selectedCoupon param.
         if (isRestaurantOrder) {
-            navigation.navigate('DiningCheckout', { selectedCoupon: coupon } as any);
+            navigation.navigate('DiningCheckout' as any);
         } else {
-            navigation.navigate('Checkout', { selectedCoupon: coupon } as any);
+            navigation.navigate('Checkout' as any);
         }
     };
 

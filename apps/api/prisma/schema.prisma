@@ -1247,18 +1247,22 @@ model webauthn_credentials {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model cart_items {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  cart_id      String   @db.Uuid
-  product_id   String
-  product_name String
-  price        Float
-  image        String?
-  quantity     Int
-  store_id     String
-  store_name   String
-  is_dining    Boolean? @default(false)
-  is_veg       Boolean? @default(true)
-  created_at   DateTime @default(dbgenerated("timezone('utc'::text, now())")) @db.Timestamptz(6)
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cart_id          String   @db.Uuid
+  product_id       String
+  product_name     String
+  price            Float
+  image            String?
+  quantity         Int
+  store_id         String
+  store_name       String
+  is_dining        Boolean? @default(false)
+  is_veg           Boolean? @default(true)
+  // Phase 4 fix C1 (2026-06-09): persist storeProductId so SIGNED_IN /
+  // TOKEN_REFRESHED reload preserves the FK needed by Phase 2L's strict
+  // /checkout/validate-coupon and by POST /orders' stock decrement.
+  store_product_id String?
+  created_at       DateTime @default(dbgenerated("timezone('utc'::text, now())")) @db.Timestamptz(6)
   updated_at   DateTime @default(dbgenerated("timezone('utc'::text, now())")) @db.Timestamptz(6)
   carts        carts    @relation(fields: [cart_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 

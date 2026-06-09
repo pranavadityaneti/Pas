@@ -42,9 +42,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-    ArrowLeftCircle, ChevronDown, CheckCircle, XCircle, Activity,
+    ArrowLeftCircle, ChevronDown, ChevronRight, CheckCircle, XCircle, Activity,
     Plus, Minus,
-    MapPin, Clock, User
+    MapPin, Clock, User, Ticket,
 } from 'lucide-react-native';
 import { useNavigation, useRoute, RouteProp, CommonActions, usePreventRemove } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -54,7 +54,7 @@ import { useOrderRequests } from '../hooks/useOrderRequests';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../lib/supabase';
-import { apiClient, validateCoupon, type ValidateCouponCartItem } from '../lib/api';
+import { apiClient, validateCoupon, checkCouponOrderEligibility, type ValidateCouponCartItem } from '../lib/api';
 import TransactionalAuthModal from '../components/TransactionalAuthModal';
 import RazorpayCheckout from '../components/RazorpayCheckout';
 import { parseUtc } from '../utils/dateFormat';
@@ -436,6 +436,25 @@ export default function DiningCheckoutScreen() {
             navigation.goBack(); return;
         }
 
+        // Phase 4 fixes D2 + A2 (2026-06-09): eligibility gate at TOP of
+        // confirmAccepted. For dining the multi-store check is structurally
+        // always single-store (one restaurant), but the storeProductId presence
+        // check is the load-bearing invariant — Supabase reload mid-session can
+        // wipe storeProductId. Run unconditionally for every coupon order, not
+        // only inside the near-expiry branch below.
+        if (appliedCoupon) {
+            const orderItemsFlat = items.map((ci) => ({
+                storeProductId: ci.storeProductId ?? null,
+                storeId: ci.storeId,
+            }));
+            const elig = checkCouponOrderEligibility(orderItemsFlat, appliedCoupon);
+            if (!elig.ok) {
+                clearAppliedCoupon();
+                Alert.alert('Coupon removed', elig.reason!);
+                return;
+            }
+        }
+
         // Phase 4H (2026-06-09): re-validate coupon if token is within 60s of
         // expiry, BEFORE the Razorpay payment order is created. Closes the
         // "stale token charged then rejected" bleed. On re-validate failure
@@ -488,7 +507,10 @@ export default function DiningCheckoutScreen() {
 
         try {
             const apiUrl = process.env.EXPO_PUBLIC_API_URL;
-            console.log('[DiningCheckout] API URL:', apiUrl, 'amount:', total);
+            // Phase 4 fix A1 (2026-06-09): charge the re-validated effectiveTotal,
+            // not the pre-re-validate `total`. Phase 4H may have just dropped/refreshed
+            // the discount in the lines above; using stale `total` would mis-charge.
+            console.log('[DiningCheckout] API URL:', apiUrl, 'amount:', effectiveTotal);
             // Use getSession() — supabase.auth.getUser() hangs on this project (see supabase.ts:43-54)
             const { data: { session: authSession } } = await supabase.auth.getSession();
             const user = authSession?.user;
@@ -496,7 +518,7 @@ export default function DiningCheckoutScreen() {
             const res = await fetch(`${apiUrl}/payments/create-order`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ amount: total, type: 'consumer', userId: user?.id })
+                body: JSON.stringify({ amount: effectiveTotal, type: 'consumer', userId: user?.id })
             });
             console.log('[DiningCheckout] Response status:', res.status);
             const data = await res.json();
@@ -576,11 +598,21 @@ export default function DiningCheckoutScreen() {
                     storeId: correctStoreId,
                     branchId: correctBranchId,
                     items: items.map(item => ({
-                        // Phase 4 (2026-06-09): forward storeProductId when present so
-                        // the server (Phase 2L) can validate coupon prices server-side.
-                        // Falls back to item.id where storeProductId isn't set; null
-                        // remains the legacy default when neither is populated.
-                        storeProductId: item.storeProductId ?? item.id ?? null,
+                        // Phase 4 fix C2 (2026-06-09): the previous `?? item.id ?? null`
+                        // fallback silently substituted an identifier that may not be a
+                        // real StoreProduct.id — once REQUIRE_COUPON_TOKEN=true, that
+                        // would break cartHash recompute after payment.
+                        //
+                        // Strict policy:
+                        //   - coupon order: use ONLY item.storeProductId; null if missing
+                        //     (Fix D2's invariant check at confirmAccepted entry guarantees
+                        //     we never get here without storeProductId on coupon orders);
+                        //   - non-coupon order: keep the legacy item.id fallback so the
+                        //     server's stock-decrement (filters on storeProductId !== null)
+                        //     continues to work for ordinary non-coupon dining orders.
+                        storeProductId: appliedCoupon
+                            ? (item.storeProductId ?? null)
+                            : (item.storeProductId ?? item.id ?? null),
                         name: item.name,
                         isVeg: item.isVeg,
                         quantity: item.quantity,
@@ -868,7 +900,9 @@ export default function DiningCheckoutScreen() {
                 onClose={() => setShowPayment(false)}
                 onSuccess={handlePaymentSuccess}
                 onError={handlePaymentError}
-                amount={total}
+                /* Phase 4 fix A1 (2026-06-09): bind to finalTotalToPay so the
+                   charge matches /payments/create-order. */
+                amount={finalTotalToPay || total}
                 restaurantName={restaurantName}
                 orderId={razorpayOrderId}
             />
@@ -1198,6 +1232,49 @@ export default function DiningCheckoutScreen() {
                         </View>
                     ))}
 
+                    {/* Phase 4 fix B1 (2026-06-09): Apply Coupon entry-point row.
+                        Lives inside the bill block here (dining checkout is denser
+                        than pickup). Tapping the row navigates to CouponsScreen
+                        with subtotal + storeId + currently applied couponId. */}
+                    <View className="border-t border-gray-100 mt-3 pt-3 mb-3">
+                        <TouchableOpacity
+                            onPress={() => navigation.navigate('Coupons' as any, {
+                                subtotal,
+                                storeId: restaurantId || '',
+                                appliedCouponId: appliedCoupon?.couponId,
+                                returnTo: 'DiningCheckout',
+                            })}
+                            className="flex-row items-center bg-[#FDF7F7] border border-[#FCDADA] rounded-xl p-3"
+                        >
+                            <Ticket size={18} color="#B52725" />
+                            <View className="flex-1 ml-3">
+                                <Text className="text-[13px] font-bold text-gray-900">
+                                    {appliedCoupon ? `${appliedCoupon.code} applied` : 'Apply Coupon'}
+                                </Text>
+                                {appliedCoupon ? (
+                                    <Text className="text-[11px] text-green-600 font-semibold mt-0.5">
+                                        Saved ₹{appliedCoupon.discount.toFixed(2)} · Tap to change
+                                    </Text>
+                                ) : (
+                                    <Text className="text-[11px] text-gray-500 font-medium mt-0.5">
+                                        Browse offers or enter a code
+                                    </Text>
+                                )}
+                            </View>
+                            {appliedCoupon ? (
+                                <TouchableOpacity
+                                    onPress={() => clearAppliedCoupon()}
+                                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                                    className="ml-2 px-2.5 py-1 rounded-full bg-gray-100"
+                                >
+                                    <Text className="text-[11px] font-bold text-gray-700">Remove</Text>
+                                </TouchableOpacity>
+                            ) : (
+                                <ChevronRight size={16} color="#B52725" />
+                            )}
+                        </TouchableOpacity>
+                    </View>
+
                     {/* Bill */}
                     <View className="border-t border-gray-100 mt-3 pt-3">
                         <View className="flex-row justify-between mb-1.5">
@@ -1242,7 +1319,9 @@ export default function DiningCheckoutScreen() {
                 onClose={() => setShowPayment(false)}
                 onSuccess={handlePaymentSuccess}
                 onError={handlePaymentError}
-                amount={total}
+                /* Phase 4 fix A1 (2026-06-09): bind to finalTotalToPay (post re-validate)
+                   so the charge matches what /payments/create-order received. */
+                amount={finalTotalToPay || total}
                 restaurantName={restaurantName}
                 orderId={razorpayOrderId}
             />

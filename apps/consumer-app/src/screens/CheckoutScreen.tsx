@@ -53,7 +53,7 @@ import { useAuth } from '../context/AuthContext';
 import { useOrderRequests, OrderRequest } from '../hooks/useOrderRequests';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../lib/supabase';
-import { apiClient, validateCoupon, type ValidateCouponCartItem } from '../lib/api';
+import { apiClient, validateCoupon, checkCouponOrderEligibility, type ValidateCouponCartItem } from '../lib/api';
 import TransactionalAuthModal from '../components/TransactionalAuthModal';
 import { STORES, RESTAURANTS, findAlternativeStores, ALL_PRODUCTS } from '../lib/data';
 import RazorpayCheckout from '../components/RazorpayCheckout';
@@ -609,7 +609,16 @@ export default function CheckoutScreen() {
                         name: item.name,
                         quantity: item.quantity,
                         price: item.price,
-                        storeProductId: item.id || item.storeProductId || null
+                        // Phase 4 fix C2 (2026-06-09): on coupon orders use ONLY
+                        // item.storeProductId (no fallback) so the cartHash
+                        // recompute on the server is deterministic. Fix D2's
+                        // invariant check at confirmAccepted entry guarantees
+                        // we never get here without storeProductId. On non-coupon
+                        // orders keep the legacy item.id || item.storeProductId
+                        // fallback so existing stock-decrement keeps working.
+                        storeProductId: appliedCoupon
+                            ? (item.storeProductId ?? null)
+                            : (item.id || item.storeProductId || null)
                     })),
                     // Phase 4 (2026-06-09): include the server-signed validation token
                     // so the server (Phase 2F) can verify the discount before applying
@@ -799,6 +808,27 @@ export default function CheckoutScreen() {
 
         const confirmAccepted = async () => {
             if (acceptedRequests.length === 0) { navigation.goBack(); return; }
+            // Phase 4 fixes D2 + A2 (2026-06-09): eligibility gate at the TOP
+            // of confirmAccepted — runs UNCONDITIONALLY for every coupon order,
+            // not only inside the near-expiry branch. Catches: (a) cart drift
+            // (items missing storeProductId after Supabase reload), and (b)
+            // multi-store coupon orders (rejected until Phase 5 ships allocation).
+            // If the order is ineligible, drop the coupon and abort — user
+            // re-taps Pay to retry without the coupon at the updated total.
+            if (appliedCoupon) {
+                const orderItemsFlat = acceptedRequests.flatMap((req: any) =>
+                    (req.items || []).map((it: any) => ({
+                        storeProductId: it.storeProductId ?? null,
+                        storeId: req.store_id,
+                    }))
+                );
+                const elig = checkCouponOrderEligibility(orderItemsFlat, appliedCoupon);
+                if (!elig.ok) {
+                    clearAppliedCoupon();
+                    Alert.alert('Coupon removed', elig.reason!);
+                    return;
+                }
+            }
             // Phase 4: removed legacy AVAILABLE_COUPONS minOrder check — the
             // server's /checkout/validate-coupon (Phase 2L) now enforces minOrder
             // against the server-trusted cart total. If a customer's cart drops
@@ -1258,6 +1288,51 @@ export default function CheckoutScreen() {
                             </View>
                         </View>
                     )}
+                </View>
+
+                {/* Phase 4 fix B1 (2026-06-09): Apply Coupon entry-point row.
+                    Previously the Phase 4 typed validateCoupon → setAppliedCoupon
+                    pipeline existed but no UI navigated to CouponsScreen — the
+                    whole flow was unreachable. This row navigates the customer
+                    to the Coupons screen, passing subtotal + storeId + the
+                    current applied couponId so the user can swap or browse. */}
+                <View className="mx-5 mt-4 mb-3">
+                    <TouchableOpacity
+                        onPress={() => navigation.navigate('Coupons' as any, {
+                            subtotal,
+                            storeId: groupedStores[0]?.storeId || '',
+                            appliedCouponId: appliedCoupon?.couponId,
+                            returnTo: 'Checkout',
+                        })}
+                        className="flex-row items-center bg-white border border-gray-100 rounded-2xl p-4"
+                    >
+                        <Ticket size={20} color="#B52725" />
+                        <View className="flex-1 ml-3">
+                            <Text className="text-[14px] font-bold text-gray-900">
+                                {appliedCoupon ? `${appliedCoupon.code} applied` : 'Apply Coupon'}
+                            </Text>
+                            {appliedCoupon ? (
+                                <Text className="text-[12px] text-green-600 font-semibold mt-0.5">
+                                    You saved ₹{appliedCoupon.discount.toFixed(2)} · Tap to change
+                                </Text>
+                            ) : (
+                                <Text className="text-[12px] text-gray-500 font-medium mt-0.5">
+                                    Browse offers or enter a code
+                                </Text>
+                            )}
+                        </View>
+                        {appliedCoupon ? (
+                            <TouchableOpacity
+                                onPress={handleRemoveCoupon}
+                                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                                className="ml-2 px-3 py-1.5 rounded-full bg-gray-100"
+                            >
+                                <Text className="text-[12px] font-bold text-gray-700">Remove</Text>
+                            </TouchableOpacity>
+                        ) : (
+                            <ChevronRight size={18} color="#B52725" />
+                        )}
+                    </TouchableOpacity>
                 </View>
 
                 <View className="px-5 mt-4 mb-3"><Text className="text-[12px] font-extrabold text-[#B52725] uppercase tracking-wider">Bill Details</Text></View>

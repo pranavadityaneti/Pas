@@ -191,6 +191,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
             setCartId(cartData.id);
 
             // Map cloud items
+            // Phase 4 fix C1 (2026-06-09): hydrate storeProductId from cart_items
+            // so SIGNED_IN / TOKEN_REFRESHED reload preserves the FK that Phase 2L's
+            // strict /checkout/validate-coupon requires.
             const cloudItems: CartItem[] = cartData.cart_items.map((ci: any) => ({
                 id: String(ci.product_id),
                 name: ci.product_name,
@@ -200,7 +203,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
                 storeId: String(ci.store_id),
                 storeName: ci.store_name,
                 isDining: ci.is_dining ?? false,
-                isVeg: ci.is_veg ?? true
+                isVeg: ci.is_veg ?? true,
+                storeProductId: ci.store_product_id ?? undefined,
             }));
 
             // Merge logic: for duplicate items, take the HIGHER quantity (not sum).
@@ -269,7 +273,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
                 store_id: String(item.storeId),
                 store_name: item.storeName,
                 is_dining: item.isDining,
-                is_veg: item.isVeg
+                is_veg: item.isVeg,
+                // Phase 4 fix C1 (2026-06-09): persist storeProductId so a
+                // subsequent loadCartFromSupabase preserves the FK.
+                store_product_id: item.storeProductId ?? null,
             }));
 
             // Safely Upsert
@@ -317,22 +324,25 @@ export function CartProvider({ children }: { children: ReactNode }) {
         }
 
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        // Phase 4 — any cart shape change invalidates the applied coupon.
-        clearAppliedCoupon();
-        setItems(prev => {
-            const existing = prev.find(i => String(i.id) === String(item.id));
-            if (existing) {
-                // Apply optional stock cap if known
-                const maxStock = item.stock !== undefined ? item.stock : Infinity;
-                const nextQty = existing.quantity + 1;
-                if (nextQty > maxStock) {
-                    Alert.alert('Max Stock', `Only ${maxStock} available.`);
-                    return prev;
-                }
-                return prev.map(i => String(i.id) === String(item.id) ? { ...i, quantity: nextQty } : i);
+        // Phase 4 fix D1 (2026-06-09): only clear the applied coupon on the
+        // mutating path. The audit caught the previous "clear before setItems"
+        // pattern: it would fire on stock-cap short-circuits (no actual cart
+        // change). Compute the decision OUTSIDE setItems so the clear only runs
+        // when we're certain the cart will mutate.
+        const existing = items.find(i => String(i.id) === String(item.id));
+        if (existing) {
+            const maxStock = item.stock !== undefined ? item.stock : Infinity;
+            const nextQty = existing.quantity + 1;
+            if (nextQty > maxStock) {
+                Alert.alert('Max Stock', `Only ${maxStock} available.`);
+                return; // no mutation, no coupon clear
             }
-            return [...prev, { ...item, id: String(item.id), storeId: String(item.storeId), quantity: 1, stock: item.stock }];
-        });
+            clearAppliedCoupon();
+            setItems(prev => prev.map(i => String(i.id) === String(item.id) ? { ...i, quantity: nextQty } : i));
+            return;
+        }
+        clearAppliedCoupon();
+        setItems(prev => [...prev, { ...item, id: String(item.id), storeId: String(item.storeId), quantity: 1, stock: item.stock }]);
     };
 
     const removeItem = (id: string) => {
@@ -355,27 +365,22 @@ export function CartProvider({ children }: { children: ReactNode }) {
             removeItem(id);
             return;
         }
-        // Phase 4 — any cart shape change invalidates the applied coupon.
-        // (Edge: if the setItems callback below short-circuits on stock cap, the
-        // coupon still clears. Accepted trade-off — keeps the "any cart interaction
-        // clears coupon" invariant simple and prevents stale-token bleeds.)
-        clearAppliedCoupon();
-        setItems(prev => {
-            const target = prev.find(i => String(i.id) === String(id));
-            if (!target) return prev;
+        // Phase 4 fix D1 (2026-06-09): compute the mutation decision outside
+        // setItems so the coupon-clear only fires when the cart actually mutates.
+        // Previous code cleared the coupon even on stock-cap short-circuit; the
+        // audit flagged that as a "no bleeds" rule violation.
+        const target = items.find(i => String(i.id) === String(id));
+        if (!target) return; // no mutation, no coupon clear
 
-            // Cap by stock if available
-            if (target.stock !== undefined && target.stock !== null) {
-                if (quantity > target.stock) {
-                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                    Alert.alert('Stock Limit Reached', `Sorry, only ${target.stock} left.`);
-                    // Explicitly return previous state without changing anything
-                    return prev;
-                }
+        if (target.stock !== undefined && target.stock !== null) {
+            if (quantity > target.stock) {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                Alert.alert('Stock Limit Reached', `Sorry, only ${target.stock} left.`);
+                return; // no mutation, no coupon clear
             }
-
-            return prev.map(i => String(i.id) === String(id) ? { ...i, quantity } : i);
-        });
+        }
+        clearAppliedCoupon();
+        setItems(prev => prev.map(i => String(i.id) === String(id) ? { ...i, quantity } : i));
     };
 
     const clearCart = () => {

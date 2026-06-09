@@ -180,6 +180,56 @@ export interface ValidateCouponCartItem {
     name?: string;
 }
 
+// ============================================================================
+// Phase 4 fixes D2 + A2 (2026-06-09) — eligibility helper used by both checkout
+// screens at confirmAccepted entry. Centralizes two invariants the adversarial
+// audit found missing:
+//   D2 — every item in the actual order being placed must have storeProductId
+//        (otherwise the server's cartHash recompute will reject after payment
+//        once REQUIRE_COUPON_TOKEN=true is flipped);
+//   A2 — coupon orders must be single-store until Phase 5 (multi-store discount
+//        allocation) is built. Phase 4's per-store POST /orders loop in
+//        CheckoutScreen sends the SAME full-cart validationToken to every
+//        per-store order; that's the bleed Phase 5 will address. Until then we
+//        explicitly reject multi-store coupon orders with a clear user message.
+// ============================================================================
+
+export interface CouponOrderEligibility {
+    ok: boolean;
+    reason?: string;
+}
+
+/**
+ * Verifies an order being placed is eligible to carry the user's currently
+ * applied coupon. Pass the FLAT list of items actually going into POST /orders
+ * (per-store flatmap is fine — caller controls scope), plus the current
+ * appliedCoupon. If `ok===false`, caller MUST drop the coupon and either
+ * abort or re-derive total before charging.
+ */
+export function checkCouponOrderEligibility(
+    orderItems: Array<{ storeProductId?: string | null; storeId?: string | null }>,
+    appliedCoupon: { code: string } | null,
+): CouponOrderEligibility {
+    if (!appliedCoupon) return { ok: true };
+    // D2 — strict storeProductId presence on every item in the order.
+    const missingId = orderItems.some((it) => !it?.storeProductId);
+    if (missingId) {
+        return {
+            ok: false,
+            reason: 'Some items in your cart need to be refreshed before this coupon can be applied. Please refresh your cart and try again.',
+        };
+    }
+    // A2 — multi-store coupon scope-limit until Phase 5 ships allocation.
+    const storeIds = new Set(orderItems.map((it) => String(it?.storeId || '')).filter((s) => s.length > 0));
+    if (storeIds.size > 1) {
+        return {
+            ok: false,
+            reason: 'Coupons can only be applied to one store at a time right now. Please remove items from other stores or remove the coupon to continue.',
+        };
+    }
+    return { ok: true };
+}
+
 export interface ValidateCouponRequest {
     code: string;
     cartItems: ValidateCouponCartItem[];
@@ -241,6 +291,39 @@ export async function validateCoupon(req: ValidateCouponRequest): Promise<Valida
                 status: r.status,
             };
         }
+        // Phase 4 fix C3 (2026-06-09): fail-closed if the server returned a
+        // non-string / empty validationToken. The previous String(j.validationToken)
+        // coerced null to the string 'null' and let the customer believe the coupon
+        // was applied; the POST /orders would then 400 with 'Malformed coupon token'
+        // AFTER Razorpay charged. This happens when COUPON_VALIDATION_SECRET is
+        // unset on EB (a real interim state during the secret rollout).
+        if (typeof j.validationToken !== 'string' || j.validationToken.length === 0) {
+            return {
+                valid: false,
+                error: 'Coupon temporarily unavailable. Please try again shortly.',
+                status: r.status,
+            };
+        }
+        // Phase 4 fix C3 (2026-06-09): also defend against unexpected discountType /
+        // fundingSource values (e.g. server-side case drift). If either is bogus,
+        // refuse the coupon rather than persisting a type-broken AppliedCoupon
+        // into CartContext where it would corrupt POST /orders' snapshot columns.
+        const VALID_DISCOUNT_TYPES = ['PERCENTAGE', 'FLAT', 'BOGO'] as const;
+        const VALID_FUNDING_SOURCES = ['PLATFORM', 'MERCHANT'] as const;
+        if (!VALID_DISCOUNT_TYPES.includes(j.discountType)) {
+            return {
+                valid: false,
+                error: 'Coupon response was malformed. Please try again.',
+                status: r.status,
+            };
+        }
+        if (j.fundingSource != null && !VALID_FUNDING_SOURCES.includes(j.fundingSource)) {
+            return {
+                valid: false,
+                error: 'Coupon response was malformed. Please try again.',
+                status: r.status,
+            };
+        }
         // Server's token has exp = now + 600s; mirror that client-side so the
         // checkout countdown UX doesn't need to decode the token.
         const expiresAt = Math.floor(Date.now() / 1000) + 10 * 60;
@@ -251,11 +334,16 @@ export async function validateCoupon(req: ValidateCouponRequest): Promise<Valida
             discount: Number(j.discount) || 0,
             discountType: j.discountType,
             fundingSource: j.fundingSource ?? null,
-            validationToken: String(j.validationToken),
+            validationToken: j.validationToken,
             expiresAt,
             bogo: j.bogo ?? null,
         };
-    } catch {
+    } catch (err) {
+        // Phase 4 fix C3 (2026-06-09): log the real error to console so Sentry
+        // (when wired) surfaces actual failure modes during rollout. Previously
+        // the bare `catch {}` swallowed everything and reported "Network hiccup"
+        // for auth failures, JSON parse failures, etc.
+        console.warn('[validateCoupon] request failed:', (err as any)?.message || err);
         return {
             valid: false,
             error: 'Network hiccup. Please try again in a moment.',
