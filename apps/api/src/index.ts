@@ -26,6 +26,7 @@ import { apifyService } from './services/apify.service';
 import { sendApplicationReceivedEmail, sendStoreApprovedEmail, sendStoreRejectedEmail, sendStoreNeedsInfoEmail, sendAdminInviteEmail } from './services/email.service';
 import { NotificationService } from './services/notification.service';
 import { initScheduledJobs } from './services/scheduled-jobs';
+import { closeSettlementCycles, detectClawback, getLastCompletedIstWeek } from './services/settlement.service';
 import { parseArrivalTime } from './utils/parseArrivalTime';
 import staffRouter from './routes/staff';
 import bookingsRouter from './routes/bookings';
@@ -580,6 +581,13 @@ app.post('/payments/create-order', async (req, res) => {
             if (!user) return;     // requireUser already sent 401
             enrichedNotes.merchantId = user.id;
             enrichedNotes.paymentType = 'merchant_signup';
+        } else {
+            // Phase 7B (2026-06-10): tag consumer order-flow payments so the
+            // orphaned-payments sweep can attribute them with certainty (it
+            // auto-refunds ONLY attributable consumer payments; everything
+            // else is Sentry-flagged for manual review).
+            enrichedNotes.paymentType = 'consumer_order';
+            if (userId && userId !== 'unknown') enrichedNotes.consumerUserId = String(userId);
         }
 
         const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -2825,6 +2833,68 @@ app.post('/orders', async (req, res) => {
             }
         }
 
+        // ── Phase 7B (2026-06-10) — server-side payment verification ──────
+        // Settlement prerequisite (docs/phase7-settlement-architecture.html §8):
+        // the server previously trusted the client's paid claim entirely.
+        // Policy:
+        //   * payment NOT FOUND or NOT captured/authorized → 400 reject (no
+        //     legitimate client is harmed: if no charge happened, refusing the
+        //     order costs nothing; closes the self-mark-paid hole).
+        //   * amount incoherence (sum of this payment's orders would exceed the
+        //     captured amount + ₹5 tolerance for whole-rupee GST splits) →
+        //     CREATE the order but flag payment_verified=false (HELD from
+        //     settlement; legitimate edge cases possible, money reviewed not lost).
+        //   * Razorpay API error / SDK unconfigured → payment_verified=null
+        //     (cron re-verifies) — infrastructure failure must not block sales.
+        let paymentVerified: boolean | null = null;
+        let paymentVerificationNote: string | null = null;
+        if (paid && paymentId && razorpayInstance) {
+            try {
+                const rzpPayment: any = await razorpayInstance.payments.fetch(String(paymentId));
+                const pStatus = String(rzpPayment?.status || '');
+                if (!rzpPayment || (pStatus !== 'captured' && pStatus !== 'authorized')) {
+                    try { Sentry.captureMessage('phase7b: paid-claim rejected — payment not captured', { level: 'warning', extra: { paymentId, pStatus, userId } }); } catch {}
+                    return res.status(400).json({
+                        error: 'PAYMENT_NOT_VERIFIED',
+                        message: 'We could not verify this payment. If you were charged, the amount will be automatically refunded.',
+                    });
+                }
+                const capturedInr = Number(rzpPayment.amount || 0) / 100;
+                // Sum the totals already booked against this payment (multi-store
+                // carts share one payment across N orders).
+                const sibling = await prisma.order.aggregate({
+                    _sum: { totalAmount: true },
+                    where: { metadata: { path: ['razorpayPaymentId'], equals: String(paymentId) } },
+                });
+                const bookedInr = Number(sibling._sum.totalAmount || 0);
+                const wouldBook = bookedInr + (Number(totalAmount) || 0);
+                if (wouldBook > capturedInr + 5) {
+                    paymentVerified = false;
+                    paymentVerificationNote = `amount overrun: captured ₹${capturedInr}, would book ₹${wouldBook}`;
+                    try { Sentry.captureMessage('phase7b: payment amount overrun — order HELD from settlement', { level: 'warning', extra: { paymentId, capturedInr, wouldBook, userId } }); } catch {}
+                } else {
+                    paymentVerified = true;
+                    paymentVerificationNote = `captured ₹${capturedInr} (${pStatus})`;
+                }
+            } catch (verifyErr: any) {
+                const msg = String(verifyErr?.message || verifyErr);
+                // Razorpay returns a 400-ish error for unknown payment ids — treat
+                // explicit not-found as a hard reject, transport errors as null.
+                if (/does not exist|not found|invalid id/i.test(msg)) {
+                    try { Sentry.captureMessage('phase7b: paid-claim rejected — payment id unknown to Razorpay', { level: 'warning', extra: { paymentId, userId } }); } catch {}
+                    return res.status(400).json({
+                        error: 'PAYMENT_NOT_VERIFIED',
+                        message: 'We could not verify this payment. If you were charged, the amount will be automatically refunded.',
+                    });
+                }
+                paymentVerified = null;
+                paymentVerificationNote = `verify-error: ${msg.slice(0, 180)}`;
+                console.warn(`[POST /orders] Phase 7B verification errored (order proceeds, cron re-verifies): ${msg}`);
+            }
+        } else if (paid && paymentId && !razorpayInstance) {
+            paymentVerificationNote = 'razorpay sdk not configured at create time';
+        }
+
         // Option A patch #4 (2026-06-08): server-side TTL + status guard.
         // Verify the order_request is still ACCEPTED and not expired before
         // creating a paid order from it. Without this, an expired or non-ACCEPTED
@@ -2901,6 +2971,9 @@ app.post('/orders', async (req, res) => {
                             ...(orderRequestId ? { orderRequestId } : {}),
                         }
                         : undefined,
+                    // Phase 7B (2026-06-10) — server-side verification result.
+                    paymentVerified,
+                    paymentVerificationNote,
                     items: {
                         create: items.map((item: any) => ({
                             storeProductId: item.storeProductId || null,
@@ -4572,6 +4645,9 @@ app.post('/orders/:id/cancel', async (req, res) => {
         let refundResult: { razorpayRefundId: string; simulated: boolean } | null = null;
         if (decision.refundInr > 0) {
             refundResult = await processRazorpayRefund(order.metadata, decision.refundInr);
+            // Phase 7D (2026-06-10): if this order was already settled in a
+            // closed/paid cycle, record a clawback (claimed by the next close).
+            try { await detectClawback(prisma, id, decision.refundInr, `cancel refund ${refundResult.razorpayRefundId}`); } catch (e) { console.error('[7D] clawback detect (cancel) failed:', e); }
             // Persist the refund id back to metadata. If this write fails
             // after Razorpay succeeded, ops reconciles via the Razorpay
             // dashboard — but no money is at risk.
@@ -5099,6 +5175,8 @@ app.patch('/orders/:id/issue/:issueId', async (req, res) => {
         let refundResult: { razorpayRefundId: string; simulated: boolean } | null = null;
         if (needsRefund) {
             refundResult = await processRazorpayRefund(order.metadata, issue.refundAmountInr!);
+            // Phase 7D (2026-06-10): settled-order refund → clawback entry.
+            try { await detectClawback(prisma, order.id, issue.refundAmountInr!, `issue refund ${refundResult.razorpayRefundId}`); } catch (e) { console.error('[7D] clawback detect (issue) failed:', e); }
             // Persist refund id back to issue + order metadata. If this
             // post-refund write fails, ops reconciles from Razorpay; the
             // status above is the canonical "approved" record.
@@ -9390,6 +9468,201 @@ app.get('/auth/merchant/profile', async (req, res) => {
 
         } catch (error: any) {
         return handleApiError(res, error, { area: 'auth.merchant.profile', extra: undefined, userMessage: 'Internal Server Error while fetching profile' });
+    }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 7C/7E (2026-06-10) — Settlement endpoints.
+// Admin surface: close cycles, list/inspect, mark paid, manage commission
+// rules + merchant settlement profiles. Merchant surface: own settlement
+// history (7F backend — the merchant app calls with authHeaders; access is
+// gated through userCanManageOrderStore, the same merchant-side guard the
+// order endpoints use).
+// ════════════════════════════════════════════════════════════════════════════
+
+// Close a settlement cycle (defaults to the last fully elapsed IST week).
+// Idempotent — safe to call alongside the Monday-02:00-IST cron.
+app.post('/admin/settlements/close-cycle', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res); if (!admin) return;
+        const weekOf = req.body?.weekOf ? new Date(String(req.body.weekOf)) : undefined;
+        if (weekOf && isNaN(weekOf.getTime())) {
+            return res.status(400).json({ error: 'weekOf must be a valid date' });
+        }
+        const result = await closeSettlementCycles(prisma, { weekOf, closedBy: admin.id });
+        await writeAuditLog(admin.id, 'settlement.cycle_closed', 'settlement_period', result.periodStart, null, result as any);
+        res.json(result);
+    } catch (error: any) {
+        return handleApiError(res, error, { area: 'settlements.close', userMessage: error?.message || 'Failed to close settlement cycle' });
+    }
+});
+
+// List cycles (admin) — filterable by status / merchant.
+app.get('/admin/settlements', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res); if (!admin) return;
+        const status = req.query.status ? String(req.query.status) : undefined;
+        const merchantId = req.query.merchantId ? String(req.query.merchantId) : undefined;
+        const cycles = await prisma.settlementCycle.findMany({
+            where: { ...(status ? { status } : {}), ...(merchantId ? { merchantId } : {}) },
+            orderBy: [{ periodStart: 'desc' }, { netPayout: 'desc' }],
+            take: 200,
+        });
+        // Resolve store names in one pass for the table view.
+        const ids = Array.from(new Set(cycles.map((c) => c.merchantId)));
+        const stores = ids.length > 0 ? await prisma.store.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : [];
+        const nameById = new Map(stores.map((s) => [s.id, s.name]));
+        res.json({ data: cycles.map((c) => ({ ...c, merchantName: nameById.get(c.merchantId) ?? null })) });
+    } catch (error: any) {
+        return handleApiError(res, error, { area: 'settlements.list', userMessage: 'Failed to load settlements' });
+    }
+});
+
+// Cycle detail + per-order lines (admin drill-down).
+app.get('/admin/settlements/:id', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res); if (!admin) return;
+        const cycle = await prisma.settlementCycle.findUnique({
+            where: { id: req.params.id },
+            include: { lines: { orderBy: { createdAt: 'asc' } } },
+        });
+        if (!cycle) return res.status(404).json({ error: 'Settlement cycle not found' });
+        res.json(cycle);
+    } catch (error: any) {
+        return handleApiError(res, error, { area: 'settlements.detail', userMessage: 'Failed to load settlement' });
+    }
+});
+
+// Mark a CLOSED cycle as PAID (manual money movement until the payout vendor
+// lands — Phase 7b). Forward-only; blocked while the merchant is on hold.
+app.post('/admin/settlements/:id/mark-paid', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res); if (!admin) return;
+        const paymentReference = String(req.body?.paymentReference || '').trim();
+        if (!paymentReference) {
+            return res.status(400).json({ error: 'paymentReference is required (bank UTR / transfer id)' });
+        }
+        const cycle = await prisma.settlementCycle.findUnique({ where: { id: req.params.id } });
+        if (!cycle) return res.status(404).json({ error: 'Settlement cycle not found' });
+        if (cycle.status !== 'CLOSED') {
+            return res.status(409).json({ error: `Cycle is ${cycle.status} — only CLOSED cycles can be marked paid` });
+        }
+        const profile = await prisma.merchantSettlementProfile.findUnique({ where: { id: cycle.merchantId } });
+        if (profile?.settlementHold) {
+            return res.status(409).json({ error: 'Merchant is on settlement hold — release the hold first' });
+        }
+        // Atomic forward-only flip.
+        const flipped = await prisma.settlementCycle.updateMany({
+            where: { id: cycle.id, status: 'CLOSED' },
+            data: { status: 'PAID', paidAt: new Date(), paidBy: admin.id, paymentReference },
+        });
+        if (flipped.count === 0) {
+            return res.status(409).json({ error: 'Cycle state changed concurrently — refresh and retry' });
+        }
+        await writeAuditLog(admin.id, 'settlement.marked_paid', 'settlement_cycle', cycle.id, null, { merchantId: cycle.merchantId, netPayout: cycle.netPayout, paymentReference } as any);
+        res.json({ ok: true });
+    } catch (error: any) {
+        return handleApiError(res, error, { area: 'settlements.markPaid', userMessage: 'Failed to mark settlement paid' });
+    }
+});
+
+// Commission rules — list / update / create (admin).
+app.get('/admin/commission-rules', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res); if (!admin) return;
+        const rules = await prisma.commissionRule.findMany({
+            orderBy: [{ category: 'asc' }, { orderType: 'asc' }, { tier: 'asc' }],
+        });
+        res.json({ data: rules });
+    } catch (error: any) {
+        return handleApiError(res, error, { area: 'commissionRules.list', userMessage: 'Failed to load commission rules' });
+    }
+});
+
+app.put('/admin/commission-rules/:id', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res); if (!admin) return;
+        const { ratePct, provisional } = req.body || {};
+        const rate = Number(ratePct);
+        if (!Number.isFinite(rate) || rate < 0 || rate > 50) {
+            return res.status(400).json({ error: 'ratePct must be a number between 0 and 50' });
+        }
+        const before = await prisma.commissionRule.findUnique({ where: { id: req.params.id } });
+        if (!before) return res.status(404).json({ error: 'Rule not found' });
+        const updated = await prisma.commissionRule.update({
+            where: { id: req.params.id },
+            data: { ratePct: rate, ...(typeof provisional === 'boolean' ? { provisional } : {}) },
+        });
+        await writeAuditLog(admin.id, 'settlement.commission_rule_updated', 'commission_rule', updated.id, { ratePct: before.ratePct, provisional: before.provisional } as any, { ratePct: updated.ratePct, provisional: updated.provisional } as any);
+        res.json(updated);
+    } catch (error: any) {
+        return handleApiError(res, error, { area: 'commissionRules.update', userMessage: 'Failed to update commission rule' });
+    }
+});
+
+// Merchant settlement profile — read/update (admin assigns category + tier).
+app.get('/admin/settlement-profiles/:merchantId', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res); if (!admin) return;
+        const profile = await prisma.merchantSettlementProfile.findUnique({ where: { id: req.params.merchantId } });
+        res.json(profile ?? { id: req.params.merchantId, commissionCategory: null, turnoverTier: null, settlementHold: false, notes: null });
+    } catch (error: any) {
+        return handleApiError(res, error, { area: 'settlementProfiles.get', userMessage: 'Failed to load profile' });
+    }
+});
+
+app.put('/admin/settlement-profiles/:merchantId', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res); if (!admin) return;
+        const { commissionCategory, turnoverTier, settlementHold, notes } = req.body || {};
+        if (turnoverTier != null && (!Number.isInteger(turnoverTier) || turnoverTier < 1 || turnoverTier > 5)) {
+            return res.status(400).json({ error: 'turnoverTier must be an integer 1-5 (or null)' });
+        }
+        const profile = await prisma.merchantSettlementProfile.upsert({
+            where: { id: req.params.merchantId },
+            create: {
+                id: req.params.merchantId,
+                commissionCategory: commissionCategory ?? null,
+                turnoverTier: turnoverTier ?? null,
+                settlementHold: !!settlementHold,
+                notes: notes ?? null,
+            },
+            update: {
+                ...(commissionCategory !== undefined ? { commissionCategory } : {}),
+                ...(turnoverTier !== undefined ? { turnoverTier } : {}),
+                ...(settlementHold !== undefined ? { settlementHold: !!settlementHold } : {}),
+                ...(notes !== undefined ? { notes } : {}),
+            },
+        });
+        await writeAuditLog(admin.id, 'settlement.profile_updated', 'merchant_settlement_profile', profile.id, null, profile as any);
+        res.json(profile);
+    } catch (error: any) {
+        return handleApiError(res, error, { area: 'settlementProfiles.update', userMessage: 'Failed to update profile' });
+    }
+});
+
+// 7F backend — merchant's own settlement history (CLOSED + PAID only; OPEN
+// cycles are internal). Auth: any user who can manage the store's orders.
+app.get('/merchant/settlements', async (req, res) => {
+    try {
+        const user = await requireUser(req, res); if (!user) return;
+        const merchantId = String(req.query.merchantId || '');
+        if (!merchantId) return res.status(400).json({ error: 'merchantId is required' });
+        const canManage = await userCanManageOrderStore(user.id, merchantId);
+        if (!canManage) return res.status(403).json({ error: 'Not authorized for this store' });
+        const cycles = await prisma.settlementCycle.findMany({
+            where: { merchantId, status: { in: ['CLOSED', 'PAID'] } },
+            orderBy: { periodStart: 'desc' },
+            take: 26, // ~6 months of weekly history
+            select: {
+                id: true, periodStart: true, periodEnd: true, status: true,
+                grossSales: true, commissionAmount: true, couponReimbursement: true,
+                couponAbsorbed: true, clawbackAmount: true, netPayout: true, paidAt: true,
+            },
+        });
+        res.json({ data: cycles });
+    } catch (error: any) {
+        return handleApiError(res, error, { area: 'settlements.merchant', userMessage: 'Failed to load settlements' });
     }
 });
 

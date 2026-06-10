@@ -431,6 +431,11 @@ model Order {
   id                   String         @id(map: "Order_pkey") @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   status               OrderStatus    @default(PENDING)
   isPaid               Boolean        @default(false) @map("ispaid")
+  // Phase 7B (2026-06-10) — server-side Razorpay verification of the client's
+  // paid claim. NULL = not yet verified (cron retries). TRUE = captured +
+  // amount-coherent. FALSE = soft-check failed → HELD from settlement.
+  paymentVerified         Boolean? @map("payment_verified")
+  paymentVerificationNote String?  @map("payment_verification_note")
   otp                  String?
   orderNumber          String         @unique(map: "Order_order_number_key") @map("order_number")
   storeId              String         @map("store_id") @db.Uuid
@@ -1492,4 +1497,113 @@ enum one_time_token_type {
   phone_change_token
 
   @@schema("auth")
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 7 (2026-06-10) — Settlement & reconciliation ledger.
+// Design doc: docs/phase7-settlement-architecture.html (decisions Q1-Q7 +
+// FQ-1..7 defaults approved by Pranav 2026-06-10).
+// Ledger model: cycles freeze at close; corrections are new entries (clawbacks
+// in the NEXT cycle), never edits. Commission rates are DATA (admin-editable
+// commission_rules), seeded from Commissions.pdf with `provisional` flags on
+// the two founder-unresolved items (table-vs-summary rate conflict; blank F&B
+// tiers 3-5 defaulted to tier-2 rates).
+// ════════════════════════════════════════════════════════════════════════════
+
+model CommissionRule {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  // Commission category (the 15 sheet categories; admin may add finer ones,
+  // e.g. splitting "Stationery, gifting, and toys" — profiles reference these
+  // by name).
+  category      String
+  // PICKUP | DINING | ANY. FQ-3 (approved): rate is resolved per ORDER's type.
+  orderType     String   @default("ANY") @map("order_type")
+  // F&B turnover tier 1-5; NULL = applies when merchant has no tier (or
+  // category isn't tiered). Resolution: most specific match wins
+  // (category+orderType+tier > category+orderType+NULL > category+ANY+NULL).
+  tier          Int?
+  ratePct       Decimal  @map("rate_pct") @db.Decimal(5, 2)
+  effectiveFrom DateTime @default(now()) @map("effective_from")
+  // TRUE = seeded default awaiting founder resolution (FQ-1/FQ-2) — surfaced
+  // in the admin rule editor.
+  provisional   Boolean  @default(false)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([category, orderType])
+  @@map("commission_rules")
+  @@schema("public")
+}
+
+model MerchantSettlementProfile {
+  // Keyed by the orders.store_id id-space (Store.id uuid) — the same grouping
+  // key the merchant-app and earnings already use. Deliberately a standalone
+  // table (no FK) to stay clear of the known Store/merchants/merchant_branches
+  // id-space overlaps.
+  id                 String   @id @db.Uuid
+  commissionCategory String?  @map("commission_category")
+  // F&B turnover tier (1-5), admin-assigned; no turnover data exists in-system.
+  turnoverTier       Int?     @map("turnover_tier")
+  // Manual freeze: cycles still compute but cannot be marked paid.
+  settlementHold     Boolean  @default(false) @map("settlement_hold")
+  notes              String?
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("merchant_settlement_profiles")
+  @@schema("public")
+}
+
+model SettlementCycle {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  merchantId          String    @map("merchant_id") @db.Uuid // orders.store_id space
+  periodStart         DateTime  @map("period_start") // Mon 00:00 IST (stored UTC)
+  periodEnd           DateTime  @map("period_end")
+  // OPEN → CLOSED → PAID (forward-only; enforced in the API layer)
+  status              String    @default("OPEN")
+  grossSales          Decimal   @default(0) @map("gross_sales") @db.Decimal(12, 2)
+  // FQ-4 (approved default): items subtotal, pre-GST, pre-coupon.
+  commissionBase      Decimal   @default(0) @map("commission_base") @db.Decimal(12, 2)
+  commissionAmount    Decimal   @default(0) @map("commission_amount") @db.Decimal(12, 2)
+  couponReimbursement Decimal   @default(0) @map("coupon_reimbursement") @db.Decimal(12, 2)
+  couponAbsorbed      Decimal   @default(0) @map("coupon_absorbed") @db.Decimal(12, 2) // informational
+  clawbackAmount      Decimal   @default(0) @map("clawback_amount") @db.Decimal(12, 2)
+  // FQ-6 reserved lines — remain 0 until the CA confirms applicability.
+  gstOnCommission     Decimal   @default(0) @map("gst_on_commission") @db.Decimal(12, 2)
+  tcsAmount           Decimal   @default(0) @map("tcs_amount") @db.Decimal(12, 2)
+  netPayout           Decimal   @default(0) @map("net_payout") @db.Decimal(12, 2)
+  heldOrderCount      Int       @default(0) @map("held_order_count")
+  closedAt            DateTime? @map("closed_at")
+  paidAt              DateTime? @map("paid_at")
+  paidBy              String?   @map("paid_by") @db.Uuid
+  paymentReference    String?   @map("payment_reference")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  lines               SettlementLine[]
+
+  @@unique([merchantId, periodStart], map: "settlement_cycle_merchant_period_key")
+  @@index([status])
+  @@map("settlement_cycles")
+  @@schema("public")
+}
+
+model SettlementLine {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  // NULLABLE: CLAWBACK entries are created with cycle_id NULL when a settled
+  // order is refunded, then claimed by the next cycle close.
+  cycleId           String?          @map("cycle_id") @db.Uuid
+  cycle             SettlementCycle? @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  orderId           String?          @map("order_id") @db.Uuid
+  // SALE | COUPON_REIMBURSEMENT | CLAWBACK | ADJUSTMENT
+  kind              String
+  amount            Decimal          @db.Decimal(12, 2)
+  commissionRatePct Decimal?         @map("commission_rate_pct") @db.Decimal(5, 2)
+  commissionRuleId  String?          @map("commission_rule_id") @db.Uuid
+  note              String?
+  createdAt         DateTime         @default(now()) @map("created_at")
+
+  // "Each order settles exactly once": partial UNIQUE on (order_id) WHERE
+  // kind = 'SALE' — declared in the migration SQL (Prisma cannot express
+  // partial indexes inline).
+  @@index([cycleId])
+  @@index([orderId])
+  @@map("settlement_lines")
+  @@schema("public")
 }
