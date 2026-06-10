@@ -516,3 +516,42 @@ Phase 2's `requireUser` hard-cut on POST /orders + PATCH /order-requests 401'd e
 - **Flag flips** (REQUIRE_ORDERS_AUTH, REQUIRE_COUPON_TOKEN) — gated on OTA propagation + Sentry counters (see forlater.md).
 - **Phase 6** (merchant surfacing), **Phase 7** (settlement — Pranav wants discussion first), **Phase 8** (verification/rollout).
 - forlater.md gained a consolidated "Coupon Foolproof — deferred audit findings" section (2026-06-10).
+
+---
+
+## Session: June 10-11, 2026 (night) — Phase 6 close-out → Phase 7 build + deploy
+
+### Timeline
+
+#### Phase 7 design locked (Pranav Q1-Q7 + FQ answers)
+Weekly IST cycles · commission per category/tier from Commissions.pdf (rates = admin-editable data, `provisional` flags for FQ-1 5%-vs-7% conflict + FQ-2 blank F&B tiers) · eligibility COMPLETED+RETURN_REJECTED · same-cycle PLATFORM-coupon reimbursement · manual mark-paid w/ UTR until payout vendor (7b) · next-cycle clawback line items · anomaly hold + server-side Razorpay payment verification as settlement prerequisite. Founder-shareable doc: `docs/phase7-settlement-architecture.html` (opened for Pranav via `open`).
+
+#### Built + applied (prod DB): 2 migrations
+- `20260610170000_phase7_settlement_schema` — commission_rules (37 seed rows, 23 provisional), merchant_settlement_profiles, settlement_cycles (unique merchant+period), settlement_lines (partial unique SALE-per-order = settle-once invariant).
+- `20260610180000_phase7_payment_verification` — orders.payment_verified/payment_verification_note + partial index.
+
+#### Backend (commit 79233db7, +1451 lines)
+- `settlement.service.ts` (NEW): IST week math, resolveRule (most-specific category/orderType/tier), closeSettlementCycles (roll-forward from PHASE7_EPOCH 2026-06-01, holds for unverified/no-profile/no-rule, per-merchant tx, totals recomputed from actual lines), detectClawback.
+- `scheduled-jobs.ts`: verifyPendingPayments (Razorpay captured + amount coherence), sweepOrphanedPayments (strict attribution, CRON_DRY_RUN), Mon 02:00 IST close cron.
+- `index.ts`: 7B payment-verification block in POST /orders (PAYMENT_NOT_VERIFIED 400 / HELD on overrun), consumer payment notes, 3 detectClawback hooks, 9 settlement endpoints (admin close/list/detail/mark-paid/commission-rules/profiles + GET /merchant/settlements).
+
+#### Deploy + incident-fix (commit c5649c2f)
+First EB deploy smoke caught settlement endpoints returning 404 — block was registered AFTER the Express 404 catch-all (dead routes). Moved above the catch-all, rebuilt, redeployed. Verified: /health 200, settlement routes 401 (auth-gated), POST /orders soft-auth intact, EB Ok/100% 2xx. `CRON_DRY_RUN=true` set for orphan-sweep's first 24h.
+
+#### 7E admin UI (commit 98a13178)
+`settlementService.ts` (NEW) + full `SettlementsManager.tsx` rewrite (was placeholder): cycle table w/ status filter + KPI strip, line-level drill-down, mark-paid dialog (UTR required), "Close last week" button, commission-rules editor (saving clears provisional). vite build clean; 0 new tsc errors (34 pre-existing).
+
+#### 7F merchant UI (commit cddf441f)
+`useSettlements.ts` (NEW hook, authHeaders pattern) + Weekly Settlements section on Earnings: per-week cards, PAID/PROCESSING chips, tap-to-expand breakdown, paid date. tsc 0 errors. Rides next merchant OTA.
+
+#### 7G in progress
+Adversarial audit workflow `wf_b259e841-f0e` running (5 lenses: money-math, concurrency/SQL, business rules, cross-file, end-to-end + hostile edges; blocker/high findings adversarially verified before synthesis). Next: fix round → dry-run cycle close vs prod (nothing marked paid).
+
+### Open threads
+- 7G results + fixes + prod dry-run close.
+- CRON_DRY_RUN flip back to live after 24h clean observation (set 2026-06-10 ~22:00 UTC).
+- PR #2 still open; Vercel admin UI ships on merge to main; merchant 7F + consumer Phase 4/5 ride OTAs (Pranav's call).
+- Founder/CA: FQ-1, FQ-2 (provisional rates), FQ-6 (GST/TCS — share HTML with CA).
+
+#### 7G complete (2026-06-11 ~04:30 IST)
+Audit workflow `wf_b259e841-f0e` (27 agents): 49 confirmed findings (3 blockers, 16 high, 14 med, 16 low), 2 refuted. All blockers + highs fixed in commit `04734624` + migration `20260611010000_phase7_hardening` (applied + verified on prod): seed rules backdated to IST epoch; verification window now epoch-wide + close-time drain + admin override endpoint; eligibility extended to EXCHANGE_APPROVED/REJECTED + RETURN_APPROVED partial returns (SALE + same-cycle offset, symmetric with post-settlement refunds); atomic clawback claim (UPDATE..WHERE cycle_id IS NULL RETURNING) for ALL merchants incl. zero-sale weeks; coupon-reimbursement partial unique + landed-SALE gating; per-merchant failure isolation; in-tx revalidation; commission-base coherence guard; heldOrderCount real; legacy-refund clawback hook; Merchants profile tab in admin. EB deploy + smoke clean. **Prod dry-run**: 12 epoch orders all payment-verified; close held 11 no-profile, created 0 cycles 0 lines (fail-closed as designed). Deferred mediums/lows → forlater.md. NEXT HUMAN STEP: assign commission categories (Merchants tab) before the Mon 2026-06-15 02:00 IST close; decide CRON_DRY_RUN flip-back after 24h.

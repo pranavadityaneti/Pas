@@ -36,6 +36,18 @@
 
 ## 🎟️ Coupon Foolproof — deferred audit findings + open flags (added 2026-06-10)
 
+### Phase 7G audit — deferred mediums/lows (added 2026-06-11; blockers + highs all FIXED in commit 04734624)
+- **Negative-net cycles & mark-paid semantics** — a clawback-only week produces netPayout < 0; the mark-paid flow treats it like a payout. Needs a founder decision: carry the debt into the next cycle automatically vs invoice the merchant. (audit M-22/M-24)
+- **Refund rupee-rounding vs clawback paise** — the cancel path rounds refunds to whole rupees before paise conversion; recorded clawback can differ from moved money by <₹1. Align rounding in one place. (M-21)
+- **Close scalability** — the close scans every eligible order since the epoch in one IN-list; fine now, needs paging before order volume grows (thousands/week). (M-31)
+- **Missed-Monday catch-up** — if the process is down at Mon 02:00 IST the close is skipped; roll-forward still settles every order at the NEXT close but under the later week's period label. Add a startup catch-up check. (L-39)
+- **detectClawback DB uniqueness** — find-then-create idempotency is per (orderId, note); add a defensive unique index if clawback volume grows. (L-43)
+- **Order-create price validation** (deep fix for the commission-evasion hole) — items are client-priced at POST /orders; the close-time coherence guard (HOLD + Sentry) is live, but validating against StoreProduct at create time is the root fix. Touches the hot checkout path — schedule deliberately.
+- **Payment-verification override UI** — the endpoint exists (POST /admin/orders/:id/payment-verification, audit-logged); an admin surface for it (held-orders worklist) is not built yet. Until then: curl with an admin token.
+- **Residual micro-race** — a refund whose transaction commits between the close's in-tx revalidation read and the close commit can settle at full value with no clawback (sub-second window). Sentry's mid-close drop messages + weekly reconciliation cover it; a full fix needs SELECT FOR UPDATE on candidate orders.
+- **OPERATIONAL PREREQUISITE for first real settlement**: assign commission categories in admin → Finance → Settlements → Merchants tab. Until assigned, ALL merchants are held (verified by prod dry-run 2026-06-11: 11 orders held no-profile, 0 cycles created). Also decide CRON_DRY_RUN flip-back (set 2026-06-10 ~22:00 UTC for the orphan sweep's first 24h).
+
+
 > Source: adversarial audits on PR #1 (merged) and PR #2 (branch `coupon-foolproof-phase4-2026-06-09`).
 > **Status 2026-06-10:** Phases 1-5 DEPLOYED to EB (`app-260610_132434177329`); PR #2 merge + consumer OTA pending. Full audit report: `docs/coupon-foolproof-audit-phase1-5.html`.
 
