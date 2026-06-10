@@ -58,6 +58,15 @@ export interface Order {
     cancelledReason?: string; // Added for cancellation reason
     returnReason?: string; // Added for return reason
     returnImages?: string[]; // Added for return proof
+    // Phase 6 (2026-06-10) — coupon snapshot from the orders row (Phase 1
+    // columns). NULL on non-coupon orders. couponDiscount is THIS order's
+    // slice (post Phase 5 multi-store allocation). fundingSource semantics:
+    // PLATFORM = the platform reimburses the merchant for the discount;
+    // MERCHANT = the merchant absorbs it.
+    couponCode?: string | null;
+    couponDiscount?: number | null;
+    couponFundingSource?: 'PLATFORM' | 'MERCHANT' | string | null;
+    couponDiscountType?: string | null;
 }
 
 // Removed Mock Data
@@ -214,6 +223,12 @@ export function useOrders(dateRange?: DateRange) {
                 orderType: o.order_type || null,
                 guestsCount: o.guests_count || null,
                 user: { id: o.user_id, name: profilesMap[o.user_id]?.name || 'Guest', phone: 'N/A' },
+                // Phase 6 (2026-06-10) — coupon snapshot columns (select * already
+                // fetches them; they just need mapping).
+                couponCode: o.order_coupon_code ?? null,
+                couponDiscount: o.order_coupon_discount != null ? Number(o.order_coupon_discount) : null,
+                couponFundingSource: o.order_coupon_funding_source ?? null,
+                couponDiscountType: o.order_coupon_discount_type ?? null,
                 items: (o.items || []).map((item: any) => ({
                     id: item.id,
                     quantity: item.quantity,

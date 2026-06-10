@@ -11,7 +11,13 @@ export function useEarnings() {
         total: 0,
         orderCount: 0,
         pendingCount: 0,
-        estimatedPayout: 0
+        estimatedPayout: 0,
+        // Phase 6 (2026-06-10) — coupon money lines (COMPLETED orders, all time):
+        // couponReimbursement = sum of PLATFORM-funded discounts (the platform
+        // owes these back to the merchant); couponAbsorbed = sum of MERCHANT-
+        // funded discounts (the merchant chose to absorb these).
+        couponReimbursement: 0,
+        couponAbsorbed: 0,
     });
     const [loading, setLoading] = useState(true);
 
@@ -24,7 +30,9 @@ export function useEarnings() {
                 // Base query scoped to the merchant
                 let query = supabase
                     .from('orders')
-                    .select('total_amount, created_at, status, branch_id')
+                    // Phase 6 (2026-06-10): + coupon snapshot columns for the
+                    // reimbursement/absorbed aggregates.
+                    .select('total_amount, created_at, status, branch_id, order_coupon_discount, order_coupon_funding_source')
                     .eq('store_id', merchantId);
 
                 // Branch routing: scope to the active branch
@@ -50,6 +58,10 @@ export function useEarnings() {
                 let totalSum = 0;
                 let completedCount = 0;
                 let pendingCount = 0;
+                // Phase 6 (2026-06-10) — coupon money aggregates over COMPLETED orders.
+                let couponReimbursementSum = 0;
+                let couponAbsorbedSum = 0;
+                let todayCouponReimbursement = 0;
 
                 (data || []).forEach(order => {
                     const orderTime = new Date(order.created_at).getTime();
@@ -64,6 +76,16 @@ export function useEarnings() {
                         completedCount++;
                         if (orderTime >= todayStart) todaySum += order.total_amount;
                         if (orderTime >= weekStart) weeklySum += order.total_amount;
+                        // Phase 6 — coupon snapshot (NULL on non-coupon orders).
+                        const couponSlice = order.order_coupon_discount != null ? Number(order.order_coupon_discount) : 0;
+                        if (couponSlice > 0) {
+                            if (order.order_coupon_funding_source === 'PLATFORM') {
+                                couponReimbursementSum += couponSlice;
+                                if (orderTime >= todayStart) todayCouponReimbursement += couponSlice;
+                            } else if (order.order_coupon_funding_source === 'MERCHANT') {
+                                couponAbsorbedSum += couponSlice;
+                            }
+                        }
                     } else if (
                         order.status === 'PENDING' ||
                         order.status === 'CONFIRMED' ||
@@ -83,7 +105,14 @@ export function useEarnings() {
                     total: totalSum,
                     orderCount: completedCount,
                     pendingCount: pendingCount,
-                    estimatedPayout: todaySum * 0.98 // 2% platform fee simulation
+                    // Phase 6 (2026-06-10): a coupon order's total_amount is what
+                    // the CUSTOMER paid (post-discount). PLATFORM-funded discounts
+                    // are reimbursed to the merchant, so today's payout estimate
+                    // adds them back before the fee simulation. Real payout math
+                    // lands in Phase 7 — this remains an estimate.
+                    estimatedPayout: (todaySum + todayCouponReimbursement) * 0.98, // 2% platform fee simulation
+                    couponReimbursement: couponReimbursementSum,
+                    couponAbsorbed: couponAbsorbedSum,
                 });
             } catch (error) {
                 console.error('Error fetching earnings:', error);

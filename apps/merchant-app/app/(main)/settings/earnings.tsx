@@ -58,6 +58,32 @@ export default function EarningsScreen() {
                     </View>
                 </View>
 
+                {/* Phase 6 (2026-06-10) — coupon money lines. Shown only when a
+                    coupon order has completed. Reimbursement = platform-funded
+                    discounts the platform owes back; Absorbed = merchant-funded
+                    discounts the merchant chose to fund. */}
+                {(stats.couponReimbursement > 0 || stats.couponAbsorbed > 0) && (
+                    <View style={styles.couponCard}>
+                        <View style={styles.couponHeader}>
+                            <MaterialCommunityIcons name="ticket-percent-outline" size={20} color="#047857" />
+                            <Text style={styles.couponTitle}>Coupon Discounts</Text>
+                        </View>
+                        {stats.couponReimbursement > 0 && (
+                            <View style={styles.couponRow}>
+                                <Text style={styles.couponLabel}>Platform-funded (reimbursed to you)</Text>
+                                <Text style={[styles.couponValue, { color: '#047857' }]}>+₹{stats.couponReimbursement.toLocaleString()}</Text>
+                            </View>
+                        )}
+                        {stats.couponAbsorbed > 0 && (
+                            <View style={styles.couponRow}>
+                                <Text style={styles.couponLabel}>Merchant-funded (absorbed by you)</Text>
+                                <Text style={[styles.couponValue, { color: '#92400E' }]}>−₹{stats.couponAbsorbed.toLocaleString()}</Text>
+                            </View>
+                        )}
+                        <Text style={styles.couponNote}>Reimbursements are settled by the platform. Exact settlement timing arrives with the payout system.</Text>
+                    </View>
+                )}
+
                 <View style={styles.pendingCard}>
                     <View style={styles.pendingIcon}>
                         <Ionicons name="alert-circle-outline" size={24} color="#F59E0B" />
@@ -95,6 +121,15 @@ const styles = StyleSheet.create({
     statBox: { flex: 1, backgroundColor: Colors.white, borderRadius: 20, padding: 20, borderWidth: 1, borderColor: Colors.border },
     statLabel: { fontSize: 13, color: Colors.textSecondary, marginBottom: 4, fontWeight: '600' },
     statValue: { fontSize: 20, fontWeight: 'bold', color: Colors.text },
+
+    // Phase 6 (2026-06-10) — coupon discounts card
+    couponCard: { backgroundColor: '#F0FDF4', borderRadius: 20, padding: 16, borderWidth: 1, borderColor: '#BBF7D0', marginBottom: 20 },
+    couponHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+    couponTitle: { fontSize: 15, fontWeight: 'bold', color: '#065F46' },
+    couponRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+    couponLabel: { fontSize: 13, color: '#374151', flex: 1, marginRight: 8 },
+    couponValue: { fontSize: 15, fontWeight: 'bold' },
+    couponNote: { fontSize: 11.5, color: '#6B7280', marginTop: 4, lineHeight: 15 },
 
     pendingCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFBEB', borderRadius: 20, padding: 16, borderWidth: 1, borderColor: '#FEF3C7', marginBottom: 32 },
     pendingIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#FEF3C7', justifyContent: 'center', alignItems: 'center', marginRight: 12 },

@@ -218,6 +218,14 @@ export default function OrdersScreen() {
             return acc + (oi.price * oi.quantity * (rate / 100));
         }, 0);
 
+        // Phase 6 (2026-06-10) — coupon snapshot surfacing. couponDiscount is
+        // THIS order's slice; netTotal matches what the customer actually paid
+        // (orders.total_amount semantics).
+        const couponDiscount = item.couponDiscount ?? 0;
+        const hasCoupon = !!item.couponCode && couponDiscount > 0;
+        const isPlatformFunded = item.couponFundingSource === 'PLATFORM';
+        const netTotal = Math.max(0, subTotal + tax - couponDiscount);
+
         return (
             <View style={styles.orderCard}>
                 <View style={styles.cardHeader}>
@@ -304,6 +312,22 @@ export default function OrdersScreen() {
                     ) : null}
                 </View>
 
+                {/* Phase 6 (2026-06-10) — coupon banner. Green = platform-funded
+                    (the platform reimburses this discount to the merchant);
+                    amber = merchant-funded (absorbed in this order's revenue). */}
+                {hasCoupon && (
+                    <View style={[styles.couponBanner, { backgroundColor: isPlatformFunded ? '#ECFDF5' : '#FFFBEB', borderColor: isPlatformFunded ? '#A7F3D0' : '#FDE68A' }]}>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: isPlatformFunded ? '#047857' : '#92400E' }}>
+                            🎟️ Coupon {item.couponCode} — ₹{couponDiscount.toFixed(2)} off
+                        </Text>
+                        <Text style={{ fontSize: 11.5, marginTop: 2, color: isPlatformFunded ? '#059669' : '#B45309' }}>
+                            {isPlatformFunded
+                                ? 'Platform-funded — this discount will be reimbursed to you'
+                                : 'Merchant-funded — absorbed in this order'}
+                        </Text>
+                    </View>
+                )}
+
                 <View style={styles.dottedSeparator} />
 
 
@@ -342,7 +366,9 @@ export default function OrdersScreen() {
 
                 <View style={[styles.cardFooter, isExpanded && styles.cardFooterExpanded]}>
                     <View>
-                        <Text style={styles.valueLabel}>Total Bill: <Text style={styles.valueAmount}>₹{(subTotal + tax).toFixed(2)}</Text></Text>
+                        {/* Phase 6: netTotal includes the coupon discount so the
+                            figure matches what the customer actually paid. */}
+                        <Text style={styles.valueLabel}>Total Bill: <Text style={styles.valueAmount}>₹{netTotal.toFixed(2)}</Text></Text>
                     </View>
                     <TouchableOpacity onPress={() => toggleAccordion(item.id)} style={styles.breakupBtn}>
                         <Text style={styles.breakupText}>View Breakup</Text>
@@ -360,10 +386,18 @@ export default function OrdersScreen() {
                             <Text style={styles.breakupLabel}>Tax</Text>
                             <Text style={styles.breakupValue}>₹{tax.toFixed(2)}</Text>
                         </View>
+                        {hasCoupon && (
+                            <View style={styles.breakupRow}>
+                                <Text style={[styles.breakupLabel, { color: isPlatformFunded ? '#047857' : '#92400E' }]}>
+                                    Coupon {item.couponCode} ({isPlatformFunded ? 'platform-funded' : 'merchant-funded'})
+                                </Text>
+                                <Text style={[styles.breakupValue, { color: isPlatformFunded ? '#047857' : '#92400E' }]}>−₹{couponDiscount.toFixed(2)}</Text>
+                            </View>
+                        )}
                         <View style={styles.breakupDivider} />
                         <View style={styles.breakupRow}>
                             <Text style={styles.breakupTotalLabel}>Total</Text>
-                            <Text style={styles.breakupTotalValue}>₹{(subTotal + tax).toFixed(2)}</Text>
+                            <Text style={styles.breakupTotalValue}>₹{netTotal.toFixed(2)}</Text>
                         </View>
                     </View>
                 )}
@@ -648,6 +682,8 @@ const styles = StyleSheet.create({
     orderTypeBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: 'bold' },
 
     statusStripContainer: { width: '100%', marginTop: 12 },
+    // Phase 6 (2026-06-10) — coupon banner (green platform-funded / amber merchant-funded)
+    couponBanner: { width: '100%', marginTop: 10, padding: 10, borderRadius: 10, borderWidth: 1 },
     approvalStrip: { 
         flexDirection: 'row', 
         justifyContent: 'space-between', 
