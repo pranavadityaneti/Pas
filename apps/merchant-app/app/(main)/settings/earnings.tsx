@@ -76,8 +76,11 @@ export default function EarningsScreen() {
                         )}
                         {stats.couponAbsorbed > 0 && (
                             <View style={styles.couponRow}>
-                                <Text style={styles.couponLabel}>Merchant-funded (absorbed by you)</Text>
-                                <Text style={[styles.couponValue, { color: '#92400E' }]}>−₹{stats.couponAbsorbed.toLocaleString()}</Text>
+                                {/* Audit fix #6: no minus prefix — this amount is already
+                                    baked into every total on this screen; a "−" invited
+                                    merchants to mentally subtract it twice. */}
+                                <Text style={styles.couponLabel}>Merchant-funded (already reflected in your totals)</Text>
+                                <Text style={[styles.couponValue, { color: '#92400E' }]}>₹{stats.couponAbsorbed.toLocaleString()}</Text>
                             </View>
                         )}
                         <Text style={styles.couponNote}>Reimbursements are settled by the platform. Exact settlement timing arrives with the payout system.</Text>

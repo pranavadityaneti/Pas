@@ -75,10 +75,25 @@ export default function ReceiptSummaryModal({ visible, onClose, order }: Receipt
                                 <tr>
                                     <td>${item.storeProduct.product.name}</td>
                                     <td>${item.quantity}</td>
-                                    <td>₹${item.price}</td>
-                                    <td>₹${item.price * item.quantity}</td>
+                                    <td>₹${Number(item.price).toFixed(2)}</td>
+                                    <td>₹${(item.price * item.quantity).toFixed(2)}</td>
                                 </tr>
                             `).join('')}
+                            ${(() => {
+                                // Phase 6 audit fix #2 (2026-06-10): GST row derived by
+                                // subtraction (Total − items + discount) so the printed
+                                // rows ALWAYS sum exactly to the printed Total — adding
+                                // a visible coupon row made the old gap (no tax row)
+                                // look like a math error to customers.
+                                const itemsSum = order.items.reduce((a, i) => a + (i.price * i.quantity), 0);
+                                const disc = order.couponCode && order.couponDiscount ? Number(order.couponDiscount) : 0;
+                                const taxRow = Math.max(0, Number(order.totalAmount) - itemsSum + disc);
+                                return taxRow > 0.005 ? `
+                            <tr>
+                                <td colspan="3">Tax (GST)</td>
+                                <td>₹${taxRow.toFixed(2)}</td>
+                            </tr>` : '';
+                            })()}
                             ${order.couponCode && order.couponDiscount ? `
                             <tr>
                                 <td colspan="3">Coupon ${order.couponCode} (${order.couponFundingSource === 'PLATFORM' ? 'platform-funded' : 'merchant-funded'})</td>
@@ -86,7 +101,7 @@ export default function ReceiptSummaryModal({ visible, onClose, order }: Receipt
                             </tr>` : ''}
                             <tr class="total-row">
                                 <td colspan="3">Total</td>
-                                <td>₹${order.totalAmount}</td>
+                                <td>₹${Number(order.totalAmount).toFixed(2)}</td>
                             </tr>
                         </tbody>
                     </table>

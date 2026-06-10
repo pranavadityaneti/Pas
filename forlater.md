@@ -71,6 +71,13 @@
 ### Admin-web
 - **CouponBuilder field extensions** (queued earlier in this file, still open) — dailyUsageLimit, eligibleVerticals, eligibleOrderTypes, bogoMode, inactiveSinceDays not settable from the builder UI; admins use direct DB.
 
+### Consumer-app nits (locked files — need explicit override)
+- **Dead static-data imports** in StorefrontScreen.tsx L17 + FavoritesScreen.tsx L17 (RESTAURANTS/STORES never used; products fallback provably empty). Pre-existing; flagged by Phase 6 audit 2026-06-10. One-line removals, both files 🔒.
+
+### Phase 7 design decisions (carry into the settlement discussion)
+- **RETURN_REJECTED revenue rule**: orders never return to COMPLETED after a won return dispute, so earnings (and now coupon reimbursement aggregates) stop counting them. Decide whether RETURN_REJECTED / partially-refunded orders count as settled revenue + reimbursable, and apply the same rule to both aggregates. (Phase 6 audit, 2026-06-10.)
+- **Anomaly-set rule**: snapshot-less orders whose total diverges from items-gross are the Sentry-flagged N3/N5 anomaly set — Phase 7 settlement math should exclude or flag them.
+
 ### Process
 - **Post-Phase-7/8: full line-by-line consumer-app + merchant-app audit** — Pranav explicitly requested (2026-06-09) a dedicated plan to find plainly-visible errors and loose ends across both apps' native + OTA changes, to be run AFTER Phase 7/8 completes.
 

@@ -218,13 +218,21 @@ export default function OrdersScreen() {
             return acc + (oi.price * oi.quantity * (rate / 100));
         }, 0);
 
-        // Phase 6 (2026-06-10) — coupon snapshot surfacing. couponDiscount is
-        // THIS order's slice; netTotal matches what the customer actually paid
-        // (orders.total_amount semantics).
+        // Phase 6 (2026-06-10, refined per audit) — coupon snapshot surfacing.
+        // couponDiscount is THIS order's slice. The displayed Total Bill is the
+        // STORED paid amount (orders.total_amount — what the customer actually
+        // paid), not a client-side recompute: the consumer checkout uses
+        // whole-rupee GST shares, so recomputed items+tax could differ from the
+        // charge by ~₹1 (and the receipt modal already shows the stored amount —
+        // two different totals for the same order otherwise). The tax row is
+        // derived by subtraction so the breakup always sums exactly.
         const couponDiscount = item.couponDiscount ?? 0;
         const hasCoupon = !!item.couponCode && couponDiscount > 0;
         const isPlatformFunded = item.couponFundingSource === 'PLATFORM';
-        const netTotal = Math.max(0, subTotal + tax - couponDiscount);
+        const effectiveDiscount = hasCoupon ? couponDiscount : 0;
+        const recomputedNet = Math.max(0, subTotal + tax - effectiveDiscount);
+        const paidTotal = Number.isFinite(item.totalAmount) && item.totalAmount > 0 ? item.totalAmount : recomputedNet;
+        const derivedTax = Math.max(0, paidTotal - subTotal + effectiveDiscount);
 
         return (
             <View style={styles.orderCard}>
@@ -366,9 +374,10 @@ export default function OrdersScreen() {
 
                 <View style={[styles.cardFooter, isExpanded && styles.cardFooterExpanded]}>
                     <View>
-                        {/* Phase 6: netTotal includes the coupon discount so the
-                            figure matches what the customer actually paid. */}
-                        <Text style={styles.valueLabel}>Total Bill: <Text style={styles.valueAmount}>₹{netTotal.toFixed(2)}</Text></Text>
+                        {/* Phase 6 (audit-refined): paidTotal is the STORED amount
+                            the customer actually paid — same source the receipt
+                            modal shows, so the two surfaces can never disagree. */}
+                        <Text style={styles.valueLabel}>Total Bill: <Text style={styles.valueAmount}>₹{paidTotal.toFixed(2)}</Text></Text>
                     </View>
                     <TouchableOpacity onPress={() => toggleAccordion(item.id)} style={styles.breakupBtn}>
                         <Text style={styles.breakupText}>View Breakup</Text>
@@ -384,7 +393,9 @@ export default function OrdersScreen() {
                         </View>
                         <View style={styles.breakupRow}>
                             <Text style={styles.breakupLabel}>Tax</Text>
-                            <Text style={styles.breakupValue}>₹{tax.toFixed(2)}</Text>
+                            {/* Derived by subtraction (paidTotal − subtotal + discount)
+                                so the rows always sum exactly to the Total. */}
+                            <Text style={styles.breakupValue}>₹{derivedTax.toFixed(2)}</Text>
                         </View>
                         {hasCoupon && (
                             <View style={styles.breakupRow}>
@@ -397,7 +408,7 @@ export default function OrdersScreen() {
                         <View style={styles.breakupDivider} />
                         <View style={styles.breakupRow}>
                             <Text style={styles.breakupTotalLabel}>Total</Text>
-                            <Text style={styles.breakupTotalValue}>₹{netTotal.toFixed(2)}</Text>
+                            <Text style={styles.breakupTotalValue}>₹{paidTotal.toFixed(2)}</Text>
                         </View>
                     </View>
                 )}
