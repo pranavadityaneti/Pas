@@ -19,3 +19,4 @@ async function checkColumns() {
     }
 }
 checkColumns();
+//# sourceMappingURL=check_columns.js.map

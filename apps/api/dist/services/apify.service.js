@@ -64,3 +64,4 @@ class ApifyService {
 }
 exports.ApifyService = ApifyService;
 exports.apifyService = new ApifyService();
+//# sourceMappingURL=apify.service.js.map

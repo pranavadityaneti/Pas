@@ -19,3 +19,4 @@ async function checkMerchantBranches() {
     }
 }
 checkMerchantBranches();
+//# sourceMappingURL=check_branches.js.map

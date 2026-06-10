@@ -20,3 +20,4 @@ async function main() {
     }
 }
 main();
+//# sourceMappingURL=query_verticals.js.map

@@ -108,6 +108,10 @@ export default function FavoritesScreen() {
             isDining: product.isDining,
             isVeg: product.isVeg ?? true,
             uom: product.uom || '1 Pc',
+            // Audit fix N1 (2026-06-10): favorites hydrate straight from the
+            // StoreProduct table (id: res.id), so product.id IS StoreProduct.id.
+            // Required for the Phase 4/5 coupon flow.
+            storeProductId: String(product.id),
         });
     };
 

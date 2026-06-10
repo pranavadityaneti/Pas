@@ -3,10 +3,15 @@
 //      any first-session event (SIGNED_IN or TOKEN_REFRESHED).
 //   2. Phase 4 coupon-state plumbing approved 2026-06-09. AppliedCoupon state
 //      + auto-clear on any cart mutation (Clear Cart alert / normal add path /
-//      removeItem / updateQuantity / clearCart). Does NOT touch the auth-listener,
-//      Supabase persistence, or cart-merge logic from layer 1 — coupon state lives
-//      in-memory only (intentionally not synced to Supabase; coupons are derived
-//      state and should always re-validate against the current cart).
+//      removeItem / updateQuantity / clearCart). Coupon state lives in-memory
+//      only (intentionally not synced to Supabase; coupons are derived state
+//      and should always re-validate against the current cart).
+//   3. Audit fix N4 approved 2026-06-09 ("Override accepted: N3, N5, and N4"):
+//      setAppliedCoupon(null) added at the two cart-change paths that bypass
+//      the mutation methods — the SIGNED_OUT branch of the auth listener and
+//      after the cloud-cart merge in loadCartFromSupabase. The cart-merge
+//      QUANTITY logic and Supabase sync from layer 1 remain untouched; only
+//      the coupon-clear lines were added.
 // CartContext: Global cart state management with Supabase persistence and strict validation.
 import React, { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
 import { Alert } from 'react-native';
@@ -141,6 +146,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
                 setItems([]);
                 setCartId(null);
                 hasLoadedCloud.current = false;
+                // Audit fix N4 (2026-06-10, override approved): sign-out empties
+                // the cart without going through the mutation methods, so the
+                // coupon auto-clear never fired — a stale signed token could
+                // survive into the next session.
+                setAppliedCoupon(null);
             } else {
                 setIsInitialized(true);
             }
@@ -243,6 +253,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
             }
 
             setItems(mergedItems);
+            // Audit fix N4 (2026-06-10, override approved): the cloud-restore
+            // merge changes cart contents without going through addItem/
+            // removeItem/updateQuantity, so the coupon auto-clear invariant was
+            // bypassed — a token signed over the pre-merge cart could be sent
+            // at checkout against different items.
+            setAppliedCoupon(null);
             setIsInitialized(true);
             hasLoadedCloud.current = true;
 

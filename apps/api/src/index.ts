@@ -2719,7 +2719,20 @@ app.post('/orders', async (req, res) => {
                     };
                 }
             } catch (err: any) {
-                return res.status(400).json({ error: err?.message || 'Invalid coupon token' });
+                // Audit fix N5 (2026-06-10): while REQUIRE_COUPON_TOKEN=false,
+                // a bad/expired token must NOT hard-400 — the customer may have
+                // already PAID (Razorpay completes before POST /orders), and a
+                // 400 here bypassed the orphaned-payment handling entirely (no
+                // alert, no Sentry, no refund path) while the client promised
+                // automatic reconciliation. Mirror the breakdown-mismatch
+                // semantics instead: proceed WITHOUT the coupon + Sentry warn.
+                // Flag ON keeps the strict 400 (clients re-validate pre-payment).
+                if (requireCouponToken) {
+                    return res.status(400).json({ error: err?.message || 'Invalid coupon token' });
+                }
+                console.warn(`[POST /orders] coupon token verify failed (${err?.message}) — proceeding WITHOUT coupon (flag off). userId=${userId} paid=${!!paid}`);
+                try { Sentry.captureMessage('coupon token verify failed — proceeded couponless (flag off)', { level: 'warning', extra: { userId, paid: !!paid, reason: err?.message } }); } catch {}
+                couponContext = null;
             }
         } else if (requireCouponToken && couponId) {
             return res.status(400).json({ error: 'Coupon discount requires a validation token. Please re-apply the coupon.' });
@@ -3069,6 +3082,22 @@ app.post('/orders', async (req, res) => {
                                 const cappedReplay = !!probe && probe.splitOrderIds.length >= storeCap;
                                 console.error(`[POST /orders] Phase 5 append rejected — ${cappedReplay ? 'split_order_ids at capacity (possible token replay)' : 'ledger row missing'} couponId=${couponContext.couponId} orderId=${createdOrder.id}`);
                                 try { Sentry.captureMessage(cappedReplay ? 'phase5: append rejected — capacity cap (possible token replay)' : 'phase5: multi-store redemption append found no row', { level: 'warning', extra: { couponId: couponContext.couponId, orderId: createdOrder.id, storeCap } }); } catch {}
+                                // Audit fix N3 (2026-06-10): the snapshot was written
+                                // BEFORE this branch — without rolling it back, a
+                                // replayed order still books the slice discount with
+                                // no ledger row behind it. Clear it in the same tx so
+                                // an order whose redemption was rejected never carries
+                                // a discount snapshot.
+                                await tx.order.update({
+                                    where: { id: createdOrder.id },
+                                    data: {
+                                        orderCouponId: null,
+                                        orderCouponCode: null,
+                                        orderCouponDiscount: null,
+                                        orderCouponFundingSource: null,
+                                        orderCouponDiscountType: null,
+                                    },
+                                });
                             }
                         }
                     }

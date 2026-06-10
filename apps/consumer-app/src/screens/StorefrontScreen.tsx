@@ -1,4 +1,8 @@
-// @lock — Do NOT overwrite.
+// @lock — Do NOT overwrite. Approved layers:
+//   1. Original locked state (pre-2026-06-10, unspecified scope).
+//   2. Audit fix N1 approved by Pranav 2026-06-10 ("let's fix N1"): handleAdd
+//      passes storeProductId into addItem (single additive property; nothing
+//      else touched). Without it the Phase 4/5 coupon flow is inert.
 import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import {
     View, Text, ScrollView, Image, TouchableOpacity,
@@ -410,6 +414,11 @@ export default function StorefrontScreen({ route }: any) {
             isVeg: product.isVeg ?? true,
             uom: product.uom || '1 Pc',
             stock: product.stock,
+            // Audit fix N1 (2026-06-10): product.id IS StoreProduct.id on the
+            // useProducts path ("We use the StoreProduct ID for uniqueness in
+            // cart"). Without this the Phase 4/5 coupon flow is inert — every
+            // apply fails the strict storeProductId guard.
+            storeProductId: String(product.id),
         });
     };
 
