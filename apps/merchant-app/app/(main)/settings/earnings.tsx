@@ -1,13 +1,26 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Colors } from '../../../constants/Colors';
 import { useEarnings } from '../../../src/hooks/useEarnings';
+import { useSettlements, SettlementCycle } from '../../../src/hooks/useSettlements';
+
+// Phase 7F — weekly settlement period label. periodEnd is exclusive (next
+// Monday 00:00 IST), so display the inclusive Sunday.
+function formatPeriod(start: string, end: string): string {
+    const fmt = (d: Date) => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+    const endInclusive = new Date(new Date(end).getTime() - 24 * 60 * 60 * 1000);
+    return `${fmt(new Date(start))} – ${fmt(endInclusive)}`;
+}
+
+const inr = (n: number) => `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function EarningsScreen() {
     const { stats, loading } = useEarnings();
+    const { cycles, loading: settlementsLoading } = useSettlements();
+    const [expandedCycle, setExpandedCycle] = useState<string | null>(null);
 
     if (loading) {
         return (
@@ -100,6 +113,89 @@ export default function EarningsScreen() {
                     </TouchableOpacity>
                 </View>
 
+                {/* Phase 7F (2026-06-10) — weekly settlement history. Cycles are
+                    merchant-level (all branches combined) and appear once a week
+                    closes (Mon 02:00 IST). PAID = money transferred; PROCESSING
+                    = calculated, payout on the way. */}
+                <View style={styles.settlementSection}>
+                    <View style={styles.settlementHeader}>
+                        <MaterialCommunityIcons name="bank-outline" size={20} color={Colors.text} />
+                        <Text style={styles.settlementTitle}>Weekly Settlements</Text>
+                    </View>
+                    <Text style={styles.settlementSub}>All branches combined · Mon–Sun weeks</Text>
+
+                    {settlementsLoading ? (
+                        <ActivityIndicator size="small" color={Colors.primary} style={{ marginVertical: 20 }} />
+                    ) : cycles.length === 0 ? (
+                        <View style={styles.settlementEmpty}>
+                            <Text style={styles.settlementEmptyText}>
+                                No settled weeks yet. Your first settlement appears after the current week closes.
+                            </Text>
+                        </View>
+                    ) : (
+                        cycles.map((c: SettlementCycle) => {
+                            const expanded = expandedCycle === c.id;
+                            const paid = c.status === 'PAID';
+                            return (
+                                <TouchableOpacity
+                                    key={c.id}
+                                    style={styles.cycleCard}
+                                    activeOpacity={0.7}
+                                    onPress={() => setExpandedCycle(expanded ? null : c.id)}
+                                >
+                                    <View style={styles.cycleRow}>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.cyclePeriod}>{formatPeriod(c.periodStart, c.periodEnd)}</Text>
+                                            <View style={[styles.statusChip, paid ? styles.statusPaid : styles.statusClosed]}>
+                                                <Text style={[styles.statusChipText, { color: paid ? '#047857' : '#92400E' }]}>
+                                                    {paid ? 'PAID' : 'PROCESSING'}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                        <View style={{ alignItems: 'flex-end' }}>
+                                            <Text style={styles.cycleAmount}>{inr(c.netPayout)}</Text>
+                                            <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color={Colors.textSecondary} />
+                                        </View>
+                                    </View>
+                                    {expanded && (
+                                        <View style={styles.cycleBreakdown}>
+                                            <View style={styles.breakdownRow}>
+                                                <Text style={styles.breakdownLabel}>Sales (items)</Text>
+                                                <Text style={styles.breakdownValue}>{inr(c.grossSales)}</Text>
+                                            </View>
+                                            <View style={styles.breakdownRow}>
+                                                <Text style={styles.breakdownLabel}>Platform commission</Text>
+                                                <Text style={[styles.breakdownValue, { color: '#DC2626' }]}>− {inr(c.commissionAmount)}</Text>
+                                            </View>
+                                            {c.couponReimbursement > 0 && (
+                                                <View style={styles.breakdownRow}>
+                                                    <Text style={styles.breakdownLabel}>Coupon reimbursement</Text>
+                                                    <Text style={[styles.breakdownValue, { color: '#047857' }]}>+ {inr(c.couponReimbursement)}</Text>
+                                                </View>
+                                            )}
+                                            {c.clawbackAmount > 0 && (
+                                                <View style={styles.breakdownRow}>
+                                                    <Text style={styles.breakdownLabel}>Refund adjustments</Text>
+                                                    <Text style={[styles.breakdownValue, { color: '#DC2626' }]}>− {inr(c.clawbackAmount)}</Text>
+                                                </View>
+                                            )}
+                                            <View style={[styles.breakdownRow, styles.breakdownTotal]}>
+                                                <Text style={[styles.breakdownLabel, { fontWeight: 'bold', color: Colors.text }]}>Net payout</Text>
+                                                <Text style={[styles.breakdownValue, { fontWeight: 'bold' }]}>{inr(c.netPayout)}</Text>
+                                            </View>
+                                            {paid && c.paidAt && (
+                                                <Text style={styles.paidNote}>
+                                                    Paid on {new Date(c.paidAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                                </Text>
+                                            )}
+                                        </View>
+                                    )}
+                                </TouchableOpacity>
+                            );
+                        })
+                    )}
+                </View>
+
             </ScrollView>
         </SafeAreaView>
     );
@@ -134,9 +230,31 @@ const styles = StyleSheet.create({
     couponValue: { fontSize: 15, fontWeight: 'bold' },
     couponNote: { fontSize: 11.5, color: '#6B7280', marginTop: 4, lineHeight: 15 },
 
-    pendingCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFBEB', borderRadius: 20, padding: 16, borderWidth: 1, borderColor: '#FEF3C7', marginBottom: 32 },
+    pendingCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFBEB', borderRadius: 20, padding: 16, borderWidth: 1, borderColor: '#FEF3C7', marginBottom: 20 },
     pendingIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#FEF3C7', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
     pendingTitle: { fontSize: 15, fontWeight: 'bold', color: '#92400E' },
     pendingDesc: { fontSize: 12, color: '#B45309', marginTop: 2, lineHeight: 16 },
     viewLink: { color: '#D97706', fontWeight: 'bold', fontSize: 14, marginLeft: 8 },
+
+    // Phase 7F (2026-06-10) — weekly settlement history
+    settlementSection: { marginBottom: 32 },
+    settlementHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
+    settlementTitle: { fontSize: 17, fontWeight: 'bold', color: Colors.text },
+    settlementSub: { fontSize: 12, color: Colors.textSecondary, marginBottom: 12 },
+    settlementEmpty: { backgroundColor: Colors.white, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: Colors.border },
+    settlementEmptyText: { fontSize: 13, color: Colors.textSecondary, lineHeight: 18 },
+    cycleCard: { backgroundColor: Colors.white, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: Colors.border, marginBottom: 10 },
+    cycleRow: { flexDirection: 'row', alignItems: 'center' },
+    cyclePeriod: { fontSize: 15, fontWeight: '600', color: Colors.text, marginBottom: 6 },
+    statusChip: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
+    statusPaid: { backgroundColor: '#D1FAE5' },
+    statusClosed: { backgroundColor: '#FEF3C7' },
+    statusChipText: { fontSize: 10.5, fontWeight: 'bold', letterSpacing: 0.5 },
+    cycleAmount: { fontSize: 18, fontWeight: 'bold', color: Colors.text, marginBottom: 4 },
+    cycleBreakdown: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: Colors.border },
+    breakdownRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+    breakdownLabel: { fontSize: 13, color: Colors.textSecondary },
+    breakdownValue: { fontSize: 13, fontWeight: '600', color: Colors.text },
+    breakdownTotal: { paddingTop: 8, borderTopWidth: 1, borderTopColor: Colors.border, marginBottom: 4 },
+    paidNote: { fontSize: 11.5, color: '#047857', marginTop: 4 },
 });
