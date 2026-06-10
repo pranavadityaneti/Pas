@@ -8,9 +8,10 @@ import { useEarnings } from '../../../src/hooks/useEarnings';
 import { useSettlements, SettlementCycle } from '../../../src/hooks/useSettlements';
 
 // Phase 7F — weekly settlement period label. periodEnd is exclusive (next
-// Monday 00:00 IST), so display the inclusive Sunday.
+// Monday 00:00 IST), so display the inclusive Sunday. Pinned to IST (7G):
+// device timezones west of IST would otherwise shift the week by a day.
 function formatPeriod(start: string, end: string): string {
-    const fmt = (d: Date) => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+    const fmt = (d: Date) => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' });
     const endInclusive = new Date(new Date(end).getTime() - 24 * 60 * 60 * 1000);
     return `${fmt(new Date(start))} – ${fmt(endInclusive)}`;
 }

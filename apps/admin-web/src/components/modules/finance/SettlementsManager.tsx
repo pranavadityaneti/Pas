@@ -23,12 +23,13 @@ import {
 import { Button } from '../../ui/button';
 import { cn } from '../../ui/utils';
 import {
-    closeCycle, formatINR, getSettlement, listCommissionRules, listSettlements,
-    markSettlementPaid, updateCommissionRule,
+    closeCycle, formatINR, getSettlement, listCommissionRules, listSettlementProfiles,
+    listSettlements, markSettlementPaid, updateCommissionRule, updateSettlementProfile,
     type CommissionRule, type CycleStatus, type SettlementCycle, type SettlementCycleDetail,
+    type SettlementProfileRow,
 } from '../../../lib/settlementService';
 
-type ViewTab = 'cycles' | 'rules';
+type ViewTab = 'cycles' | 'rules' | 'merchants';
 type StatusFilter = CycleStatus | 'ALL';
 
 const STATUS_STYLES: Record<CycleStatus, string> = {
@@ -74,6 +75,10 @@ export function SettlementsManager() {
     const [editRate, setEditRate] = useState('');
     const [ruleSaving, setRuleSaving] = useState(false);
 
+    const [profileRows, setProfileRows] = useState<SettlementProfileRow[]>([]);
+    const [profilesLoading, setProfilesLoading] = useState(false);
+    const [profileSaving, setProfileSaving] = useState<string | null>(null);
+
     const loadCycles = useCallback(async () => {
         setLoading(true);
         setError(null);
@@ -100,6 +105,37 @@ export function SettlementsManager() {
     }, []);
 
     useEffect(() => { if (viewTab === 'rules' && rules.length === 0) loadRules(); }, [viewTab, rules.length, loadRules]);
+
+    const loadProfiles = useCallback(async () => {
+        setProfilesLoading(true);
+        try {
+            setProfileRows(await listSettlementProfiles());
+        } catch {
+            // surfaced via the empty state
+        } finally {
+            setProfilesLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { if (viewTab === 'merchants' && profileRows.length === 0) { loadProfiles(); if (rules.length === 0) loadRules(); } }, [viewTab, profileRows.length, rules.length, loadProfiles, loadRules]);
+
+    const saveProfile = async (row: SettlementProfileRow, patch: Partial<SettlementProfileRow>) => {
+        setProfileSaving(row.merchantId);
+        try {
+            await updateSettlementProfile(row.merchantId, {
+                commissionCategory: patch.commissionCategory !== undefined ? patch.commissionCategory : row.commissionCategory,
+                turnoverTier: patch.turnoverTier !== undefined ? patch.turnoverTier : row.turnoverTier,
+                settlementHold: patch.settlementHold !== undefined ? patch.settlementHold : row.settlementHold,
+            });
+            setProfileRows((prev) => prev.map((r) => r.merchantId === row.merchantId
+                ? { ...r, ...patch, configured: !!(patch.commissionCategory !== undefined ? patch.commissionCategory : r.commissionCategory) }
+                : r));
+        } catch {
+            // row stays unchanged on failure
+        } finally {
+            setProfileSaving(null);
+        }
+    };
 
     const openDetail = async (cycle: SettlementCycle) => {
         setDetailLoading(true);
@@ -137,8 +173,9 @@ export function SettlementsManager() {
             const r = await closeCycle();
             setCloseSummary(
                 `Closed ${formatPeriod(r.periodStart, r.periodEnd)}: ${r.merchantsClosed} merchants, ${r.ordersSettled} orders settled` +
-                ` (held: ${r.ordersHeldUnverified} unverified, ${r.ordersHeldNoProfile} no-profile), net ${formatINR(r.totals.netPayout)}.` +
-                (r.merchantsSkipped > 0 ? ` ${r.merchantsSkipped} already closed (skipped).` : ''),
+                ` (held: ${r.ordersHeldUnverified} unverified, ${r.ordersHeldNoProfile} no-profile, ${r.ordersHeldIncoherent} flagged), net ${formatINR(r.totals.netPayout)}.` +
+                (r.merchantsSkipped > 0 ? ` ${r.merchantsSkipped} already closed (skipped).` : '') +
+                (r.failures?.length ? ` ⚠ ${r.failures.length} merchant(s) FAILED — check Sentry and re-run.` : ''),
             );
             await loadCycles();
         } catch (e: any) {
@@ -177,7 +214,7 @@ export function SettlementsManager() {
     if (detail) {
         const d = detail;
         const moneyRows: Array<[string, string, string?]> = [
-            ['Gross sales (items, pre-GST)', formatINR(d.grossSales)],
+            ['Gross sales (order totals paid by customers)', formatINR(d.grossSales)],
             ['Commission base', formatINR(d.commissionBase)],
             ['Platform commission', `− ${formatINR(d.commissionAmount)}`, 'text-red-600'],
             ['Coupon reimbursement (platform-funded)', `+ ${formatINR(d.couponReimbursement)}`, 'text-emerald-600'],
@@ -302,6 +339,9 @@ export function SettlementsManager() {
                     <Button variant="ghost" size="sm" className={cn('gap-1.5 rounded-lg', viewTab === 'rules' ? 'bg-gray-100 text-gray-900' : 'text-gray-500')} onClick={() => setViewTab('rules')}>
                         <Percent className="w-4 h-4" /> Commission rules
                     </Button>
+                    <Button variant="ghost" size="sm" className={cn('gap-1.5 rounded-lg', viewTab === 'merchants' ? 'bg-gray-100 text-gray-900' : 'text-gray-500')} onClick={() => setViewTab('merchants')}>
+                        <Settings2 className="w-4 h-4" /> Merchants
+                    </Button>
                 </div>
                 {viewTab === 'cycles' && (
                     <div className="flex items-center gap-2">
@@ -316,7 +356,91 @@ export function SettlementsManager() {
                 )}
             </div>
 
-            {viewTab === 'rules' ? (
+            {viewTab === 'merchants' ? (
+                <div className="flex-1 overflow-auto p-5">
+                    <p className="text-xs text-gray-500 mb-3 max-w-2xl">
+                        A merchant settles only after a <span className="font-semibold">commission category</span> is assigned here —
+                        unconfigured merchants have ALL their orders held out of every weekly close (fail-closed).
+                        Tier applies to F&amp;B categories. Hold blocks mark-paid without stopping calculation.
+                    </p>
+                    {profilesLoading ? (
+                        <div className="flex items-center justify-center py-16 text-gray-400"><Loader2 className="w-6 h-6 animate-spin" /></div>
+                    ) : (
+                        <div className="rounded-xl border border-gray-200 overflow-hidden">
+                            <table className="w-full text-sm">
+                                <thead className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
+                                    <tr>
+                                        <th className="px-4 py-2.5">Merchant</th>
+                                        <th className="px-4 py-2.5">Commission category</th>
+                                        <th className="px-4 py-2.5">Tier</th>
+                                        <th className="px-4 py-2.5">Hold</th>
+                                        <th className="px-4 py-2.5">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {profileRows.map((row) => {
+                                        const categories = Array.from(new Set(rules.map((r) => r.category))).sort();
+                                        const saving = profileSaving === row.merchantId;
+                                        return (
+                                            <tr key={row.merchantId} className={cn('hover:bg-gray-50', !row.configured && 'bg-amber-50/40')}>
+                                                <td className="px-4 py-2 font-medium text-gray-900">{row.merchantName}</td>
+                                                <td className="px-4 py-2">
+                                                    <select
+                                                        className="w-full max-w-[260px] px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white"
+                                                        value={row.commissionCategory ?? ''}
+                                                        disabled={saving}
+                                                        onChange={(e) => saveProfile(row, { commissionCategory: e.target.value || null })}
+                                                    >
+                                                        <option value="">— not assigned —</option>
+                                                        {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+                                                    </select>
+                                                </td>
+                                                <td className="px-4 py-2">
+                                                    <select
+                                                        className="px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white"
+                                                        value={row.turnoverTier ?? ''}
+                                                        disabled={saving}
+                                                        onChange={(e) => saveProfile(row, { turnoverTier: e.target.value ? Number(e.target.value) : null })}
+                                                    >
+                                                        <option value="">—</option>
+                                                        {[1, 2, 3, 4, 5].map((t) => <option key={t} value={t}>{t}</option>)}
+                                                    </select>
+                                                </td>
+                                                <td className="px-4 py-2">
+                                                    <button
+                                                        className={cn(
+                                                            'px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors',
+                                                            row.settlementHold
+                                                                ? 'bg-red-50 text-red-700 border-red-200'
+                                                                : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300',
+                                                        )}
+                                                        disabled={saving}
+                                                        onClick={() => saveProfile(row, { settlementHold: !row.settlementHold })}
+                                                    >
+                                                        {row.settlementHold ? 'ON HOLD' : 'off'}
+                                                    </button>
+                                                </td>
+                                                <td className="px-4 py-2">
+                                                    {saving ? (
+                                                        <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
+                                                    ) : row.configured ? (
+                                                        <span className="inline-flex items-center gap-1 text-emerald-700 text-xs font-semibold"><BadgeCheck className="w-3.5 h-3.5" /> Configured</span>
+                                                    ) : (
+                                                        <span className="inline-flex items-center gap-1 text-amber-700 text-xs font-semibold"><AlertTriangle className="w-3.5 h-3.5" /> Orders held</span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                    {profileRows.length === 0 && (
+                                        <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No merchants found.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+            ) : viewTab === 'rules' ? (
                 <div className="flex-1 overflow-auto p-5">
                     <p className="text-xs text-gray-500 mb-3 max-w-2xl">
                         Rates apply at cycle-close time. <span className="font-semibold text-amber-700">Provisional</span> rows

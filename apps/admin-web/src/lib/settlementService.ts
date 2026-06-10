@@ -64,8 +64,20 @@ export interface CloseCycleResult {
     ordersSettled: number;
     ordersHeldUnverified: number;
     ordersHeldNoProfile: number;
+    ordersHeldIncoherent: number;
     clawbacksClaimed: number;
+    failures: Array<{ merchantId: string; error: string }>;
     totals: { grossSales: number; commission: number; couponReimbursement: number; clawbacks: number; netPayout: number };
+}
+
+export interface SettlementProfileRow {
+    merchantId: string;
+    merchantName: string;
+    commissionCategory: string | null;
+    turnoverTier: number | null;
+    settlementHold: boolean;
+    notes: string | null;
+    configured: boolean;
 }
 
 export async function listSettlements(status?: CycleStatus): Promise<SettlementCycle[]> {
@@ -95,6 +107,18 @@ export async function listCommissionRules(): Promise<CommissionRule[]> {
 export async function updateCommissionRule(id: string, ratePct: number, provisional?: boolean): Promise<CommissionRule> {
     const res = await api.put(`/admin/commission-rules/${id}`, { ratePct, ...(provisional !== undefined ? { provisional } : {}) });
     return res.data;
+}
+
+export async function listSettlementProfiles(): Promise<SettlementProfileRow[]> {
+    const res = await api.get('/admin/settlement-profiles');
+    return res.data.data;
+}
+
+export async function updateSettlementProfile(
+    merchantId: string,
+    patch: { commissionCategory?: string | null; turnoverTier?: number | null; settlementHold?: boolean; notes?: string | null },
+): Promise<void> {
+    await api.put(`/admin/settlement-profiles/${merchantId}`, patch);
 }
 
 export const formatINR = (v: string | number | null | undefined): string => {

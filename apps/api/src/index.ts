@@ -25,7 +25,7 @@ import { watiService } from './services/wati.service';
 import { apifyService } from './services/apify.service';
 import { sendApplicationReceivedEmail, sendStoreApprovedEmail, sendStoreRejectedEmail, sendStoreNeedsInfoEmail, sendAdminInviteEmail } from './services/email.service';
 import { NotificationService } from './services/notification.service';
-import { initScheduledJobs } from './services/scheduled-jobs';
+import { initScheduledJobs, verifyPendingPayments } from './services/scheduled-jobs';
 import { closeSettlementCycles, detectClawback, getLastCompletedIstWeek } from './services/settlement.service';
 import { parseArrivalTime } from './utils/parseArrivalTime';
 import staffRouter from './routes/staff';
@@ -3999,6 +3999,12 @@ app.post('/orders/:id/refund', async (req, res) => {
             },
             include: { user: true }
         });
+
+        // Phase 7G (2026-06-11, audit fix): this endpoint can flip a settled
+        // COMPLETED order to REFUNDED — the ledger must claw the payout back
+        // on the next cycle, same as the cancel/issue/SLA refund paths.
+        const clawAmount = Number(amount) > 0 ? Number(amount) : (Number(order.totalAmount) || 0);
+        try { await detectClawback(prisma, id, clawAmount, `legacy refund ${refundResult?.id ?? 'recorded'}`); } catch (e) { console.error('[7D] clawback detect (legacy refund) failed:', e); }
 
         if (refundedOrder.user?.phone) {
             smsService.sendOrderUpdate(refundedOrder.user.phone, id, 'Refund Processed').catch(err => console.error('SMS Failed:', err));
@@ -9323,6 +9329,12 @@ app.post('/admin/settlements/close-cycle', async (req, res) => {
         if (weekOf && isNaN(weekOf.getTime())) {
             return res.status(400).json({ error: 'weekOf must be a valid date' });
         }
+        // 7G: drain the verification backlog first (batch-capped at 25/call)
+        // so the close sees every verifiable order instead of holding them.
+        for (let i = 0; i < 40; i++) {
+            const n = await verifyPendingPayments(prisma);
+            if (n < 25) break;
+        }
         const result = await closeSettlementCycles(prisma, { weekOf, closedBy: admin.id });
         await writeAuditLog(admin.id, 'settlement.cycle_closed', 'settlement_period', result.periodStart, null, result as any);
         res.json(result);
@@ -9361,7 +9373,8 @@ app.get('/admin/settlements/:id', async (req, res) => {
             include: { lines: { orderBy: { createdAt: 'asc' } } },
         });
         if (!cycle) return res.status(404).json({ error: 'Settlement cycle not found' });
-        res.json(cycle);
+        const store = await prisma.store.findUnique({ where: { id: cycle.merchantId }, select: { name: true } });
+        res.json({ ...cycle, merchantName: store?.name ?? null });
     } catch (error: any) {
         return handleApiError(res, error, { area: 'settlements.detail', userMessage: 'Failed to load settlement' });
     }
@@ -9431,6 +9444,74 @@ app.put('/admin/commission-rules/:id', async (req, res) => {
         res.json(updated);
     } catch (error: any) {
         return handleApiError(res, error, { area: 'commissionRules.update', userMessage: 'Failed to update commission rule' });
+    }
+});
+
+// 7G — settlement profile worklist: every store with its profile state, so
+// the admin can see who is configured and who is silently HELD. Without this
+// the close holds 100% of merchants with no operable remediation surface.
+app.get('/admin/settlement-profiles', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res); if (!admin) return;
+        const stores = await prisma.store.findMany({
+            select: { id: true, name: true },
+            orderBy: { name: 'asc' },
+            take: 500,
+        });
+        const profiles = stores.length > 0 ? await prisma.merchantSettlementProfile.findMany({
+            where: { id: { in: stores.map((s) => s.id) } },
+        }) : [];
+        const pById = new Map(profiles.map((p) => [p.id, p]));
+        res.json({
+            data: stores.map((s) => {
+                const p = pById.get(s.id);
+                return {
+                    merchantId: s.id,
+                    merchantName: s.name,
+                    commissionCategory: p?.commissionCategory ?? null,
+                    turnoverTier: p?.turnoverTier ?? null,
+                    settlementHold: p?.settlementHold ?? false,
+                    notes: p?.notes ?? null,
+                    configured: !!p?.commissionCategory,
+                };
+            }),
+        });
+    } catch (error: any) {
+        return handleApiError(res, error, { area: 'settlementProfiles.list', userMessage: 'Failed to load profiles' });
+    }
+});
+
+// 7G — manual payment-verification override (audit release valve): a paid
+// order stuck unverified (Razorpay outage at create time + outside the cron's
+// reach, or a false-positive amount-overrun hold) can be resolved by an admin
+// after manual reconciliation against the Razorpay dashboard. Audit-logged.
+app.post('/admin/orders/:id/payment-verification', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res); if (!admin) return;
+        const verified = req.body?.verified;
+        const note = String(req.body?.note || '').trim();
+        if (typeof verified !== 'boolean') {
+            return res.status(400).json({ error: 'verified must be true or false' });
+        }
+        if (!note) {
+            return res.status(400).json({ error: 'note is required (what was reconciled and where)' });
+        }
+        const order = await prisma.order.findUnique({
+            where: { id: req.params.id },
+            select: { id: true, paymentVerified: true, paymentVerificationNote: true },
+        });
+        if (!order) return res.status(404).json({ error: 'Order not found' });
+        const updated = await prisma.order.update({
+            where: { id: order.id },
+            data: { paymentVerified: verified, paymentVerificationNote: `ADMIN OVERRIDE: ${note}`.slice(0, 500) },
+            select: { id: true, paymentVerified: true, paymentVerificationNote: true },
+        });
+        await writeAuditLog(admin.id, 'settlement.payment_verification_override', 'order', order.id,
+            { paymentVerified: order.paymentVerified, note: order.paymentVerificationNote } as any,
+            { paymentVerified: updated.paymentVerified, note: updated.paymentVerificationNote } as any);
+        res.json(updated);
+    } catch (error: any) {
+        return handleApiError(res, error, { area: 'settlements.paymentOverride', userMessage: 'Failed to override payment verification' });
     }
 });
 

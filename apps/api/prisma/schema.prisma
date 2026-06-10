@@ -1589,13 +1589,19 @@ model SettlementLine {
   // NULLABLE: CLAWBACK entries are created with cycle_id NULL when a settled
   // order is refunded, then claimed by the next cycle close.
   cycleId           String?          @map("cycle_id") @db.Uuid
-  cycle             SettlementCycle? @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  // RESTRICT (7G): deleting a cycle must never erase its lines — that would
+  // re-open double-settlement for every order in it.
+  cycle             SettlementCycle? @relation(fields: [cycleId], references: [id], onDelete: Restrict)
   orderId           String?          @map("order_id") @db.Uuid
   // SALE | COUPON_REIMBURSEMENT | CLAWBACK | ADJUSTMENT
   kind              String
   amount            Decimal          @db.Decimal(12, 2)
   commissionRatePct Decimal?         @map("commission_rate_pct") @db.Decimal(5, 2)
   commissionRuleId  String?          @map("commission_rule_id") @db.Uuid
+  // 7G: per-line commission facts as columns so frozen totals recompute
+  // exactly from lines without parsing notes (SALE lines only).
+  commissionBase    Decimal?         @map("commission_base") @db.Decimal(12, 2)
+  commissionAmount  Decimal?         @map("commission_amount") @db.Decimal(12, 2)
   note              String?
   createdAt         DateTime         @default(now()) @map("created_at")
 

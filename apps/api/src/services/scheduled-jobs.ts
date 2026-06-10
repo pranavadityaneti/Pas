@@ -23,7 +23,7 @@ import cron from 'node-cron';
 import * as Sentry from '@sentry/node';
 import { PrismaClient } from '@prisma/client';
 import { NotificationService } from './notification.service';
-import { closeSettlementCycles, detectClawback } from './settlement.service';
+import { closeSettlementCycles, detectClawback, PHASE7_EPOCH } from './settlement.service';
 
 const REMINDER_TYPES = {
     PICKUP_30: 'PICKUP_REMINDER_30MIN',
@@ -133,6 +133,13 @@ export function initScheduledJobs(
     // cron can coexist safely.
     cron.schedule('0 2 * * 1', async () => {
         try {
+            // 7G: drain the verification backlog FIRST so the close sees every
+            // verifiable order (the per-minute tick is batch-capped at 25; a
+            // backlog would otherwise hold orders for a full extra week).
+            for (let i = 0; i < 40; i++) {
+                const n = await verifyPendingPayments(prisma);
+                if (n < 25) break;
+            }
             const result = await closeSettlementCycles(prisma);
             console.log('[cron] weekly settlement close:', JSON.stringify(result));
         } catch (e) {
@@ -638,26 +645,37 @@ function initLocalRazorpay(): any {
  * pre-deploy orders inside the window. Sets TRUE (captured + amount-coherent),
  * FALSE (held from settlement), and leaves NULL only on repeated API errors.
  * Batch-capped; the partial index orders_payment_unverified_idx keeps the
- * scan cheap. Also callable with an explicit window by the cycle-close engine.
+ * scan cheap. Returns the candidate count so callers (the weekly close, the
+ * admin close endpoint) can loop until the backlog drains.
+ *
+ * 7G fixes: the default window starts at the PHASE7 EPOCH, not now-7d — the
+ * sliding window permanently stranded any order that stayed NULL past 7 days
+ * (pre-deploy orders, Razorpay outages). And RETURN_APPROVED orders are
+ * scanned despite isPaid=false (the partial-refund flow flips it; their kept
+ * remainder still needs verification to settle).
  */
 export async function verifyPendingPayments(
     prisma: PrismaClient,
     window?: { from: Date; to: Date },
-): Promise<void> {
+): Promise<number> {
     const rzp = initLocalRazorpay();
-    if (!rzp) return; // nothing to do without credentials — orders stay NULL
+    if (!rzp) return 0; // nothing to do without credentials — orders stay NULL
 
-    const from = window?.from ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const from = window?.from ?? PHASE7_EPOCH;
     // Give create-time verification 3 minutes before the cron picks a row up.
     const to = window?.to ?? new Date(Date.now() - 3 * 60 * 1000);
 
     const candidates = await prisma.order.findMany({
-        where: { isPaid: true, paymentVerified: null, createdAt: { gte: from, lte: to } },
+        where: {
+            paymentVerified: null,
+            createdAt: { gte: from, lte: to },
+            OR: [{ isPaid: true }, { status: 'RETURN_APPROVED' as any }],
+        },
         select: { id: true, totalAmount: true, metadata: true },
         orderBy: { createdAt: 'asc' },
         take: 25,
     });
-    if (candidates.length === 0) return;
+    if (candidates.length === 0) return 0;
 
     for (const o of candidates) {
         const paymentId = (o.metadata as any)?.razorpayPaymentId
@@ -714,6 +732,7 @@ export async function verifyPendingPayments(
             }
         }
     }
+    return candidates.length;
 }
 
 /**
