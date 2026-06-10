@@ -461,3 +461,58 @@ Frequent signouts investigation Phase 1 + Phase 2A shipped. Major data integrity
 - [ ] **Cosmetic data cleanup:** 6 merchants with null `Store.merchant_id`, "Security Test Store" leftover, "Test City" / "Test City 1774176523" entries in City table
 - [ ] **Phone format inconsistency in `merchants`** — most are 10-digit (`9182369196`), one is with-prefix (`919959777027` for Freshly). Worth normalizing.
 - [ ] **Test fresh signup end-to-end** to confirm Trigger 1 + Trigger 2 fire correctly in real life (not just simulation)
+
+---
+
+# Session 2026-06-09 → 2026-06-10 — Coupon Foolproof Phases 1-5 + hot-fixes (marathon)
+
+## Headline
+Coupon-foolproof Phases 1-5 are code-complete and audited. Phases 1-3 + four hot-fix waves are LIVE on EB. Phase 4 (consumer checkout integration) and Phase 5 (multi-store allocation) are committed on PR #2, audited three+two times respectively, all blockers closed — **Phase 5 EB deploy is pending Pranav's go**.
+
+## Deploy timeline (EB `pas-api-prod-v2`)
+| Version | Contents |
+|---|---|
+| `app-260609_112931383837` | Phases 1+2+3A backend (+ COUPON_VALIDATION_SECRET set) |
+| `app-260609_143434212572` | Phase 2J soft-auth hot-fix (+ REQUIRE_ORDERS_AUTH=false) |
+| `app-260609_145802394098` | Phase 2K — 5 hot-fixes from PR #1 adversarial review |
+| `app-260609_160632632075` | Phase 2L — server-side price reconciliation (bleed #11) |
+| (pending Pranav go) | Phase 5 + audit fixes (`7b07df82` working tree) |
+
+## DB migrations applied to prod Supabase
+- `20260608120000_coupon_extensions`, `…130000_audit_log`, `…140000_order_coupon_fields` (FK TEXT fix), `…150000_redemption_ledger_fields` (Phase 1)
+- 9 historical drift migrations resolved via `migrate resolve --applied` after read-only verification (`scripts/verify_migration_drift.ts`)
+- `20260609170000_cart_items_store_product_id` (Phase 4 fix C1)
+- `20260609220000_phase5_coupon_redemption_cart_fingerprint` (Phase 5A — cart_fingerprint + partial unique)
+
+## Git/PR state
+- **PR #1 MERGED to main** (`00d36579`): Phases 1+2+3, mobile catch-up, 2J, 2K. Vercel auto-deployed admin-web.
+- **PR #2 OPEN** (`coupon-foolproof-phase4-2026-06-09`): `342b78a9` 2L → `e4cf981c` Phase 4 → `ae51a2fb` 9 audit blockers → `4f099622` D2-pickup + 5 → `3e2a484d` finalTotal cleanup → `66ef7708` Phase 5 → `7a3611c9` 5 audit blockers → `7b07df82` R1/R2/R3 hardening.
+
+## Live incident (resolved)
+Phase 2's `requireUser` hard-cut on POST /orders + PATCH /order-requests 401'd every pre-OTA consumer install (main's app sends no Authorization header). Caught by sanity-check after PR #1 review; fixed same hour with Phase 2J soft-auth (`softRequireUser` + REQUIRE_ORDERS_AUTH flag + Sentry rollout counter). Verified by prod curl before/after.
+
+## Adversarial audit trail (Workflow tool, 5-reviewer panels)
+1. **PR #1 pre-merge**: 23 findings, 6 high → Phase 2K fixed 5 + soft-auth; mediums queued.
+2. **Phase 4 audit**: 9 blockers (incl. dead pipeline — no Apply Coupon entry point; dining charge mismatch) → all fixed in `ae51a2fb`.
+3. **Phase 4 re-audit**: D2-pickup still open (acceptedRequests strip storeProductId) + D1 rapid-tap regression → fixed in `4f099622`.
+4. **Phase 4 third audit**: clean (approve-with-caveats, 0 blockers) after `3e2a484d`.
+5. **Phase 5 audit**: 5 money blockers (fingerprint replay; rejected-store full discount; negative slice; client/server split drift; concurrent-cancel ledger corruption) → fixed in `7a3611c9`.
+6. **Phase 5 re-audit**: approve-with-caveats, 0 blockers, "safe to deploy yes". Residuals R1/R2/R3 hardened in `7b07df82`; R4/R5/R6 queued in forlater.md.
+
+## Key decisions (Pranav)
+- Option A (fix-everything-before-Phase-5) over revert; "no temporary patches / no bleeds" is the standing standard.
+- Phase 5 Q1-Q5: per-store minOrder REJECT; store-scoped coupons reject multi-store; single-store keeps legacy ledger path; one discount line in UI; proportional partial reversal on cancel.
+- Lock overrides granted: CartContext (L2), CheckoutScreen (L6, L7), DiningCheckoutScreen (L6), CartScreen (L2).
+- CLAUDE.md updated: Vercel = git auto-deploy (never local CLI); EB = chained setenv;deploy.
+
+## Errors/learnings (≥2 attempts — ERRORS.md candidates)
+- `git add apps/api/dist/index.js` always prints the gitignore warning and exits 1, but the tracked file DOES stage. Pattern: stage, ignore exit code, verify `git diff --cached --stat`, commit separately.
+- Prisma interactive transactions: a caught P2002 still poisons the Postgres tx — use raw `INSERT … ON CONFLICT DO NOTHING RETURNING` instead of catch-and-continue.
+- Workflow agents audit ONLY the commit diff unless told to read surrounding files — the "dead pipeline" Phase 4 blocker came from me not checking whether the new flow was reachable.
+
+## Open threads at session end
+- **Phase 5 EB deploy** — awaiting Pranav's explicit go (code at `7b07df82`, tsc clean, dist built).
+- **Consumer-app EAS OTA** from PR #2 branch — Pranav's call after deploy.
+- **Flag flips** (REQUIRE_ORDERS_AUTH, REQUIRE_COUPON_TOKEN) — gated on OTA propagation + Sentry counters (see forlater.md).
+- **Phase 6** (merchant surfacing), **Phase 7** (settlement — Pranav wants discussion first), **Phase 8** (verification/rollout).
+- forlater.md gained a consolidated "Coupon Foolproof — deferred audit findings" section (2026-06-10).
