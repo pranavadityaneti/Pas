@@ -37,7 +37,14 @@
 ## 🎟️ Coupon Foolproof — deferred audit findings + open flags (added 2026-06-10)
 
 > Source: adversarial audits on PR #1 (merged) and PR #2 (branch `coupon-foolproof-phase4-2026-06-09`).
-> Phases 1-5 are code-complete; Phase 5 EB deploy pending Pranav's go. These are the consciously-deferred leftovers.
+> **Status 2026-06-10:** Phases 1-5 DEPLOYED to EB (`app-260610_132434177329`); PR #2 merge + consumer OTA pending. Full audit report: `docs/coupon-foolproof-audit-phase1-5.html`.
+
+### 🚨 OTA GATES (must land BEFORE the consumer EAS OTA — from full audit 2026-06-10)
+- **N1 (CRITICAL): thread `storeProductId` into addItem callsites.** No add-to-cart path sets `CartItem.storeProductId` (StorefrontScreen.tsx L402-413, FavoritesScreen.tsx L101-111, useProducts.ts L72) — without this the OTA ships a DEAD coupon feature (every apply fails "items out of date"). Fix: pass `storeProductId: product.id` at each callsite + run the e2e apply test.
+- **N3: clear order coupon snapshot on capped multi-store replay** (apps/api POST /orders appended===0 non-idempotent branch) — replayed orders currently still book the slice discount.
+- **N5: token-verify failure after payment must not bypass orphan handling** — while REQUIRE_COUPON_TOKEN=false, proceed couponless + Sentry instead of bare 400.
+- **N4: clearAppliedCoupon on SIGNED_OUT + cloud-cart restore** (CartContext 🔒 — needs explicit lock override).
+- **N6 decision: orphaned-payments sweep cron** (referenced in 3 comments, never built) — build it, or soften the client "automatic refund" copy and accept manual reconciliation.
 
 ### Operational flags / gates (time-sensitive, not code)
 - **`REQUIRE_ORDERS_AUTH=true` flip** — POST /orders + PATCH /order-requests are in soft-auth (Phase 2J). Flip via `eb setenv REQUIRE_ORDERS_AUTH=true` once Sentry shows `phase: pre-ota-soft-auth` at zero for 24h after the consumer OTA rolls. Added 2026-06-09.
