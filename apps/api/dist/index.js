@@ -8875,152 +8875,6 @@ app.post('/me/profile', async (req, res) => {
         return (0, api_error_handler_1.handleApiError)(res, e, { area: 'me.profile', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to update profile' });
     }
 });
-// --- 404 Handler ---
-app.use((req, res, next) => {
-    res.status(404).json({ error: 'Endpoint not found', path: req.path });
-});
-// --- Sentry Express error handler ---
-// Per Sentry's Express SDK guidance, this MUST be registered after all
-// controllers + the 404 handler, and BEFORE any other error-handling middleware.
-// It does NOT swallow the error — control flows on to the global error handler
-// below, which still returns the JSON response to the client.
-Sentry.setupExpressErrorHandler(app);
-// --- Global Error Handler ---
-app.use((err, req, res, next) => {
-    console.error('[Global Error Handler]', err);
-    if (res.headersSent) {
-        return next(err);
-    }
-    // Force JSON response
-    res.status(500).json({
-        error: 'Internal Server Error',
-        message: err.message || 'An unexpected error occurred',
-        // stack: process.env.NODE_ENV === 'development' ? err.stack : undefined 
-    });
-});
-// --- Socket.io Setup ---
-const server = (0, http_1.createServer)(app);
-const io = new socket_io_1.Server(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST", "PATCH"]
-    }
-});
-io.on('connection', (socket) => {
-    console.log('Client connected:', socket.id);
-    socket.on('join_store', (storeId) => {
-        socket.join(`store_${storeId}`);
-    });
-});
-/**
- * GET /auth/merchant/profile
- * Securely fetches the complete merchant profile with signed URLs for private documents.
- * Header: Authorization: Bearer <token>
- */
-app.get('/auth/merchant/profile', async (req, res) => {
-    try {
-        const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return res.status(401).json({ error: 'Missing or invalid token' });
-        }
-        const token = authHeader.split(' ')[1];
-        // 1. Authenticate user from Supabase token (Zero-Trust)
-        const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
-        if (authError || !user) {
-            return res.status(401).json({ error: 'Invalid or expired token' });
-        }
-        const userId = user.id;
-        // 2. Fetch comprehensive merchant data via Prisma
-        const merchantData = await prisma.merchant.findUnique({
-            where: { id: userId },
-            include: {
-                branches: true,
-                subscriptions: {
-                    orderBy: { createdAt: 'desc' },
-                    take: 1
-                }
-            }
-        });
-        if (!merchantData) {
-            return res.status(404).json({ error: 'Merchant profile not found' });
-        }
-        // Fetch associated store (aligned with signup ID mapping)
-        const storeData = await prisma.store.findUnique({
-            where: { id: userId },
-            include: {
-                city: true
-            }
-        });
-        // 3. Generate Signed URLs for private document storage (1-hour expiry)
-        const signUrl = async (path) => {
-            if (!path)
-                return null;
-            // Use supabaseAdmin to bypass public access requirements
-            const { data, error } = await supabaseAdmin.storage
-                .from('merchant-docs')
-                .createSignedUrl(path, 3600);
-            return error ? null : data?.signedUrl;
-        };
-        const [panUrl, aadharFrontUrl, aadharBackUrl, msmeUrl, gstUrl, fssaiUrl] = await Promise.all([
-            signUrl(merchantData.panDocUrl),
-            signUrl(merchantData.aadharFrontUrl),
-            signUrl(merchantData.aadharBackUrl),
-            signUrl(merchantData.msmeCertificateUrl),
-            signUrl(merchantData.gstCertificateUrl),
-            signUrl(merchantData.fssaiCertificateUrl)
-        ]);
-        // 4. Clean, Flattened Response (Data Sanitization)
-        const profileResponse = {
-            id: merchantData.id,
-            ownerName: merchantData.ownerName,
-            email: merchantData.email,
-            phone: merchantData.phone,
-            status: merchantData.status,
-            kycStatus: merchantData.kycStatus,
-            store: storeData ? {
-                name: storeData.name,
-                address: storeData.address,
-                city: storeData.city?.name,
-                image: storeData.image,
-                active: storeData.active
-            } : null,
-            kyc: {
-                panNumber: merchantData.panNumber,
-                aadharNumber: merchantData.aadharNumber,
-                msmeNumber: merchantData.msmeNumber,
-                gstNumber: merchantData.gstNumber,
-                fssaiNumber: merchantData.fssaiNumber,
-                bankAccount: merchantData.bankAccountNumber,
-                ifsc: merchantData.ifscCode,
-                beneficiaryName: merchantData.bankBeneficiaryName,
-                docUrls: {
-                    pan: panUrl,
-                    aadharFront: aadharFrontUrl,
-                    aadharBack: aadharBackUrl,
-                    msme: msmeUrl,
-                    gst: gstUrl,
-                    fssai: fssaiUrl
-                }
-            },
-            branches: merchantData.branches.map(b => ({
-                id: b.id,
-                name: b.branchName,
-                manager: b.managerName,
-                phone: b.phone,
-                isActive: b.isActive
-            })),
-            subscription: merchantData.subscriptions[0] ? {
-                status: merchantData.subscriptions[0].status,
-                amount: merchantData.subscriptions[0].amount,
-                createdAt: merchantData.subscriptions[0].createdAt
-            } : null
-        };
-        res.json(profileResponse);
-    }
-    catch (error) {
-        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'auth.merchant.profile', extra: undefined, userMessage: 'Internal Server Error while fetching profile' });
-    }
-});
 // ════════════════════════════════════════════════════════════════════════════
 // Phase 7C/7E (2026-06-10) — Settlement endpoints.
 // Admin surface: close cycles, list/inspect, mark paid, manage commission
@@ -9236,6 +9090,152 @@ app.get('/merchant/settlements', async (req, res) => {
     }
     catch (error) {
         return (0, api_error_handler_1.handleApiError)(res, error, { area: 'settlements.merchant', userMessage: 'Failed to load settlements' });
+    }
+});
+// --- 404 Handler ---
+app.use((req, res, next) => {
+    res.status(404).json({ error: 'Endpoint not found', path: req.path });
+});
+// --- Sentry Express error handler ---
+// Per Sentry's Express SDK guidance, this MUST be registered after all
+// controllers + the 404 handler, and BEFORE any other error-handling middleware.
+// It does NOT swallow the error — control flows on to the global error handler
+// below, which still returns the JSON response to the client.
+Sentry.setupExpressErrorHandler(app);
+// --- Global Error Handler ---
+app.use((err, req, res, next) => {
+    console.error('[Global Error Handler]', err);
+    if (res.headersSent) {
+        return next(err);
+    }
+    // Force JSON response
+    res.status(500).json({
+        error: 'Internal Server Error',
+        message: err.message || 'An unexpected error occurred',
+        // stack: process.env.NODE_ENV === 'development' ? err.stack : undefined 
+    });
+});
+// --- Socket.io Setup ---
+const server = (0, http_1.createServer)(app);
+const io = new socket_io_1.Server(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST", "PATCH"]
+    }
+});
+io.on('connection', (socket) => {
+    console.log('Client connected:', socket.id);
+    socket.on('join_store', (storeId) => {
+        socket.join(`store_${storeId}`);
+    });
+});
+/**
+ * GET /auth/merchant/profile
+ * Securely fetches the complete merchant profile with signed URLs for private documents.
+ * Header: Authorization: Bearer <token>
+ */
+app.get('/auth/merchant/profile', async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ error: 'Missing or invalid token' });
+        }
+        const token = authHeader.split(' ')[1];
+        // 1. Authenticate user from Supabase token (Zero-Trust)
+        const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+        if (authError || !user) {
+            return res.status(401).json({ error: 'Invalid or expired token' });
+        }
+        const userId = user.id;
+        // 2. Fetch comprehensive merchant data via Prisma
+        const merchantData = await prisma.merchant.findUnique({
+            where: { id: userId },
+            include: {
+                branches: true,
+                subscriptions: {
+                    orderBy: { createdAt: 'desc' },
+                    take: 1
+                }
+            }
+        });
+        if (!merchantData) {
+            return res.status(404).json({ error: 'Merchant profile not found' });
+        }
+        // Fetch associated store (aligned with signup ID mapping)
+        const storeData = await prisma.store.findUnique({
+            where: { id: userId },
+            include: {
+                city: true
+            }
+        });
+        // 3. Generate Signed URLs for private document storage (1-hour expiry)
+        const signUrl = async (path) => {
+            if (!path)
+                return null;
+            // Use supabaseAdmin to bypass public access requirements
+            const { data, error } = await supabaseAdmin.storage
+                .from('merchant-docs')
+                .createSignedUrl(path, 3600);
+            return error ? null : data?.signedUrl;
+        };
+        const [panUrl, aadharFrontUrl, aadharBackUrl, msmeUrl, gstUrl, fssaiUrl] = await Promise.all([
+            signUrl(merchantData.panDocUrl),
+            signUrl(merchantData.aadharFrontUrl),
+            signUrl(merchantData.aadharBackUrl),
+            signUrl(merchantData.msmeCertificateUrl),
+            signUrl(merchantData.gstCertificateUrl),
+            signUrl(merchantData.fssaiCertificateUrl)
+        ]);
+        // 4. Clean, Flattened Response (Data Sanitization)
+        const profileResponse = {
+            id: merchantData.id,
+            ownerName: merchantData.ownerName,
+            email: merchantData.email,
+            phone: merchantData.phone,
+            status: merchantData.status,
+            kycStatus: merchantData.kycStatus,
+            store: storeData ? {
+                name: storeData.name,
+                address: storeData.address,
+                city: storeData.city?.name,
+                image: storeData.image,
+                active: storeData.active
+            } : null,
+            kyc: {
+                panNumber: merchantData.panNumber,
+                aadharNumber: merchantData.aadharNumber,
+                msmeNumber: merchantData.msmeNumber,
+                gstNumber: merchantData.gstNumber,
+                fssaiNumber: merchantData.fssaiNumber,
+                bankAccount: merchantData.bankAccountNumber,
+                ifsc: merchantData.ifscCode,
+                beneficiaryName: merchantData.bankBeneficiaryName,
+                docUrls: {
+                    pan: panUrl,
+                    aadharFront: aadharFrontUrl,
+                    aadharBack: aadharBackUrl,
+                    msme: msmeUrl,
+                    gst: gstUrl,
+                    fssai: fssaiUrl
+                }
+            },
+            branches: merchantData.branches.map(b => ({
+                id: b.id,
+                name: b.branchName,
+                manager: b.managerName,
+                phone: b.phone,
+                isActive: b.isActive
+            })),
+            subscription: merchantData.subscriptions[0] ? {
+                status: merchantData.subscriptions[0].status,
+                amount: merchantData.subscriptions[0].amount,
+                createdAt: merchantData.subscriptions[0].createdAt
+            } : null
+        };
+        res.json(profileResponse);
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'auth.merchant.profile', extra: undefined, userMessage: 'Internal Server Error while fetching profile' });
     }
 });
 // --- Server Start ---
