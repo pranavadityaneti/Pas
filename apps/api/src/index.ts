@@ -2622,8 +2622,11 @@ app.post('/orders', async (req, res) => {
             // above is THIS store's slice from the signed breakdown (used for
             // both the Order snapshot and the accumulating ledger row).
             // fingerprint dedups the single redemption row across the cart's N
-            // per-store POST /orders calls.
+            // per-store POST /orders calls. storeCount caps split_order_ids
+            // growth (re-audit fix R1 — a cart can never legitimately produce
+            // more orders than it has stores).
             fingerprint?: string;
+            storeCount?: number;
         } | null = null;
         const requireCouponToken = String(process.env.REQUIRE_COUPON_TOKEN || 'false').toLowerCase() === 'true';
 
@@ -2650,9 +2653,24 @@ app.post('/orders', async (req, res) => {
                     const rawSpids: Array<string | null> = (items || []).map((it: any) => (it?.storeProductId ? String(it.storeProductId) : null));
                     const hasMissingSpid = rawSpids.some((s) => s === null);
                     const orderSpidSet = new Set<string>(rawSpids.filter((s): s is string => !!s));
+                    // Phase 5 re-audit fix R3 (2026-06-10): bind QUANTITIES, not
+                    // just the product-id set. A stripped-quantity or padded order
+                    // must not book the signed slice. Tokens carry sorted
+                    // "spid:qty" pairs per entry; the order's items must produce
+                    // the identical multiset. Tokens minted before this deploy
+                    // lack spidQty — fall back to the spid-set match for the
+                    // 10-minute transition window.
+                    const orderSpidQtyKey = (items || [])
+                        .map((it: any) => `${it?.storeProductId ? String(it.storeProductId) : 'MISSING'}:${Number(it?.quantity) || 0}`)
+                        .sort()
+                        .join('|');
                     const matches = hasMissingSpid || orderSpidSet.size === 0
                         ? []
                         : (decoded.breakdown as any[]).filter((entry) => {
+                            if (Array.isArray(entry?.spidQty)) {
+                                const entryKey = entry.spidQty.map((s: any) => String(s)).sort().join('|');
+                                return entryKey === orderSpidQtyKey;
+                            }
                             if (!Array.isArray(entry?.storeProductIds)) return false;
                             const entrySet = new Set<string>(entry.storeProductIds.map((s: any) => String(s)));
                             if (entrySet.size !== orderSpidSet.size) return false;
@@ -2677,6 +2695,7 @@ app.post('/orders', async (req, res) => {
                             fundingSource: String(decoded.fundingSource || ''),
                             discountType: String(decoded.discountType || ''),
                             fingerprint: String(decoded.fingerprint),
+                            storeCount: (decoded.breakdown as any[]).length,
                         };
                     }
                 } else {
@@ -3019,16 +3038,26 @@ app.post('/orders', async (req, res) => {
                         await incrementCouponCounters();
                     } else {
                         // Phase 5 audit fix #5b (2026-06-10): append is now CHECKED.
-                        // affected = 0 means either an idempotent retry (orderId
-                        // already in the array — fine) or the row is unexpectedly
-                        // missing (Sentry-warn; do not fail the order).
+                        // affected = 0 means an idempotent retry (orderId already
+                        // in the array), a replay capped by R1 below, or the row
+                        // is unexpectedly missing (Sentry-warn; do not fail the
+                        // order).
+                        //
+                        // Re-audit fix R1 (2026-06-10): array growth is capped at
+                        // the signed breakdown's store count — a cart can never
+                        // legitimately produce more orders than it has stores, so
+                        // a scripted client replaying one non-expired token across
+                        // several full checkouts can no longer ride the append
+                        // path indefinitely.
+                        const storeCap = couponContext.storeCount ?? 1;
                         const appended = await tx.$executeRaw`
                             UPDATE "public"."coupon_redemptions"
                             SET "split_order_ids" = array_append("split_order_ids", ${createdOrder.id}),
                                 "discount_amount" = COALESCE("discount_amount", 0) + ${couponContext.discount}
                             WHERE "coupon_id" = ${couponContext.couponId}
                               AND "cart_fingerprint" = ${couponContext.fingerprint}
-                              AND NOT ("split_order_ids" @> ARRAY[${createdOrder.id}]::text[]);
+                              AND NOT ("split_order_ids" @> ARRAY[${createdOrder.id}]::text[])
+                              AND COALESCE(array_length("split_order_ids", 1), 0) < ${storeCap};
                         `;
                         if (appended === 0) {
                             const probe = await tx.couponRedemption.findFirst({
@@ -3037,8 +3066,9 @@ app.post('/orders', async (req, res) => {
                             });
                             const isIdempotentRetry = !!probe && probe.splitOrderIds.includes(createdOrder.id);
                             if (!isIdempotentRetry) {
-                                console.error(`[POST /orders] Phase 5 append affected 0 rows and order not present — ledger row missing? couponId=${couponContext.couponId} orderId=${createdOrder.id}`);
-                                try { Sentry.captureMessage('phase5: multi-store redemption append found no row', { level: 'warning', extra: { couponId: couponContext.couponId, orderId: createdOrder.id } }); } catch {}
+                                const cappedReplay = !!probe && probe.splitOrderIds.length >= storeCap;
+                                console.error(`[POST /orders] Phase 5 append rejected — ${cappedReplay ? 'split_order_ids at capacity (possible token replay)' : 'ledger row missing'} couponId=${couponContext.couponId} orderId=${createdOrder.id}`);
+                                try { Sentry.captureMessage(cappedReplay ? 'phase5: append rejected — capacity cap (possible token replay)' : 'phase5: multi-store redemption append found no row', { level: 'warning', extra: { couponId: couponContext.couponId, orderId: createdOrder.id, storeCap } }); } catch {}
                             }
                         }
                     }
@@ -5906,11 +5936,19 @@ app.post('/checkout/validate-coupon', async (req, res) => {
             branchId: string | null;
             storeId: string;
             storeProductIds: string[];
+            // Phase 5 re-audit fix R3 (2026-06-10): "spid:qty" pairs — signed
+            // into the token so POST /orders can bind quantities, not just the
+            // product-id set (a stripped-quantity order must not book the slice).
+            spidQty: string[];
             subtotal: number;
             discount: number;
         };
         let perStoreBreakdown: StoreSlice[] | null = null;
         let cartFingerprint: string | null = null;
+        // R2 (2026-06-10): for multi-store, the authoritative signed discount is
+        // the SUM of allocated slices (exact by construction), not the
+        // pre-allocation rounded figure.
+        let multiStoreSignedDiscount: number | null = null;
         if (hasCartItems && storeAttribution) {
             // Group items by branch (falls back to storeId when branch_id is
             // null) using SERVER-side attribution — never client input.
@@ -5921,10 +5959,11 @@ app.post('/checkout/validate-coupon', async (req, res) => {
                 const key = attr.branchId ?? attr.storeId;
                 let g = groups.get(key);
                 if (!g) {
-                    g = { branchId: attr.branchId, storeId: attr.storeId, storeProductIds: [], subtotal: 0, discount: 0 };
+                    g = { branchId: attr.branchId, storeId: attr.storeId, storeProductIds: [], spidQty: [], subtotal: 0, discount: 0 };
                     groups.set(key, g);
                 }
                 g.storeProductIds.push(spid);
+                g.spidQty.push(`${spid}:${Number(item?.quantity) || 0}`);
                 g.subtotal += (trustedPrices!.get(spid) || 0) * (Number(item?.quantity) || 0);
             }
 
@@ -5975,7 +6014,11 @@ app.post('/checkout/validate-coupon', async (req, res) => {
                 for (let round = 0; leftover > 0 && round < slices.length * 2; round++) {
                     for (const { i } of order) {
                         if (leftover <= 0) break;
-                        const capPaise = Math.floor(slices[i].subtotal * 100);
+                        // Phase 5 re-audit fix R2 (2026-06-10): Math.round, not
+                        // Math.floor — float-dirty subtotals (33.33*100 =
+                        // 3332.999…) under-computed caps by a paisa and stranded
+                        // 1-2 paise at the 100%-discount edge.
+                        const capPaise = Math.round(slices[i].subtotal * 100);
                         if (paise[i] < capPaise) {
                             paise[i] += 1;
                             leftover -= 1;
@@ -5986,6 +6029,18 @@ app.post('/checkout/validate-coupon', async (req, res) => {
                     slices[i].discount = paise[i] / 100;
                 }
                 perStoreBreakdown = slices;
+                // Phase 5 re-audit fix R2 (2026-06-10): the exact-sum invariant
+                // is now enforced BY CONSTRUCTION — the signed/charged total is
+                // the sum of the allocated slices, so the token discount, the
+                // client charge, and the per-order snapshots can never disagree
+                // even if cap-exhaustion strands paise. Observable via Sentry
+                // when it deviates from the pre-allocation total.
+                const allocatedTotal = paise.reduce((s, x) => s + x, 0) / 100;
+                if (leftover > 0 || Math.round(allocatedTotal * 100) !== totalPaise) {
+                    console.warn(`[validate-coupon] Phase 5 allocation residual: leftover=${leftover} paise, allocated=₹${allocatedTotal} vs requested=₹${roundedDiscount}`);
+                    try { Sentry.captureMessage('phase5: allocation residual paise', { level: 'warning', extra: { leftover, allocatedTotal, roundedDiscount } }); } catch {}
+                }
+                multiStoreSignedDiscount = allocatedTotal;
 
                 // Cart fingerprint — dedup key for the single CouponRedemption
                 // row that covers all of this cart's orders. Integrity comes from
@@ -6008,11 +6063,14 @@ app.post('/checkout/validate-coupon', async (req, res) => {
             }
         }
 
+        // R2 (2026-06-10): for multi-store carts the signed total is the exact
+        // sum of the allocated slices.
+        const signedDiscount = multiStoreSignedDiscount ?? roundedDiscount;
         const tokenPayload: Record<string, any> = {
             couponId: coupon.id,
             userId,
             cartHash,
-            discount: roundedDiscount,
+            discount: signedDiscount,
             fundingSource: coupon.fundingSource,
             discountType: coupon.discountType,
             exp: Math.floor(Date.now() / 1000) + 10 * 60,
@@ -6021,10 +6079,14 @@ app.post('/checkout/validate-coupon', async (req, res) => {
         if (perStoreBreakdown) {
             // Phase 5 — multi-store fields. Single-store tokens stay byte-
             // compatible with Phase 4 (no new fields) for backward compat.
+            // R3 (2026-06-10): spidQty (sorted "spid:qty" pairs) binds
+            // quantities into the signed entry so POST /orders can verify the
+            // order's items, not just its product-id set.
             tokenPayload.breakdown = perStoreBreakdown.map((s) => ({
                 branchId: s.branchId,
                 storeId: s.storeId,
                 storeProductIds: s.storeProductIds,
+                spidQty: [...s.spidQty].sort(),
                 subtotal: Math.round(s.subtotal * 100) / 100,
                 discount: s.discount,
             }));
@@ -6036,7 +6098,8 @@ app.post('/checkout/validate-coupon', async (req, res) => {
             valid: true,
             couponId: coupon.id,
             code: coupon.code,
-            discount: roundedDiscount,
+            // R2 (2026-06-10): exact sum of slices for multi-store carts.
+            discount: signedDiscount,
             discountType: coupon.discountType,
             discountValue: coupon.discountValue,
             maxDiscountCap: coupon.maxDiscountCap,
