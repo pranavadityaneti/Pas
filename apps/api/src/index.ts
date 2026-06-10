@@ -2618,13 +2618,12 @@ app.post('/orders', async (req, res) => {
             discount: number;
             fundingSource: string;
             discountType: string;
-            // Phase 5 (2026-06-09) — set only for multi-store carts. totalDiscount
-            // is the full signed cart discount (the redemption ledger row's
-            // discountAmount); `discount` above is THIS store's slice (the Order
-            // snapshot). fingerprint dedups the single redemption row across the
-            // cart's N per-store POST /orders calls.
+            // Phase 5 (2026-06-09) — set only for multi-store carts. `discount`
+            // above is THIS store's slice from the signed breakdown (used for
+            // both the Order snapshot and the accumulating ledger row).
+            // fingerprint dedups the single redemption row across the cart's N
+            // per-store POST /orders calls.
             fingerprint?: string;
-            totalDiscount?: number;
         } | null = null;
         const requireCouponToken = String(process.env.REQUIRE_COUPON_TOKEN || 'false').toLowerCase() === 'true';
 
@@ -2642,20 +2641,32 @@ app.post('/orders', async (req, res) => {
                     // matching: every item in this order must belong to exactly
                     // one breakdown entry's storeProductIds (signed data). That
                     // entry's slice becomes this Order's snapshot discount.
-                    const orderSpids: string[] = (items || [])
-                        .map((it: any) => (it?.storeProductId ? String(it.storeProductId) : null))
-                        .filter((s: string | null): s is string => !!s);
-                    const matches = (decoded.breakdown as any[]).filter((entry) =>
-                        orderSpids.length > 0 &&
-                        Array.isArray(entry?.storeProductIds) &&
-                        orderSpids.every((spid) => entry.storeProductIds.includes(spid))
-                    );
+                    // Phase 5 audit fold-in (2026-06-10): EXACT-set matching, not
+                    // subset. The order's storeProductIds must equal one breakdown
+                    // entry's set exactly — a partial-store order (item removed
+                    // after validation) no longer silently matches and understates.
+                    // Items missing storeProductId count as a match failure (the
+                    // previous filter silently dropped them before matching).
+                    const rawSpids: Array<string | null> = (items || []).map((it: any) => (it?.storeProductId ? String(it.storeProductId) : null));
+                    const hasMissingSpid = rawSpids.some((s) => s === null);
+                    const orderSpidSet = new Set<string>(rawSpids.filter((s): s is string => !!s));
+                    const matches = hasMissingSpid || orderSpidSet.size === 0
+                        ? []
+                        : (decoded.breakdown as any[]).filter((entry) => {
+                            if (!Array.isArray(entry?.storeProductIds)) return false;
+                            const entrySet = new Set<string>(entry.storeProductIds.map((s: any) => String(s)));
+                            if (entrySet.size !== orderSpidSet.size) return false;
+                            for (const spid of orderSpidSet) {
+                                if (!entrySet.has(spid)) return false;
+                            }
+                            return true;
+                        });
                     if (matches.length !== 1) {
                         if (requireCouponToken) {
                             return res.status(400).json({ error: 'Cart changed since coupon was applied — please re-apply' });
                         }
-                        console.warn(`[POST /orders] Phase 5 multi-store breakdown match failed (${matches.length} matches, ${orderSpids.length} spids) — proceeding WITHOUT coupon. Will reject when REQUIRE_COUPON_TOKEN=true. userId=${userId}`);
-                        try { Sentry.captureMessage('phase5: multi-store breakdown match failed', { level: 'warning', extra: { userId, orderSpids, matchCount: matches.length } }); } catch {}
+                        console.warn(`[POST /orders] Phase 5 multi-store breakdown match failed (${matches.length} matches, ${orderSpidSet.size} spids, missingSpid=${hasMissingSpid}) — proceeding WITHOUT coupon. Will reject when REQUIRE_COUPON_TOKEN=true. userId=${userId}`);
+                        try { Sentry.captureMessage('phase5: multi-store breakdown match failed', { level: 'warning', extra: { userId, orderSpids: Array.from(orderSpidSet), hasMissingSpid, matchCount: matches.length } }); } catch {}
                         // No couponContext — order is created without a discount
                         // snapshot (mirrors the legacy no-token behavior).
                     } else {
@@ -2666,7 +2677,6 @@ app.post('/orders', async (req, res) => {
                             fundingSource: String(decoded.fundingSource || ''),
                             discountType: String(decoded.discountType || ''),
                             fingerprint: String(decoded.fingerprint),
-                            totalDiscount: Number(decoded.discount) || 0,
                         };
                     }
                 } else {
@@ -2984,13 +2994,19 @@ app.post('/orders', async (req, res) => {
                     // counters ONCE; every other store-order appends its orderId
                     // to split_order_ids (deduped in-statement, so client retries
                     // can't double-append).
+                    // Phase 5 audit fold-in (2026-06-10): discount_amount ACCUMULATES
+                    // per order slice instead of front-loading the full cart total on
+                    // the first INSERT. The ledger row's discountAmount now always
+                    // equals the sum of the slices of orders actually placed — exact
+                    // and symmetric with the Q5 partial-reversal subtraction, and it
+                    // never overstates when a sibling store's POST /orders fails.
                     const inserted = await tx.$queryRaw<{ id: string }[]>`
                         INSERT INTO "public"."coupon_redemptions"
                             ("coupon_id", "user_id", "discount_amount", "funding_source", "split_order_ids", "cart_fingerprint")
                         VALUES (
                             ${couponContext.couponId},
                             ${userId}::uuid,
-                            ${couponContext.totalDiscount ?? couponContext.discount},
+                            ${couponContext.discount},
                             ${couponContext.fundingSource},
                             ARRAY[${createdOrder.id}]::text[],
                             ${couponContext.fingerprint}
@@ -3002,13 +3018,29 @@ app.post('/orders', async (req, res) => {
                     if (inserted.length > 0) {
                         await incrementCouponCounters();
                     } else {
-                        await tx.$executeRaw`
+                        // Phase 5 audit fix #5b (2026-06-10): append is now CHECKED.
+                        // affected = 0 means either an idempotent retry (orderId
+                        // already in the array — fine) or the row is unexpectedly
+                        // missing (Sentry-warn; do not fail the order).
+                        const appended = await tx.$executeRaw`
                             UPDATE "public"."coupon_redemptions"
-                            SET "split_order_ids" = array_append("split_order_ids", ${createdOrder.id})
+                            SET "split_order_ids" = array_append("split_order_ids", ${createdOrder.id}),
+                                "discount_amount" = COALESCE("discount_amount", 0) + ${couponContext.discount}
                             WHERE "coupon_id" = ${couponContext.couponId}
                               AND "cart_fingerprint" = ${couponContext.fingerprint}
                               AND NOT ("split_order_ids" @> ARRAY[${createdOrder.id}]::text[]);
                         `;
+                        if (appended === 0) {
+                            const probe = await tx.couponRedemption.findFirst({
+                                where: { couponId: couponContext.couponId, cartFingerprint: couponContext.fingerprint },
+                                select: { id: true, splitOrderIds: true },
+                            });
+                            const isIdempotentRetry = !!probe && probe.splitOrderIds.includes(createdOrder.id);
+                            if (!isIdempotentRetry) {
+                                console.error(`[POST /orders] Phase 5 append affected 0 rows and order not present — ledger row missing? couponId=${couponContext.couponId} orderId=${createdOrder.id}`);
+                                try { Sentry.captureMessage('phase5: multi-store redemption append found no row', { level: 'warning', extra: { couponId: couponContext.couponId, orderId: createdOrder.id } }); } catch {}
+                            }
+                        }
                     }
                 } else {
                     // ── Single-store path — unchanged Phase 2F semantics ──
@@ -4343,65 +4375,87 @@ app.post('/orders/:id/cancel', async (req, res) => {
                 // reversal, mirroring the single-store semantics above.
                 const multiRedemption = await tx.couponRedemption.findFirst({
                     where: { splitOrderIds: { has: id }, userId: order.userId },
+                    select: { id: true, couponId: true, createdAt: true },
                 });
                 if (multiRedemption) {
-                    const remaining = multiRedemption.splitOrderIds.filter((oid) => oid !== id);
                     const orderSliceDiscount = Number((order as any).orderCouponDiscount ?? 0);
-                    if (remaining.length === 0) {
-                        await tx.couponRedemption.delete({ where: { id: multiRedemption.id } });
-                        await tx.coupon.updateMany({
-                            where: { id: multiRedemption.couponId, usedCount: { gte: 1 } },
-                            data: { usedCount: { decrement: 1 } },
-                        });
-                        const nowM = new Date();
-                        const istNowM = new Date(nowM.getTime() + (5.5 * 60 * 60 * 1000));
-                        const istMidnightUtcMsM = Date.UTC(istNowM.getUTCFullYear(), istNowM.getUTCMonth(), istNowM.getUTCDate(), 0, 0, 0, 0) - (5.5 * 60 * 60 * 1000);
-                        const istMidnightTodayM = new Date(istMidnightUtcMsM);
-                        if (multiRedemption.createdAt >= istMidnightTodayM) {
-                            await tx.coupon.updateMany({
-                                where: { id: multiRedemption.couponId, dailyUsageCount: { gte: 1 } },
-                                data: { dailyUsageCount: { decrement: 1 } },
+                    // Phase 5 audit fix #5 (2026-06-10): the shrink is now atomic
+                    // IN-STATEMENT (array_remove + GREATEST guard, conditioned on
+                    // the orderId still being present), mirroring the append path.
+                    // The previous read-modify-write lost updates under concurrent
+                    // cancels of two different orders from the same cart: both read
+                    // [o1,o2], the loser overwrote with stale values, the row never
+                    // emptied, and counters never decremented.
+                    const shrunk = await tx.$queryRaw<{ split_order_ids: string[] }[]>`
+                        UPDATE "public"."coupon_redemptions"
+                        SET "split_order_ids" = array_remove("split_order_ids", ${id}),
+                            "discount_amount" = GREATEST(0, COALESCE("discount_amount", 0) - ${orderSliceDiscount})
+                        WHERE "id" = ${multiRedemption.id}
+                          AND "split_order_ids" @> ARRAY[${id}]::text[]
+                        RETURNING "split_order_ids";
+                    `;
+                    if (shrunk.length > 0) {
+                        const remainingCount = shrunk[0].split_order_ids.length;
+                        if (remainingCount === 0) {
+                            // Last order of the cart cancelled — full reversal.
+                            // deleteMany guarded on isEmpty so a concurrent append
+                            // (shouldn't happen post-cancel, but defensive) can't
+                            // have its orderId deleted out from under it.
+                            const deleted = await tx.couponRedemption.deleteMany({
+                                where: { id: multiRedemption.id, splitOrderIds: { isEmpty: true } },
                             });
+                            if (deleted.count > 0) {
+                                await tx.coupon.updateMany({
+                                    where: { id: multiRedemption.couponId, usedCount: { gte: 1 } },
+                                    data: { usedCount: { decrement: 1 } },
+                                });
+                                const nowM = new Date();
+                                const istNowM = new Date(nowM.getTime() + (5.5 * 60 * 60 * 1000));
+                                const istMidnightUtcMsM = Date.UTC(istNowM.getUTCFullYear(), istNowM.getUTCMonth(), istNowM.getUTCDate(), 0, 0, 0, 0) - (5.5 * 60 * 60 * 1000);
+                                const istMidnightTodayM = new Date(istMidnightUtcMsM);
+                                if (multiRedemption.createdAt >= istMidnightTodayM) {
+                                    await tx.coupon.updateMany({
+                                        where: { id: multiRedemption.couponId, dailyUsageCount: { gte: 1 } },
+                                        data: { dailyUsageCount: { decrement: 1 } },
+                                    });
+                                }
+                            }
                         }
-                    } else {
-                        const newDiscountAmount = Math.max(0, Number(multiRedemption.discountAmount ?? 0) - orderSliceDiscount);
-                        await tx.couponRedemption.update({
-                            where: { id: multiRedemption.id },
-                            data: { splitOrderIds: remaining, discountAmount: newDiscountAmount },
-                        });
-                    }
-                    // Clear this Order's coupon snapshot (mirrors single-store path).
-                    await tx.order.update({
-                        where: { id },
-                        data: {
-                            orderCouponId: null,
-                            orderCouponCode: null,
-                            orderCouponDiscount: null,
-                            orderCouponFundingSource: null,
-                            orderCouponDiscountType: null,
-                        },
-                    });
-                    try {
-                        await tx.auditLog.create({
+                        // Clear this Order's coupon snapshot (mirrors single-store path).
+                        await tx.order.update({
+                            where: { id },
                             data: {
-                                actorUserId: user.id,
-                                action: 'coupon.redemption_reversed',
-                                targetType: 'coupon',
-                                targetId: multiRedemption.couponId,
-                                beforeJson: {
-                                    orderId: id,
-                                    orderOwnerUserId: order.userId,
-                                    multiStore: true,
-                                    partial: remaining.length > 0,
-                                    remainingOrders: remaining.length,
-                                    reversedSlice: orderSliceDiscount,
-                                } as any,
-                                afterJson: undefined,
+                                orderCouponId: null,
+                                orderCouponCode: null,
+                                orderCouponDiscount: null,
+                                orderCouponFundingSource: null,
+                                orderCouponDiscountType: null,
                             },
                         });
-                    } catch (auditErr) {
-                        console.error('[Phase 5 reversal audit log] failed:', auditErr);
+                        try {
+                            await tx.auditLog.create({
+                                data: {
+                                    actorUserId: user.id,
+                                    action: 'coupon.redemption_reversed',
+                                    targetType: 'coupon',
+                                    targetId: multiRedemption.couponId,
+                                    beforeJson: {
+                                        orderId: id,
+                                        orderOwnerUserId: order.userId,
+                                        multiStore: true,
+                                        partial: remainingCount > 0,
+                                        remainingOrders: remainingCount,
+                                        reversedSlice: orderSliceDiscount,
+                                    } as any,
+                                    afterJson: undefined,
+                                },
+                            });
+                        } catch (auditErr) {
+                            console.error('[Phase 5 reversal audit log] failed:', auditErr);
+                        }
                     }
+                    // shrunk.length === 0 → a concurrent cancel already removed this
+                    // orderId — idempotent no-op (snapshot already cleared by it).
                 }
 
                 // Re-fetch the row we just CAS-updated so the rest of the
@@ -5896,29 +5950,60 @@ app.post('/checkout/validate-coupon', async (req, res) => {
                     }
                 }
 
-                // Proportional allocation. round-half-up to ₹0.01 per store;
-                // the LAST store absorbs the rounding residual so the slices
-                // always sum exactly to the total signed discount.
+                // Proportional allocation — largest-remainder method, in paise.
+                //
+                // Phase 5 audit fix #3 (2026-06-10): the previous "round each
+                // slice, last store absorbs residual" could sign a NEGATIVE last
+                // slice (repro: FLAT ₹1.99 over subtotals [100,100,100,100,1] →
+                // [0.50,0.50,0.50,0.50,−0.01]). Largest-remainder guarantees:
+                // every slice >= 0, slices sum EXACTLY to the signed total, and
+                // the leftover paise go to the largest fractional remainders
+                // (with per-store subtotal headroom respected) instead of an
+                // arbitrary last store.
                 const slices = Array.from(groups.values());
                 const totalSubtotal = slices.reduce((s, g) => s + g.subtotal, 0);
-                let allocated = 0;
-                for (let i = 0; i < slices.length; i++) {
-                    if (i === slices.length - 1) {
-                        slices[i].discount = Math.round((roundedDiscount - allocated) * 100) / 100;
-                    } else {
-                        const share = totalSubtotal > 0 ? slices[i].subtotal / totalSubtotal : 0;
-                        slices[i].discount = Math.round(roundedDiscount * share * 100) / 100;
-                        allocated += slices[i].discount;
+                const totalPaise = Math.round(roundedDiscount * 100);
+                const exact = slices.map((g) => (totalSubtotal > 0 ? (totalPaise * g.subtotal) / totalSubtotal : 0));
+                const floors = exact.map((x) => Math.floor(x));
+                let leftover = totalPaise - floors.reduce((s, x) => s + x, 0);
+                // Hand out leftover paise to the largest fractional remainders,
+                // skipping stores already at their subtotal cap.
+                const order = exact
+                    .map((x, i) => ({ i, frac: x - Math.floor(x) }))
+                    .sort((a, b) => b.frac - a.frac);
+                const paise = floors.slice();
+                for (let round = 0; leftover > 0 && round < slices.length * 2; round++) {
+                    for (const { i } of order) {
+                        if (leftover <= 0) break;
+                        const capPaise = Math.floor(slices[i].subtotal * 100);
+                        if (paise[i] < capPaise) {
+                            paise[i] += 1;
+                            leftover -= 1;
+                        }
                     }
+                }
+                for (let i = 0; i < slices.length; i++) {
+                    slices[i].discount = paise[i] / 100;
                 }
                 perStoreBreakdown = slices;
 
-                // Deterministic cart fingerprint — dedup key for the single
-                // CouponRedemption row that covers all of this cart's orders.
-                // Integrity comes from the token signature (the fingerprint is
-                // inside the signed payload), so a plain SHA-256 suffices.
+                // Cart fingerprint — dedup key for the single CouponRedemption
+                // row that covers all of this cart's orders. Integrity comes from
+                // the token signature (the fingerprint is inside the signed
+                // payload), so a plain SHA-256 suffices.
+                //
+                // Phase 5 audit fix #1 (2026-06-10): a per-validation random nonce
+                // (jti) is folded into the hash. Without it, re-ordering the
+                // IDENTICAL cart with the same coupon days later produced the SAME
+                // fingerprint — the second checkout's INSERT hit ON CONFLICT, took
+                // the append path, and usedCount/dailyUsageCount/perCustomerLimit
+                // never incremented (full usage-limit bypass with the stock app).
+                // One checkout = one token = one jti = one fingerprint; retries of
+                // the same checkout's N per-store orders still dedup onto one row,
+                // while distinct checkouts can never collide.
+                const fingerprintJti = crypto.randomUUID();
                 cartFingerprint = crypto.createHash('sha256')
-                    .update(`${coupon.id}|${userId}|${cartHash}`)
+                    .update(`${coupon.id}|${userId}|${cartHash}|${fingerprintJti}`)
                     .digest('hex');
             }
         }
@@ -5959,10 +6044,13 @@ app.post('/checkout/validate-coupon', async (req, res) => {
             fundingSource: coupon.fundingSource,
             minOrder: coupon.minOrder ?? null,
             validationToken,
-            // Phase 5 — present only for multi-store carts.
+            // Phase 5 — present only for multi-store carts. storeProductIds is
+            // included so the client can match each per-store order to its slice
+            // with the SAME currency the server uses (audit fix #4 — the client
+            // must use this split, never recompute its own).
             multiStore: !!perStoreBreakdown,
             perStoreBreakdown: perStoreBreakdown
-                ? perStoreBreakdown.map((s) => ({ branchId: s.branchId, storeId: s.storeId, subtotal: Math.round(s.subtotal * 100) / 100, discount: s.discount }))
+                ? perStoreBreakdown.map((s) => ({ branchId: s.branchId, storeId: s.storeId, storeProductIds: s.storeProductIds, subtotal: Math.round(s.subtotal * 100) / 100, discount: s.discount }))
                 : undefined,
         });
         } catch (error: any) {

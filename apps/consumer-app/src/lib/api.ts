@@ -262,13 +262,17 @@ export interface ValidateCouponSuccess {
     /** Phase 5 (2026-06-09) — true when the cart spans >1 store. */
     multiStore?: boolean;
     /**
-     * Phase 5 — per-store discount split (display/diagnostic only client-side;
-     * the authoritative copy is inside the signed validationToken, which POST
-     * /orders reads directly).
+     * Phase 5 — per-store discount split. Phase 5 audit fix #4 (2026-06-10):
+     * this is the AUTHORITATIVE split the client must use for per-order
+     * totalAmount math in handlePaymentSuccess (matched by storeProductIds —
+     * the same currency the server's POST /orders matching uses). Never
+     * recompute a client-side proportional split; it drifts from the signed
+     * server slices by up to ~₹0.50/store.
      */
     perStoreBreakdown?: Array<{
         branchId: string | null;
         storeId: string;
+        storeProductIds: string[];
         subtotal: number;
         discount: number;
     }>;

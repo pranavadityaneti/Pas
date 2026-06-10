@@ -579,11 +579,53 @@ export default function CheckoutScreen() {
             const actualSubtotal = acceptedRequests.reduce((sum: number, r: any) => sum + r.subtotal, 0);
             const createdOrders: any[] = [];
 
+            // Phase 5 audit fix #4 (2026-06-10): the per-store discount comes from
+            // the SERVER's signed perStoreBreakdown (matched by storeProductIds —
+            // the same currency the server's POST /orders matching uses), never a
+            // client-side proportional recompute. The old Math.round(discount *
+            // share) used whole-rupee rounding with no residual absorption and
+            // drifted from the signed slices by up to ~₹0.50/store, making
+            // Order.totalAmount and Order.orderCouponDiscount disagree on the
+            // same row. cartItemsByProductId resolves req item ids → cart
+            // storeProductIds (acceptedRequests strip the field).
+            const orderCartItemsById = new Map(items.map((ci) => [String(ci.id), ci]));
+            const couponBreakdown = appliedCoupon?.perStoreBreakdown;
+
             for (let i = 0; i < acceptedRequests.length; i++) {
                 const req = acceptedRequests[i];
                 const share = req.subtotal / (actualSubtotal || 1);
                 const groupGst = Math.round(finalGstToPay * share);
-                const groupDiscount = Math.round(discount * share);
+                let groupDiscount = 0;
+                if (appliedCoupon) {
+                    if (couponBreakdown && couponBreakdown.length > 0) {
+                        // Multi-store: exact storeProductId-set match against the
+                        // signed breakdown — identical to the server's matching.
+                        const reqSpids = new Set(
+                            (req.items || [])
+                                .map((it: any) => orderCartItemsById.get(String(it.id))?.storeProductId)
+                                .filter(Boolean)
+                                .map(String)
+                        );
+                        const entry = couponBreakdown.find(
+                            (b) =>
+                                Array.isArray(b.storeProductIds) &&
+                                b.storeProductIds.length === reqSpids.size &&
+                                b.storeProductIds.every((s) => reqSpids.has(String(s)))
+                        );
+                        if (entry) {
+                            groupDiscount = entry.discount;
+                        } else {
+                            // Should be impossible after confirmAccepted's accepted-
+                            // subset re-validation — fail loud, apply NO discount to
+                            // this order (the server will make the same decision).
+                            console.error(`[CheckoutScreen] Phase 5: no breakdown entry matched store ${req.store_id} — order proceeds without a discount slice`);
+                            groupDiscount = 0;
+                        }
+                    } else {
+                        // Single-store coupon: full signed discount, exact paise.
+                        groupDiscount = appliedCoupon.discount;
+                    }
+                }
                 const groupFinalTotal = Math.max(0, req.subtotal + groupGst - groupDiscount);
 
                 const storeIdStr = String(req.store_id);
@@ -834,59 +876,61 @@ export default function CheckoutScreen() {
             // acceptedRequests[].items where useOrderRequests.createRequests
             // strips the field. Match by product id (cart item .id == order
             // request item .id, both come from the same upstream feed).
+            // Phase 5 audit fix #2 (2026-06-10): the coupon must be re-validated
+            // against ONLY the accepted stores' items whenever the accepted set
+            // differs from the cart the coupon was validated on (a store rejected,
+            // or the cart drifted) — not just when the token nears expiry.
+            // Without this, a rejected store's slice stayed in the charged
+            // discount: 2-store cart A=600/B=400 with a 10% coupon (signed ₹100),
+            // B rejects → customer was charged −₹100 though entitled to −₹60.
+            let effectiveDiscount = appliedCoupon?.discount ?? 0;
             if (appliedCoupon) {
                 const cartItemsByProductId = new Map(
                     items.map((ci) => [String(ci.id), ci])
                 );
-                const orderItemsFlat = acceptedRequests.flatMap((req: any) =>
+                // Accepted-subset items, with storeProductId sourced from
+                // CartContext (durable post-C1; acceptedRequests strip the field).
+                const acceptedItems = acceptedRequests.flatMap((req: any) =>
                     (req.items || []).map((it: any) => {
                         const cartMatch = cartItemsByProductId.get(String(it.id));
                         return {
-                            storeProductId: cartMatch?.storeProductId ?? null,
-                            storeId: req.store_id,
+                            storeProductId: cartMatch?.storeProductId ? String(cartMatch.storeProductId) : null,
+                            storeId: String(req.store_id),
+                            quantity: Number(it.quantity) || 0,
+                            price: Number(it.price) || 0,
+                            id: String(it.id),
+                            name: String(it.name || ''),
                         };
                     })
                 );
-                const elig = checkCouponOrderEligibility(orderItemsFlat, appliedCoupon);
+                const elig = checkCouponOrderEligibility(acceptedItems, appliedCoupon);
                 if (!elig.ok) {
                     clearAppliedCoupon();
                     Alert.alert('Coupon removed', elig.reason!);
                     return;
                 }
-            }
-            // Phase 4: removed legacy AVAILABLE_COUPONS minOrder check — the
-            // server's /checkout/validate-coupon (Phase 2L) now enforces minOrder
-            // against the server-trusted cart total. If a customer's cart drops
-            // below minOrder after applying, the next interaction with the cart
-            // auto-clears appliedCoupon (see CartContext.tsx Phase 4 changes),
-            // so no client-side mirror check is needed.
-            //
-            // Phase 4H (2026-06-09): if the coupon token is within 60s of expiry,
-            // re-validate before the Razorpay payment order is created. Prevents
-            // the customer being charged the full amount and then the server (Phase
-            // 2F) rejecting the stale token. On re-validate failure, the coupon is
-            // dropped and the customer is informed BEFORE payment is initiated.
-            let effectiveDiscount = appliedCoupon?.discount ?? 0;
-            if (appliedCoupon && appliedCoupon.expiresAt - 60 < Math.floor(Date.now() / 1000)) {
-                const itemsWithProductId = items.every((ci) => !!ci.storeProductId);
-                if (!itemsWithProductId) {
-                    // Cart has legacy items lacking storeProductId — can't safely
-                    // re-validate. Drop the coupon defensively.
-                    clearAppliedCoupon();
-                    effectiveDiscount = 0;
-                    Alert.alert(
-                        'Coupon removed',
-                        'Your cart was updated. Proceeding without the discount.'
-                    );
-                } else {
-                    const reValidatePayload: ValidateCouponCartItem[] = items.map((ci) => ({
-                        storeProductId: String(ci.storeProductId),
-                        quantity: ci.quantity,
-                        price: ci.price,
-                        id: ci.id,
-                        name: ci.name,
+                // Does the accepted set differ from the full cart the token was
+                // signed over? Compare storeProductId multisets.
+                const cartSpidKey = items
+                    .map((ci) => `${ci.storeProductId}:${ci.quantity}`)
+                    .sort()
+                    .join('|');
+                const acceptedSpidKey = acceptedItems
+                    .map((it: any) => `${it.storeProductId}:${it.quantity}`)
+                    .sort()
+                    .join('|');
+                const acceptedSetChanged = cartSpidKey !== acceptedSpidKey;
+                const nearExpiry = appliedCoupon.expiresAt - 60 < Math.floor(Date.now() / 1000);
+
+                if (acceptedSetChanged || nearExpiry) {
+                    const reValidatePayload: ValidateCouponCartItem[] = acceptedItems.map((it: any) => ({
+                        storeProductId: String(it.storeProductId),
+                        quantity: it.quantity,
+                        price: it.price,
+                        id: it.id,
+                        name: it.name,
                     }));
-                    const reValidateStoreIds = Array.from(new Set(items.map((ci) => String(ci.storeId))));
+                    const reValidateStoreIds = Array.from(new Set(acceptedItems.map((it: any) => it.storeId)));
                     const reValidate = await validateCoupon({
                         code: appliedCoupon.code,
                         cartItems: reValidatePayload,
@@ -897,11 +941,15 @@ export default function CheckoutScreen() {
                         clearAppliedCoupon();
                         effectiveDiscount = 0;
                         Alert.alert(
-                            'Coupon expired',
+                            'Coupon removed',
                             `${reValidate.error} Proceeding without the discount.`
                         );
                     } else {
-                        // Refresh CartContext with the new server-signed token.
+                        // Refresh CartContext with the token signed over the
+                        // ACCEPTED subset — handlePaymentSuccess sends this token
+                        // and consumes its breakdown, so the charge, the per-order
+                        // totals, and the server snapshots all derive from the
+                        // same signed numbers.
                         setAppliedCoupon({
                             code: reValidate.code,
                             couponId: reValidate.couponId,
@@ -911,6 +959,8 @@ export default function CheckoutScreen() {
                             validationToken: reValidate.validationToken,
                             expiresAt: reValidate.expiresAt,
                             cartHash: '',
+                            multiStore: reValidate.multiStore,
+                            perStoreBreakdown: reValidate.perStoreBreakdown ?? null,
                         });
                         effectiveDiscount = reValidate.discount;
                     }

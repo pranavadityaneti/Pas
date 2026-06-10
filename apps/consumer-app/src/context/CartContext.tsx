@@ -60,6 +60,21 @@ export interface AppliedCoupon {
     expiresAt: number;
     /** For diagnostics only — server recomputes its own cartHash. */
     cartHash: string;
+    /** Phase 5 (2026-06-10) — true when the validated cart spans >1 store. */
+    multiStore?: boolean;
+    /**
+     * Phase 5 — the server's authoritative per-store discount split. The
+     * checkout per-store order loop MUST take each store's slice from here
+     * (matched by storeProductIds), never recompute its own proportional
+     * split (Phase 5 audit fix #4).
+     */
+    perStoreBreakdown?: Array<{
+        branchId: string | null;
+        storeId: string;
+        storeProductIds: string[];
+        subtotal: number;
+        discount: number;
+    }> | null;
 }
 
 interface CartContextType {

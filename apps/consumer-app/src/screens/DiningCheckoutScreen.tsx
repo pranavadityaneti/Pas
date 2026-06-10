@@ -496,6 +496,11 @@ export default function DiningCheckoutScreen() {
                         validationToken: reValidate.validationToken,
                         expiresAt: reValidate.expiresAt,
                         cartHash: '',
+                        // Phase 5 (2026-06-10) — dining is structurally single-store
+                        // so these are effectively false/null; threaded for contract
+                        // uniformity with CheckoutScreen.
+                        multiStore: reValidate.multiStore,
+                        perStoreBreakdown: reValidate.perStoreBreakdown ?? null,
                     });
                     effectiveDiscount = reValidate.discount;
                 }

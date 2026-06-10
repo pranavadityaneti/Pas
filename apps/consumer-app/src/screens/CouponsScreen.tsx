@@ -161,6 +161,10 @@ export default function CouponsScreen() {
           // cartHash is server-recomputed; we don't have access to the signed
           // payload here. Empty string is fine — it's diagnostic-only client-side.
           cartHash: '',
+          // Phase 5 (2026-06-10) — authoritative per-store split for the
+          // checkout's per-order totalAmount math (audit fix #4).
+          multiStore: result.multiStore,
+          perStoreBreakdown: result.perStoreBreakdown ?? null,
         });
         // Hand off to the returnTo checkout screen. Checkout lives 3 navigators deep
         // (Root → Main(tabs) → Cart(tab) → CartStack → Checkout), so a flat

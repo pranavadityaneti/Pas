@@ -131,6 +131,9 @@ export default function OffersScreen() {
                 validationToken: result.validationToken,
                 expiresAt: result.expiresAt,
                 cartHash: '',
+                // Phase 5 (2026-06-10) — authoritative per-store split (audit fix #4).
+                multiStore: result.multiStore,
+                perStoreBreakdown: result.perStoreBreakdown ?? null,
             });
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             // Navigate to Cart so the customer sees the discount applied.
