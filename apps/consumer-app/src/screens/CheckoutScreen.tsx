@@ -30,6 +30,13 @@
 //      touch session-recovery (layer 2), errorDiagnostic (layer 3), apiClient.fetch
 //      URL paths or effectiveUser resolution (layer 4), or executeCancelOrder
 //      (layer 5).
+//   7. Phase 5 multi-store coupon lift approved 2026-06-09 (plan approved with
+//      Q1-Q5 decisions). Apply Coupon row's multi-store disable removed — the
+//      server now signs a per-store discount breakdown into the validation
+//      token and POST /orders snapshots each store's slice. The eligibility
+//      gate at confirmAccepted keeps the storeProductId invariant but no
+//      longer rejects multi-store carts. Does NOT touch layers 1-5; layer 6's
+//      CartContext-sourced storeProductId lookup is unchanged.
 // Any modification to the checkout flow, error UI, or session-handling logic
 // REQUIRES the user's explicit chat-confirmed approval. Hard lock.
 // Confirm Pre-order Screen: Order review with arrival details → Order confirmed with OTP.
@@ -1309,40 +1316,32 @@ export default function CheckoutScreen() {
                 </View>
 
                 {/* Phase 4 fix B1 (2026-06-09): Apply Coupon entry-point row.
-                    Re-fixed 2026-06-09 evening: (a) restructured so the Remove
-                    button is a SIBLING of the navigate-to-Coupons row, not a
-                    nested TouchableOpacity (the prior nested pattern could
-                    intermittently fire both handlers — coupon cleared AND
-                    CouponsScreen opened); (b) disabled the row when the cart
-                    is multi-store, since A2's eligibility check would reject
-                    a coupon order at confirmAccepted anyway (silent UX trap). */}
+                    Remove button is a SIBLING of the navigate row (not nested)
+                    so a Remove tap can't also open CouponsScreen.
+                    Phase 5 (2026-06-09): multi-store gate LIFTED — the server
+                    now issues per-store discount breakdowns inside the signed
+                    token, so multi-store carts can apply coupons. The row is
+                    always enabled. storeId param remains the first store's id
+                    (CouponsScreen uses it only to ALSO include store-scoped
+                    coupons in the browse list; validation derives stores
+                    server-side from cartItems). */}
                 <View className="mx-5 mt-4 mb-3 flex-row items-center bg-white border border-gray-100 rounded-2xl p-4">
                     <TouchableOpacity
-                        onPress={() => {
-                            if (groupedStores.length > 1) return; // disabled multi-store
-                            navigation.navigate('Coupons' as any, {
-                                subtotal,
-                                storeId: groupedStores[0]?.storeId || '',
-                                appliedCouponId: appliedCoupon?.couponId,
-                                returnTo: 'Checkout',
-                            });
-                        }}
-                        disabled={groupedStores.length > 1}
-                        activeOpacity={groupedStores.length > 1 ? 1 : 0.7}
+                        onPress={() => navigation.navigate('Coupons' as any, {
+                            subtotal,
+                            storeId: groupedStores[0]?.storeId || '',
+                            appliedCouponId: appliedCoupon?.couponId,
+                            returnTo: 'Checkout',
+                        })}
+                        activeOpacity={0.7}
                         className="flex-1 flex-row items-center"
                     >
-                        <Ticket size={20} color={groupedStores.length > 1 ? '#9CA3AF' : '#B52725'} />
+                        <Ticket size={20} color="#B52725" />
                         <View className="flex-1 ml-3">
-                            <Text className={`text-[14px] font-bold ${groupedStores.length > 1 ? 'text-gray-400' : 'text-gray-900'}`}>
-                                {groupedStores.length > 1
-                                    ? 'Coupons (multi-store cart)'
-                                    : appliedCoupon ? `${appliedCoupon.code} applied` : 'Apply Coupon'}
+                            <Text className="text-[14px] font-bold text-gray-900">
+                                {appliedCoupon ? `${appliedCoupon.code} applied` : 'Apply Coupon'}
                             </Text>
-                            {groupedStores.length > 1 ? (
-                                <Text className="text-[12px] text-gray-400 font-medium mt-0.5">
-                                    Single-store carts only for now
-                                </Text>
-                            ) : appliedCoupon ? (
+                            {appliedCoupon ? (
                                 <Text className="text-[12px] text-green-600 font-semibold mt-0.5">
                                     You saved ₹{appliedCoupon.discount.toFixed(2)} · Tap to change
                                 </Text>
@@ -1352,9 +1351,7 @@ export default function CheckoutScreen() {
                                 </Text>
                             )}
                         </View>
-                        {appliedCoupon && groupedStores.length === 1 ? null : groupedStores.length === 1 ? (
-                            <ChevronRight size={18} color="#B52725" />
-                        ) : null}
+                        {!appliedCoupon && <ChevronRight size={18} color="#B52725" />}
                     </TouchableOpacity>
                     {appliedCoupon && (
                         <TouchableOpacity

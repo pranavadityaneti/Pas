@@ -288,9 +288,21 @@ model CouponRedemption {
   // discountAmount: actual ₹ discount applied to this redemption (feeds analytics).
   // fundingSource: snapshot of PLATFORM/MERCHANT at redeem time (immutable).
   // splitOrderIds: array of Order IDs when one coupon spans multi-store carts.
-  discountAmount Decimal? @map("discount_amount") @db.Decimal(10, 2)
-  fundingSource  String?  @map("funding_source")
-  splitOrderIds  String[] @default([]) @map("split_order_ids")
+  discountAmount  Decimal? @map("discount_amount") @db.Decimal(10, 2)
+  fundingSource   String?  @map("funding_source")
+  splitOrderIds   String[] @default([]) @map("split_order_ids")
+
+  // Phase 5 (2026-06-09) — multi-store coupon allocation. When a customer
+  // applies a coupon to a multi-store cart, ONE CouponRedemption row covers
+  // ALL the per-store orders. cart_fingerprint is the dedup key; first POST
+  // /orders INSERTs the row, subsequent stores catch P2002 on the partial
+  // unique and append their orderId to split_order_ids[]. Single-store
+  // redemptions keep cart_fingerprint = NULL and use the existing
+  // (coupon_id, order_id) unique-key path.
+  // The partial UNIQUE INDEX (coupon_id, cart_fingerprint) WHERE
+  // cart_fingerprint IS NOT NULL is declared in the migration SQL because
+  // Prisma's schema language does not express partial indexes inline.
+  cartFingerprint String?  @map("cart_fingerprint")
 
   @@unique([couponId, orderId], map: "coupon_redemptions_coupon_order_key")
   @@index([couponId], map: "CouponRedemption_coupon_id_idx")

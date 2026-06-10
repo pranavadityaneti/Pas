@@ -181,17 +181,16 @@ export interface ValidateCouponCartItem {
 }
 
 // ============================================================================
-// Phase 4 fixes D2 + A2 (2026-06-09) — eligibility helper used by both checkout
-// screens at confirmAccepted entry. Centralizes two invariants the adversarial
-// audit found missing:
+// Phase 4 fix D2 (2026-06-09) — eligibility helper used by both checkout
+// screens at confirmAccepted entry:
 //   D2 — every item in the actual order being placed must have storeProductId
 //        (otherwise the server's cartHash recompute will reject after payment
-//        once REQUIRE_COUPON_TOKEN=true is flipped);
-//   A2 — coupon orders must be single-store until Phase 5 (multi-store discount
-//        allocation) is built. Phase 4's per-store POST /orders loop in
-//        CheckoutScreen sends the SAME full-cart validationToken to every
-//        per-store order; that's the bleed Phase 5 will address. Until then we
-//        explicitly reject multi-store coupon orders with a clear user message.
+//        once REQUIRE_COUPON_TOKEN=true is flipped).
+//
+// Phase 5 (2026-06-09): the A2 single-store restriction is LIFTED. The server
+// now issues multi-store tokens with a signed per-store discount breakdown;
+// POST /orders matches each store's items to its slice. The helper keeps the
+// storeProductId + storeId presence invariants (both still load-bearing).
 // ============================================================================
 
 export interface CouponOrderEligibility {
@@ -219,10 +218,9 @@ export function checkCouponOrderEligibility(
             reason: 'Some items in your cart need to be refreshed before this coupon can be applied. Please refresh your cart and try again.',
         };
     }
-    // A2 — multi-store coupon scope-limit until Phase 5 ships allocation.
-    // Phase 4 audit re-fix (2026-06-09 evening): use ?? (not ||) for null/undefined
-    // detection so a future numeric-zero storeId doesn't collapse silently. Treat
-    // missing storeId as a violation, not a silent drop (fail-closed).
+    // Missing storeId is still a violation (fail-closed). Phase 4 audit re-fix
+    // (2026-06-09 evening): use ?? (not ||) for null/undefined detection so a
+    // future numeric-zero storeId doesn't collapse silently.
     const missingStore = orderItems.some((it) => {
         const s = it?.storeId ?? null;
         return s === null || s === '' || s === undefined;
@@ -233,13 +231,10 @@ export function checkCouponOrderEligibility(
             reason: 'One or more items in your order are missing store information. Please refresh your cart and try again.',
         };
     }
-    const storeIds = new Set(orderItems.map((it) => String(it?.storeId ?? '')));
-    if (storeIds.size > 1) {
-        return {
-            ok: false,
-            reason: 'Coupons can only be applied to one store at a time right now. Please remove items from other stores or remove the coupon to continue.',
-        };
-    }
+    // Phase 5 (2026-06-09): multi-store coupon carts are now allowed — the
+    // server signs a per-store discount breakdown into the validation token
+    // and POST /orders applies each store's slice. The old single-store reject
+    // (Phase 4's A2 guard) is removed.
     return { ok: true };
 }
 
@@ -264,6 +259,19 @@ export interface ValidateCouponSuccess {
     /** Unix seconds — client-computed: now + 10 min (matches server token.exp). */
     expiresAt: number;
     bogo?: { buy: number; get: number } | null;
+    /** Phase 5 (2026-06-09) — true when the cart spans >1 store. */
+    multiStore?: boolean;
+    /**
+     * Phase 5 — per-store discount split (display/diagnostic only client-side;
+     * the authoritative copy is inside the signed validationToken, which POST
+     * /orders reads directly).
+     */
+    perStoreBreakdown?: Array<{
+        branchId: string | null;
+        storeId: string;
+        subtotal: number;
+        discount: number;
+    }>;
 }
 
 export interface ValidateCouponFailure {
@@ -350,6 +358,9 @@ export async function validateCoupon(req: ValidateCouponRequest): Promise<Valida
             validationToken: j.validationToken,
             expiresAt,
             bogo: j.bogo ?? null,
+            // Phase 5 (2026-06-09) — multi-store passthrough (display-only).
+            multiStore: j.multiStore === true,
+            perStoreBreakdown: Array.isArray(j.perStoreBreakdown) ? j.perStoreBreakdown : undefined,
         };
     } catch (err) {
         // Phase 4 fix C3 (2026-06-09): log the real error to console so Sentry

@@ -2446,23 +2446,64 @@ app.post('/orders', async (req, res) => {
                 if (decoded.userId !== userId) {
                     return res.status(400).json({ error: 'Coupon token does not match this user' });
                 }
-                // cartHash binding — only enforce strictly when REQUIRE_COUPON_TOKEN
-                // is on. Until then a mismatch is logged but allowed (backward compat
-                // with legacy consumer-app builds that haven't OTA'd yet).
-                const observedCartHash = computeCartHash(items || []);
-                if (decoded.cartHash !== observedCartHash) {
-                    if (requireCouponToken) {
-                        return res.status(400).json({ error: 'Cart changed since coupon was applied — please re-apply' });
+                const isMultiStoreToken = Array.isArray(decoded.breakdown) && decoded.breakdown.length > 1 && typeof decoded.fingerprint === 'string';
+                if (isMultiStoreToken) {
+                    // Phase 5 — multi-store token. The token's cartHash covers the
+                    // FULL cart while this POST /orders carries one store's subset,
+                    // so the whole-cart hash comparison is replaced by subset
+                    // matching: every item in this order must belong to exactly
+                    // one breakdown entry's storeProductIds (signed data). That
+                    // entry's slice becomes this Order's snapshot discount.
+                    const orderSpids = (items || [])
+                        .map((it) => (it?.storeProductId ? String(it.storeProductId) : null))
+                        .filter((s) => !!s);
+                    const matches = decoded.breakdown.filter((entry) => orderSpids.length > 0 &&
+                        Array.isArray(entry?.storeProductIds) &&
+                        orderSpids.every((spid) => entry.storeProductIds.includes(spid)));
+                    if (matches.length !== 1) {
+                        if (requireCouponToken) {
+                            return res.status(400).json({ error: 'Cart changed since coupon was applied — please re-apply' });
+                        }
+                        console.warn(`[POST /orders] Phase 5 multi-store breakdown match failed (${matches.length} matches, ${orderSpids.length} spids) — proceeding WITHOUT coupon. Will reject when REQUIRE_COUPON_TOKEN=true. userId=${userId}`);
+                        try {
+                            Sentry.captureMessage('phase5: multi-store breakdown match failed', { level: 'warning', extra: { userId, orderSpids, matchCount: matches.length } });
+                        }
+                        catch { }
+                        // No couponContext — order is created without a discount
+                        // snapshot (mirrors the legacy no-token behavior).
                     }
-                    console.warn(`[POST /orders] coupon cartHash mismatch — will reject when REQUIRE_COUPON_TOKEN=true. userId=${userId}`);
+                    else {
+                        couponContext = {
+                            couponId: String(decoded.couponId),
+                            code: String(couponCode || ''),
+                            discount: Number(matches[0].discount) || 0,
+                            fundingSource: String(decoded.fundingSource || ''),
+                            discountType: String(decoded.discountType || ''),
+                            fingerprint: String(decoded.fingerprint),
+                            totalDiscount: Number(decoded.discount) || 0,
+                        };
+                    }
                 }
-                couponContext = {
-                    couponId: String(decoded.couponId),
-                    code: String(couponCode || ''),
-                    discount: Number(decoded.discount) || 0,
-                    fundingSource: String(decoded.fundingSource || ''),
-                    discountType: String(decoded.discountType || ''),
-                };
+                else {
+                    // Single-store path — unchanged Phase 2F semantics.
+                    // cartHash binding — only enforce strictly when REQUIRE_COUPON_TOKEN
+                    // is on. Until then a mismatch is logged but allowed (backward compat
+                    // with legacy consumer-app builds that haven't OTA'd yet).
+                    const observedCartHash = computeCartHash(items || []);
+                    if (decoded.cartHash !== observedCartHash) {
+                        if (requireCouponToken) {
+                            return res.status(400).json({ error: 'Cart changed since coupon was applied — please re-apply' });
+                        }
+                        console.warn(`[POST /orders] coupon cartHash mismatch — will reject when REQUIRE_COUPON_TOKEN=true. userId=${userId}`);
+                    }
+                    couponContext = {
+                        couponId: String(decoded.couponId),
+                        code: String(couponCode || ''),
+                        discount: Number(decoded.discount) || 0,
+                        fundingSource: String(decoded.fundingSource || ''),
+                        discountType: String(decoded.discountType || ''),
+                    };
+                }
             }
             catch (err) {
                 return res.status(400).json({ error: err?.message || 'Invalid coupon token' });
@@ -2668,7 +2709,9 @@ app.post('/orders', async (req, res) => {
             // (couponId, orderId) — the partial unique index from Phase 1 #4
             // means duplicate inserts are no-ops.
             if (couponContext) {
-                // Snapshot the coupon on the Order row (immune to future archive/edit)
+                // Snapshot the coupon on the Order row (immune to future archive/edit).
+                // Phase 5: for multi-store carts, couponContext.discount is THIS
+                // store's slice from the signed breakdown — not the full cart total.
                 await tx.order.update({
                     where: { id: createdOrder.id },
                     data: {
@@ -2679,23 +2722,10 @@ app.post('/orders', async (req, res) => {
                         orderCouponDiscountType: couponContext.discountType,
                     },
                 });
-                // Idempotent ledger insert. If a redemption already exists for
-                // this (couponId, orderId), skip the increments — this is the
-                // retry/double-call defense.
-                const existingRedemption = await tx.couponRedemption.findFirst({
-                    where: { couponId: couponContext.couponId, orderId: createdOrder.id },
-                    select: { id: true },
-                });
-                if (!existingRedemption) {
-                    await tx.couponRedemption.create({
-                        data: {
-                            couponId: couponContext.couponId,
-                            userId,
-                            orderId: createdOrder.id,
-                            discountAmount: couponContext.discount,
-                            fundingSource: couponContext.fundingSource,
-                        },
-                    });
+                // Shared counter logic — runs EXACTLY ONCE per redemption row
+                // (single-store: per order; multi-store: per cart, on the
+                // first store-order's INSERT only).
+                const incrementCouponCounters = async () => {
                     // Fetch coupon caps (single read) for limit checks.
                     const couponRow = await tx.coupon.findUnique({
                         where: { id: couponContext.couponId },
@@ -2739,6 +2769,67 @@ app.post('/orders', async (req, res) => {
                         if (d.count === 0) {
                             throw new Error('Coupon daily usage limit reached');
                         }
+                    }
+                };
+                if (couponContext.fingerprint) {
+                    // ── Phase 5 (2026-06-09) — multi-store redemption path ──
+                    // ONE redemption row covers the whole cart, keyed by
+                    // (coupon_id, cart_fingerprint) via the partial unique index.
+                    // INSERT ... ON CONFLICT DO NOTHING avoids transaction
+                    // poisoning (a caught P2002 would abort the surrounding
+                    // Postgres tx) AND gives atomic first-writer-wins: the store
+                    // order that lands first creates the row + increments the
+                    // counters ONCE; every other store-order appends its orderId
+                    // to split_order_ids (deduped in-statement, so client retries
+                    // can't double-append).
+                    const inserted = await tx.$queryRaw `
+                        INSERT INTO "public"."coupon_redemptions"
+                            ("coupon_id", "user_id", "discount_amount", "funding_source", "split_order_ids", "cart_fingerprint")
+                        VALUES (
+                            ${couponContext.couponId},
+                            ${userId}::uuid,
+                            ${couponContext.totalDiscount ?? couponContext.discount},
+                            ${couponContext.fundingSource},
+                            ARRAY[${createdOrder.id}]::text[],
+                            ${couponContext.fingerprint}
+                        )
+                        ON CONFLICT ("coupon_id", "cart_fingerprint") WHERE "cart_fingerprint" IS NOT NULL
+                        DO NOTHING
+                        RETURNING "id";
+                    `;
+                    if (inserted.length > 0) {
+                        await incrementCouponCounters();
+                    }
+                    else {
+                        await tx.$executeRaw `
+                            UPDATE "public"."coupon_redemptions"
+                            SET "split_order_ids" = array_append("split_order_ids", ${createdOrder.id})
+                            WHERE "coupon_id" = ${couponContext.couponId}
+                              AND "cart_fingerprint" = ${couponContext.fingerprint}
+                              AND NOT ("split_order_ids" @> ARRAY[${createdOrder.id}]::text[]);
+                        `;
+                    }
+                }
+                else {
+                    // ── Single-store path — unchanged Phase 2F semantics ──
+                    // Idempotent ledger insert. If a redemption already exists for
+                    // this (couponId, orderId), skip the increments — this is the
+                    // retry/double-call defense.
+                    const existingRedemption = await tx.couponRedemption.findFirst({
+                        where: { couponId: couponContext.couponId, orderId: createdOrder.id },
+                        select: { id: true },
+                    });
+                    if (!existingRedemption) {
+                        await tx.couponRedemption.create({
+                            data: {
+                                couponId: couponContext.couponId,
+                                userId,
+                                orderId: createdOrder.id,
+                                discountAmount: couponContext.discount,
+                                fundingSource: couponContext.fundingSource,
+                            },
+                        });
+                        await incrementCouponCounters();
                     }
                 }
             }
@@ -3993,6 +4084,81 @@ app.post('/orders/:id/cancel', async (req, res) => {
                         }
                     }
                 }
+                // ── Phase 5 (2026-06-09) — multi-store redemption reversal ──
+                // Q5 decision (approved): proportional PARTIAL reversal. Multi-
+                // store redemption rows have orderId = NULL and track per-store
+                // orders in splitOrderIds[], so the block above (orderId match)
+                // never finds them. When ONE of N store-orders is cancelled:
+                //   - remove its id from splitOrderIds
+                //   - subtract this Order's snapshot slice from discountAmount
+                //   - usedCount / dailyUsageCount stay (the coupon WAS used)
+                // When the LAST order is cancelled: delete the row + decrement
+                // usedCount (and dailyUsageCount if redeemed today IST) — full
+                // reversal, mirroring the single-store semantics above.
+                const multiRedemption = await tx.couponRedemption.findFirst({
+                    where: { splitOrderIds: { has: id }, userId: order.userId },
+                });
+                if (multiRedemption) {
+                    const remaining = multiRedemption.splitOrderIds.filter((oid) => oid !== id);
+                    const orderSliceDiscount = Number(order.orderCouponDiscount ?? 0);
+                    if (remaining.length === 0) {
+                        await tx.couponRedemption.delete({ where: { id: multiRedemption.id } });
+                        await tx.coupon.updateMany({
+                            where: { id: multiRedemption.couponId, usedCount: { gte: 1 } },
+                            data: { usedCount: { decrement: 1 } },
+                        });
+                        const nowM = new Date();
+                        const istNowM = new Date(nowM.getTime() + (5.5 * 60 * 60 * 1000));
+                        const istMidnightUtcMsM = Date.UTC(istNowM.getUTCFullYear(), istNowM.getUTCMonth(), istNowM.getUTCDate(), 0, 0, 0, 0) - (5.5 * 60 * 60 * 1000);
+                        const istMidnightTodayM = new Date(istMidnightUtcMsM);
+                        if (multiRedemption.createdAt >= istMidnightTodayM) {
+                            await tx.coupon.updateMany({
+                                where: { id: multiRedemption.couponId, dailyUsageCount: { gte: 1 } },
+                                data: { dailyUsageCount: { decrement: 1 } },
+                            });
+                        }
+                    }
+                    else {
+                        const newDiscountAmount = Math.max(0, Number(multiRedemption.discountAmount ?? 0) - orderSliceDiscount);
+                        await tx.couponRedemption.update({
+                            where: { id: multiRedemption.id },
+                            data: { splitOrderIds: remaining, discountAmount: newDiscountAmount },
+                        });
+                    }
+                    // Clear this Order's coupon snapshot (mirrors single-store path).
+                    await tx.order.update({
+                        where: { id },
+                        data: {
+                            orderCouponId: null,
+                            orderCouponCode: null,
+                            orderCouponDiscount: null,
+                            orderCouponFundingSource: null,
+                            orderCouponDiscountType: null,
+                        },
+                    });
+                    try {
+                        await tx.auditLog.create({
+                            data: {
+                                actorUserId: user.id,
+                                action: 'coupon.redemption_reversed',
+                                targetType: 'coupon',
+                                targetId: multiRedemption.couponId,
+                                beforeJson: {
+                                    orderId: id,
+                                    orderOwnerUserId: order.userId,
+                                    multiStore: true,
+                                    partial: remaining.length > 0,
+                                    remainingOrders: remaining.length,
+                                    reversedSlice: orderSliceDiscount,
+                                },
+                                afterJson: undefined,
+                            },
+                        });
+                    }
+                    catch (auditErr) {
+                        console.error('[Phase 5 reversal audit log] failed:', auditErr);
+                    }
+                }
                 // Re-fetch the row we just CAS-updated so the rest of the
                 // endpoint has the canonical post-flip state.
                 return tx.order.findUnique({ where: { id } });
@@ -5117,6 +5283,13 @@ app.post('/checkout/validate-coupon', async (req, res) => {
         // product can't be resolved, reject the whole request. No silent fallback
         // to client prices — that's exactly the gap this hot-fix closes.
         let trustedPrices = null;
+        // Phase 5 (2026-06-09) — server-side store attribution per item.
+        // Maps storeProductId → { branchId, storeId } from the StoreProduct row
+        // (never from client input). Drives: (a) server-derived store ids for
+        // the eligibleVerticals check (fixes the latent bug where clients sent
+        // branch UUIDs and prisma.store.findMany matched nothing), and (b) the
+        // multi-store discount allocation breakdown.
+        let storeAttribution = null;
         if (hasCartItems) {
             const storeProductIds = [];
             for (const item of cartItems) {
@@ -5134,9 +5307,10 @@ app.post('/checkout/validate-coupon', async (req, res) => {
             // the user must refresh.
             const rows = await prisma.storeProduct.findMany({
                 where: { id: { in: storeProductIds }, is_deleted: false, active: true },
-                select: { id: true, price: true },
+                select: { id: true, price: true, branch_id: true, storeId: true },
             });
             trustedPrices = new Map(rows.map((r) => [r.id, Number(r.price) || 0]));
+            storeAttribution = new Map(rows.map((r) => [r.id, { branchId: r.branch_id ?? null, storeId: r.storeId }]));
             const missing = storeProductIds.filter((id) => !trustedPrices.has(id));
             if (missing.length > 0) {
                 return res.status(400).json({
@@ -5191,14 +5365,28 @@ app.post('/checkout/validate-coupon', async (req, res) => {
         }
         // Phase 2 (2E-2) — vertical scope. If coupon.eligibleVerticals is non-empty,
         // every cart store's vertical must be in the allowlist (vertical IDs).
-        if (coupon.eligibleVerticals && coupon.eligibleVerticals.length > 0 && Array.isArray(storeIds) && storeIds.length > 0) {
-            const cartStoreIds = storeIds.map((s) => String(s));
+        //
+        // Phase 5 (2026-06-09): when cartItems[] is present, derive the Store ids
+        // SERVER-SIDE from StoreProduct.storeId (storeAttribution map) instead of
+        // trusting the client's storeIds[]. Fixes the latent bug where the
+        // consumer-app sent branch UUIDs (cart item .storeId) which never matched
+        // prisma.store rows, silently rejecting every verticals-scoped coupon —
+        // and closes the "lie about storeIds to bypass eligibility" hole.
+        // Legacy clients (cartTotal-only, no cartItems) keep the old client-supplied
+        // path since there's nothing server-side to derive from.
+        const serverStoreIds = storeAttribution
+            ? Array.from(new Set(Array.from(storeAttribution.values()).map((a) => a.storeId)))
+            : [];
+        const verticalCheckStoreIds = storeAttribution
+            ? serverStoreIds
+            : (Array.isArray(storeIds) ? storeIds.map((s) => String(s)) : []);
+        if (coupon.eligibleVerticals && coupon.eligibleVerticals.length > 0 && verticalCheckStoreIds.length > 0) {
             const cartStores = await prisma.store.findMany({
-                where: { id: { in: cartStoreIds } },
+                where: { id: { in: verticalCheckStoreIds } },
                 select: { id: true, verticalId: true },
             });
             const allowedVerticalIds = new Set(coupon.eligibleVerticals);
-            const allMatch = cartStores.length === cartStoreIds.length
+            const allMatch = cartStores.length === verticalCheckStoreIds.length
                 && cartStores.every((s) => !!s.verticalId && allowedVerticalIds.has(s.verticalId));
             if (!allMatch) {
                 return res.status(400).json({ valid: false, error: 'This coupon is not valid for one or more stores in your cart' });
@@ -5311,6 +5499,71 @@ app.post('/checkout/validate-coupon', async (req, res) => {
         // this before applying the discount — closes the cart-spoof attack.
         const roundedDiscount = Math.round(discount * 100) / 100;
         const cartHash = computeCartHash(hasCartItems ? cartItems : []);
+        let perStoreBreakdown = null;
+        let cartFingerprint = null;
+        if (hasCartItems && storeAttribution) {
+            // Group items by branch (falls back to storeId when branch_id is
+            // null) using SERVER-side attribution — never client input.
+            const groups = new Map();
+            for (const item of cartItems) {
+                const spid = String(item.storeProductId);
+                const attr = storeAttribution.get(spid); // presence validated in Phase 2L block
+                const key = attr.branchId ?? attr.storeId;
+                let g = groups.get(key);
+                if (!g) {
+                    g = { branchId: attr.branchId, storeId: attr.storeId, storeProductIds: [], subtotal: 0, discount: 0 };
+                    groups.set(key, g);
+                }
+                g.storeProductIds.push(spid);
+                g.subtotal += (trustedPrices.get(spid) || 0) * (Number(item?.quantity) || 0);
+            }
+            if (groups.size > 1) {
+                // Q2 (approved 2026-06-09): store-scoped coupons reject multi-store
+                // carts outright — cart-level semantics, no partial application.
+                if (coupon.storeId) {
+                    return res.status(400).json({
+                        valid: false,
+                        error: 'This coupon is valid for a single store only. Please remove items from other stores to use it.',
+                    });
+                }
+                // Q1 (approved 2026-06-09): per-store minOrder. If ANY store's
+                // subtotal is below the coupon's minOrder, reject the whole
+                // coupon with a clear error (no skip-store half-application).
+                if (coupon.minOrder) {
+                    const violating = Array.from(groups.values()).find((g) => g.subtotal < coupon.minOrder);
+                    if (violating) {
+                        return res.status(400).json({
+                            valid: false,
+                            error: `Each store in your cart needs a minimum of ₹${coupon.minOrder} for this coupon. Please add more items or remove the coupon.`,
+                        });
+                    }
+                }
+                // Proportional allocation. round-half-up to ₹0.01 per store;
+                // the LAST store absorbs the rounding residual so the slices
+                // always sum exactly to the total signed discount.
+                const slices = Array.from(groups.values());
+                const totalSubtotal = slices.reduce((s, g) => s + g.subtotal, 0);
+                let allocated = 0;
+                for (let i = 0; i < slices.length; i++) {
+                    if (i === slices.length - 1) {
+                        slices[i].discount = Math.round((roundedDiscount - allocated) * 100) / 100;
+                    }
+                    else {
+                        const share = totalSubtotal > 0 ? slices[i].subtotal / totalSubtotal : 0;
+                        slices[i].discount = Math.round(roundedDiscount * share * 100) / 100;
+                        allocated += slices[i].discount;
+                    }
+                }
+                perStoreBreakdown = slices;
+                // Deterministic cart fingerprint — dedup key for the single
+                // CouponRedemption row that covers all of this cart's orders.
+                // Integrity comes from the token signature (the fingerprint is
+                // inside the signed payload), so a plain SHA-256 suffices.
+                cartFingerprint = crypto.createHash('sha256')
+                    .update(`${coupon.id}|${userId}|${cartHash}`)
+                    .digest('hex');
+            }
+        }
         const tokenPayload = {
             couponId: coupon.id,
             userId,
@@ -5321,6 +5574,18 @@ app.post('/checkout/validate-coupon', async (req, res) => {
             exp: Math.floor(Date.now() / 1000) + 10 * 60,
             iat: Math.floor(Date.now() / 1000),
         };
+        if (perStoreBreakdown) {
+            // Phase 5 — multi-store fields. Single-store tokens stay byte-
+            // compatible with Phase 4 (no new fields) for backward compat.
+            tokenPayload.breakdown = perStoreBreakdown.map((s) => ({
+                branchId: s.branchId,
+                storeId: s.storeId,
+                storeProductIds: s.storeProductIds,
+                subtotal: Math.round(s.subtotal * 100) / 100,
+                discount: s.discount,
+            }));
+            tokenPayload.fingerprint = cartFingerprint;
+        }
         const validationToken = signCouponToken(tokenPayload);
         res.json({
             valid: true,
@@ -5334,6 +5599,11 @@ app.post('/checkout/validate-coupon', async (req, res) => {
             fundingSource: coupon.fundingSource,
             minOrder: coupon.minOrder ?? null,
             validationToken,
+            // Phase 5 — present only for multi-store carts.
+            multiStore: !!perStoreBreakdown,
+            perStoreBreakdown: perStoreBreakdown
+                ? perStoreBreakdown.map((s) => ({ branchId: s.branchId, storeId: s.storeId, subtotal: Math.round(s.subtotal * 100) / 100, discount: s.discount }))
+                : undefined,
         });
     }
     catch (error) {
