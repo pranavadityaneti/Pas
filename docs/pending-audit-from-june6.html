@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PAS — Pending Audit from the June 6 Build (as of 2026-06-11)</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 980px; margin: 0 auto; padding: 28px 32px 80px; color: #1a1a1a; background: #fafafa; line-height: 1.55; }
+  h1 { font-size: 24px; margin: 0 0 4px; color: #111; }
+  h2 { font-size: 18px; margin: 36px 0 10px; padding-bottom: 6px; border-bottom: 1.5px solid #d4d4d4; color: #111; }
+  h3 { font-size: 15px; margin: 24px 0 8px; color: #222; }
+  h4 { font-size: 13.5px; margin: 16px 0 4px; color: #444; text-transform: uppercase; letter-spacing: 0.04em; }
+  .lead { color: #555; font-size: 14px; margin-bottom: 24px; }
+  .tldr { background: #fff; border: 1px solid #e0e0e0; border-radius: 10px; padding: 16px 18px; margin: 18px 0 30px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+  .tldr table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  .tldr th, .tldr td { padding: 7px 10px; text-align: left; border-bottom: 1px solid #efefef; }
+  .tldr th { font-weight: 700; background: #f6f6f6; }
+  .tldr td.count { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+  .toc { background: #fff; border-left: 3px solid #c44; padding: 10px 16px; margin: 0 0 24px; font-size: 13.5px; }
+  .toc ol { margin: 4px 0 4px 20px; padding: 0; }
+  .toc a { color: #2563eb; text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  ul.scenario { list-style: none; padding: 0; margin: 0; }
+  ul.scenario li { padding: 6px 0 6px 0; border-bottom: 1px dotted #e6e6e6; font-size: 13.5px; }
+  ul.scenario li:last-child { border-bottom: none; }
+  .pill { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.03em; margin-right: 6px; vertical-align: 1px; }
+  .pill.p0 { background: #fee2e2; color: #991b1b; }
+  .pill.p1 { background: #fef3c7; color: #92400e; }
+  .pill.p2 { background: #e0e7ff; color: #3730a3; }
+  .pill.new { background: #d1fae5; color: #065f46; }
+  .pill.done { background: #e2e8f0; color: #334155; }
+  .pill.ops { background: #fef9c3; color: #713f12; }
+  .pill.unkn { background: #f3e8ff; color: #6b21a8; }
+  .meta { color: #777; font-size: 12px; }
+  pre { background: #f5f5f5; border: 1px solid #e0e0e0; border-radius: 6px; padding: 10px 12px; font-size: 12.5px; overflow-x: auto; font-family: 'SF Mono', 'Menlo', Consolas, monospace; }
+  code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; font-size: 90%; font-family: 'SF Mono', 'Menlo', Consolas, monospace; }
+  .module-head { font-weight: 700; color: #6b21a8; margin: 14px 0 4px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .note { background: #fffbe6; border-left: 3px solid #f59e0b; padding: 8px 14px; margin: 10px 0; font-size: 13px; }
+  .done-note { background: #ecfdf5; border-left: 3px solid #10b981; padding: 8px 14px; margin: 10px 0; font-size: 13px; }
+  @media print {
+    body { background: #fff; padding: 10px 16px; max-width: none; }
+    h2 { break-after: avoid; }
+    .toc, .tldr { box-shadow: none; }
+  }
+</style>
+</head>
+<body>
+
+<h1>PAS — Pending Audit from the June 6 Build</h1>
+<div class="lead">Snapshot taken <strong>2026-06-11</strong>, immediately after Phase 7G ship + PR #2 merge. Lists every test, code item, operational step, and deferred decision that has NOT been resolved since the June 6 founder-QA build. Cross-references <code>docs/test-checklist-june6-build.xlsx</code>, <code>forlater.md</code>, the active task list, and the Phase 7G audit residuals.</div>
+
+<div class="tldr">
+  <h4 style="margin-top:0">TL;DR — pending by category</h4>
+  <table>
+    <thead><tr><th>Bucket</th><th>What's in it</th><th class="count">Items</th></tr></thead>
+    <tbody>
+      <tr><td>A · Operational (you)</td><td>Steps Pranav owns this week — categories, CRON flip, OTAs, cron close</td><td class="count">4</td></tr>
+      <tr><td>B · Founder QA — June 6 checklist</td><td>Customer + merchant scenarios still marked "Not Tested" (Customer 41 + Merchant 27)</td><td class="count">68</td></tr>
+      <tr><td>C · Founder QA — post-June-6 features</td><td>New surfaces (coupon E2E, settlement UIs) that need their own scenarios</td><td class="count">~22</td></tr>
+      <tr><td>D · Phase 8 rollout</td><td>Sequenced OTAs + flag flips + legacy-endpoint retirement</td><td class="count">6</td></tr>
+      <tr><td>E · Phase 7G residuals</td><td>Mediums/lows + 1 founder decision (negative-net cycles)</td><td class="count">9</td></tr>
+      <tr><td>F · Open task list</td><td><code>TaskList</code> still-pending items</td><td class="count">5</td></tr>
+      <tr><td>G · <code>forlater.md</code> active queue</td><td>Pre-existing structural backlog; some quietly shipped — verify each</td><td class="count">~14</td></tr>
+      <tr><td>H · Sprint integrations still open</td><td>KYC vendor, Cloudinary, PostHog, Razorpay Route, Reports/CSV…</td><td class="count">~8</td></tr>
+      <tr><td>I · Founder decisions awaiting input</td><td>FQ-2 (Stationery + F&B tiers), FQ-6 (GST/TCS via CA), negative-net cycles</td><td class="count">3</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="toc">
+<strong>Table of contents</strong>
+<ol>
+  <li><a href="#shipped">What HAS landed since June 6 (positive ledger)</a></li>
+  <li><a href="#a-ops">A · Operational steps you own</a></li>
+  <li><a href="#b-qa-old">B · Founder QA — June 6 checklist (68 scenarios)</a></li>
+  <li><a href="#c-qa-new">C · Founder QA — post-June-6 features</a></li>
+  <li><a href="#d-rollout">D · Phase 8 rollout sequence</a></li>
+  <li><a href="#e-7g">E · Phase 7G residuals (audit mediums/lows)</a></li>
+  <li><a href="#f-tasks">F · Open <code>TaskList</code> items</a></li>
+  <li><a href="#g-forlater">G · <code>forlater.md</code> active queue (status check)</a></li>
+  <li><a href="#h-sprint">H · Sprint integrations still open</a></li>
+  <li><a href="#i-decisions">I · Founder decisions awaiting input</a></li>
+</ol>
+</div>
+
+<!-- =================================================================== -->
+
+<h2 id="shipped">0. What HAS landed since June 6 <span class="pill done">CONTEXT</span></h2>
+<p>Five days of work, all shipped to <code>main</code> + EB (commits between <code>6841ae51</code> and <code>f8c5a911</code>). For framing the pending list — these are NO LONGER pending:</p>
+<ul>
+  <li><strong>Phase 1–7 of Coupon Foolproof</strong> — schema, server hardening, admin dashboard, consumer checkout integration (Checkout + DiningCheckout — locks overridden), multi-store discount allocation with signed validation tokens, merchant-app coupon surfacing.</li>
+  <li><strong>Phase 7 Settlement Ledger (full)</strong> — settlement engine + clawback detector, payment-verification cron, orphaned-payment sweep (currently <code>CRON_DRY_RUN=true</code>), weekly Mon-02:00-IST close cron. Admin UI (Cycles + Commission Rules + <strong>Merchants tab</strong>), merchant Weekly Settlements section on Earnings.</li>
+  <li><strong>Phase 7G adversarial fixes</strong> — 49 audit findings (3 blockers, 16 high), all blockers/highs concretely fixed: eligibility covers EXCHANGE_APPROVED/REJECTED + RETURN_APPROVED partial returns; atomic clawback claim; COUPON unique index; per-merchant failure isolation; commission coherence guard; backdated rules + IST-aligned epoch; admin payment-verification override endpoint; legacy refund clawback hook; held-order attribution.</li>
+  <li><strong>API hardening</strong> — Phase 2J/2K/2L (soft-auth flag, P2002-poison fix, signed validation tokens, trusted prices), Option A patches #1A–#8 (requireUser, idempotency, expires_at guard, SLA cron, Sentry coverage).</li>
+  <li><strong>Sentry rollout</strong> — pas-api full coverage, admin-web wired, mobile DSNs set (rides next native build).</li>
+  <li><strong>FQ-1 resolved</strong> — 6 categories at 7% non-provisional, audit-logged.</li>
+  <li><strong>Earlier (June 4) build/infra</strong> — Phase 2.E3 Razorpay webhook (<code>POST /webhooks/razorpay</code>) for server-side order creation; <code>reconcileOrderRequestStatus</code> cron expires stranded ACCEPTED rows; EB <code>.ebignore</code> ships node_modules (deploy time ≤ 5 min); merchant realtime channels on <code>useOrders</code>; <code>admin_audit_log</code> table; admin reads routed through API (Path B architecture); analytics v1 + role-aware home dashboards.</li>
+</ul>
+
+<!-- =================================================================== -->
+
+<h2 id="a-ops">A · Operational steps you own <span class="pill ops">OPS</span></h2>
+<ul class="scenario">
+  <li><span class="pill ops">A1</span><strong>Assign commission categories</strong> for every active merchant in admin → Finance → Settlements → <strong>Merchants tab</strong>. F&amp;B merchants also need a turnover tier (1–5). Until done, every order is held no-profile. <em>You've taken this on.</em></li>
+  <li><span class="pill ops">A2</span><strong>CRON_DRY_RUN flip-back</strong> — orphan-payment sweep has been observe-only since 2026-06-10 ~22:00 UTC. Window completes ~2026-06-11 ~22:00 UTC. Sentry should have ≥ one "would refund" log to inspect first. Run <code>eb setenv CRON_DRY_RUN= ; eb deploy</code> (unsetting) when you're ready.</li>
+  <li><span class="pill ops">A3</span><strong>Mon 2026-06-15 02:00 IST cron</strong> — first weekly settlement close runs automatically. Watch the Sentry breadcrumb + the Cycles tab the next morning.</li>
+  <li><span class="pill ops">A4</span><strong>Open the Phase 7 architecture HTML</strong> with stakeholders (founder, future CA) — <code>docs/phase7-settlement-architecture.html</code>. Especially before FQ-6 GST/TCS conversation.</li>
+</ul>
+
+<!-- =================================================================== -->
+
+<h2 id="b-qa-old">B · Founder QA — June 6 checklist (68 scenarios) <span class="pill p0">P0/P1</span></h2>
+<div class="note"><strong>Status:</strong> every scenario in <code>docs/test-checklist-june6-build.xlsx</code> is marked "Not Tested." The check column is the founder-QA pass that never happened — testing was deferred while Phases 4–7 + the Phase 6 → 7 → 7G audit chain landed. With the code now stable and on <code>main</code>, this is the largest pending block.</div>
+
+<h3>Customer app (41 scenarios — C-001 to C-041)</h3>
+<div class="module-head">Login &amp; Onboarding (5)</div>
+<ul class="scenario">
+  <li><span class="pill p0">P0</span><strong>C-001</strong> First-time onboarding renders</li>
+  <li><span class="pill p0">P0</span><strong>C-002</strong> Phone-OTP login via WhatsApp (Wati)</li>
+  <li><span class="pill p0">P0</span><strong>C-003</strong> Back-to-back OTPs no longer banned</li>
+  <li><span class="pill p1">P1</span><strong>C-004</strong> Wrong-OTP limit per record</li>
+  <li><span class="pill p1">P1</span><strong>C-005</strong> Profile setup after first login</li>
+</ul>
+<div class="module-head">Discovery &amp; Browse (6)</div>
+<ul class="scenario">
+  <li><span class="pill p0">P0</span><strong>C-006</strong> Manual location selection</li>
+  <li><span class="pill p0">P0</span><strong>C-007</strong> Use current device location</li>
+  <li><span class="pill p0">P0</span><strong>C-008</strong> Nearby stores returned by API</li>
+  <li><span class="pill p0">P0</span><strong>C-009</strong> Storefront opens with products</li>
+  <li><span class="pill p1">P1</span><strong>C-010</strong> Pickup-only vs dining UI gating</li>
+  <li><span class="pill p1">P1</span><strong>C-011</strong> Product detail screen</li>
+</ul>
+<div class="module-head">Cart (3)</div>
+<ul class="scenario">
+  <li><span class="pill p0">P0</span><strong>C-012</strong> Add to cart from storefront</li>
+  <li><span class="pill p0">P0</span><strong>C-013</strong> Change quantity in cart</li>
+  <li><span class="pill p1">P1</span><strong>C-014</strong> Cart persists across app relaunch</li>
+</ul>
+<div class="module-head">Pickup Checkout (5)</div>
+<ul class="scenario">
+  <li><span class="pill p0">P0</span><strong>C-015</strong> Open Pickup Checkout from cart</li>
+  <li><span class="pill p0">P0</span><strong>C-016</strong> Select pickup time</li>
+  <li><span class="pill p1">P1</span><strong>C-017</strong> Picking Up For: Myself vs Someone Else</li>
+  <li><span class="pill p0">P0</span><strong>C-018</strong> Bill Details math (no float spill)</li>
+  <li><span class="pill p0">P0</span><strong>C-019</strong> Place pickup order via Razorpay</li>
+</ul>
+<div class="module-head">Dining Checkout (2)</div>
+<ul class="scenario">
+  <li><span class="pill p0">P0</span><strong>C-020</strong> Open Dining Checkout</li>
+  <li><span class="pill p0">P0</span><strong>C-021</strong> Place a dining order</li>
+</ul>
+<div class="module-head">Coupons (10) — these are the Phase 4/5/6 acceptance gates</div>
+<ul class="scenario">
+  <li><span class="pill p0">P0</span><strong>C-022</strong> Apply Coupon row above Bill Details (Pickup)</li>
+  <li><span class="pill p0">P0</span><strong>C-023</strong> Apply Coupon row on Dining Checkout</li>
+  <li><span class="pill p0">P0</span><strong>C-024</strong> Apply-Coupon screen opens (Swiggy-style)</li>
+  <li><span class="pill p0">P0</span><strong>C-025</strong> Coupon cards match admin builder design</li>
+  <li><span class="pill p0">P0</span><strong>C-026</strong> Apply by tap → Bill Details updates</li>
+  <li><span class="pill p1">P1</span><strong>C-027</strong> Apply via manual code entry</li>
+  <li><span class="pill p1">P1</span><strong>C-028</strong> Invalid code shows error</li>
+  <li><span class="pill p1">P1</span><strong>C-029</strong> Below-min-order coupon rejected</li>
+  <li><span class="pill p0">P0</span><strong>C-030</strong> Remove an applied coupon</li>
+  <li><span class="pill p1">P1</span><strong>C-031</strong> Per-customer limit enforces on repeat</li>
+</ul>
+<div class="module-head">Orders &amp; Tracking (3)</div>
+<ul class="scenario">
+  <li><span class="pill p0">P0</span><strong>C-032</strong> Order appears in Your Orders after payment</li>
+  <li><span class="pill p1">P1</span><strong>C-033</strong> Invoice modal opens from an order</li>
+  <li><span class="pill p1">P1</span><strong>C-034</strong> Status updates via Realtime</li>
+</ul>
+<div class="module-head">Notifications (3)</div>
+<ul class="scenario">
+  <li><span class="pill p1">P1</span><strong>C-035</strong> Bell + badge</li>
+  <li><span class="pill p1">P1</span><strong>C-036</strong> Notifications screen lists events</li>
+  <li><span class="pill p1">P1</span><strong>C-037</strong> Push delivers to device + deep-link</li>
+</ul>
+<div class="module-head">Profile &amp; Session (4)</div>
+<ul class="scenario">
+  <li><span class="pill p0">P0</span><strong>C-038</strong> No auto-logout after hours/overnight</li>
+  <li><span class="pill p0">P0</span><strong>C-039</strong> Session survives background → foreground</li>
+  <li><span class="pill p0">P0</span><strong>C-040</strong> No spontaneous mid-session logout</li>
+  <li><span class="pill p1">P1</span><strong>C-041</strong> Manual logout + re-login</li>
+</ul>
+
+<h3>Merchant app (27 scenarios — M-001 to M-027)</h3>
+<div class="module-head">Login &amp; Session (5)</div>
+<ul class="scenario">
+  <li><span class="pill p0">P0</span><strong>M-001</strong> Phone-OTP login via WhatsApp (merchant)</li>
+  <li><span class="pill p0">P0</span><strong>M-002</strong> OTP back-to-back resend (no ban)</li>
+  <li><span class="pill p1">P1</span><strong>M-003</strong> Branch-level login (multi-branch)</li>
+  <li><span class="pill p0">P0</span><strong>M-004</strong> No auto-logout on relaunch</li>
+  <li><span class="pill p0">P0</span><strong>M-005</strong> Session survives background → foreground</li>
+</ul>
+<div class="module-head">Dashboard (6)</div>
+<ul class="scenario">
+  <li><span class="pill p1">P1</span><strong>M-006</strong> Greeting + branch name</li>
+  <li><span class="pill p0">P0</span><strong>M-007</strong> Online/Offline toggle</li>
+  <li><span class="pill p0">P0</span><strong>M-008</strong> Today's Orders count correct</li>
+  <li><span class="pill p1">P1</span><strong>M-009</strong> Pending / Completed counts</li>
+  <li><span class="pill p1">P1</span><strong>M-010</strong> Revenue tile = today's completed gross</li>
+  <li><span class="pill p1">P1</span><strong>M-011</strong> Estimated Payout — no float spill</li>
+</ul>
+<div class="module-head">Order Flow (4)</div>
+<ul class="scenario">
+  <li><span class="pill p0">P0</span><strong>M-012</strong> Notification bell badge on new order</li>
+  <li><span class="pill p0">P0</span><strong>M-013</strong> Accept an order request</li>
+  <li><span class="pill p0">P0</span><strong>M-014</strong> Reject an order request</li>
+  <li><span class="pill p0">P0</span><strong>M-015</strong> Mark Ready + pickup-OTP verification</li>
+</ul>
+<div class="module-head">Inventory (5)</div>
+<ul class="scenario">
+  <li><span class="pill p0">P0</span><strong>M-016</strong> Inventory list loads</li>
+  <li><span class="pill p1">P1</span><strong>M-017</strong> Filter Modal (category/brand/availability)</li>
+  <li><span class="pill p0">P0</span><strong>M-018</strong> Toggle product Out of Stock</li>
+  <li><span class="pill p1">P1</span><strong>M-019</strong> Add from global catalog</li>
+  <li><span class="pill p1">P1</span><strong>M-020</strong> Add custom product</li>
+  <li><span class="pill p1">P1</span><strong>M-021</strong> Reject duplicate menu item name</li>
+</ul>
+<div class="module-head">Bookings — dining only (2)</div>
+<ul class="scenario">
+  <li><span class="pill p0">P0</span><strong>M-022</strong> Bookings screen loads</li>
+  <li><span class="pill p1">P1</span><strong>M-023</strong> Slot Config edits</li>
+</ul>
+<div class="module-head">Profile &amp; Settings (2)</div>
+<ul class="scenario">
+  <li><span class="pill p1">P1</span><strong>M-024</strong> Profile screen view</li>
+  <li><span class="pill p1">P1</span><strong>M-025</strong> Manual logout</li>
+</ul>
+<div class="module-head">Notifications (2)</div>
+<ul class="scenario">
+  <li><span class="pill p0">P0</span><strong>M-026</strong> New-order push notification</li>
+  <li><span class="pill p1">P1</span><strong>M-027</strong> In-app notification list</li>
+</ul>
+
+<!-- =================================================================== -->
+
+<h2 id="c-qa-new">C · Founder QA — features added AFTER June 6 (~22 new scenarios) <span class="pill new">NEW</span></h2>
+<p>None of these existed when the June 6 checklist was written; they all need acceptance criteria + a founder run-through before launch.</p>
+
+<h4>Coupon end-to-end (Phase 4–5)</h4>
+<ul class="scenario">
+  <li><span class="pill p0">P0</span>Multi-store coupon split — discount allocated proportionally; per-store breakdown signed and consumed unchanged at checkout</li>
+  <li><span class="pill p0">P0</span>Rejected-store re-validation — accepted-subset re-signs, discount on rejected items disappears</li>
+  <li><span class="pill p0">P0</span>Cart-mutation auto-clears applied coupon (rapid-tap-safe)</li>
+  <li><span class="pill p0">P0</span>Validation token expires (10 min) — re-apply required</li>
+  <li><span class="pill p1">P1</span>Logout clears applied coupon + cloud-merge on sign-in</li>
+  <li><span class="pill p1">P1</span>Partial cancel proportional reversal — usage count decrements</li>
+  <li><span class="pill p1">P1</span>Storefront / Favorites both set <code>storeProductId</code> on Add (N1)</li>
+</ul>
+
+<h4>Merchant coupon surfacing (Phase 6)</h4>
+<ul class="scenario">
+  <li><span class="pill p0">P0</span>Order detail green PLATFORM / amber MERCHANT coupon banner</li>
+  <li><span class="pill p0">P0</span>Receipt HTML + printed ticket carry COUPON APPLIED line</li>
+  <li><span class="pill p1">P1</span>Earnings "Coupon Discounts" card aggregates reimbursement + absorbed correctly</li>
+  <li><span class="pill p1">P1</span>Estimated payout adds today's PLATFORM reimbursement</li>
+</ul>
+
+<h4>Settlement UI — admin (Phase 7E)</h4>
+<ul class="scenario">
+  <li><span class="pill p0">P0</span>Cycles tab renders OPEN/CLOSED/PAID with correct money columns</li>
+  <li><span class="pill p0">P0</span>Detail drill-down: SALE / COUPON_REIMBURSEMENT / CLAWBACK lines reconcile to cycle total</li>
+  <li><span class="pill p0">P0</span>Mark-paid dialog requires UTR; cycle flips CLOSED → PAID forward-only</li>
+  <li><span class="pill p0">P0</span>"Close last week" button — idempotent, mirror of cron</li>
+  <li><span class="pill p0">P0</span>Commission Rules editor — saving clears provisional flag</li>
+  <li><span class="pill p0">P0</span><strong>Merchants tab</strong> — assign category + tier + hold; held-order state visible</li>
+  <li><span class="pill p1">P1</span>Negative-net cycle UI (clawback-only week) — see <a href="#e-7g">E-9</a></li>
+</ul>
+
+<h4>Settlement UI — merchant (Phase 7F)</h4>
+<ul class="scenario">
+  <li><span class="pill p0">P0</span>Earnings → Weekly Settlements section renders cycle history</li>
+  <li><span class="pill p1">P1</span>Tap-to-expand breakdown shows sales/commission/reimbursement/clawback/net</li>
+  <li><span class="pill p1">P1</span>Week labels pinned to IST regardless of device timezone</li>
+</ul>
+
+<h4>Phase 7B/7G safety nets (silent — verify via Sentry, not UI)</h4>
+<ul class="scenario">
+  <li><span class="pill p0">P0</span>POST /orders rejects unverified Razorpay payments (PAYMENT_NOT_VERIFIED 400)</li>
+  <li><span class="pill p0">P0</span>Orphan-payment sweep — observe Sentry "would refund" entries during DRY_RUN window</li>
+</ul>
+
+<!-- =================================================================== -->
+
+<h2 id="d-rollout">D · Phase 8 rollout sequence <span class="pill p0">GATED</span></h2>
+<ol>
+  <li><strong>Vercel admin-web</strong> — ✅ already deployed (commit <code>f8c5a911</code>)</li>
+  <li><strong>Consumer EAS OTA</strong> — ships Phase 4 + 5 (coupon checkout, multi-store, Apply Coupon row, perStoreBreakdown consumer). Your call.</li>
+  <li><strong>Merchant EAS OTA</strong> — ships Phase 6 (coupon banner, receipt rows) + 7F (Weekly Settlements). Your call.</li>
+  <li><strong>Flip <code>REQUIRE_COUPON_TOKEN=true</code></strong> after 24h clean Sentry from OTAs (currently warn-only). EB setenv + deploy.</li>
+  <li><strong>Flip <code>REQUIRE_ORDERS_AUTH=true</code></strong> after a further 24h clean Sentry (currently false — soft-auth). EB setenv + deploy.</li>
+  <li><strong>Retire legacy <code>POST /coupons/redeem</code></strong> once the new path has soaked for ~1 week with no Sentry counters firing.</li>
+</ol>
+
+<!-- =================================================================== -->
+
+<h2 id="e-7g">E · Phase 7G residuals (audit mediums/lows) <span class="pill p1">DEFERRED</span></h2>
+<ol>
+  <li><strong>Negative-net cycle UI semantics</strong> — clawback-only weeks. <em>Founder decision needed:</em> carry debt forward, invoice the merchant, or block payment until offset.</li>
+  <li><strong>Refund rupee-rounding vs clawback paise</strong> — refund path rounds whole rupees before paise; recorded clawback can differ &lt; ₹1 from moved money. Align rounding.</li>
+  <li><strong>Close scalability</strong> — single IN-list scan from epoch; needs paging before thousands of orders/week.</li>
+  <li><strong>Missed-Monday catch-up</strong> — if process down at 02:00 IST, close skipped. Add startup catch-up check.</li>
+  <li><strong>detectClawback DB uniqueness</strong> — currently find-then-create; add a defensive partial unique index.</li>
+  <li><strong>Order-create price validation</strong> — items still client-priced. Coherence guard catches it at close-time (HELD + Sentry); root fix is validating against StoreProduct at create. Hot path — schedule deliberately.</li>
+  <li><strong>Payment-verification override UI</strong> — endpoint exists (<code>POST /admin/orders/:id/payment-verification</code>, audit-logged); admin worklist UI not built. Until then: curl with admin JWT.</li>
+  <li><strong>Residual micro-race</strong> — refund whose tx commits between in-tx revalidation and close commit can settle full with no clawback (sub-second window). Sentry mid-close drop messages + weekly reconciliation cover it; full fix needs <code>SELECT FOR UPDATE</code> on candidates.</li>
+  <li><strong>Negative-net + mark-paid semantics</strong> — flow currently treats it like a payout; needs UI guard + founder decision (#1 above).</li>
+</ol>
+
+<!-- =================================================================== -->
+
+<h2 id="f-tasks">F · Open TaskList items (5)</h2>
+<ul class="scenario">
+  <li><span class="pill p1">P1</span><strong>#5</strong> End-to-end test admin coupon builder against live API</li>
+  <li><span class="pill p1">P1</span><strong>#32</strong> Agreements V1 in merchant signup — T&amp;C + Privacy + Partner + click-accept</li>
+  <li><span class="pill p1">P1</span><strong>#33</strong> Aadhar eSign vendor scaffolding (Digio recommended)</li>
+  <li><span class="pill p0">P0</span><strong>#44</strong> Option A finalization — consumer + merchant OTA (your-approval gated)</li>
+  <li><span class="pill p0">P0</span><strong>#54</strong> Coupon Foolproof Phase 8 — verification, tests, rollout (= sections B/C/D of this audit)</li>
+</ul>
+
+<!-- =================================================================== -->
+
+<h2 id="g-forlater">G · <code>forlater.md</code> active queue — status check</h2>
+<div class="done-note"><strong>Verified shipped since the queue was written</strong> (delete or strikethrough in <code>forlater.md</code> next pass):</div>
+<ul class="scenario">
+  <li><span class="pill done">DONE</span><strong>#2</strong> Realtime for merchant Pending/Processing tabs — channels live in <code>useOrders.ts:336/367</code></li>
+  <li><span class="pill done">DONE</span><strong>#17</strong> Server-side <code>order_requests</code> expiry — <code>reconcileOrderRequestStatus</code> cron at <code>scheduled-jobs.ts:101</code></li>
+  <li><span class="pill done">DONE</span><strong>#18</strong> Razorpay webhook → server-side order creation — <code>POST /webhooks/razorpay</code> at <code>index.ts:723</code> (Phase 2.E3)</li>
+  <li><span class="pill done">DONE</span><strong>Frequent signouts</strong> — Phase 2B/2C refresh-token rotation race fix</li>
+  <li><span class="pill done">DONE</span><strong>Order-create FK race</strong> — Layer 2/3/4 hardening from 2026-05-29</li>
+</ul>
+
+<div class="note"><strong>Still pending — verify before considering complete:</strong></div>
+<ul class="scenario">
+  <li><span class="pill p1">P1</span><strong>#1</strong> Unify Request ID → Order ID — <code>Order.orderNumber</code> exists, but unsure if <code>order_requests</code> carries the same number across the flip. <span class="pill unkn">VERIFY</span></li>
+  <li><span class="pill p0">P0</span><strong>#3</strong> Tighten RLS on <code>merchant_branches</code> — drop <code>USING (true)</code> on UPDATE/DELETE/SELECT, keep scoped <code>merchant_id=auth.uid()</code> + an <code>is_active</code> SELECT policy</li>
+  <li><span class="pill p1">P1</span><strong>#4</strong> Timings save bug — <code>isDirty</code> guard exists at <code>timings.tsx:92</code>, may already be fixed; needs founder confirmation</li>
+  <li><span class="pill p1">P1</span><strong>#5</strong> <code>is_active</code> field overload (architectural split into <code>is_active</code> + <code>accepting_orders</code>) — pre-scaling refactor</li>
+  <li><span class="pill p2">P2</span><strong>#7</strong> Operating hours coverage check — SQL written, not yet run</li>
+  <li><span class="pill p0">P0</span><strong>#8</strong> Security audit — broader RLS sweep across <code>StoreProduct</code>, <code>notifications</code>, etc.</li>
+  <li><span class="pill p1">P1</span><strong>#11</strong> OTP cache bug in merchant Ready tab — input pre-filled from previous order. <em>Safety risk.</em></li>
+  <li><span class="pill p2">P2</span><strong>#14</strong> Cosmetic data cleanup — 6 merchants with NULL <code>Store.merchant_id</code>; Security Test Store leftover; Test City rows; Teja stationary branch name</li>
+  <li><span class="pill p1">P1</span><strong>#15</strong> Phone format inconsistency in <code>merchants</code> table (10-digit vs <code>91…</code>) — normalize + CHECK constraint</li>
+  <li><span class="pill p1">P1</span><strong>#20</strong> Reschedule + Reorder (customer app) — product feature</li>
+  <li><span class="pill p2">P2</span><strong>#21</strong> Instagram tagging & hashtag campaign (Meta Graph API) — 2-4 weeks of App Review + 1-2 weeks dev</li>
+  <li><span class="pill p1">P1</span><strong>#22</strong> Customer-app notifications full plan — 14 scenarios across pickup/dining lifecycle (6 + 3 + scheduled + exchange/return)</li>
+  <li><span class="pill p1">P1</span><strong>Wati-OTP consumer name capture</strong> — User.name NULL for ~27 customers; prompt at first login</li>
+  <li><span class="pill p2">P2</span><strong>Audit log viewer page</strong> — extend coverage to user.suspend/role_change, admin.invited, merchant.kyc_decision</li>
+  <li><span class="pill p2">P2</span><strong>Customers page load-more UI</strong> — server pagination shipped (cap 500); UI for &gt; 400 customers</li>
+</ul>
+
+<!-- =================================================================== -->
+
+<h2 id="h-sprint">H · Sprint integrations still open</h2>
+<ul class="scenario">
+  <li><span class="pill p0">P0</span><strong>KYC / GST verification vendor</strong> — Karza / IDfy / DigiLocker decision + integration. Blocking real-merchant onboarding scale.</li>
+  <li><span class="pill p1">P1</span><strong>Razorpay Route / Payouts vendor</strong> — Razorpay X doesn't support our business type (confirmed late May). Cashfree Payouts / Open Money / Decentro evaluation. Phase 7b unblocks automated transfers.</li>
+  <li><span class="pill p1">P1</span><strong>Wati extension</strong> — order status messages, payment OTP, reminders, marketing, support routing (each = a Wati template + automation)</li>
+  <li><span class="pill p1">P1</span><strong>Cloudinary / imgix</strong> — image CDN for products, banners, store photos. Customer-app bandwidth win.</li>
+  <li><span class="pill p2">P2</span><strong>PostHog / Mixpanel</strong> — product analytics, funnels, retention</li>
+  <li><span class="pill p1">P1</span><strong>Reports / CSV exports</strong> — orders, refunds, GST, payouts. Analytics-page CSV shipped; the rest pending.</li>
+  <li><span class="pill p0">P0</span><strong>Supabase public-schema GRANT migration</strong> — deadline 2026-10-30. Every new table must include explicit <code>GRANT</code>s; audit existing tables.</li>
+  <li><span class="pill p1">P1</span><strong>Reports / data exports tab</strong> — orders, refunds, GST, payouts (with date pickers)</li>
+</ul>
+
+<!-- =================================================================== -->
+
+<h2 id="i-decisions">I · Founder decisions awaiting input</h2>
+<ol>
+  <li><strong>FQ-2 — Stationery sub-category split</strong>. Sheet says "2% stationery, 5% others" within one category; +gifting conflict. Currently 2% provisional. Options: split into Stationery (2%) + Gifting & Toys (5%) as two rules, or pick one rate for the whole category.</li>
+  <li><strong>FQ-2 — F&amp;B turnover tiers 3-5</strong>. Sheet leaves them blank. Currently seeded at tier-2 defaults (PICKUP 8%, DINING 10%), all provisional. Need actual rates or confirmation that tier-2 holds beyond ₹1cr.</li>
+  <li><strong>FQ-6 — GST on commission + TCS</strong>. Share <code>docs/phase7-settlement-architecture.html</code> with the CA. Reserved columns (<code>gstOnCommission</code>, <code>tcsAmount</code>) currently 0; need CA's call before the first PAID cycle.</li>
+</ol>
+
+<hr style="margin-top:48px;border:none;border-top:1px solid #d4d4d4;">
+<p class="meta">Generated <strong>2026-06-11</strong> · sources: <code>docs/test-checklist-june6-build.xlsx</code>, <code>forlater.md</code>, <code>SESSION_LOG.md</code>, TaskList, git log <code>main</code> (June 6 → today), live prod DB census via verify script. Saved under <code>docs/pending-audit-from-june6.html</code>.</p>
+
+</body>
+</html>
