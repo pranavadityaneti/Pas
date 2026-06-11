@@ -1,5 +1,5 @@
 // @lock — DO NOT EDIT WITHOUT EXPLICIT USER PERMISSION.
-// Pickup Checkout — multiple approved layers (cumulative, latest May 19, 2026 demo crisis):
+// Pickup Checkout — multiple approved layers (cumulative, latest 2026-06-09):
 //   1. Non-absolute bottom CTA with pb-[100px] for tab bar clearance (original layout fix).
 //   2. handlePaymentSuccess session-recovery block: refresh + getSession to recover
 //      from Razorpay WebView session eviction (uses `effectiveUser`, not `user`, for
@@ -16,6 +16,27 @@
 //      acceptedRequests + PENDING requests so stores B..N are not left ACCEPTED
 //      until cron expiry. Does not touch handlePaymentSuccess, session-recovery,
 //      or the apiClient migration from layer 4).
+//   6. Phase 4 coupon-foolproof integration approved 2026-06-09. Reads
+//      appliedCoupon from CartContext (single source of truth for the server-signed
+//      validation token + signed discount). Sends validationToken + couponId +
+//      couponCode in the POST /orders body so the server (Phase 2F) can verify
+//      the token before applying the discount snapshot. Legacy AVAILABLE_COUPONS
+//      local constant + couponCode / couponApplied / couponDiscount local state
+//      removed — CartContext.appliedCoupon is now authoritative. On the proceed-
+//      to-pay step we synchronously re-validate the coupon if its token expires
+//      within 60s (closes the "stale token sent to server" bleed); on failure
+//      we clear the coupon and alert the user. Live countdown UI on the banner
+//      deferred to a follow-up styling pass (no bleeds, just polish). Does NOT
+//      touch session-recovery (layer 2), errorDiagnostic (layer 3), apiClient.fetch
+//      URL paths or effectiveUser resolution (layer 4), or executeCancelOrder
+//      (layer 5).
+//   7. Phase 5 multi-store coupon lift approved 2026-06-09 (plan approved with
+//      Q1-Q5 decisions). Apply Coupon row's multi-store disable removed — the
+//      server now signs a per-store discount breakdown into the validation
+//      token and POST /orders snapshots each store's slice. The eligibility
+//      gate at confirmAccepted keeps the storeProductId invariant but no
+//      longer rejects multi-store carts. Does NOT touch layers 1-5; layer 6's
+//      CartContext-sourced storeProductId lookup is unchanged.
 // Any modification to the checkout flow, error UI, or session-handling logic
 // REQUIRES the user's explicit chat-confirmed approval. Hard lock.
 // Confirm Pre-order Screen: Order review with arrival details → Order confirmed with OTP.
@@ -39,7 +60,7 @@ import { useAuth } from '../context/AuthContext';
 import { useOrderRequests, OrderRequest } from '../hooks/useOrderRequests';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../lib/supabase';
-import { apiClient } from '../lib/api';
+import { apiClient, validateCoupon, checkCouponOrderEligibility, type ValidateCouponCartItem } from '../lib/api';
 import TransactionalAuthModal from '../components/TransactionalAuthModal';
 import { STORES, RESTAURANTS, findAlternativeStores, ALL_PRODUCTS } from '../lib/data';
 import RazorpayCheckout from '../components/RazorpayCheckout';
@@ -47,11 +68,10 @@ import * as Contacts from 'expo-contacts';
 import { parseUtc } from '../utils/dateFormat';
 
 const TIME_OPTIONS = ['Today, 6:00 PM - 7:00 PM', 'Today, 7:00 PM - 8:00 PM', 'Today, 8:00 PM - 9:00 PM'];
-const AVAILABLE_COUPONS = [
-    { code: 'PASFIRST', discount: 100, description: 'Flat ₹100 off on your first order', minOrder: 500 },
-    { code: 'SUNDAY50', discount: 50, description: '₹50 off on lazy Sundays', minOrder: 299 },
-    { code: 'HUNGRY20', discount: 0.20, description: '20% off up to ₹100', isPercentage: true, maxDiscount: 100, minOrder: 400 },
-];
+// Phase 4 (2026-06-09): legacy AVAILABLE_COUPONS constant removed. The applied
+// coupon now lives in CartContext (server-validated via /checkout/validate-coupon)
+// and the discount comes from the signed token's `discount` field, not a hardcoded
+// list. The old minOrder client-side guard is now enforced server-side too.
 
 const generateTimeSlots = (store: any, day: 'Today' | 'Tomorrow') => {
     if (!store?.openingTime || !store?.closingTime) return TIME_OPTIONS;
@@ -92,7 +112,12 @@ export default function CheckoutScreen() {
     // 1. ALL HOOKS AT THE VERY TOP (UNCONDITIONAL)
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const route = useRoute<RouteProp<RootStackParamList, 'Checkout'>>();
-    const { items, getTotal, clearCart, updateQuantity, addItem, removeItem } = useCart();
+    // Phase 4 (2026-06-09): appliedCoupon + setAppliedCoupon + clearAppliedCoupon
+    // are the source of truth for coupon state on this screen. clearCart
+    // auto-clears appliedCoupon too (see CartContext.tsx), so post-order cleanup
+    // doesn't need explicit clear. setAppliedCoupon is used by the proceed-to-pay
+    // re-validate path to refresh the token when it nears expiry.
+    const { items, getTotal, clearCart, updateQuantity, addItem, removeItem, appliedCoupon, setAppliedCoupon, clearAppliedCoupon } = useCart();
     const {
         requests,
         allResolved,
@@ -112,9 +137,9 @@ export default function CheckoutScreen() {
     const [selectedDay, setSelectedDay] = useState<'Today' | 'Tomorrow'>('Today');
     const [confirmedOrders, setConfirmedOrders] = useState<{ storeId: string, storeName: string, items: any[], total: number, orderNumber?: string, otp: string }[]>([]);
     const [specialInstructions, setSpecialInstructions] = useState('');
-    const [couponCode, setCouponCode] = useState('');
-    const [couponApplied, setCouponApplied] = useState(false);
-    const [couponDiscount, setCouponDiscount] = useState(0);
+    // Phase 4 (2026-06-09): legacy couponCode/couponApplied/couponDiscount local
+    // state removed. CartContext.appliedCoupon is authoritative. See useCart()
+    // destructuring above.
     const [showPayment, setShowPayment] = useState(false);
     const [paymentId, setPaymentId] = useState<string | null>(null);
     const [razorpayOrderId, setRazorpayOrderId] = useState<string | undefined>();
@@ -377,16 +402,13 @@ export default function CheckoutScreen() {
     }, [rejectedRequests]);
 
     useEffect(() => {
-        if (route.params?.selectedCoupon) {
-            const { code, discount } = route.params.selectedCoupon;
-            setCouponCode(code);
-            setCouponDiscount(discount);
-            setCouponApplied(true);
-        }
+        // Phase 4 audit re-fix (2026-06-09 evening): selectedCoupon route param
+        // was dropped in this same audit pass. Only specialInstructions remains
+        // on Checkout/DiningCheckout. Coupon state is read from CartContext below.
         if (route.params?.specialInstructions) {
             setSpecialInstructions(route.params.specialInstructions);
         }
-    }, [route.params?.selectedCoupon, route.params?.specialInstructions]);
+    }, [route.params?.specialInstructions]);
 
 
 
@@ -425,7 +447,8 @@ export default function CheckoutScreen() {
         const isFnB = ['restaurant', 'bakery', 'cafe'].some(t => type.includes(t));
         return sum + (isFnB ? (group.total * 0.05) : 0);
     }, 0).toFixed(2));
-    const discount = couponApplied ? couponDiscount : 0;
+    // Phase 4: derive discount from CartContext.appliedCoupon (single source of truth).
+    const discount = appliedCoupon?.discount ?? 0;
     const total = subtotal + exactGst - discount;
 
     // Helpers
@@ -435,10 +458,11 @@ export default function CheckoutScreen() {
     };
 
     const handleRemoveCoupon = () => {
-        setCouponCode('');
-        setCouponApplied(false);
-        setCouponDiscount(0);
-        navigation.setParams({ selectedCoupon: undefined });
+        // Phase 4: clear CartContext.appliedCoupon (single source of truth).
+        // Phase 4 audit re-fix (2026-06-09 evening): dropped the
+        // navigation.setParams({ selectedCoupon: undefined }) call — the
+        // selectedCoupon route param itself was dropped from RootStackParamList.
+        clearAppliedCoupon();
     };
 
     const selectContact = async () => {
@@ -555,11 +579,53 @@ export default function CheckoutScreen() {
             const actualSubtotal = acceptedRequests.reduce((sum: number, r: any) => sum + r.subtotal, 0);
             const createdOrders: any[] = [];
 
+            // Phase 5 audit fix #4 (2026-06-10): the per-store discount comes from
+            // the SERVER's signed perStoreBreakdown (matched by storeProductIds —
+            // the same currency the server's POST /orders matching uses), never a
+            // client-side proportional recompute. The old Math.round(discount *
+            // share) used whole-rupee rounding with no residual absorption and
+            // drifted from the signed slices by up to ~₹0.50/store, making
+            // Order.totalAmount and Order.orderCouponDiscount disagree on the
+            // same row. cartItemsByProductId resolves req item ids → cart
+            // storeProductIds (acceptedRequests strip the field).
+            const orderCartItemsById = new Map(items.map((ci) => [String(ci.id), ci]));
+            const couponBreakdown = appliedCoupon?.perStoreBreakdown;
+
             for (let i = 0; i < acceptedRequests.length; i++) {
                 const req = acceptedRequests[i];
                 const share = req.subtotal / (actualSubtotal || 1);
                 const groupGst = Math.round(finalGstToPay * share);
-                const groupDiscount = Math.round(discount * share);
+                let groupDiscount = 0;
+                if (appliedCoupon) {
+                    if (couponBreakdown && couponBreakdown.length > 0) {
+                        // Multi-store: exact storeProductId-set match against the
+                        // signed breakdown — identical to the server's matching.
+                        const reqSpids = new Set(
+                            (req.items || [])
+                                .map((it: any) => orderCartItemsById.get(String(it.id))?.storeProductId)
+                                .filter(Boolean)
+                                .map(String)
+                        );
+                        const entry = couponBreakdown.find(
+                            (b) =>
+                                Array.isArray(b.storeProductIds) &&
+                                b.storeProductIds.length === reqSpids.size &&
+                                b.storeProductIds.every((s) => reqSpids.has(String(s)))
+                        );
+                        if (entry) {
+                            groupDiscount = entry.discount;
+                        } else {
+                            // Should be impossible after confirmAccepted's accepted-
+                            // subset re-validation — fail loud, apply NO discount to
+                            // this order (the server will make the same decision).
+                            console.error(`[CheckoutScreen] Phase 5: no breakdown entry matched store ${req.store_id} — order proceeds without a discount slice`);
+                            groupDiscount = 0;
+                        }
+                    } else {
+                        // Single-store coupon: full signed discount, exact paise.
+                        groupDiscount = appliedCoupon.discount;
+                    }
+                }
                 const groupFinalTotal = Math.max(0, req.subtotal + groupGst - groupDiscount);
 
                 const storeIdStr = String(req.store_id);
@@ -586,12 +652,39 @@ export default function CheckoutScreen() {
                     specialInstructions: specialInstructions,
                     arrivalTime: selectedTime[req.branch_id] || selectedTime[req.store_id] || 'ASAP',
                     otp: storeOtp,
-                    items: req.items.map((item: any) => ({
-                        name: item.name,
-                        quantity: item.quantity,
-                        price: item.price,
-                        storeProductId: item.id || item.storeProductId || null
-                    }))
+                    items: req.items.map((item: any) => {
+                        // Phase 4 audit re-fix (2026-06-09 evening): look up
+                        // storeProductId from CartContext.items (durable post-C1)
+                        // because req.items has storeProductId stripped by
+                        // useOrderRequests.createRequests. Match by product .id.
+                        const cartMatch = items.find((ci) => String(ci.id) === String(item.id));
+                        const trustedStoreProductId = cartMatch?.storeProductId ?? null;
+                        return {
+                            name: item.name,
+                            quantity: item.quantity,
+                            price: item.price,
+                            // Phase 4 fix C2 (2026-06-09): on coupon orders use ONLY
+                            // the trusted storeProductId from CartContext (no fallback)
+                            // so the server's cartHash recompute is deterministic.
+                            // The D2 eligibility gate above guarantees the cart has
+                            // a storeProductId match for every item on coupon orders.
+                            // Non-coupon orders keep the legacy fallback path so
+                            // existing stock-decrement keeps working.
+                            storeProductId: appliedCoupon
+                                ? trustedStoreProductId
+                                : (trustedStoreProductId || item.id || null)
+                        };
+                    }),
+                    // Phase 4 (2026-06-09): include the server-signed validation token
+                    // so the server (Phase 2F) can verify the discount before applying
+                    // it to this Order's snapshot columns. Only present when a coupon
+                    // was applied to this cart; absent for no-coupon orders. The server
+                    // accepts both shapes via the Phase 2G shim for backward compat.
+                    ...(appliedCoupon ? {
+                        validationToken: appliedCoupon.validationToken,
+                        couponId: appliedCoupon.couponId,
+                        couponCode: appliedCoupon.code,
+                    } : {}),
                 };
 
                 let orderData: any = null;
@@ -762,22 +855,118 @@ export default function CheckoutScreen() {
             const isFnB = ['restaurant', 'bakery', 'cafe'].some(t => type.includes(t));
             return sum + (isFnB ? (req.subtotal * 0.05) : 0);
         }, 0));
-        const resultTotal = Math.max(0, resultSubtotal + resultGst - (couponApplied ? couponDiscount : 0));
+        // Phase 4: derived discount from CartContext.appliedCoupon (single source of truth).
+        const resultTotal = Math.max(0, resultSubtotal + resultGst - (appliedCoupon?.discount ?? 0));
 
         // Pending swap requests — show as "in progress"
         const pendingSwaps = requests.filter(r => r.status === 'PENDING');
 
         const confirmAccepted = async () => {
             if (acceptedRequests.length === 0) { navigation.goBack(); return; }
-            let newDiscount = couponApplied ? couponDiscount : 0;
-            if (couponApplied) {
-                const appliedCoupon = AVAILABLE_COUPONS.find(c => c.code === couponCode);
-                if (appliedCoupon && resultSubtotal < appliedCoupon.minOrder) {
-                    Alert.alert('Coupon Removed', 'Subtotal below minimum for coupon.');
-                    newDiscount = 0;
+            // Phase 4 fixes D2 + A2 (2026-06-09): eligibility gate at the TOP
+            // of confirmAccepted — runs UNCONDITIONALLY for every coupon order,
+            // not only inside the near-expiry branch. Catches: (a) cart drift
+            // (items missing storeProductId after Supabase reload), and (b)
+            // multi-store coupon orders (rejected until Phase 5 ships allocation).
+            // If the order is ineligible, drop the coupon and abort — user
+            // re-taps Pay to retry without the coupon at the updated total.
+            //
+            // Phase 4 audit re-fix (2026-06-09 evening): source storeProductId
+            // from CartContext.items (durable post-C1), not from
+            // acceptedRequests[].items where useOrderRequests.createRequests
+            // strips the field. Match by product id (cart item .id == order
+            // request item .id, both come from the same upstream feed).
+            // Phase 5 audit fix #2 (2026-06-10): the coupon must be re-validated
+            // against ONLY the accepted stores' items whenever the accepted set
+            // differs from the cart the coupon was validated on (a store rejected,
+            // or the cart drifted) — not just when the token nears expiry.
+            // Without this, a rejected store's slice stayed in the charged
+            // discount: 2-store cart A=600/B=400 with a 10% coupon (signed ₹100),
+            // B rejects → customer was charged −₹100 though entitled to −₹60.
+            let effectiveDiscount = appliedCoupon?.discount ?? 0;
+            if (appliedCoupon) {
+                const cartItemsByProductId = new Map(
+                    items.map((ci) => [String(ci.id), ci])
+                );
+                // Accepted-subset items, with storeProductId sourced from
+                // CartContext (durable post-C1; acceptedRequests strip the field).
+                const acceptedItems = acceptedRequests.flatMap((req: any) =>
+                    (req.items || []).map((it: any) => {
+                        const cartMatch = cartItemsByProductId.get(String(it.id));
+                        return {
+                            storeProductId: cartMatch?.storeProductId ? String(cartMatch.storeProductId) : null,
+                            storeId: String(req.store_id),
+                            quantity: Number(it.quantity) || 0,
+                            price: Number(it.price) || 0,
+                            id: String(it.id),
+                            name: String(it.name || ''),
+                        };
+                    })
+                );
+                const elig = checkCouponOrderEligibility(acceptedItems, appliedCoupon);
+                if (!elig.ok) {
+                    clearAppliedCoupon();
+                    Alert.alert('Coupon removed', elig.reason!);
+                    return;
+                }
+                // Does the accepted set differ from the full cart the token was
+                // signed over? Compare storeProductId multisets.
+                const cartSpidKey = items
+                    .map((ci) => `${ci.storeProductId}:${ci.quantity}`)
+                    .sort()
+                    .join('|');
+                const acceptedSpidKey = acceptedItems
+                    .map((it: any) => `${it.storeProductId}:${it.quantity}`)
+                    .sort()
+                    .join('|');
+                const acceptedSetChanged = cartSpidKey !== acceptedSpidKey;
+                const nearExpiry = appliedCoupon.expiresAt - 60 < Math.floor(Date.now() / 1000);
+
+                if (acceptedSetChanged || nearExpiry) {
+                    const reValidatePayload: ValidateCouponCartItem[] = acceptedItems.map((it: any) => ({
+                        storeProductId: String(it.storeProductId),
+                        quantity: it.quantity,
+                        price: it.price,
+                        id: it.id,
+                        name: it.name,
+                    }));
+                    const reValidateStoreIds = Array.from(new Set(acceptedItems.map((it: any) => it.storeId)));
+                    const reValidate = await validateCoupon({
+                        code: appliedCoupon.code,
+                        cartItems: reValidatePayload,
+                        storeIds: reValidateStoreIds,
+                        orderType: 'pickup',
+                    });
+                    if (!reValidate.valid) {
+                        clearAppliedCoupon();
+                        effectiveDiscount = 0;
+                        Alert.alert(
+                            'Coupon removed',
+                            `${reValidate.error} Proceeding without the discount.`
+                        );
+                    } else {
+                        // Refresh CartContext with the token signed over the
+                        // ACCEPTED subset — handlePaymentSuccess sends this token
+                        // and consumes its breakdown, so the charge, the per-order
+                        // totals, and the server snapshots all derive from the
+                        // same signed numbers.
+                        setAppliedCoupon({
+                            code: reValidate.code,
+                            couponId: reValidate.couponId,
+                            discount: reValidate.discount,
+                            fundingSource: reValidate.fundingSource,
+                            discountType: reValidate.discountType,
+                            validationToken: reValidate.validationToken,
+                            expiresAt: reValidate.expiresAt,
+                            cartHash: '',
+                            multiStore: reValidate.multiStore,
+                            perStoreBreakdown: reValidate.perStoreBreakdown ?? null,
+                        });
+                        effectiveDiscount = reValidate.discount;
+                    }
                 }
             }
-            const newTotal = Math.max(0, resultSubtotal + resultGst - newDiscount);
+            const newTotal = Math.max(0, resultSubtotal + resultGst - effectiveDiscount);
             setFinalTotalToPay(newTotal);
             setFinalGstToPay(resultGst);
 
@@ -972,7 +1161,7 @@ export default function CheckoutScreen() {
                             {resultGst > 0 && (
                                 <View className="flex-row justify-between mb-2"><Text className="text-[13px] text-gray-500 font-medium">GST (5%)</Text><Text className="text-[13px] text-gray-900 font-bold">₹{resultGst}</Text></View>
                             )}
-                            {couponApplied && <View className="flex-row justify-between mb-2"><Text className="text-[13px] text-green-600 font-bold">Discount</Text><Text className="text-[13px] text-green-600 font-bold">-₹{couponDiscount}</Text></View>}
+                            {appliedCoupon && <View className="flex-row justify-between mb-2"><Text className="text-[13px] text-green-600 font-bold">Discount</Text><Text className="text-[13px] text-green-600 font-bold">-₹{appliedCoupon.discount}</Text></View>}
                             <View className="border-t border-gray-200 my-2" />
                             <View className="flex-row justify-between"><Text className="text-[15px] text-gray-900 font-extrabold">Total</Text><Text className="text-[18px] text-gray-900 font-extrabold">₹{resultTotal}</Text></View>
                         </View>
@@ -1001,7 +1190,7 @@ export default function CheckoutScreen() {
                         </TouchableOpacity>
                     )}
                 </View>
-                <RazorpayCheckout visible={showPayment} onClose={() => setShowPayment(false)} onSuccess={handlePaymentSuccess} onError={handlePaymentError} amount={finalTotalToPay || total} restaurantName={storeNamesList} orderId={razorpayOrderId} />
+                <RazorpayCheckout visible={showPayment} onClose={() => setShowPayment(false)} onSuccess={handlePaymentSuccess} onError={handlePaymentError} amount={finalTotalToPay} restaurantName={storeNamesList} orderId={razorpayOrderId} />
             </SafeAreaView>
         );
     }
@@ -1176,13 +1365,62 @@ export default function CheckoutScreen() {
                     )}
                 </View>
 
+                {/* Phase 4 fix B1 (2026-06-09): Apply Coupon entry-point row.
+                    Remove button is a SIBLING of the navigate row (not nested)
+                    so a Remove tap can't also open CouponsScreen.
+                    Phase 5 (2026-06-09): multi-store gate LIFTED — the server
+                    now issues per-store discount breakdowns inside the signed
+                    token, so multi-store carts can apply coupons. The row is
+                    always enabled. storeId param remains the first store's id
+                    (CouponsScreen uses it only to ALSO include store-scoped
+                    coupons in the browse list; validation derives stores
+                    server-side from cartItems). */}
+                <View className="mx-5 mt-4 mb-3 flex-row items-center bg-white border border-gray-100 rounded-2xl p-4">
+                    <TouchableOpacity
+                        onPress={() => navigation.navigate('Coupons' as any, {
+                            subtotal,
+                            storeId: groupedStores[0]?.storeId || '',
+                            appliedCouponId: appliedCoupon?.couponId,
+                            returnTo: 'Checkout',
+                        })}
+                        activeOpacity={0.7}
+                        className="flex-1 flex-row items-center"
+                    >
+                        <Ticket size={20} color="#B52725" />
+                        <View className="flex-1 ml-3">
+                            <Text className="text-[14px] font-bold text-gray-900">
+                                {appliedCoupon ? `${appliedCoupon.code} applied` : 'Apply Coupon'}
+                            </Text>
+                            {appliedCoupon ? (
+                                <Text className="text-[12px] text-green-600 font-semibold mt-0.5">
+                                    You saved ₹{appliedCoupon.discount.toFixed(2)} · Tap to change
+                                </Text>
+                            ) : (
+                                <Text className="text-[12px] text-gray-500 font-medium mt-0.5">
+                                    Browse offers or enter a code
+                                </Text>
+                            )}
+                        </View>
+                        {!appliedCoupon && <ChevronRight size={18} color="#B52725" />}
+                    </TouchableOpacity>
+                    {appliedCoupon && (
+                        <TouchableOpacity
+                            onPress={handleRemoveCoupon}
+                            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                            className="ml-2 px-3 py-1.5 rounded-full bg-gray-100"
+                        >
+                            <Text className="text-[12px] font-bold text-gray-700">Remove</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
+
                 <View className="px-5 mt-4 mb-3"><Text className="text-[12px] font-extrabold text-[#B52725] uppercase tracking-wider">Bill Details</Text></View>
                 <View className="mx-5 mb-20 bg-white rounded-2xl border border-gray-100 p-5">
                     <View className="flex-row justify-between mb-2.5"><Text className="text-[13px] text-gray-500 font-semibold">Item Total</Text><Text className="text-[13px] text-gray-900 font-bold">₹{subtotal}</Text></View>
                     {exactGst > 0 && (
                         <View className="flex-row justify-between mb-2.5"><Text className="text-[13px] text-gray-500 font-semibold">GST (5%)</Text><Text className="text-[13px] text-gray-900 font-bold">₹{exactGst.toFixed(2)}</Text></View>
                     )}
-                    {couponApplied && <View className="flex-row justify-between mb-2.5"><Text className="text-[13px] text-green-600 font-bold">Offer Discount</Text><Text className="text-[13px] text-green-600 font-bold">−₹{discount.toFixed(2)}</Text></View>}
+                    {appliedCoupon && <View className="flex-row justify-between mb-2.5"><Text className="text-[13px] text-green-600 font-bold">Offer Discount</Text><Text className="text-[13px] text-green-600 font-bold">−₹{discount.toFixed(2)}</Text></View>}
                     <View className="border-t border-gray-100 my-3" />
                     <View className="flex-row justify-between items-center"><Text className="text-[15px] text-gray-900 font-bold">To Pay</Text><Text className="text-[18px] text-gray-900 font-bold">₹{total.toFixed(2)}</Text></View>
                 </View>
@@ -1256,7 +1494,7 @@ export default function CheckoutScreen() {
                 </View>
             </Modal>
 
-            <RazorpayCheckout visible={showPayment} onClose={() => setShowPayment(false)} onSuccess={handlePaymentSuccess} onError={handlePaymentError} amount={finalTotalToPay || total} restaurantName={storeNamesList} orderId={razorpayOrderId} />
+            <RazorpayCheckout visible={showPayment} onClose={() => setShowPayment(false)} onSuccess={handlePaymentSuccess} onError={handlePaymentError} amount={finalTotalToPay} restaurantName={storeNamesList} orderId={razorpayOrderId} />
         </SafeAreaView>
     );
 }

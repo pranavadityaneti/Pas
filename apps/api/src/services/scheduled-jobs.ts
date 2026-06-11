@@ -23,6 +23,7 @@ import cron from 'node-cron';
 import * as Sentry from '@sentry/node';
 import { PrismaClient } from '@prisma/client';
 import { NotificationService } from './notification.service';
+import { closeSettlementCycles, detectClawback, PHASE7_EPOCH } from './settlement.service';
 
 const REMINDER_TYPES = {
     PICKUP_30: 'PICKUP_REMINDER_30MIN',
@@ -102,12 +103,52 @@ export function initScheduledJobs(
                 console.error('[cron] reconcileOrderRequestStatus error:', e);
                 Sentry.captureException(e, { tags: { area: 'cron.reconcileOrderRequestStatus' } });
             }
+            // Phase 7B (2026-06-10): re-verify orders whose payment check was
+            // inconclusive at create time (Razorpay API error / SDK gap).
+            try {
+                await verifyPendingPayments(prisma);
+            } catch (e) {
+                console.error('[cron] verifyPendingPayments error:', e);
+                Sentry.captureException(e, { tags: { area: 'cron.verifyPendingPayments' } });
+            }
+            // Phase 7B / N6 (2026-06-10): orphaned-payments sweep — captured
+            // consumer payments with no order behind them get auto-refunded.
+            // Runs every 10th minute; respects CRON_DRY_RUN.
+            try {
+                if (new Date().getMinutes() % 10 === 0) {
+                    await sweepOrphanedPayments(prisma);
+                }
+            } catch (e) {
+                console.error('[cron] sweepOrphanedPayments error:', e);
+                Sentry.captureException(e, { tags: { area: 'cron.sweepOrphanedPayments' } });
+            }
         } finally {
             cronTickRunning = false;
         }
     });
 
-    console.log('[cron] Scheduled jobs initialized — running every 1 minute');
+    // Phase 7C (2026-06-10): weekly settlement close — Monday 02:00 IST,
+    // closing the just-ended Mon-Sun IST week. Idempotent (cycle-level skip +
+    // the SALE partial-unique), so the admin "Close cycle" button and this
+    // cron can coexist safely.
+    cron.schedule('0 2 * * 1', async () => {
+        try {
+            // 7G: drain the verification backlog FIRST so the close sees every
+            // verifiable order (the per-minute tick is batch-capped at 25; a
+            // backlog would otherwise hold orders for a full extra week).
+            for (let i = 0; i < 40; i++) {
+                const n = await verifyPendingPayments(prisma);
+                if (n < 25) break;
+            }
+            const result = await closeSettlementCycles(prisma);
+            console.log('[cron] weekly settlement close:', JSON.stringify(result));
+        } catch (e) {
+            console.error('[cron] weekly settlement close error:', e);
+            Sentry.captureException(e, { tags: { area: 'cron.settlementClose' } });
+        }
+    }, { timezone: 'Asia/Kolkata' });
+
+    console.log('[cron] Scheduled jobs initialized — running every 1 minute (+ weekly settlement close Mon 02:00 IST)');
     if (process.env.CRON_DRY_RUN === 'true') {
         console.warn('[cron] DRY-RUN MODE — Razorpay refund calls will be simulated only. Unset CRON_DRY_RUN to enable real refunds.');
     }
@@ -298,6 +339,8 @@ async function processOrderIssueSla(
             let refundResult: { razorpayRefundId: string; simulated: boolean } | null = null;
             if (needsRefund) {
                 refundResult = await tryRazorpayRefund(order.metadata, issue.refundAmountInr!);
+                // Phase 7D (2026-06-10): settled-order refund → clawback entry.
+                try { await detectClawback(prisma, order.id, issue.refundAmountInr!, `sla auto-refund ${refundResult.razorpayRefundId}`); } catch (e) { console.error('[7D] clawback detect (sla) failed:', e); }
                 // Persist refund id back. If this write fails after Razorpay
                 // succeeded, ops reconciles from the dashboard.
                 await prisma.$transaction(async (tx) => {
@@ -573,5 +616,190 @@ async function healMissingUserRows(prisma: PrismaClient): Promise<void> {
         // ALERT: drift was detected and auto-healed. Investigate why the signup
         // path missed these — this should normally be 0 forever.
         console.error(`[cron][ALERT] Self-heal created ${healed} missing consumer "User" row(s). The signup trigger missed them — investigate.`);
+    }
+}
+
+// ─────────────── Phase 7B (2026-06-10): payment verification jobs ───────────
+// Settlement prerequisite + the N6 decision (build the cron, don't soften the
+// copy). Shares the local Razorpay init + CRON_DRY_RUN conventions used by
+// tryRazorpayRefund above.
+
+function initLocalRazorpay(): any {
+    try {
+        const Razorpay = require('razorpay');
+        if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+            return new Razorpay({
+                key_id: process.env.RAZORPAY_KEY_ID,
+                key_secret: process.env.RAZORPAY_KEY_SECRET,
+            });
+        }
+    } catch (e) {
+        console.warn('[cron 7b] razorpay sdk init failed:', e);
+    }
+    return null;
+}
+
+/**
+ * Re-verify orders whose create-time payment check was inconclusive
+ * (payment_verified IS NULL): Razorpay API error, SDK unconfigured, or
+ * pre-deploy orders inside the window. Sets TRUE (captured + amount-coherent),
+ * FALSE (held from settlement), and leaves NULL only on repeated API errors.
+ * Batch-capped; the partial index orders_payment_unverified_idx keeps the
+ * scan cheap. Returns the candidate count so callers (the weekly close, the
+ * admin close endpoint) can loop until the backlog drains.
+ *
+ * 7G fixes: the default window starts at the PHASE7 EPOCH, not now-7d — the
+ * sliding window permanently stranded any order that stayed NULL past 7 days
+ * (pre-deploy orders, Razorpay outages). And RETURN_APPROVED orders are
+ * scanned despite isPaid=false (the partial-refund flow flips it; their kept
+ * remainder still needs verification to settle).
+ */
+export async function verifyPendingPayments(
+    prisma: PrismaClient,
+    window?: { from: Date; to: Date },
+): Promise<number> {
+    const rzp = initLocalRazorpay();
+    if (!rzp) return 0; // nothing to do without credentials — orders stay NULL
+
+    const from = window?.from ?? PHASE7_EPOCH;
+    // Give create-time verification 3 minutes before the cron picks a row up.
+    const to = window?.to ?? new Date(Date.now() - 3 * 60 * 1000);
+
+    const candidates = await prisma.order.findMany({
+        where: {
+            paymentVerified: null,
+            createdAt: { gte: from, lte: to },
+            OR: [{ isPaid: true }, { status: 'RETURN_APPROVED' as any }],
+        },
+        select: { id: true, totalAmount: true, metadata: true },
+        orderBy: { createdAt: 'asc' },
+        take: 25,
+    });
+    if (candidates.length === 0) return 0;
+
+    for (const o of candidates) {
+        const paymentId = (o.metadata as any)?.razorpayPaymentId
+            ? String((o.metadata as any).razorpayPaymentId)
+            : null;
+        if (!paymentId) {
+            await prisma.order.update({
+                where: { id: o.id },
+                data: { paymentVerified: false, paymentVerificationNote: 'paid claim without payment id' },
+            });
+            try { Sentry.captureMessage('phase7b: paid order has no payment id — HELD', { level: 'warning', extra: { orderId: o.id } }); } catch {}
+            continue;
+        }
+        try {
+            const p: any = await rzp.payments.fetch(paymentId);
+            const status = String(p?.status || '');
+            if (status !== 'captured' && status !== 'authorized') {
+                await prisma.order.update({
+                    where: { id: o.id },
+                    data: { paymentVerified: false, paymentVerificationNote: `payment status ${status || 'unknown'}` },
+                });
+                try { Sentry.captureMessage('phase7b: cron verification FAILED — payment not captured', { level: 'warning', extra: { orderId: o.id, paymentId, status } }); } catch {}
+                continue;
+            }
+            const capturedInr = Number(p.amount || 0) / 100;
+            const sibling = await prisma.order.aggregate({
+                _sum: { totalAmount: true },
+                where: { metadata: { path: ['razorpayPaymentId'], equals: paymentId } },
+            });
+            const bookedInr = Number(sibling._sum.totalAmount || 0);
+            if (bookedInr > capturedInr + 5) {
+                await prisma.order.update({
+                    where: { id: o.id },
+                    data: { paymentVerified: false, paymentVerificationNote: `amount overrun: captured ₹${capturedInr}, booked ₹${bookedInr}` },
+                });
+                try { Sentry.captureMessage('phase7b: cron verification — amount overrun, HELD', { level: 'warning', extra: { orderId: o.id, paymentId, capturedInr, bookedInr } }); } catch {}
+            } else {
+                await prisma.order.update({
+                    where: { id: o.id },
+                    data: { paymentVerified: true, paymentVerificationNote: `captured ₹${capturedInr} (cron-verified)` },
+                });
+            }
+        } catch (err: any) {
+            const msg = String(err?.message || err);
+            if (/does not exist|not found|invalid id/i.test(msg)) {
+                await prisma.order.update({
+                    where: { id: o.id },
+                    data: { paymentVerified: false, paymentVerificationNote: 'payment id unknown to Razorpay' },
+                });
+                try { Sentry.captureMessage('phase7b: cron verification — payment id unknown, HELD', { level: 'warning', extra: { orderId: o.id, paymentId } }); } catch {}
+            } else {
+                // Transport error — leave NULL; next tick retries.
+                console.warn(`[cron 7b] verify transport error for order ${o.id}: ${msg}`);
+            }
+        }
+    }
+    return candidates.length;
+}
+
+/**
+ * Orphaned-payments sweep (N6 decision: build the cron). Finds CAPTURED
+ * consumer payments from the last 24h (excluding the most recent 15 min —
+ * checkout may legitimately still be in flight) that have NO order behind
+ * them, and refunds them in full. Attribution is strict: auto-refund ONLY
+ * payments tagged notes.paymentType='consumer_order' (set by
+ * /payments/create-order since Phase 7B) or whose Razorpay order receipt
+ * carries the consumer 'PAS-' prefix. Everything else (merchant signup
+ * payments, unattributable) is flagged to Sentry for manual review — never
+ * auto-refunded. Respects CRON_DRY_RUN.
+ */
+export async function sweepOrphanedPayments(prisma: PrismaClient): Promise<void> {
+    const rzp = initLocalRazorpay();
+    if (!rzp) return;
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const list: any = await rzp.payments.all({
+        from: nowSec - 24 * 60 * 60,
+        to: nowSec - 15 * 60,
+        count: 100,
+    });
+    const payments: any[] = Array.isArray(list?.items) ? list.items : [];
+    if (payments.length === 0) return;
+
+    for (const p of payments) {
+        try {
+            if (String(p?.status) !== 'captured') continue;
+            if (Number(p?.amount_refunded || 0) > 0) continue; // already (partially) refunded
+
+            // Skip non-consumer flows outright.
+            const noteType = p?.notes?.paymentType ? String(p.notes.paymentType) : null;
+            if (noteType === 'merchant_signup') continue;
+
+            // An order exists? Not an orphan.
+            const order = await prisma.order.findFirst({
+                where: { metadata: { path: ['razorpayPaymentId'], equals: String(p.id) } },
+                select: { id: true },
+            });
+            if (order) continue;
+
+            // Attribution gate for auto-refund.
+            let attributable = noteType === 'consumer_order';
+            if (!attributable && p?.order_id) {
+                try {
+                    const rzpOrder: any = await rzp.orders.fetch(String(p.order_id));
+                    attributable = typeof rzpOrder?.receipt === 'string' && rzpOrder.receipt.startsWith('PAS-');
+                } catch { /* fetch failed — treat as unattributable */ }
+            }
+
+            if (!attributable) {
+                console.warn(`[cron 7b sweep] unattributable captured payment with no order — manual review: ${p.id} ₹${Number(p.amount) / 100}`);
+                try { Sentry.captureMessage('phase7b sweep: unattributable orphan payment — manual review', { level: 'warning', extra: { paymentId: p.id, amountInr: Number(p.amount) / 100, email: p.email, contact: p.contact } }); } catch {}
+                continue;
+            }
+
+            // Attributable consumer orphan → refund in full.
+            if (process.env.CRON_DRY_RUN === 'true') {
+                console.warn(`[cron 7b sweep] DRY_RUN — would refund orphan ${p.id} ₹${Number(p.amount) / 100}`);
+                continue;
+            }
+            const refund = await rzp.payments.refund(String(p.id), { amount: Number(p.amount) });
+            console.error(`[cron 7b sweep][ORPHAN-REFUNDED] payment=${p.id} amount=₹${Number(p.amount) / 100} refund=${refund?.id}`);
+            try { Sentry.captureMessage('phase7b sweep: orphan consumer payment auto-refunded', { level: 'warning', extra: { paymentId: p.id, amountInr: Number(p.amount) / 100, refundId: refund?.id } }); } catch {}
+        } catch (err: any) {
+            console.error(`[cron 7b sweep] error handling payment ${p?.id}:`, err?.message || err);
+        }
     }
 }

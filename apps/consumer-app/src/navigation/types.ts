@@ -1,14 +1,11 @@
 export type RootStackParamList = {
     Main: undefined;
     Storefront: { storeId: string; highlightProductId?: string; orderMode?: 'pickup' | 'dining' };
-    Checkout: {
-        selectedCoupon?: { code: string; discount: number },
-        specialInstructions?: string
-    };
-    DiningCheckout: {
-        selectedCoupon?: { code: string; discount: number },
-        specialInstructions?: string
-    };
+    // Phase 4 audit re-fix (2026-06-09 evening): selectedCoupon dropped from
+    // Checkout + DiningCheckout — CartContext.appliedCoupon is the single source
+    // of truth (set by OffersScreen / CouponsScreen via setAppliedCoupon).
+    Checkout: { specialInstructions?: string } | undefined;
+    DiningCheckout: { specialInstructions?: string } | undefined;
     LocationPicker: undefined;
     Onboarding: undefined;
     Auth: undefined;

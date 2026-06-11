@@ -22,8 +22,9 @@ import {
   StyleSheet,
   Alert,
 } from 'react-native';
-import { apiClient } from '../lib/api';
+import { apiClient, validateCoupon, type ValidateCouponCartItem } from '../lib/api';
 import { CouponCard, type Coupon } from './CouponCard';
+import { useCart } from '../context/CartContext';
 
 export interface AppliedCouponInfo {
   couponId: string;
@@ -31,6 +32,11 @@ export interface AppliedCouponInfo {
   discount: number;
   discountType: Coupon['discountType'];
   bogo: { buy: number; get: number } | null;
+  // Phase 4 (2026-06-09): callers receive the server-signed token + expiry so
+  // they can persist these to CartContext (for forwarding into POST /orders).
+  validationToken: string;
+  expiresAt: number;
+  fundingSource: 'PLATFORM' | 'MERCHANT' | null;
 }
 
 interface CouponsSectionProps {
@@ -56,6 +62,8 @@ export function CouponsSection({
   onRemove,
   title = 'Available offers',
 }: CouponsSectionProps) {
+  // Phase 4 (2026-06-09) — pull cart items for the Phase 2L strict payload.
+  const { items: cartItems } = useCart();
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [loading, setLoading] = useState(true);
   const [validating, setValidating] = useState<string | null>(null); // couponId currently being validated
@@ -93,23 +101,51 @@ export function CouponsSection({
         onRemove?.();
         return;
       }
+      // Phase 4 — build the strict cartItems[] payload from CartContext.
+      // Reject client-side if any item is missing storeProductId (clearer UX
+      // than the server's 400 "refresh your cart" message).
+      const validatePayload: ValidateCouponCartItem[] = [];
+      for (const ci of cartItems) {
+        if (!ci.storeProductId) {
+          Alert.alert(
+            "Couldn't apply",
+            'Some items in your cart are out of date. Please refresh your cart and try again.'
+          );
+          return;
+        }
+        validatePayload.push({
+          storeProductId: String(ci.storeProductId),
+          quantity: ci.quantity,
+          price: ci.price,
+          id: ci.id,
+          name: ci.name,
+        });
+      }
+      const storeIds = Array.from(new Set(cartItems.map((ci) => String(ci.storeId))));
+      const orderType: 'pickup' | 'dining' | undefined =
+        cartItems.length > 0 ? (cartItems[0].isDining ? 'dining' : 'pickup') : undefined;
       setValidating(c.id);
       try {
-        const r = await apiClient.fetch('/checkout/validate-coupon', {
-          method: 'POST',
-          body: JSON.stringify({ code: c.code, cartTotal: subtotal, storeId: storeId ?? undefined }),
+        const result = await validateCoupon({
+          code: c.code,
+          cartItems: validatePayload,
+          storeIds,
+          orderType,
+          storeId: storeId ?? undefined,
         });
-        const json = await r.json().catch(() => ({}));
-        if (!r.ok || !json?.valid) {
-          Alert.alert("Couldn't apply", json?.error ?? 'This coupon could not be applied right now.');
+        if (!result.valid) {
+          Alert.alert("Couldn't apply", result.error);
           return;
         }
         onApply({
-          couponId: json.couponId,
-          code: json.code,
-          discount: Number(json.discount) || 0,
+          couponId: result.couponId,
+          code: result.code,
+          discount: result.discount,
           discountType: c.discountType,
-          bogo: json.bogo ?? null,
+          bogo: result.bogo ?? null,
+          validationToken: result.validationToken,
+          expiresAt: result.expiresAt,
+          fundingSource: result.fundingSource,
         });
       } catch (e: any) {
         Alert.alert("Couldn't apply", 'Please try again in a moment.');
@@ -117,7 +153,7 @@ export function CouponsSection({
         setValidating(null);
       }
     },
-    [appliedCouponId, onApply, onRemove, storeId, subtotal]
+    [appliedCouponId, cartItems, onApply, onRemove, storeId]
   );
 
   if (loading) {

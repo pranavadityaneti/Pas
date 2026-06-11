@@ -218,6 +218,22 @@ export default function OrdersScreen() {
             return acc + (oi.price * oi.quantity * (rate / 100));
         }, 0);
 
+        // Phase 6 (2026-06-10, refined per audit) — coupon snapshot surfacing.
+        // couponDiscount is THIS order's slice. The displayed Total Bill is the
+        // STORED paid amount (orders.total_amount — what the customer actually
+        // paid), not a client-side recompute: the consumer checkout uses
+        // whole-rupee GST shares, so recomputed items+tax could differ from the
+        // charge by ~₹1 (and the receipt modal already shows the stored amount —
+        // two different totals for the same order otherwise). The tax row is
+        // derived by subtraction so the breakup always sums exactly.
+        const couponDiscount = item.couponDiscount ?? 0;
+        const hasCoupon = !!item.couponCode && couponDiscount > 0;
+        const isPlatformFunded = item.couponFundingSource === 'PLATFORM';
+        const effectiveDiscount = hasCoupon ? couponDiscount : 0;
+        const recomputedNet = Math.max(0, subTotal + tax - effectiveDiscount);
+        const paidTotal = Number.isFinite(item.totalAmount) && item.totalAmount > 0 ? item.totalAmount : recomputedNet;
+        const derivedTax = Math.max(0, paidTotal - subTotal + effectiveDiscount);
+
         return (
             <View style={styles.orderCard}>
                 <View style={styles.cardHeader}>
@@ -304,6 +320,22 @@ export default function OrdersScreen() {
                     ) : null}
                 </View>
 
+                {/* Phase 6 (2026-06-10) — coupon banner. Green = platform-funded
+                    (the platform reimburses this discount to the merchant);
+                    amber = merchant-funded (absorbed in this order's revenue). */}
+                {hasCoupon && (
+                    <View style={[styles.couponBanner, { backgroundColor: isPlatformFunded ? '#ECFDF5' : '#FFFBEB', borderColor: isPlatformFunded ? '#A7F3D0' : '#FDE68A' }]}>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: isPlatformFunded ? '#047857' : '#92400E' }}>
+                            🎟️ Coupon {item.couponCode} — ₹{couponDiscount.toFixed(2)} off
+                        </Text>
+                        <Text style={{ fontSize: 11.5, marginTop: 2, color: isPlatformFunded ? '#059669' : '#B45309' }}>
+                            {isPlatformFunded
+                                ? 'Platform-funded — this discount will be reimbursed to you'
+                                : 'Merchant-funded — absorbed in this order'}
+                        </Text>
+                    </View>
+                )}
+
                 <View style={styles.dottedSeparator} />
 
 
@@ -342,7 +374,10 @@ export default function OrdersScreen() {
 
                 <View style={[styles.cardFooter, isExpanded && styles.cardFooterExpanded]}>
                     <View>
-                        <Text style={styles.valueLabel}>Total Bill: <Text style={styles.valueAmount}>₹{(subTotal + tax).toFixed(2)}</Text></Text>
+                        {/* Phase 6 (audit-refined): paidTotal is the STORED amount
+                            the customer actually paid — same source the receipt
+                            modal shows, so the two surfaces can never disagree. */}
+                        <Text style={styles.valueLabel}>Total Bill: <Text style={styles.valueAmount}>₹{paidTotal.toFixed(2)}</Text></Text>
                     </View>
                     <TouchableOpacity onPress={() => toggleAccordion(item.id)} style={styles.breakupBtn}>
                         <Text style={styles.breakupText}>View Breakup</Text>
@@ -358,12 +393,22 @@ export default function OrdersScreen() {
                         </View>
                         <View style={styles.breakupRow}>
                             <Text style={styles.breakupLabel}>Tax</Text>
-                            <Text style={styles.breakupValue}>₹{tax.toFixed(2)}</Text>
+                            {/* Derived by subtraction (paidTotal − subtotal + discount)
+                                so the rows always sum exactly to the Total. */}
+                            <Text style={styles.breakupValue}>₹{derivedTax.toFixed(2)}</Text>
                         </View>
+                        {hasCoupon && (
+                            <View style={styles.breakupRow}>
+                                <Text style={[styles.breakupLabel, { color: isPlatformFunded ? '#047857' : '#92400E' }]}>
+                                    Coupon {item.couponCode} ({isPlatformFunded ? 'platform-funded' : 'merchant-funded'})
+                                </Text>
+                                <Text style={[styles.breakupValue, { color: isPlatformFunded ? '#047857' : '#92400E' }]}>−₹{couponDiscount.toFixed(2)}</Text>
+                            </View>
+                        )}
                         <View style={styles.breakupDivider} />
                         <View style={styles.breakupRow}>
                             <Text style={styles.breakupTotalLabel}>Total</Text>
-                            <Text style={styles.breakupTotalValue}>₹{(subTotal + tax).toFixed(2)}</Text>
+                            <Text style={styles.breakupTotalValue}>₹{paidTotal.toFixed(2)}</Text>
                         </View>
                     </View>
                 )}
@@ -648,6 +693,8 @@ const styles = StyleSheet.create({
     orderTypeBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: 'bold' },
 
     statusStripContainer: { width: '100%', marginTop: 12 },
+    // Phase 6 (2026-06-10) — coupon banner (green platform-funded / amber merchant-funded)
+    couponBanner: { width: '100%', marginTop: 10, padding: 10, borderRadius: 10, borderWidth: 1 },
     approvalStrip: { 
         flexDirection: 'row', 
         justifyContent: 'space-between', 

@@ -35,8 +35,9 @@ import {
 import { ChevronLeft } from 'lucide-react-native';
 import { useNavigation, useRoute, CommonActions, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { apiClient } from '../lib/api';
+import { apiClient, validateCoupon, type ValidateCouponCartItem } from '../lib/api';
 import { CouponCard, type Coupon } from '../components/CouponCard';
+import { useCart } from '../context/CartContext';
 import type { RootStackParamList } from '../navigation/types';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'Coupons'>;
@@ -57,6 +58,11 @@ export default function CouponsScreen() {
   const navigation = useNavigation<NavProp>();
   const route = useRoute<RtProp>();
   const { subtotal, storeId, appliedCouponId, returnTo } = route.params;
+  // Phase 4 (2026-06-09) — pull cart items so validate-coupon can be called with
+  // the strict cartItems[] payload (Phase 2L: storeProductId required per item).
+  // Setting appliedCoupon here persists the validation token to CartContext so
+  // CheckoutScreen / DiningCheckoutScreen can hand it to POST /orders.
+  const { items: cartItems, setAppliedCoupon } = useCart();
 
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [loading, setLoading] = useState(true);
@@ -102,29 +108,74 @@ export default function CouponsScreen() {
     async (code: string, sourceKey: string) => {
       setErrorMsg(null);
       setApplying(sourceKey);
-      try {
-        const r = await apiClient.fetch('/checkout/validate-coupon', {
-          method: 'POST',
-          body: JSON.stringify({ code: code.toUpperCase(), cartTotal: subtotal, storeId: storeId ?? undefined }),
-        });
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok || !j?.valid) {
-          setErrorMsg(j?.error || 'This coupon could not be applied.');
+      // Phase 4 — build the strict cartItems[] payload from CartContext. Every
+      // item MUST have a storeProductId (Phase 2L server-side rejects otherwise).
+      // We reject client-side too with a clear UX message instead of letting the
+      // server return a confusing 400.
+      const validatePayload: ValidateCouponCartItem[] = [];
+      for (const ci of cartItems) {
+        if (!ci.storeProductId) {
+          setErrorMsg(
+            'Some items in your cart are out of date. Please refresh your cart and try again.'
+          );
+          setApplying(null);
           return;
         }
+        validatePayload.push({
+          storeProductId: String(ci.storeProductId),
+          quantity: ci.quantity,
+          price: ci.price,
+          id: ci.id,
+          name: ci.name,
+        });
+      }
+      const storeIds = Array.from(new Set(cartItems.map((c) => String(c.storeId))));
+      // Resolve orderType from cart shape — first item's isDining (cart can't
+      // mix dine-in + pickup per CartContext.addItem's validation).
+      const orderType: 'pickup' | 'dining' | undefined =
+        cartItems.length > 0 ? (cartItems[0].isDining ? 'dining' : 'pickup') : undefined;
+      try {
+        const result = await validateCoupon({
+          code,
+          cartItems: validatePayload,
+          storeIds,
+          orderType,
+          storeId: storeId ?? undefined,
+        });
+        if (!result.valid) {
+          setErrorMsg(result.error);
+          return;
+        }
+        // Phase 4 — persist the full applied-coupon object to CartContext so
+        // CheckoutScreen / DiningCheckoutScreen can forward the validationToken
+        // into POST /orders. CartContext also automatically clears this state
+        // on any subsequent cart mutation.
+        setAppliedCoupon({
+          code: result.code,
+          couponId: result.couponId,
+          discount: result.discount,
+          fundingSource: result.fundingSource,
+          discountType: result.discountType,
+          validationToken: result.validationToken,
+          expiresAt: result.expiresAt,
+          // cartHash is server-recomputed; we don't have access to the signed
+          // payload here. Empty string is fine — it's diagnostic-only client-side.
+          cartHash: '',
+          // Phase 5 (2026-06-10) — authoritative per-store split for the
+          // checkout's per-order totalAmount math (audit fix #4).
+          multiStore: result.multiStore,
+          perStoreBreakdown: result.perStoreBreakdown ?? null,
+        });
         // Hand off to the returnTo checkout screen. Checkout lives 3 navigators deep
         // (Root → Main(tabs) → Cart(tab) → CartStack → Checkout), so a flat
         // navigate({name:'Checkout'}) from the root-level CouponsScreen fails
         // ("not handled by any navigator"). Use a nested target so React Navigation
-        // walks the tree, finds the existing Checkout instance, and merges params
-        // instead of pushing a duplicate.
-        const selectedCoupon = {
-          couponId: j.couponId,
-          code: j.code,
-          discount: Number(j.discount) || 0,
-          discountType: j.discountType,
-          bogo: j.bogo ?? null,
-        };
+        // walks the tree, finds the existing Checkout instance.
+        //
+        // Phase 4 audit re-fix (2026-06-09 evening): dropped the selectedCoupon
+        // route-param payload — CartContext.appliedCoupon is now the only
+        // source of truth (set by setAppliedCoupon above). The checkout screens
+        // read directly from context; no wake-up signal needed.
         navigation.dispatch(
           CommonActions.navigate({
             name: 'Main',
@@ -132,7 +183,6 @@ export default function CouponsScreen() {
               screen: 'Cart',
               params: {
                 screen: returnTo,
-                params: { selectedCoupon },
                 merge: true,
               },
               merge: true,
@@ -146,7 +196,7 @@ export default function CouponsScreen() {
         setApplying(null);
       }
     },
-    [navigation, returnTo, storeId, subtotal]
+    [cartItems, navigation, returnTo, setAppliedCoupon, storeId]
   );
 
   const onApplyManual = () => {

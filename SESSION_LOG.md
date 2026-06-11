@@ -461,3 +461,97 @@ Frequent signouts investigation Phase 1 + Phase 2A shipped. Major data integrity
 - [ ] **Cosmetic data cleanup:** 6 merchants with null `Store.merchant_id`, "Security Test Store" leftover, "Test City" / "Test City 1774176523" entries in City table
 - [ ] **Phone format inconsistency in `merchants`** — most are 10-digit (`9182369196`), one is with-prefix (`919959777027` for Freshly). Worth normalizing.
 - [ ] **Test fresh signup end-to-end** to confirm Trigger 1 + Trigger 2 fire correctly in real life (not just simulation)
+
+---
+
+# Session 2026-06-09 → 2026-06-10 — Coupon Foolproof Phases 1-5 + hot-fixes (marathon)
+
+## Headline
+Coupon-foolproof Phases 1-5 are code-complete and audited. Phases 1-3 + four hot-fix waves are LIVE on EB. Phase 4 (consumer checkout integration) and Phase 5 (multi-store allocation) are committed on PR #2, audited three+two times respectively, all blockers closed — **Phase 5 EB deploy is pending Pranav's go**.
+
+## Deploy timeline (EB `pas-api-prod-v2`)
+| Version | Contents |
+|---|---|
+| `app-260609_112931383837` | Phases 1+2+3A backend (+ COUPON_VALIDATION_SECRET set) |
+| `app-260609_143434212572` | Phase 2J soft-auth hot-fix (+ REQUIRE_ORDERS_AUTH=false) |
+| `app-260609_145802394098` | Phase 2K — 5 hot-fixes from PR #1 adversarial review |
+| `app-260609_160632632075` | Phase 2L — server-side price reconciliation (bleed #11) |
+| (pending Pranav go) | Phase 5 + audit fixes (`7b07df82` working tree) |
+
+## DB migrations applied to prod Supabase
+- `20260608120000_coupon_extensions`, `…130000_audit_log`, `…140000_order_coupon_fields` (FK TEXT fix), `…150000_redemption_ledger_fields` (Phase 1)
+- 9 historical drift migrations resolved via `migrate resolve --applied` after read-only verification (`scripts/verify_migration_drift.ts`)
+- `20260609170000_cart_items_store_product_id` (Phase 4 fix C1)
+- `20260609220000_phase5_coupon_redemption_cart_fingerprint` (Phase 5A — cart_fingerprint + partial unique)
+
+## Git/PR state
+- **PR #1 MERGED to main** (`00d36579`): Phases 1+2+3, mobile catch-up, 2J, 2K. Vercel auto-deployed admin-web.
+- **PR #2 OPEN** (`coupon-foolproof-phase4-2026-06-09`): `342b78a9` 2L → `e4cf981c` Phase 4 → `ae51a2fb` 9 audit blockers → `4f099622` D2-pickup + 5 → `3e2a484d` finalTotal cleanup → `66ef7708` Phase 5 → `7a3611c9` 5 audit blockers → `7b07df82` R1/R2/R3 hardening.
+
+## Live incident (resolved)
+Phase 2's `requireUser` hard-cut on POST /orders + PATCH /order-requests 401'd every pre-OTA consumer install (main's app sends no Authorization header). Caught by sanity-check after PR #1 review; fixed same hour with Phase 2J soft-auth (`softRequireUser` + REQUIRE_ORDERS_AUTH flag + Sentry rollout counter). Verified by prod curl before/after.
+
+## Adversarial audit trail (Workflow tool, 5-reviewer panels)
+1. **PR #1 pre-merge**: 23 findings, 6 high → Phase 2K fixed 5 + soft-auth; mediums queued.
+2. **Phase 4 audit**: 9 blockers (incl. dead pipeline — no Apply Coupon entry point; dining charge mismatch) → all fixed in `ae51a2fb`.
+3. **Phase 4 re-audit**: D2-pickup still open (acceptedRequests strip storeProductId) + D1 rapid-tap regression → fixed in `4f099622`.
+4. **Phase 4 third audit**: clean (approve-with-caveats, 0 blockers) after `3e2a484d`.
+5. **Phase 5 audit**: 5 money blockers (fingerprint replay; rejected-store full discount; negative slice; client/server split drift; concurrent-cancel ledger corruption) → fixed in `7a3611c9`.
+6. **Phase 5 re-audit**: approve-with-caveats, 0 blockers, "safe to deploy yes". Residuals R1/R2/R3 hardened in `7b07df82`; R4/R5/R6 queued in forlater.md.
+
+## Key decisions (Pranav)
+- Option A (fix-everything-before-Phase-5) over revert; "no temporary patches / no bleeds" is the standing standard.
+- Phase 5 Q1-Q5: per-store minOrder REJECT; store-scoped coupons reject multi-store; single-store keeps legacy ledger path; one discount line in UI; proportional partial reversal on cancel.
+- Lock overrides granted: CartContext (L2), CheckoutScreen (L6, L7), DiningCheckoutScreen (L6), CartScreen (L2).
+- CLAUDE.md updated: Vercel = git auto-deploy (never local CLI); EB = chained setenv;deploy.
+
+## Errors/learnings (≥2 attempts — ERRORS.md candidates)
+- `git add apps/api/dist/index.js` always prints the gitignore warning and exits 1, but the tracked file DOES stage. Pattern: stage, ignore exit code, verify `git diff --cached --stat`, commit separately.
+- Prisma interactive transactions: a caught P2002 still poisons the Postgres tx — use raw `INSERT … ON CONFLICT DO NOTHING RETURNING` instead of catch-and-continue.
+- Workflow agents audit ONLY the commit diff unless told to read surrounding files — the "dead pipeline" Phase 4 blocker came from me not checking whether the new flow was reachable.
+
+## Open threads at session end
+- **Phase 5 EB deploy** — awaiting Pranav's explicit go (code at `7b07df82`, tsc clean, dist built).
+- **Consumer-app EAS OTA** from PR #2 branch — Pranav's call after deploy.
+- **Flag flips** (REQUIRE_ORDERS_AUTH, REQUIRE_COUPON_TOKEN) — gated on OTA propagation + Sentry counters (see forlater.md).
+- **Phase 6** (merchant surfacing), **Phase 7** (settlement — Pranav wants discussion first), **Phase 8** (verification/rollout).
+- forlater.md gained a consolidated "Coupon Foolproof — deferred audit findings" section (2026-06-10).
+
+---
+
+## Session: June 10-11, 2026 (night) — Phase 6 close-out → Phase 7 build + deploy
+
+### Timeline
+
+#### Phase 7 design locked (Pranav Q1-Q7 + FQ answers)
+Weekly IST cycles · commission per category/tier from Commissions.pdf (rates = admin-editable data, `provisional` flags for FQ-1 5%-vs-7% conflict + FQ-2 blank F&B tiers) · eligibility COMPLETED+RETURN_REJECTED · same-cycle PLATFORM-coupon reimbursement · manual mark-paid w/ UTR until payout vendor (7b) · next-cycle clawback line items · anomaly hold + server-side Razorpay payment verification as settlement prerequisite. Founder-shareable doc: `docs/phase7-settlement-architecture.html` (opened for Pranav via `open`).
+
+#### Built + applied (prod DB): 2 migrations
+- `20260610170000_phase7_settlement_schema` — commission_rules (37 seed rows, 23 provisional), merchant_settlement_profiles, settlement_cycles (unique merchant+period), settlement_lines (partial unique SALE-per-order = settle-once invariant).
+- `20260610180000_phase7_payment_verification` — orders.payment_verified/payment_verification_note + partial index.
+
+#### Backend (commit 79233db7, +1451 lines)
+- `settlement.service.ts` (NEW): IST week math, resolveRule (most-specific category/orderType/tier), closeSettlementCycles (roll-forward from PHASE7_EPOCH 2026-06-01, holds for unverified/no-profile/no-rule, per-merchant tx, totals recomputed from actual lines), detectClawback.
+- `scheduled-jobs.ts`: verifyPendingPayments (Razorpay captured + amount coherence), sweepOrphanedPayments (strict attribution, CRON_DRY_RUN), Mon 02:00 IST close cron.
+- `index.ts`: 7B payment-verification block in POST /orders (PAYMENT_NOT_VERIFIED 400 / HELD on overrun), consumer payment notes, 3 detectClawback hooks, 9 settlement endpoints (admin close/list/detail/mark-paid/commission-rules/profiles + GET /merchant/settlements).
+
+#### Deploy + incident-fix (commit c5649c2f)
+First EB deploy smoke caught settlement endpoints returning 404 — block was registered AFTER the Express 404 catch-all (dead routes). Moved above the catch-all, rebuilt, redeployed. Verified: /health 200, settlement routes 401 (auth-gated), POST /orders soft-auth intact, EB Ok/100% 2xx. `CRON_DRY_RUN=true` set for orphan-sweep's first 24h.
+
+#### 7E admin UI (commit 98a13178)
+`settlementService.ts` (NEW) + full `SettlementsManager.tsx` rewrite (was placeholder): cycle table w/ status filter + KPI strip, line-level drill-down, mark-paid dialog (UTR required), "Close last week" button, commission-rules editor (saving clears provisional). vite build clean; 0 new tsc errors (34 pre-existing).
+
+#### 7F merchant UI (commit cddf441f)
+`useSettlements.ts` (NEW hook, authHeaders pattern) + Weekly Settlements section on Earnings: per-week cards, PAID/PROCESSING chips, tap-to-expand breakdown, paid date. tsc 0 errors. Rides next merchant OTA.
+
+#### 7G in progress
+Adversarial audit workflow `wf_b259e841-f0e` running (5 lenses: money-math, concurrency/SQL, business rules, cross-file, end-to-end + hostile edges; blocker/high findings adversarially verified before synthesis). Next: fix round → dry-run cycle close vs prod (nothing marked paid).
+
+### Open threads
+- 7G results + fixes + prod dry-run close.
+- CRON_DRY_RUN flip back to live after 24h clean observation (set 2026-06-10 ~22:00 UTC).
+- PR #2 still open; Vercel admin UI ships on merge to main; merchant 7F + consumer Phase 4/5 ride OTAs (Pranav's call).
+- Founder/CA: FQ-1, FQ-2 (provisional rates), FQ-6 (GST/TCS — share HTML with CA).
+
+#### 7G complete (2026-06-11 ~04:30 IST)
+Audit workflow `wf_b259e841-f0e` (27 agents): 49 confirmed findings (3 blockers, 16 high, 14 med, 16 low), 2 refuted. All blockers + highs fixed in commit `04734624` + migration `20260611010000_phase7_hardening` (applied + verified on prod): seed rules backdated to IST epoch; verification window now epoch-wide + close-time drain + admin override endpoint; eligibility extended to EXCHANGE_APPROVED/REJECTED + RETURN_APPROVED partial returns (SALE + same-cycle offset, symmetric with post-settlement refunds); atomic clawback claim (UPDATE..WHERE cycle_id IS NULL RETURNING) for ALL merchants incl. zero-sale weeks; coupon-reimbursement partial unique + landed-SALE gating; per-merchant failure isolation; in-tx revalidation; commission-base coherence guard; heldOrderCount real; legacy-refund clawback hook; Merchants profile tab in admin. EB deploy + smoke clean. **Prod dry-run**: 12 epoch orders all payment-verified; close held 11 no-profile, created 0 cycles 0 lines (fail-closed as designed). Deferred mediums/lows → forlater.md. NEXT HUMAN STEP: assign commission categories (Merchants tab) before the Mon 2026-06-15 02:00 IST close; decide CRON_DRY_RUN flip-back after 24h.

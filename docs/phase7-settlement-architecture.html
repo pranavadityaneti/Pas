@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PAS Phase 7 — Settlement &amp; Reconciliation: Architecture &amp; Decisions — 2026-06-10</title>
+<style>
+  :root { --red:#b42926; --green:#15803d; --amber:#b45309; --gray:#6b7280; --bg:#f8f9fa; --border:#e5e7eb; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; color:#111827; margin:0; padding:0 16px 80px; line-height:1.55; }
+  .wrap { max-width:980px; margin:0 auto; }
+  h1 { font-size:26px; border-bottom:3px solid var(--red); padding-bottom:10px; margin-top:28px; }
+  h2 { font-size:20px; margin-top:36px; border-bottom:1px solid var(--border); padding-bottom:6px; }
+  h3 { font-size:16px; margin-top:24px; }
+  pre { background:#111827; color:#e5e7eb; padding:12px 14px; border-radius:8px; overflow-x:auto; font-size:12.5px; line-height:1.5; }
+  code { background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:1px 5px; font-size:.92em; }
+  pre code { background:none; border:none; padding:0; }
+  table { border-collapse:collapse; width:100%; margin:14px 0; font-size:13.5px; }
+  th,td { border:1px solid var(--border); padding:7px 10px; text-align:left; vertical-align:top; }
+  th { background:var(--bg); font-weight:700; }
+  .ok { color:var(--green); font-weight:700; } .bad { color:var(--red); font-weight:700; } .warn { color:var(--amber); font-weight:700; }
+  .box { border:1px solid var(--border); border-left:5px solid var(--red); background:var(--bg); border-radius:6px; padding:12px 16px; margin:14px 0; }
+  .box.green { border-left-color:var(--green); } .box.amber { border-left-color:var(--amber); }
+  .toc { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:14px 22px; }
+  .toc ol { margin:6px 0; padding-left:22px; }
+  .meta { color:var(--gray); font-size:13px; }
+  .small { font-size:12.5px; color:var(--gray); }
+  @media print { body{padding:0 6mm;font-size:11.5px} pre{white-space:pre-wrap} h2{page-break-after:avoid} table,.box{page-break-inside:avoid} .toc{page-break-after:always} }
+</style>
+</head>
+<body><div class="wrap">
+
+<h1>PAS Phase 7 — Settlement &amp; Reconciliation<br><span style="font-size:17px;font-weight:600;color:#374151">Architecture, locked decisions, commission engine, and open founder questions</span></h1>
+<p class="meta">Prepared 2026-06-10 for Pranav + founders · Decisions Q1–Q7 confirmed by Pranav 2026-06-10 · Commission source: <code>Commissions.pdf</code> (provided 2026-06-10) · Build proceeds in parallel; founder input needed only on §5's flagged items</p>
+
+<div class="toc"><strong>Table of Contents</strong>
+<ol>
+<li><a href="#exec">Executive summary (plain English)</a></li>
+<li><a href="#decisions">Locked decisions (Q1–Q7)</a></li>
+<li><a href="#commission">The commission engine — what the sheet says</a></li>
+<li><a href="#conflicts">⚠️ Two conflicts + gaps in the commission sheet (founders: please resolve)</a></li>
+<li><a href="#founderq">All open founder questions</a></li>
+<li><a href="#arch">Architecture — the settlement ledger</a></li>
+<li><a href="#example">Worked example — one merchant, one week</a></li>
+<li><a href="#prereq">Prerequisite: server-side payment verification</a></li>
+<li><a href="#plan">Build plan (7A–7G)</a></li>
+<li><a href="#context">Context: where the coupon system stands today</a></li>
+</ol></div>
+
+<h2 id="exec">1. Executive summary (plain English)</h2>
+<p>Phase 7 builds the system that answers, every week, for every merchant: <strong>"how much do we owe you, and can we prove it?"</strong></p>
+<div class="box green">
+<p><strong>The formula:</strong> Net payout = <em>what customers paid for the merchant's completed orders</em> + <em>platform-funded coupon discounts we owe back</em> − <em>our commission (per category/tier, per the attached sheet)</em> − <em>clawbacks from earlier weeks (refunds after payout)</em>.</p>
+</div>
+<p>Three design principles drive everything below:</p>
+<ol>
+<li><strong>Ledger, not live math.</strong> When a week closes, we compute once and freeze an immutable settlement record. A merchant's "week of June 1" payout never silently changes in July. Later refunds become explicit deductions in a later week — never a rewrite of history.</li>
+<li><strong>Commission rates are data, not code.</strong> The sheet itself shows rates vary by category, by order type, and by merchant turnover tier — and that they're still being decided (two tiers are blank). So rates live in an admin-editable table. The two conflicts found in the sheet (§4) don't block the build: founders can settle them and an admin updates a row, no code change.</li>
+<li><strong>Calculate now, move money later.</strong> Razorpay X rejected our business type, and a payout vendor (Cashfree/Open/Decentro) is not yet selected. Phase 7 computes, records, and displays everything, with a manual "Mark as paid" step. Automated bank transfers become Phase 7b once a vendor is chosen — zero rework needed.</li>
+</ol>
+<p><strong>What we need from founders:</strong> only §4/§5 — resolve two rate contradictions in the commission sheet, fill in (or default) two blank F&amp;B tiers, and confirm what amount commission is charged on. The build starts now regardless; these arrive as configuration.</p>
+
+<h2 id="decisions">2. Locked decisions (Q1–Q7, confirmed by Pranav 2026-06-10)</h2>
+<table>
+<tr><th>#</th><th>Question</th><th>Decision</th><th>What it means in practice</th></tr>
+<tr><td>Q1</td><td>Settlement cycle</td><td><strong>Weekly</strong></td><td>Monday 00:00 IST → Sunday 23:59:59 IST (proposed boundary — see §5 FQ-5). A cycle "closes" shortly after it ends and becomes immutable.</td></tr>
+<tr><td>Q2</td><td>Platform fee</td><td><strong>No flat fee — category/tier commission per the attached sheet</strong></td><td>Engine detailed in §3. Rates are admin-editable data.</td></tr>
+<tr><td>Q3</td><td>Which orders count</td><td><strong>COMPLETED + RETURN_REJECTED</strong></td><td>A merchant who wins a return dispute keeps the sale in their payout. Refunded orders count net of refund. (This also fixes a known earnings-display quirk where RETURN_REJECTED sales vanished from merchant revenue.)</td></tr>
+<tr><td>Q4</td><td>Coupon reimbursement timing</td><td><strong>Same weekly cycle, separate line item</strong></td><td>Platform-funded coupon discounts appear as their own labelled credit line in the same payout.</td></tr>
+<tr><td>Q5</td><td>Money movement</td><td><strong>Calculate + record + display now; manual "Mark as paid"; automated transfers = Phase 7b after payout-vendor selection</strong></td><td>Unblocks Phase 7 entirely from the vendor decision (Razorpay X rejected our business type on 2026-05-29).</td></tr>
+<tr><td>Q6</td><td>Clawbacks</td><td><strong>Next-cycle deduction, explicit line item</strong></td><td>An order refunded after its week was paid out shows up as a named deduction ("Clawback: order #X refunded ₹Y on &lt;date&gt;") in the following week. Standard marketplace practice.</td></tr>
+<tr><td>Q7</td><td>Anomalies</td><td><strong>Hold + flag; payment verification becomes a prerequisite</strong></td><td>Orders in the Sentry-flagged anomaly set (coupon snapshot inconsistencies) and any order whose payment cannot be verified against Razorpay are excluded from auto-settlement and parked in a manual-review bucket. See §8.</td></tr>
+</table>
+
+<h2 id="commission">3. The commission engine — what the sheet says</h2>
+<h3>3.1 Base rates per category (from the sheet's table)</h3>
+<table>
+<tr><th>Category</th><th>Commission</th></tr>
+<tr><td>Bakeries &amp; Desserts</td><td>5% pickup · 7% dining <span class="small">(tiered — see 3.2)</span></td></tr>
+<tr><td>Restaurant and cafes</td><td>5% pickup · 7% dining <span class="small">(tiered — see 3.2)</span></td></tr>
+<tr><td>Beauty &amp; personal care</td><td>5% <span class="warn">⚠ conflict — see §4.1</span></td></tr>
+<tr><td>Electricals, paints &amp; automobiles</td><td>5%</td></tr>
+<tr><td>Electronics and accessories</td><td>5% <span class="warn">⚠ conflict</span></td></tr>
+<tr><td>Fashion and apparel</td><td>5% <span class="warn">⚠ conflict</span></td></tr>
+<tr><td>Fresh items</td><td>2%</td></tr>
+<tr><td>Grocery and kirana</td><td>2%</td></tr>
+<tr><td>Hardware and plumbing</td><td>5%</td></tr>
+<tr><td>Home and lifestyle</td><td>5% <span class="warn">⚠ conflict</span></td></tr>
+<tr><td>Pet care and supplies</td><td>5% <span class="warn">⚠ conflict</span></td></tr>
+<tr><td>Pharmacy and wellness</td><td>2%</td></tr>
+<tr><td>Puja and festive needs</td><td>2%</td></tr>
+<tr><td>Sports and fitness</td><td>5% <span class="warn">⚠ conflict</span></td></tr>
+<tr><td>Stationery, gifting, and toys</td><td>2% stationery · 5% others <span class="warn">⚠ conflict on gifting — see §4.1</span></td></tr>
+</table>
+<h3>3.2 F&amp;B turnover tiers (Restaurants &amp; Cafes, Bakeries &amp; Desserts)</h3>
+<table>
+<tr><th>Tier</th><th>Annual turnover</th><th>Only pickup</th><th>Pickup + dining</th></tr>
+<tr><td>1</td><td>Above ₹1 cr</td><td>5%</td><td>7%</td></tr>
+<tr><td>2</td><td>₹60L – ₹1 cr</td><td>8%</td><td>10%</td></tr>
+<tr><td>3</td><td>₹40L – ₹60L</td><td class="bad">blank</td><td class="bad">blank</td></tr>
+<tr><td>4</td><td>₹20L – ₹40L</td><td class="bad">blank</td><td class="bad">blank</td></tr>
+<tr><td>5</td><td>Under ₹20L</td><td class="bad">blank</td><td class="bad">blank</td></tr>
+</table>
+<p class="small">Note the structure: smaller merchants pay <em>higher</em> rates (Tier 2 &gt; Tier 1). Tiers 3–5 presumably continue upward but are unfilled — see §4.2.</p>
+<h3>3.3 How the engine implements this</h3>
+<ul>
+<li><strong><code>CommissionRule</code> table</strong> (admin-editable): category, order-type qualifier (pickup/dining/any), turnover tier (nullable), rate %, effective-from date. The cycle-close job picks the most specific matching rule per order. Rate changes take effect from the date set — past settled cycles are untouched.</li>
+<li><strong>Merchant fields</strong> (new, admin-set): commission category (derived from their vertical, overridable) and turnover tier (F&amp;B only). Today no turnover data exists in the system, so tier is a manual admin assignment at onboarding/review.</li>
+<li><strong>Per-order resolution:</strong> the order's <code>order_type</code> (pickup vs dine-in — already stored per order) selects pickup/dining rates. This interprets "5% pickup / 7% dining" as <em>per order</em>, not per merchant — see open question FQ-3.</li>
+</ul>
+
+<h2 id="conflicts">4. ⚠️ Conflicts + gaps in the commission sheet — founders, please resolve</h2>
+<div class="box">
+<h3 style="margin-top:0">4.1 The table and the summary at the bottom contradict each other</h3>
+<p>The sheet's main table lists <strong>Fashion, Beauty, Pet Care, Sports &amp; Fitness, Home &amp; Lifestyle, Electronics at 5%</strong> — but the summary block at the bottom of the same document lists the same categories under <strong>"7% Commission"</strong> (and adds Gifting at 7%, which the table prices at 5%).</p>
+<p><strong>One of these is the intended rate.</strong> Until resolved, the engine will default to the <em>table</em> values (more specific, itemized) — flagged as provisional. Changing it later is a one-row admin edit, not code.</p>
+</div>
+<div class="box">
+<h3 style="margin-top:0">4.2 F&amp;B Tiers 3, 4, 5 are blank</h3>
+<p>Three of five turnover tiers have no rates. Options: (a) founders fill them now; (b) default all unfilled tiers to Tier 2's rates (8% / 10%) until decided; (c) block settlement for merchants in those tiers (not recommended — it stalls payouts). <strong>Engine default until told otherwise: option (b)</strong>, marked provisional in the admin UI.</p>
+</div>
+
+<h2 id="founderq">5. All open founder questions</h2>
+<table>
+<tr><th>#</th><th>Question</th><th>Default until answered</th></tr>
+<tr><td><strong>FQ-1</strong></td><td>Resolve §4.1: are Fashion/Beauty/Pet/Sports/Home/Electronics/Gifting at <strong>5% or 7%</strong>?</td><td>Table values (5%; gifting 5%)</td></tr>
+<tr><td><strong>FQ-2</strong></td><td>Fill §4.2: rates for F&amp;B Tiers 3–5</td><td>Tier 2 rates (8% / 10%)</td></tr>
+<tr><td><strong>FQ-3</strong></td><td>"5% pickup / 7% dining" — charged <strong>per order's type</strong> (a pickup order at a dine-in restaurant pays 5%) or <strong>per merchant's offering</strong> (any merchant who offers dining pays 7% on everything)? The tier wording ("Only pickup −5% / Pickup and dining −7%") reads like the latter; per-order is more common in the industry and we store order type per order.</td><td>Per order's type</td></tr>
+<tr><td><strong>FQ-4</strong></td><td><strong>Commission base:</strong> charged on (a) the items subtotal excluding GST, (b) the customer-paid total including GST, and is it computed <strong>before or after coupon discounts</strong>? Industry norm: pre-tax item value; pre-discount for merchant-funded promos.</td><td>Items subtotal, pre-GST, pre-coupon</td></tr>
+<tr><td><strong>FQ-5</strong></td><td>Weekly boundary: Monday 00:00 IST → Sunday end, cycle closes Monday morning?</td><td>Yes (Mon–Sun IST)</td></tr>
+<tr><td><strong>FQ-6</strong></td><td><strong>For your CA, not the codebase (flagging, not asserting):</strong> (a) is 18% GST charged on PAS's commission invoice to merchants? (b) Indian marketplaces typically have GST-TCS collection obligations on net taxable supplies — confirm applicability and we'll add the line item. The ledger design reserves space for both.</td><td>Line items reserved, set to 0 until confirmed</td></tr>
+<tr><td><strong>FQ-7</strong></td><td>Minimum payout threshold (e.g., hold payouts under ₹500 and roll into next week)?</td><td>No threshold</td></tr>
+</table>
+<p class="small">None of these block the build — each lands as configuration or a rate-table row. They DO block the first <em>real</em> payout run, so resolving them within ~2 weeks keeps the timeline clean.</p>
+
+<h2 id="arch">6. Architecture — the settlement ledger</h2>
+<h3>6.1 Why a ledger (and not on-demand math)</h3>
+<p>If payouts were recomputed live, a merchant's "week of June 1" number could differ in March because an order got refunded later — an audit nightmare and a trust killer. Instead: <strong>compute once at cycle close, freeze it, never touch it again.</strong> Corrections are new entries, not edits. This is double-entry thinking applied to marketplace payouts, and it matches the no-temporary-patches standard the whole coupon project has been held to.</p>
+<h3>6.2 Data model (new tables)</h3>
+<pre>SettlementCycle          one row per (merchant, week)
+  id, merchant_id, period_start, period_end (IST week)
+  status: OPEN → CLOSED → PAID            (forward-only)
+  gross_sales              Σ customer-paid totals of eligible orders
+  commission_base          Σ per-order commission base (per FQ-4 rule)
+  commission_amount        Σ per-order commission (rate resolved per order)
+  coupon_reimbursement     Σ PLATFORM-funded coupon slices       (credit)
+  coupon_absorbed          Σ MERCHANT-funded slices              (info only)
+  clawback_amount          Σ clawback line items applied this cycle
+  gst_on_commission, tcs_amount            (reserved, 0 until FQ-6)
+  net_payout               gross − commission − clawbacks + reimbursement (− reserved taxes)
+  closed_at, paid_at, paid_by, payment_reference (manual for now)
+
+SettlementLine           one row per order per cycle (the receipts)
+  cycle_id, order_id, kind: SALE | COUPON_REIMBURSEMENT | CLAWBACK | ADJUSTMENT
+  amount, commission_rate_used, commission_rule_id, note
+
+CommissionRule           admin-editable rate matrix (§3.3)
+  category, order_type (PICKUP|DINING|ANY), tier (nullable), rate_pct,
+  effective_from, provisional (bool — flags §4 defaults)
+
+Merchant additions       commission_category, turnover_tier (F&B),
+                         settlement_hold (bool, manual freeze)</pre>
+<h3>6.3 The weekly close (idempotent job + manual trigger)</h3>
+<ol>
+<li>Select eligible orders for the week: status COMPLETED or RETURN_REJECTED, payment <strong>verified against Razorpay</strong> (§8), not in the anomaly set, not already settled in a prior cycle (each order settles exactly once — enforced by a unique constraint on SettlementLine.order_id for kind=SALE).</li>
+<li>Resolve each order's commission rule (category + order type + tier, most specific wins) and write a SALE line.</li>
+<li>Add COUPON_REIMBURSEMENT lines from each order's platform-funded snapshot slice (the per-store slices Phase 5 made exact).</li>
+<li>Pull pending CLAWBACK entries (orders refunded after their cycle was paid) into this cycle.</li>
+<li>Freeze the cycle: status CLOSED. Anomaly/held orders roll forward to the next week's candidate set automatically — money is delayed, never lost.</li>
+<li>Admin reviews in SettlementsManager (currently mock data — gets rewired to this), clicks <strong>Mark as paid</strong> after making the bank transfer manually, recording a payment reference. Phase 7b replaces this click with a payout-vendor API call.</li>
+</ol>
+<h3>6.4 What each party sees</h3>
+<ul>
+<li><strong>Admin (SettlementsManager):</strong> per-merchant weekly rows — gross, commission, reimbursements, clawbacks, net, status, held-order count; drill-down to the per-order lines; mark-as-paid flow. FinanceHub KPI: total platform coupon spend + total commission earned per week.</li>
+<li><strong>Merchant (Earnings tab):</strong> a settlement history list — "Week of June 1: ₹14,520 · PAID" — with the same line-item breakdown. The current "2% fee simulation" estimate gets replaced by real numbers derived from their actual commission rules.</li>
+</ul>
+
+<h2 id="example">7. Worked example — one merchant, one week</h2>
+<div class="box green">
+<p><strong>Spice Garden (Restaurant, Tier 2: pickup 8% / dining 10%)</strong> — week Mon Jun 1 → Sun Jun 7:</p>
+<pre>22 pickup orders, customers paid ₹18,000   (items ₹17,200 + GST ₹800)
+ 6 dine-in orders, customers paid ₹9,450   (items ₹9,000 + GST ₹450)
+ 1 pickup order used WEEKEND20 (platform-funded), slice −₹120
+   → customer paid ₹880 for ₹1,000 of items (included in the 22 above)
+ 1 order from LAST week refunded ₹600 after that week was already paid
+
+Gross sales (customer-paid)                       ₹27,450.00
+Commission base (items, pre-GST, pre-coupon)      ₹26,200.00
+Commission: ₹17,200×8% + ₹9,000×10%             − ₹2,276.00
+Coupon reimbursement (platform-funded)           +   ₹120.00
+Clawback (last week's refund)                    −   ₹600.00
+─────────────────────────────────────────────────────────────
+NET PAYOUT                                        ₹24,694.00</pre>
+<p class="small">Every number above traces to a frozen SettlementLine row. If founders answer FQ-4 differently (commission on customer-paid totals), only the base changes — same machinery.</p>
+</div>
+
+<h2 id="prereq">8. Prerequisite: server-side payment verification</h2>
+<div class="box amber">
+<p><strong>The single biggest standing money risk in the system predates the coupon project:</strong> the server currently trusts the app's claim that an order was paid (<code>paid: true</code> + a payment id in the request). Until now that risk was bounded — wrong data, no automated money. <strong>Phase 7 is the moment the data starts driving real payouts</strong>, so verification graduates from "queued hardening" to a prerequisite:</p>
+<ul>
+<li>At order creation: verify the payment id against Razorpay's API — captured, amount matches, not previously used. Orders that fail go to the anomaly bucket (created, but flagged + excluded from settlement).</li>
+<li>At cycle close: only verified-paid orders settle (belt and braces).</li>
+</ul>
+<p>This is build item 7B and lands before the first real cycle closes.</p>
+</div>
+
+<h2 id="plan">9. Build plan (7A–7G)</h2>
+<table>
+<tr><th>Step</th><th>What</th><th>Gate</th></tr>
+<tr><td><strong>7A</strong></td><td>Schema: SettlementCycle + SettlementLine + CommissionRule + merchant fields; seed CommissionRule from §3 (provisional flags on §4 defaults)</td><td>Migration — Pranav's §6 confirmation</td></tr>
+<tr><td><strong>7B</strong></td><td>Server-side Razorpay payment verification on POST /orders + anomaly bucket</td><td>EB deploy confirmation</td></tr>
+<tr><td><strong>7C</strong></td><td>Cycle-close engine: eligibility, rule resolution, line writing, freeze; idempotent; admin-triggerable + weekly cron</td><td>EB deploy confirmation</td></tr>
+<tr><td><strong>7D</strong></td><td>Clawback detection (refund/cancel events on already-settled orders → pending clawback entries)</td><td>rides 7C deploy</td></tr>
+<tr><td><strong>7E</strong></td><td>Admin: SettlementsManager rewired from mock to real + mark-as-paid + CommissionRule editor + FinanceHub KPIs</td><td>Vercel via git push</td></tr>
+<tr><td><strong>7F</strong></td><td>Merchant: Earnings settlement history (replaces the 2% simulation)</td><td>rides merchant OTA</td></tr>
+<tr><td><strong>7G</strong></td><td>Adversarial audit (same multi-reviewer discipline as Phases 4–6) + fix round + dry-run cycle close against prod data with payouts NOT marked paid</td><td>—</td></tr>
+</table>
+<p><strong>Sequencing note:</strong> per Pranav, the build starts now without waiting for founder sign-off — FQ answers land as configuration. The only thing founder answers truly gate is the <em>first real payout run</em>.</p>
+
+<h2 id="context">10. Context: where the coupon system stands today</h2>
+<p class="small">For founders reading this standalone: Phases 1–6 of the coupon-foolproof project are complete — schema, hardened APIs, admin dashboard, consumer checkout integration, exact multi-store discount allocation, and merchant-side surfacing. Backend phases are live in production; consumer/merchant app changes ship via the next app updates. The system has been through seven adversarial audit rounds (multi-reviewer, line-by-line); all blockers found were fixed and re-verified. Full detail: <code>docs/coupon-foolproof-audit-phase1-5.html</code>. Phase 7 (this document) is the settlement layer that turns those verified numbers into weekly merchant payouts; Phase 8 (verification &amp; rollout) follows.</p>
+
+<p class="meta">End of document. Author: Claude (with Pranav). Decisions herein confirmed by Pranav 2026-06-10; provisional items flagged inline.</p>
+</div></body>
+</html>

@@ -34,6 +34,67 @@
 
 ---
 
+## 🎟️ Coupon Foolproof — deferred audit findings + open flags (added 2026-06-10)
+
+### Phase 7G audit — deferred mediums/lows (added 2026-06-11; blockers + highs all FIXED in commit 04734624)
+- **Negative-net cycles & mark-paid semantics** — a clawback-only week produces netPayout < 0; the mark-paid flow treats it like a payout. Needs a founder decision: carry the debt into the next cycle automatically vs invoice the merchant. (audit M-22/M-24)
+- **Refund rupee-rounding vs clawback paise** — the cancel path rounds refunds to whole rupees before paise conversion; recorded clawback can differ from moved money by <₹1. Align rounding in one place. (M-21)
+- **Close scalability** — the close scans every eligible order since the epoch in one IN-list; fine now, needs paging before order volume grows (thousands/week). (M-31)
+- **Missed-Monday catch-up** — if the process is down at Mon 02:00 IST the close is skipped; roll-forward still settles every order at the NEXT close but under the later week's period label. Add a startup catch-up check. (L-39)
+- **detectClawback DB uniqueness** — find-then-create idempotency is per (orderId, note); add a defensive unique index if clawback volume grows. (L-43)
+- **Order-create price validation** (deep fix for the commission-evasion hole) — items are client-priced at POST /orders; the close-time coherence guard (HOLD + Sentry) is live, but validating against StoreProduct at create time is the root fix. Touches the hot checkout path — schedule deliberately.
+- **Payment-verification override UI** — the endpoint exists (POST /admin/orders/:id/payment-verification, audit-logged); an admin surface for it (held-orders worklist) is not built yet. Until then: curl with an admin token.
+- **Residual micro-race** — a refund whose transaction commits between the close's in-tx revalidation read and the close commit can settle at full value with no clawback (sub-second window). Sentry's mid-close drop messages + weekly reconciliation cover it; a full fix needs SELECT FOR UPDATE on candidate orders.
+- **OPERATIONAL PREREQUISITE for first real settlement**: assign commission categories in admin → Finance → Settlements → Merchants tab. Until assigned, ALL merchants are held (verified by prod dry-run 2026-06-11: 11 orders held no-profile, 0 cycles created). Also decide CRON_DRY_RUN flip-back (set 2026-06-10 ~22:00 UTC for the orphan sweep's first 24h).
+
+
+> Source: adversarial audits on PR #1 (merged) and PR #2 (branch `coupon-foolproof-phase4-2026-06-09`).
+> **Status 2026-06-10:** Phases 1-5 DEPLOYED to EB (`app-260610_132434177329`); PR #2 merge + consumer OTA pending. Full audit report: `docs/coupon-foolproof-audit-phase1-5.html`.
+
+### 🚨 OTA GATES (must land BEFORE the consumer EAS OTA — from full audit 2026-06-10)
+- **N1 (CRITICAL): thread `storeProductId` into addItem callsites.** No add-to-cart path sets `CartItem.storeProductId` (StorefrontScreen.tsx L402-413, FavoritesScreen.tsx L101-111, useProducts.ts L72) — without this the OTA ships a DEAD coupon feature (every apply fails "items out of date"). Fix: pass `storeProductId: product.id` at each callsite + run the e2e apply test.
+- **N3: clear order coupon snapshot on capped multi-store replay** (apps/api POST /orders appended===0 non-idempotent branch) — replayed orders currently still book the slice discount.
+- **N5: token-verify failure after payment must not bypass orphan handling** — while REQUIRE_COUPON_TOKEN=false, proceed couponless + Sentry instead of bare 400.
+- **N4: clearAppliedCoupon on SIGNED_OUT + cloud-cart restore** (CartContext 🔒 — needs explicit lock override).
+- **N6 decision: orphaned-payments sweep cron** (referenced in 3 comments, never built) — build it, or soften the client "automatic refund" copy and accept manual reconciliation.
+
+### Operational flags / gates (time-sensitive, not code)
+- **`REQUIRE_ORDERS_AUTH=true` flip** — POST /orders + PATCH /order-requests are in soft-auth (Phase 2J). Flip via `eb setenv REQUIRE_ORDERS_AUTH=true` once Sentry shows `phase: pre-ota-soft-auth` at zero for 24h after the consumer OTA rolls. Added 2026-06-09.
+- **`REQUIRE_COUPON_TOKEN=true` flip** — token enforcement is logged-only. Flip after consumer OTA propagates. **Prerequisite met 2026-06-10:** R3 qty-binding landed (`7b07df82`); audit said it must precede this flip.
+- **Pre-deploy operational check (eligibleVerticals)** — Phase 5B's server-derived store-id fix means verticals-scoped coupons start WORKING the moment the API deploys (they were silently broken before). Review with Pranav which verticals-scoped coupons exist and whether their budgets are intended to go live. From Phase 5 audit cleanup #5.
+- **branch_id NULL count query** — run `SELECT COUNT(*) FROM "StoreProduct" WHERE branch_id IS NULL AND is_deleted = false;` before relying on branch-grouped allocation. From Phase 5 audit cleanup #9.
+
+### Consumer-app (CheckoutScreen 🔒 — each needs explicit lock override)
+- **R4 — stale discount at payment consent.** After a store rejection, the results screen shows the full-cart discount; the tap silently re-validates and Razorpay asks for a higher amount with no in-app explanation. Money-safe but a trust gap. Fix: confirmation line ("Store B declined — your discount is now ₹60, total ₹X. Continue?"). From Phase 5 re-audit, 2026-06-10.
+- **R5 — late swap-accept during Razorpay window (PRE-EXISTING).** Merchant accepts a pending swap while the payment sheet is open → fresh closure POSTs a paid:true order for a store whose subtotal was never charged. Fix: snapshot accepted-request ids at confirmAccepted; handlePaymentSuccess iterates only the snapshot. From Phase 5 re-audit.
+- **R6 — per-store GST whole-rupee drift (PRE-EXISTING).** `groupGst = Math.round(finalGstToPay * share)` drifts ±₹1 from the charged GST across stores; discount is now paise-exact but GST isn't. Same largest-remainder treatment as the discount split would fix it.
+
+### Backend (apps/api) — mediums from PR #1 + Phase 5 audits
+- **Single-store token jti single-use** (PR #1 medium #9) — multi-store now has the jti fingerprint + R1 cap; the SINGLE-store path token is still replayable across distinct orders within 10 min (bounded by per-(coupon,order) unique + usage counters). Full fix: persist consumed jtis with TTL.
+- **perCustomerLimit atomic CAS** (PR #1 medium #7) — checked only at validate-time, race-able across concurrent checkouts. In-txn count or partial unique index.
+- **Payment-level idempotency index** (PR #1 medium #12) — partial unique on `orders(metadata->>'razorpayPaymentId', store_id)`. Requires migration.
+- **Store-scope coupon check broken both ways** (Phase 5 audit cleanup #4, PRE-EXISTING) — `coupon.storeId` comparison uses client-supplied storeId in the single-store path; id-space ambiguity (Store id vs branch id). Server-side derivation now exists for multi-store; extend to single-store.
+- **Partial unique index drift risk** (Phase 5 audit cleanup) — `coupon_redemption_cart_fingerprint_unique_idx` lives only in migration SQL (Prisma can't express partial indexes); a future schema reset could drop it. Schema comment exists; consider a CI check.
+- **Rate-limiter sweep** (PR #1 low #5) — in-memory Map grows unbounded on long uptimes; add setInterval sweep.
+- **BOGO 0/0 infinite-loop guard** (PR #1 low #6) — server-side validator refusing bogoBuy<=0 || bogoGet<=0 on POST /coupon.
+- **Idempotency-Key honor on POST /coupon** (PR #1 low #14) — admin-web sends it; server ignores it.
+- **GIN index on split_order_ids** (Phase 5 nit) — cancel-path `splitOrderIds has` is a sequential scan today; fine at current volume.
+
+### Admin-web
+- **CouponBuilder field extensions** (queued earlier in this file, still open) — dailyUsageLimit, eligibleVerticals, eligibleOrderTypes, bogoMode, inactiveSinceDays not settable from the builder UI; admins use direct DB.
+
+### Consumer-app nits (locked files — need explicit override)
+- **Dead static-data imports** in StorefrontScreen.tsx L17 + FavoritesScreen.tsx L17 (RESTAURANTS/STORES never used; products fallback provably empty). Pre-existing; flagged by Phase 6 audit 2026-06-10. One-line removals, both files 🔒.
+
+### Phase 7 design decisions (carry into the settlement discussion)
+- **RETURN_REJECTED revenue rule**: orders never return to COMPLETED after a won return dispute, so earnings (and now coupon reimbursement aggregates) stop counting them. Decide whether RETURN_REJECTED / partially-refunded orders count as settled revenue + reimbursable, and apply the same rule to both aggregates. (Phase 6 audit, 2026-06-10.)
+- **Anomaly-set rule**: snapshot-less orders whose total diverges from items-gross are the Sentry-flagged N3/N5 anomaly set — Phase 7 settlement math should exclude or flag them.
+
+### Process
+- **Post-Phase-7/8: full line-by-line consumer-app + merchant-app audit** — Pranav explicitly requested (2026-06-09) a dedicated plan to find plainly-visible errors and loose ends across both apps' native + OTA changes, to be run AFTER Phase 7/8 completes.
+
+---
+
 ## 🚀 June 6 Build Sprint (target: native build + production push)
 
 > **Founder commitment for June 6, 2026.** All items here must land in the build that goes out that day. Scope is heavy for 11 days — see "Sprint scope concerns" in the founder questions doc.

@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, FlatList, TextInput, Image, Dimensions, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, TextInput, Image, Dimensions, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArrowLeft, CheckCircle, Tag, Search, Info, Percent, CreditCard } from 'lucide-react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import * as Haptics from 'expo-haptics';
+import { useCart } from '../context/CartContext';
+import { validateCoupon, type ValidateCouponCartItem } from '../lib/api';
 
 const { width } = Dimensions.get('window');
 
@@ -64,31 +66,84 @@ export default function OffersScreen() {
     const route = useRoute<RouteProp<RootStackParamList, 'Offers'>>();
     const { subtotal } = route.params;
     const [manualCode, setManualCode] = useState('');
+    // Phase 4 fix B2 (2026-06-09): replace the legacy selectedCoupon route-param
+    // hand-off with the typed validateCoupon + CartContext.setAppliedCoupon flow.
+    // The previous flow silently broke after Phase 4 deleted the consumer-side
+    // useEffect on selectedCoupon in both checkout screens.
+    const { items: cartItems, setAppliedCoupon } = useCart();
+    const [applying, setApplying] = useState<string | null>(null);
 
-    const handleApplyCoupon = (coupon: any) => {
+    const handleApplyCoupon = async (coupon: any) => {
+        // Quick client-side minOrder check (UX shortcut; server is authoritative).
         if (subtotal < coupon.minOrder) {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            alert(`Add ₹${coupon.minOrder - subtotal} more to avail this offer!`);
+            Alert.alert('Add more to your cart', `Add ₹${coupon.minOrder - subtotal} more to avail this offer.`);
             return;
         }
-
-        let disc = 0;
-        if (coupon.isPercentage) {
-            disc = Math.min(Math.round(subtotal * (coupon.discount as number)), coupon.maxDiscount || 999);
-        } else {
-            disc = coupon.discount as number;
+        // Phase 4 fix B2: build the strict cartItems[] payload (Phase 2L requires
+        // storeProductId on every item). Reject client-side if any item is missing it.
+        if (cartItems.length === 0) {
+            Alert.alert("Cart is empty", "Add items to your cart first, then apply a coupon at checkout.");
+            return;
         }
-
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        navigation.navigate('Main' as any, {
-            screen: 'Cart',
-            params: {
-                selectedCoupon: {
-                    code: coupon.code,
-                    discount: disc
-                }
+        const validatePayload: ValidateCouponCartItem[] = [];
+        for (const ci of cartItems) {
+            if (!ci.storeProductId) {
+                Alert.alert(
+                    "Couldn't apply",
+                    'Some items in your cart need to be refreshed before this coupon can be applied. Please refresh your cart and try again.'
+                );
+                return;
             }
-        });
+            validatePayload.push({
+                storeProductId: String(ci.storeProductId),
+                quantity: ci.quantity,
+                price: ci.price,
+                id: ci.id,
+                name: ci.name,
+            });
+        }
+        const storeIds = Array.from(new Set(cartItems.map((ci) => String(ci.storeId))));
+        const orderType: 'pickup' | 'dining' | undefined =
+            cartItems.length > 0 ? (cartItems[0].isDining ? 'dining' : 'pickup') : undefined;
+        setApplying(coupon.code);
+        try {
+            const result = await validateCoupon({
+                code: coupon.code,
+                cartItems: validatePayload,
+                storeIds,
+                orderType,
+            });
+            if (!result.valid) {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                Alert.alert('Could not apply offer', result.error);
+                return;
+            }
+            // Persist to CartContext — the single source of truth for the rest
+            // of the checkout flow (CheckoutScreen / DiningCheckoutScreen read
+            // appliedCoupon directly).
+            setAppliedCoupon({
+                code: result.code,
+                couponId: result.couponId,
+                discount: result.discount,
+                fundingSource: result.fundingSource,
+                discountType: result.discountType,
+                validationToken: result.validationToken,
+                expiresAt: result.expiresAt,
+                cartHash: '',
+                // Phase 5 (2026-06-10) — authoritative per-store split (audit fix #4).
+                multiStore: result.multiStore,
+                perStoreBreakdown: result.perStoreBreakdown ?? null,
+            });
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // Navigate to Cart so the customer sees the discount applied.
+            // No selectedCoupon param — CartContext.appliedCoupon is authoritative.
+            navigation.navigate('Main' as any, {
+                screen: 'Cart',
+            });
+        } finally {
+            setApplying(null);
+        }
     };
     const restaurantOffers = AVAILABLE_COUPONS.filter(c => c.category === 'RESTAURANT');
     const paymentOffers = AVAILABLE_COUPONS.filter(c => c.category === 'PAYMENT');

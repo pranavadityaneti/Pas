@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PAS Coupon Foolproof — Full Audit Report (Phases 1-5) — 2026-06-10</title>
+<style>
+  :root {
+    --red: #b42926; --green: #15803d; --amber: #b45309; --gray: #6b7280;
+    --bg-soft: #f8f9fa; --border: #e5e7eb;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #111827; margin: 0; padding: 0 16px 80px; line-height: 1.55; }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 26px; border-bottom: 3px solid var(--red); padding-bottom: 10px; margin-top: 28px; }
+  h2 { font-size: 20px; margin-top: 36px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  h3 { font-size: 16px; margin-top: 24px; }
+  pre { background: #111827; color: #e5e7eb; padding: 12px 14px; border-radius: 8px; overflow-x: auto; font-size: 12.5px; line-height: 1.45; }
+  code { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 0.92em; }
+  pre code { background: none; border: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 13.5px; }
+  th, td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--bg-soft); font-weight: 700; }
+  .sev-critical { color: #fff; background: var(--red); padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .sev-high { color: #fff; background: #dc2626; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .sev-medium { color: #fff; background: var(--amber); padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .sev-low { color: #fff; background: var(--gray); padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .sev-nit { color: #374151; background: var(--border); padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .ok { color: var(--green); font-weight: 700; }
+  .bad { color: var(--red); font-weight: 700; }
+  .warn { color: var(--amber); font-weight: 700; }
+  .box { border: 1px solid var(--border); border-left: 5px solid var(--red); background: var(--bg-soft); border-radius: 6px; padding: 12px 16px; margin: 14px 0; }
+  .box.green { border-left-color: var(--green); }
+  .box.amber { border-left-color: var(--amber); }
+  .toc { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 8px; padding: 14px 22px; }
+  .toc ol { margin: 6px 0; padding-left: 22px; }
+  .meta { color: var(--gray); font-size: 13px; }
+  .finding { border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin: 10px 0; }
+  .finding .fhead { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-bottom: 4px; }
+  .finding .floc { color: var(--gray); font-size: 12.5px; }
+  .small { font-size: 12.5px; color: var(--gray); }
+  @media print {
+    body { padding: 0 6mm; font-size: 11.5px; }
+    pre { white-space: pre-wrap; }
+    h1 { page-break-before: auto; }
+    h2 { page-break-after: avoid; }
+    .finding, table, .box { page-break-inside: avoid; }
+    .toc { page-break-after: always; }
+  }
+</style>
+</head>
+<body><div class="wrap">
+
+<h1>PAS Coupon Foolproof — Full Audit Report (Phases 1-5)</h1>
+<p class="meta">Generated 2026-06-10 · Audit run <code>wf_ecdc96a6-5f3</code> (6 independent area reviewers + synthesizer, ~851k tokens, 250 tool calls) · Target: prod state — EB <code>app-260610_132434177329</code> ≡ branch <code>coupon-foolproof-phase4-2026-06-09</code> @ <code>86bdaee0</code></p>
+
+<div class="toc">
+<strong>Table of Contents</strong>
+<ol>
+  <li><a href="#exec">Executive summary (plain English)</a></li>
+  <li><a href="#status">Current system status — what is live where</a></li>
+  <li><a href="#history">Complete phase &amp; hot-fix history</a></li>
+  <li><a href="#method">Audit methodology</a></li>
+  <li><a href="#good">What was verified CORRECT (positive assurance)</a></li>
+  <li><a href="#blockers">The 2 new blockers</a></li>
+  <li><a href="#new">All new findings (31)</a></li>
+  <li><a href="#deferred">Known-deferred items re-confirmed (14)</a></li>
+  <li><a href="#preexisting">Pre-existing issues outside coupon scope (7)</a></li>
+  <li><a href="#plan">Recommended action plan</a></li>
+  <li><a href="#appendix">Appendix: deploys, migrations, commits, audit rounds</a></li>
+</ol>
+</div>
+
+<h2 id="exec">1. Executive summary (plain English)</h2>
+<div class="box green">
+<p><strong>The coupon engine itself, as deployed on the server, is in genuinely good shape.</strong> Six independent reviewers verified the money math, replay protection, ledger and counter bookkeeping, database migrations, and backward compatibility with the old app. <strong>Nothing in production is leaking money through the new coupon code today.</strong></p>
+</div>
+<div class="box">
+<p><strong>However, two new blockers stop a clean sign-off:</strong></p>
+<ol>
+<li><strong>The consumer app update about to ship has a dead coupon feature.</strong> No add-to-cart path ever records the product ID the coupon system requires, so after the OTA every customer's coupon-apply attempt would fail with "Some items in your cart are out of date." The fix is small and well-bounded (a one-line change at each of ~3 add-to-cart callsites). <em>Zero impact today — phones run the old bundle.</em></li>
+<li><strong>A stale compiled file already in production silently breaks two admin features</strong> (admin-invite emails never send; merchant KYC "needs info" returns a 500) — unrelated to coupons, but live right now. The corrected build already sits in the working tree; it needs commit + redeploy.</li>
+</ol>
+</div>
+<p>Everything else found is latent edge cases, admin-dashboard polish, dead code, or items already on the deferred queue. The single biggest standing money risk in the whole system — the server trusting the client's claim that a payment happened — <strong>predates the coupon project entirely</strong> and is now formally tracked.</p>
+<p><strong>Bottom line:</strong> Phases 1-5 server-side: solid and live. Consumer-side: one small but critical wire missing before OTA. Two quick fixes and the system is ready for the rollout sequence.</p>
+
+<h2 id="status">2. Current system status — what is live where</h2>
+<table>
+<tr><th>Layer</th><th>State</th><th>Notes</th></tr>
+<tr><td><strong>API (Elastic Beanstalk)</strong></td><td class="ok">Phases 1, 2 (+2J/2K/2L), 3A, 5 LIVE</td><td><code>app-260610_132434177329</code> — identical to branch HEAD <code>86bdaee0</code>. Health Green.</td></tr>
+<tr><td><strong>Prod DB (Supabase Postgres)</strong></td><td class="ok">All 6 coupon migrations applied</td><td>Field-by-field parity verified between <code>schema.prisma</code> and live DB. 0 rows in <code>coupon_redemptions</code> and <code>audit_log</code> — no backfill debt.</td></tr>
+<tr><td><strong>Env flags</strong></td><td class="warn">Transition state (by design)</td><td><code>COUPON_VALIDATION_SECRET</code> set · <code>REQUIRE_ORDERS_AUTH=false</code> (soft-auth) · <code>REQUIRE_COUPON_TOKEN</code> unset (warn-only)</td></tr>
+<tr><td><strong>Admin-web (Vercel)</strong></td><td class="ok">Phase 3 LIVE</td><td>Deployed via PR #1 merge. Analytics pages reachable only by direct URL (finding N9).</td></tr>
+<tr><td><strong>Consumer app (phones)</strong></td><td class="warn">Pre-Phase-4 bundle</td><td>Old hardcoded-coupon flow. Verified it hits no errors against the new API. <strong>OTA pending — blocked on blocker #1.</strong></td></tr>
+<tr><td><strong>Merchant app (phones)</strong></td><td class="warn">Pre-PR#1 bundle</td><td>Accept/reject via Supabase direct (still works). OTA will switch it to the API path (safe since Phase 2K staff-RBAC fix).</td></tr>
+<tr><td><strong>Git</strong></td><td class="ok">PR #1 merged · PR #2 open</td><td>PR #2 (<code>coupon-foolproof-phase4-2026-06-09</code>, 10 commits) holds Phase 2L + 4 + 5 + all audit fixes. Its API code is already deployed; merge pending.</td></tr>
+</table>
+
+<h2 id="history">3. Complete phase &amp; hot-fix history</h2>
+<h3>Phases</h3>
+<table>
+<tr><th>Phase</th><th>What</th><th>Status</th></tr>
+<tr><td><strong>1 — Schema</strong></td><td>4 additive migrations: coupon extensions (soft-delete, daily-usage, eligibility, BOGO mode), <code>audit_log</code> table, Order coupon snapshot columns (FK TEXT fix), redemption ledger fields + UNIQUE(coupon_id, order_id)</td><td class="ok">LIVE</td></tr>
+<tr><td><strong>2 — API hardening</strong></td><td>RBAC capability helper, defensive audit writer, rate limiter, HMAC-SHA256 token chain (sign/verify/cartHash), soft-delete, validate-coupon refactor with cartItems[], transactional CAS redemption in POST /orders, backward-compat shim, cancellation reversal, rate limits</td><td class="ok">LIVE</td></tr>
+<tr><td><strong>3 — Admin dashboard</strong></td><td>5 endpoints (check-code, analytics, redemptions ledger, audit-log, upload-logo) + CouponDetailPage + CouponAnalyticsHub + AuditLog wiring</td><td class="ok">LIVE (2 polish gaps: N8 logo pipeline, N9 navigation)</td></tr>
+<tr><td><strong>4 — Consumer checkout</strong></td><td>CartContext coupon state + auto-clear, typed validateCoupon, Apply Coupon entry rows, token-expiry re-validate, accepted-subset re-validate, Supabase storeProductId persistence</td><td class="warn">Code complete + 3× audited; <strong>OTA blocked on blocker #1</strong></td></tr>
+<tr><td><strong>5 — Multi-store allocation</strong></td><td>Largest-remainder paise allocation, signed per-store breakdown + jti fingerprint + spidQty binding, ON-CONFLICT single-row ledger with capped append, proportional partial reversal</td><td class="ok">LIVE (server) · client side rides the Phase 4 OTA</td></tr>
+</table>
+<h3>Hot-fix waves (all from adversarial audit rounds)</h3>
+<table>
+<tr><th>Wave</th><th>Trigger</th><th>Contents</th></tr>
+<tr><td><strong>2J</strong> (soft-auth)</td><td>Live incident: hard <code>requireUser</code> 401'd every pre-OTA checkout</td><td><code>softRequireUser</code> + <code>REQUIRE_ORDERS_AUTH</code> flag + Sentry rollout counter. Verified by prod curl.</td></tr>
+<tr><td><strong>2K</strong> (5 fixes)</td><td>PR #1 pre-merge review (23 findings)</td><td>Staff/manager RBAC on order-request accept (<code>userCanManageBranch</code> — 23 prod users protected), orphan-refund ownership + Razorpay amount cap, TOCTOU atomic order-request flip, legacy redeem usage/daily CAS, reversal actor attribution, redeem shim ownership+code match, soft-delete filter on redeem</td></tr>
+<tr><td><strong>2L</strong> (price reconciliation)</td><td>Phase 4 prerequisite ("no bleeds")</td><td>Server-trusted StoreProduct prices drive cart totals + BOGO; strict storeProductId policy</td></tr>
+<tr><td><strong>Phase 4 fix waves</strong> (3 rounds)</td><td>Phase 4 audits</td><td>9 blockers (incl. dead pipeline — missing Apply Coupon UI; dining charge mismatch; Supabase persistence) → D2-pickup re-fix + D1 rapid-tap → finalTotalToPay sentinels</td></tr>
+<tr><td><strong>Phase 5 fix waves</strong> (2 rounds)</td><td>Phase 5 audits</td><td>5 money blockers (fingerprint replay, rejected-store full discount, negative slice, client/server split drift, concurrent-cancel corruption) → R1 replay cap, R2 exact-sum by construction, R3 quantity binding</td></tr>
+</table>
+
+<h2 id="method">4. Audit methodology</h2>
+<p>This is the <strong>7th adversarial audit round</strong> of the coupon project. Six reviewers each took an area and read the actual files line-by-line (not diffs), with authorization to run read-only queries against prod for schema/index/RLS verification:</p>
+<table>
+<tr><th>Reviewer</th><th>Area</th><th>Verdict</th></tr>
+<tr><td>db-schema</td><td>6 migrations + Prisma schema parity vs live DB, indexes, FK types, snapshot symmetry</td><td>approve-with-caveats</td></tr>
+<tr><td>validate-coupon</td><td>The full validation endpoint: every eligibility check, discount math, Phase 5 allocation, token signing</td><td>approve-with-caveats</td></tr>
+<tr><td>orders-redemption</td><td>POST /orders coupon path, redemption ledger (both modes), cancel reversal, legacy redeem</td><td>approve-with-caveats</td></tr>
+<tr><td>consumer-app</td><td>All 9 consumer files as a system: lifecycle, closures, display-vs-charged, OTA compat</td><td class="bad">block (found blocker #1)</td></tr>
+<tr><td>admin-web</td><td>5 admin endpoints, RBAC parity, analytics correctness incl. multi-store, builder/detail/hub/audit UIs</td><td>approve-with-caveats</td></tr>
+<tr><td>cross-cutting</td><td>Deployed-dist vs source coherence, backward-compat matrix, flag-state matrix, token version skew, deferred-list accuracy</td><td>approve-with-caveats (found blocker #2)</td></tr>
+</table>
+<p class="small">Findings were de-duplicated and classified: <strong>new</strong> (31) vs <strong>known-deferred</strong> (14 — already in forlater.md, all re-confirmed accurate) vs <strong>pre-existing</strong> (7 — predate the coupon project).</p>
+
+<h2 id="good">5. What was verified CORRECT (positive assurance)</h2>
+<div class="box green">
+<ul>
+<li><strong>Migrations:</strong> all 6 applied cleanly; field-by-field parity between schema and live DB for every coupon column, index, and FK. The one failed migration attempt (order_coupon FK type) was properly rolled back and re-applied.</li>
+<li><strong>Pricing is fully server-trusted:</strong> cart totals recomputed from StoreProduct prices (client prices ignored); percentage-with-cap, flat, both BOGO modes, and the final clamp all independently re-derived and confirmed.</li>
+<li><strong>Token chain is sound:</strong> HMAC-SHA256 with constant-time comparison, expiry + userId binding, exact product-set + quantity-multiset matching — forged, cross-user, stripped, or padded-cart tokens are all closed off.</li>
+<li><strong>Phase 5 money chain is exact end-to-end:</strong> largest-remainder allocation sums precisely; the client consumes the server's signed split verbatim; the ledger accumulates per-slice.</li>
+<li><strong>Counter/ledger symmetry holds on every traced path:</strong> counters increment exactly once per cart and reverse correctly on cancel, including the atomic in-statement partial reversal.</li>
+<li><strong>Fingerprint dedup:</strong> ON CONFLICT target exactly matches the live prod index; per-validation jti makes cross-checkout collisions impossible.</li>
+<li><strong>Cancel integrity:</strong> atomic status compare-and-set makes double-cancel reversal impossible; Razorpay refund fires only after CANCELLED commits.</li>
+<li><strong>Backward compatibility traced against the ACTUAL deployed consumer bundle:</strong> it can hit no coupon-related errors; nothing money-bearing is disabled in the current flag state.</li>
+<li><strong>Data-layer security verified live:</strong> coupons + redemptions unreachable via Supabase REST (RLS + zero grants); three-way RBAC parity (admin-web ↔ API lib ↔ endpoints).</li>
+<li><strong>Both projects compile clean</strong>; prod ledger tables hold 0 rows, so no live data is affected by any finding.</li>
+<li><strong>The storeProductId round-trip (cart ↔ Supabase) is correctly built on both ends</strong> — only the single upstream producer is missing, which is why blocker #1 is a small, bounded fix.</li>
+</ul>
+</div>
+
+<h2 id="blockers">6. The 2 new blockers</h2>
+<div class="finding"><div class="fhead"><span class="sev-critical">CRITICAL · N1</span> <strong>Consumer coupon feature is dead-on-arrival for the pending OTA — no add-to-cart path sets <code>storeProductId</code></strong></div>
+<div class="floc">apps/consumer-app/src/screens/StorefrontScreen.tsx L402-413 · FavoritesScreen.tsx L101-111 · hooks/useProducts.ts L72</div>
+<p>The Phase 4/5 flow is inert end-to-end: nothing produces <code>CartItem.storeProductId</code>, so the strict guards make <em>every</em> apply attempt fail with "Some items in your cart are out of date." The Supabase round-trip is correct but persists only null. Zero prod impact today (phones run the old bundle) — but the pending OTA would ship a dead feature. <strong>This deferred producer work was tracked nowhere</strong> — the audit's most important catch.</p>
+<p><strong>Fix:</strong> pass <code>storeProductId: product.id</code> in StorefrontScreen's handleAdd (id IS StoreProduct.id on the useProducts path) and FavoritesScreen (already keyed by store_product_id); then run the e2e apply test. <em>Now tracked as an explicit OTA gate in forlater.md.</em></p></div>
+
+<div class="finding"><div class="fhead"><span class="sev-high">HIGH · N2</span> <strong>Stale committed <code>email.service.js</code> breaks two admin features in prod RIGHT NOW (outside coupon scope)</strong></div>
+<div class="floc">apps/api/dist/services/email.service.js vs src/services/email.service.ts — deployed dist/index.js calls sendStoreNeedsInfoEmail / sendAdminInviteEmail which the committed service file doesn't export</div>
+<p>Live effects today: admin-invite emails silently never send (error swallowed — endpoint reports success), merchant KYC "needs info" 500s after the status update commits, email test-send 500s. Coupon paths unaffected. <strong>The corrected rebuilt files already sit as uncommitted working-tree changes.</strong></p>
+<p><strong>Fix:</strong> rebuild, commit the regenerated dist, redeploy (with deploy confirmation). Longer term: a predeploy guard that fails when tsc output differs from committed dist.</p></div>
+
+<h2 id="new">7. All new findings (31)</h2>
+<h3>Medium (7) — pre-OTA hardening batch</h3>
+<table>
+<tr><th>#</th><th>Finding</th><th>Essence</th><th>Fix</th></tr>
+<tr><td>N3</td><td>Capped replay still books the snapshot</td><td>Multi-store replay: R1 cap blocks the ledger append, but the Order's coupon-snapshot write happens earlier and isn't rolled back — replayed orders book the slice discount.</td><td>Clear snapshot columns in the same tx when append is capped (non-idempotent branch).</td></tr>
+<tr><td>N4</td><td>Coupon survives sign-out / cloud-restore</td><td><code>appliedCoupon</code> isn't cleared on SIGNED_OUT or after loadCartFromSupabase merge — the two cart-change paths that bypass the mutation methods. 🔒 CartContext.</td><td>clearAppliedCoupon() in both paths (lock override needed).</td></tr>
+<tr><td>N5</td><td>Token-verify failure after payment bypasses orphan handling</td><td>400 before order creation → no alert/Sentry/refund, while client copy promises reconciliation. OTA-window risk only.</td><td>Flag-off: proceed couponless + Sentry (mirror breakdown-mismatch).</td></tr>
+<tr><td>N6</td><td>Orphan-refund SLA cron doesn't exist</td><td>Referenced in 3 comments, never built. All soft-auth traffic skips inline auto-refund → manual reconciliation only, while client promises automatic.</td><td>Build the sweep cron, or soften client copy + accept manual ops. Decision needed.</td></tr>
+<tr><td>N7</td><td>Admin analytics ignore splitOrderIds</td><td>Multi-store redemptions (order_id NULL) silently excluded from topStores/orderType breakdowns; ledger shows "—". Money KPIs unaffected. Latent (0 rows).</td><td>Union splitOrderIds into the joins; render "N stores" rows.</td></tr>
+<tr><td>N8</td><td>Logo pipeline dead; ~0.5MB base64 per checkout</td><td>CouponBuilder stores base64 data-URLs in the DB (both prod coupons, up to ~249K chars); uploadCouponLogo has zero importers; the 'coupons' bucket doesn't exist. Every consumer coupon-list call downloads it all.</td><td>Create bucket, wire the upload, migrate 2 rows; meanwhile truncate logoUrl on list endpoints.</td></tr>
+<tr><td>N9</td><td>Analytics UI unreachable in-app</td><td>/marketing/analytics + /marketing/coupons/:id registered but nothing links to them.</td><td>Sidebar/tab link + per-row "View analytics".</td></tr>
+</table>
+<h3>Low (10)</h3>
+<table>
+<tr><th>#</th><th>Finding</th><th>Essence</th></tr>
+<tr><td>N10</td><td>inactiveSinceDays dead column</td><td>Never written/read; /coupons/available hardcodes 30d (== default, so consistent today).</td></tr>
+<tr><td>N11</td><td>Legacy redeem writes NULL discountAmount/fundingSource</td><td>Would undercount analytics; endpoint currently has zero callers, 0 rows.</td></tr>
+<tr><td>N12</td><td>audit_log lacks RLS</td><td>Not exploitable now (zero grants); one-line hardening migration.</td></tr>
+<tr><td>N13</td><td>orderCouponCode snapshot from client body</td><td>Garbage code corrupts ledger cosmetics + can double-burn usedCount on multi-store (no economic gain). Add code to signed token.</td></tr>
+<tr><td>N14</td><td>Cancel leaves snapshot when no ledger row</td><td>Capped-replay orders' snapshots never cleared on cancel → analytics overstatement. Pairs with N3.</td></tr>
+<tr><td>N15</td><td>Negative quantities not rejected</td><td>Can only lower the discount (clamps + spidQty hold); normalize qty ≥ 0.</td></tr>
+<tr><td>N16</td><td>CouponsSection.tsx is dead code (252 lines)</td><td>Zero importers; header comment falsely claims use. Delete (needs your approval) + fix 2 stale comments.</td></tr>
+<tr><td>N17</td><td>check-code dead in UI + semantics diverge from DB constraint</td><td>Archived code reports available:true but creation 409s (unconditional unique).</td></tr>
+<tr><td>N18</td><td>FINANCE role has no working UI path</td><td>view_analytics capability exists but sidebar + GET /coupons require create_edit_delete. Latent (0 FINANCE users).</td></tr>
+<tr><td>N19</td><td>upload-logo: temp-file leak on early returns + no size/mimetype limits</td><td>Capability-gated and unused; harden when wiring N8.</td></tr>
+</table>
+<h3>Nits (12)</h3>
+<table>
+<tr><th>#</th><th>Nit</th></tr>
+<tr><td>N20</td><td>schema.pulled.prisma is a stale introspection snapshot — delete or regenerate</td></tr>
+<tr><td>N21</td><td>validate-coupon fetches trusted prices before coupon-validity checks (bounded by auth + rate limit)</td></tr>
+<tr><td>N22</td><td>Legacy verticals fallback doesn't de-dupe client storeIds (theoretical — path unused)</td></tr>
+<tr><td>N23</td><td>usageLimit/dailyUsageLimit truthiness treats 0 as unlimited — document or compare !== null</td></tr>
+<tr><td>N24</td><td>Cancel audit comment claims merchant/admin actors but endpoint is owner-only — comment fix</td></tr>
+<tr><td>N25</td><td>Dining results card omits the discount line that the Pay CTA includes (display-only)</td></tr>
+<tr><td>N26</td><td>AuditLog filter doesn't reset page state</td></tr>
+<tr><td>N27</td><td>Archive UX says "deleted / cannot be undone" but is soft-delete; no Archived filter</td></tr>
+<tr><td>N28</td><td>PATCH/DELETE /coupon surface P2025/P2002 as 500s instead of 404/409</td></tr>
+<tr><td>N29</td><td>CouponAnalyticsHub is N+1 with unbounded server reads — fine today, degrade later</td></tr>
+<tr><td>N30</td><td>Stale comment: claims legacy redeem carries most traffic — it has NO callers; consider retiring post-flags</td></tr>
+<tr><td>N31</td><td>forlater.md said "Phase 5 deploy pending" — stale (now fixed)</td></tr>
+</table>
+
+<h2 id="deferred">8. Known-deferred items re-confirmed (14)</h2>
+<p>All 16 entries in forlater.md's coupon section were verified against the code — <strong>all accurate</strong>, none stale (except the Phase-5-status header line, N31). Highlights re-confirmed still open: flag flips (REQUIRE_COUPON_TOKEN, then REQUIRE_ORDERS_AUTH); single-store token jti single-use; perCustomerLimit CAS; payment-level idempotency index; store-scope id-space ambiguity; BOGO 0/0 guard (audit suggests widening to PATCH + a validate-side batchSize guard — cheap fix, instance-hang risk); R4 consent UX; R6 GST drift; partial-index drift risk; rate-limiter sweep; Idempotency-Key honor; GIN index; CouponBuilder field extensions.</p>
+
+<h2 id="preexisting">9. Pre-existing issues outside coupon scope (7)</h2>
+<table>
+<tr><th>Severity</th><th>Issue</th></tr>
+<tr><td><span class="sev-high">HIGH</span></td><td><strong>POST /orders trusts client-supplied <code>paid</code>/<code>paymentId</code>/<code>totalAmount</code> with no server-side Razorpay verification</strong> — a client can self-mark an order paid. The single biggest standing money risk in the system; predates the coupon project. Now formally queued.</td></tr>
+<tr><td><span class="sev-medium">MED</span></td><td>INACTIVE_USERS audience enforced only at list-time, not at validate-time</td></tr>
+<tr><td><span class="sev-medium">MED</span></td><td>The CURRENT phone bundle applies hardcoded client-side coupons and POSTs already-discounted totals the server records without recompute (retires with the OTA)</td></tr>
+<tr><td><span class="sev-medium">MED</span></td><td>/products/upload-image has NO auth guard — anyone can upload arbitrary files to the public products bucket (noticed while auditing the gated coupon equivalent)</td></tr>
+<tr><td><span class="sev-low">LOW</span></td><td>Merchant UPDATE RLS on orders is column-unrestricted — staff could edit coupon snapshot columns directly</td></tr>
+<tr><td><span class="sev-low">LOW</span></td><td>Legacy redeem: no ownership check on body.orderId (griefing-only)</td></tr>
+<tr><td><span class="sev-low">LOW</span></td><td>Legacy redeem skips isActive/dates/perCustomerLimit (bookkeeping-only; no callers)</td></tr>
+</table>
+
+<h2 id="plan">10. Recommended action plan</h2>
+<table>
+<tr><th>Priority</th><th>Action</th><th>Gate</th></tr>
+<tr><td>1</td><td><strong>Blocker N1:</strong> thread storeProductId into the ~3 addItem callsites + e2e apply test</td><td>Blocks consumer OTA</td></tr>
+<tr><td>2</td><td><strong>Blocker N2:</strong> rebuild apps/api, commit regenerated dist, redeploy</td><td>Fixes 2 live admin breaks; needs deploy go</td></tr>
+<tr><td>3</td><td><strong>Pre-OTA hardening batch:</strong> N3 (snapshot clear on capped replay), N5 (token-fail orphan handling), N4 (coupon clear on sign-out/restore — 🔒 lock), N6 decision (cron vs copy)</td><td>Before consumer OTA</td></tr>
+<tr><td>4</td><td><strong>OTA</strong> consumer app → watch Sentry → flip REQUIRE_COUPON_TOKEN → flip REQUIRE_ORDERS_AUTH after 24h clean → retire legacy /coupons/redeem</td><td>Sequenced rollout</td></tr>
+<tr><td>5</td><td>BOGO guard widening (cheap; removes an instance-hang class)</td><td>Anytime</td></tr>
+<tr><td>6</td><td>Admin follow-ups: N7 splitOrderIds in analytics, N8 logo bucket, N9 navigation, N12 audit_log RLS</td><td>Convenient batch</td></tr>
+<tr><td>7</td><td><strong>Pre-existing (separate work):</strong> server-side Razorpay payment verification on POST /orders; auth guard on /products/upload-image</td><td>High-value, out of coupon scope</td></tr>
+</table>
+
+<h2 id="appendix">11. Appendix</h2>
+<h3>EB deploy history (this project)</h3>
+<pre>app-260609_112931383837  Phases 1+2+3A          (+ COUPON_VALIDATION_SECRET)
+app-260609_143434212572  Phase 2J soft-auth      (+ REQUIRE_ORDERS_AUTH=false)
+app-260609_145802394098  Phase 2K 5 hot-fixes
+app-260609_160632632075  Phase 2L price reconciliation
+app-260610_132434177329  Phase 5 + audit hardening   ← CURRENT</pre>
+<h3>Migrations applied (prod Supabase)</h3>
+<pre>20260608120000_coupon_extensions             coupons: deleted_at, daily_usage_*, eligibility, bogo_mode, inactive_since_days
+20260608130000_audit_log                     audit_log + 3 indexes
+20260608140000_order_coupon_fields           orders: 5 snapshot columns (FK TEXT)
+20260608150000_redemption_ledger_fields      redemptions: discount_amount, funding_source, split_order_ids + UNIQUE
+20260609170000_cart_items_store_product_id   cart_items.store_product_id
+20260609220000_phase5_..._cart_fingerprint   redemptions.cart_fingerprint + partial UNIQUE</pre>
+<h3>PR #2 commits (coupon-foolproof-phase4-2026-06-09)</h3>
+<pre>342b78a9  Phase 2L — server-side price reconciliation
+e4cf981c  Phase 4 — consumer-side integration (4B-4I)
+ae51a2fb  Phase 4 audit follow-up — 9 blockers
+4f099622  Phase 4 re-audit — D2-pickup + 5 findings
+3e2a484d  Phase 4 third-audit cleanup
+66ef7708  Phase 5 — multi-store allocation
+7a3611c9  Phase 5 audit follow-up — 5 blockers + 2 fold-ins
+7b07df82  Phase 5 re-audit hardening — R1/R2/R3
+86bdaee0  docs: session log + forlater queue</pre>
+<h3>Audit rounds to date</h3>
+<pre>#1  PR #1 pre-merge      23 findings, 6 high      → 2K wave + 2J soft-auth
+#2  Phase 4              9 blockers (5/5 block)   → ae51a2fb
+#3  Phase 4 re-audit     D2-pickup still open     → 4f099622
+#4  Phase 4 third        clean (0 blockers)       → 3e2a484d polish
+#5  Phase 5              5 money blockers         → 7a3611c9
+#6  Phase 5 re-audit     0 blockers + R1/R2/R3    → 7b07df82
+#7  FULL Phases 1-5      THIS REPORT — 2 new blockers, 31 new findings, engine verified healthy</pre>
+
+<p class="meta">End of report. Source data: workflow <code>wf_ecdc96a6-5f3</code> raw output (52 de-duplicated findings from 58 raw).</p>
+</div></body>
+</html>

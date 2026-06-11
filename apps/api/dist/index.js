@@ -62,6 +62,7 @@ const apify_service_1 = require("./services/apify.service");
 const email_service_1 = require("./services/email.service");
 const notification_service_1 = require("./services/notification.service");
 const scheduled_jobs_1 = require("./services/scheduled-jobs");
+const settlement_service_1 = require("./services/settlement.service");
 const parseArrivalTime_1 = require("./utils/parseArrivalTime");
 const staff_1 = __importDefault(require("./routes/staff"));
 const bookings_1 = __importDefault(require("./routes/bookings"));
@@ -577,6 +578,15 @@ app.post('/payments/create-order', async (req, res) => {
                 return; // requireUser already sent 401
             enrichedNotes.merchantId = user.id;
             enrichedNotes.paymentType = 'merchant_signup';
+        }
+        else {
+            // Phase 7B (2026-06-10): tag consumer order-flow payments so the
+            // orphaned-payments sweep can attribute them with certainty (it
+            // auto-refunds ONLY attributable consumer payments; everything
+            // else is Sentry-flagged for manual review).
+            enrichedNotes.paymentType = 'consumer_order';
+            if (userId && userId !== 'unknown')
+                enrichedNotes.consumerUserId = String(userId);
         }
         const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
         const randomStr = Math.floor(100 + Math.random() * 900);
@@ -2446,26 +2456,115 @@ app.post('/orders', async (req, res) => {
                 if (decoded.userId !== userId) {
                     return res.status(400).json({ error: 'Coupon token does not match this user' });
                 }
-                // cartHash binding — only enforce strictly when REQUIRE_COUPON_TOKEN
-                // is on. Until then a mismatch is logged but allowed (backward compat
-                // with legacy consumer-app builds that haven't OTA'd yet).
-                const observedCartHash = computeCartHash(items || []);
-                if (decoded.cartHash !== observedCartHash) {
-                    if (requireCouponToken) {
-                        return res.status(400).json({ error: 'Cart changed since coupon was applied — please re-apply' });
+                const isMultiStoreToken = Array.isArray(decoded.breakdown) && decoded.breakdown.length > 1 && typeof decoded.fingerprint === 'string';
+                if (isMultiStoreToken) {
+                    // Phase 5 — multi-store token. The token's cartHash covers the
+                    // FULL cart while this POST /orders carries one store's subset,
+                    // so the whole-cart hash comparison is replaced by subset
+                    // matching: every item in this order must belong to exactly
+                    // one breakdown entry's storeProductIds (signed data). That
+                    // entry's slice becomes this Order's snapshot discount.
+                    // Phase 5 audit fold-in (2026-06-10): EXACT-set matching, not
+                    // subset. The order's storeProductIds must equal one breakdown
+                    // entry's set exactly — a partial-store order (item removed
+                    // after validation) no longer silently matches and understates.
+                    // Items missing storeProductId count as a match failure (the
+                    // previous filter silently dropped them before matching).
+                    const rawSpids = (items || []).map((it) => (it?.storeProductId ? String(it.storeProductId) : null));
+                    const hasMissingSpid = rawSpids.some((s) => s === null);
+                    const orderSpidSet = new Set(rawSpids.filter((s) => !!s));
+                    // Phase 5 re-audit fix R3 (2026-06-10): bind QUANTITIES, not
+                    // just the product-id set. A stripped-quantity or padded order
+                    // must not book the signed slice. Tokens carry sorted
+                    // "spid:qty" pairs per entry; the order's items must produce
+                    // the identical multiset. Tokens minted before this deploy
+                    // lack spidQty — fall back to the spid-set match for the
+                    // 10-minute transition window.
+                    const orderSpidQtyKey = (items || [])
+                        .map((it) => `${it?.storeProductId ? String(it.storeProductId) : 'MISSING'}:${Number(it?.quantity) || 0}`)
+                        .sort()
+                        .join('|');
+                    const matches = hasMissingSpid || orderSpidSet.size === 0
+                        ? []
+                        : decoded.breakdown.filter((entry) => {
+                            if (Array.isArray(entry?.spidQty)) {
+                                const entryKey = entry.spidQty.map((s) => String(s)).sort().join('|');
+                                return entryKey === orderSpidQtyKey;
+                            }
+                            if (!Array.isArray(entry?.storeProductIds))
+                                return false;
+                            const entrySet = new Set(entry.storeProductIds.map((s) => String(s)));
+                            if (entrySet.size !== orderSpidSet.size)
+                                return false;
+                            for (const spid of orderSpidSet) {
+                                if (!entrySet.has(spid))
+                                    return false;
+                            }
+                            return true;
+                        });
+                    if (matches.length !== 1) {
+                        if (requireCouponToken) {
+                            return res.status(400).json({ error: 'Cart changed since coupon was applied — please re-apply' });
+                        }
+                        console.warn(`[POST /orders] Phase 5 multi-store breakdown match failed (${matches.length} matches, ${orderSpidSet.size} spids, missingSpid=${hasMissingSpid}) — proceeding WITHOUT coupon. Will reject when REQUIRE_COUPON_TOKEN=true. userId=${userId}`);
+                        try {
+                            Sentry.captureMessage('phase5: multi-store breakdown match failed', { level: 'warning', extra: { userId, orderSpids: Array.from(orderSpidSet), hasMissingSpid, matchCount: matches.length } });
+                        }
+                        catch { }
+                        // No couponContext — order is created without a discount
+                        // snapshot (mirrors the legacy no-token behavior).
                     }
-                    console.warn(`[POST /orders] coupon cartHash mismatch — will reject when REQUIRE_COUPON_TOKEN=true. userId=${userId}`);
+                    else {
+                        couponContext = {
+                            couponId: String(decoded.couponId),
+                            code: String(couponCode || ''),
+                            discount: Number(matches[0].discount) || 0,
+                            fundingSource: String(decoded.fundingSource || ''),
+                            discountType: String(decoded.discountType || ''),
+                            fingerprint: String(decoded.fingerprint),
+                            storeCount: decoded.breakdown.length,
+                        };
+                    }
                 }
-                couponContext = {
-                    couponId: String(decoded.couponId),
-                    code: String(couponCode || ''),
-                    discount: Number(decoded.discount) || 0,
-                    fundingSource: String(decoded.fundingSource || ''),
-                    discountType: String(decoded.discountType || ''),
-                };
+                else {
+                    // Single-store path — unchanged Phase 2F semantics.
+                    // cartHash binding — only enforce strictly when REQUIRE_COUPON_TOKEN
+                    // is on. Until then a mismatch is logged but allowed (backward compat
+                    // with legacy consumer-app builds that haven't OTA'd yet).
+                    const observedCartHash = computeCartHash(items || []);
+                    if (decoded.cartHash !== observedCartHash) {
+                        if (requireCouponToken) {
+                            return res.status(400).json({ error: 'Cart changed since coupon was applied — please re-apply' });
+                        }
+                        console.warn(`[POST /orders] coupon cartHash mismatch — will reject when REQUIRE_COUPON_TOKEN=true. userId=${userId}`);
+                    }
+                    couponContext = {
+                        couponId: String(decoded.couponId),
+                        code: String(couponCode || ''),
+                        discount: Number(decoded.discount) || 0,
+                        fundingSource: String(decoded.fundingSource || ''),
+                        discountType: String(decoded.discountType || ''),
+                    };
+                }
             }
             catch (err) {
-                return res.status(400).json({ error: err?.message || 'Invalid coupon token' });
+                // Audit fix N5 (2026-06-10): while REQUIRE_COUPON_TOKEN=false,
+                // a bad/expired token must NOT hard-400 — the customer may have
+                // already PAID (Razorpay completes before POST /orders), and a
+                // 400 here bypassed the orphaned-payment handling entirely (no
+                // alert, no Sentry, no refund path) while the client promised
+                // automatic reconciliation. Mirror the breakdown-mismatch
+                // semantics instead: proceed WITHOUT the coupon + Sentry warn.
+                // Flag ON keeps the strict 400 (clients re-validate pre-payment).
+                if (requireCouponToken) {
+                    return res.status(400).json({ error: err?.message || 'Invalid coupon token' });
+                }
+                console.warn(`[POST /orders] coupon token verify failed (${err?.message}) — proceeding WITHOUT coupon (flag off). userId=${userId} paid=${!!paid}`);
+                try {
+                    Sentry.captureMessage('coupon token verify failed — proceeded couponless (flag off)', { level: 'warning', extra: { userId, paid: !!paid, reason: err?.message } });
+                }
+                catch { }
+                couponContext = null;
             }
         }
         else if (requireCouponToken && couponId) {
@@ -2548,6 +2647,79 @@ app.post('/orders', async (req, res) => {
                 return res.status(200).json(existingForPayment);
             }
         }
+        // ── Phase 7B (2026-06-10) — server-side payment verification ──────
+        // Settlement prerequisite (docs/phase7-settlement-architecture.html §8):
+        // the server previously trusted the client's paid claim entirely.
+        // Policy:
+        //   * payment NOT FOUND or NOT captured/authorized → 400 reject (no
+        //     legitimate client is harmed: if no charge happened, refusing the
+        //     order costs nothing; closes the self-mark-paid hole).
+        //   * amount incoherence (sum of this payment's orders would exceed the
+        //     captured amount + ₹5 tolerance for whole-rupee GST splits) →
+        //     CREATE the order but flag payment_verified=false (HELD from
+        //     settlement; legitimate edge cases possible, money reviewed not lost).
+        //   * Razorpay API error / SDK unconfigured → payment_verified=null
+        //     (cron re-verifies) — infrastructure failure must not block sales.
+        let paymentVerified = null;
+        let paymentVerificationNote = null;
+        if (paid && paymentId && razorpayInstance) {
+            try {
+                const rzpPayment = await razorpayInstance.payments.fetch(String(paymentId));
+                const pStatus = String(rzpPayment?.status || '');
+                if (!rzpPayment || (pStatus !== 'captured' && pStatus !== 'authorized')) {
+                    try {
+                        Sentry.captureMessage('phase7b: paid-claim rejected — payment not captured', { level: 'warning', extra: { paymentId, pStatus, userId } });
+                    }
+                    catch { }
+                    return res.status(400).json({
+                        error: 'PAYMENT_NOT_VERIFIED',
+                        message: 'We could not verify this payment. If you were charged, the amount will be automatically refunded.',
+                    });
+                }
+                const capturedInr = Number(rzpPayment.amount || 0) / 100;
+                // Sum the totals already booked against this payment (multi-store
+                // carts share one payment across N orders).
+                const sibling = await prisma.order.aggregate({
+                    _sum: { totalAmount: true },
+                    where: { metadata: { path: ['razorpayPaymentId'], equals: String(paymentId) } },
+                });
+                const bookedInr = Number(sibling._sum.totalAmount || 0);
+                const wouldBook = bookedInr + (Number(totalAmount) || 0);
+                if (wouldBook > capturedInr + 5) {
+                    paymentVerified = false;
+                    paymentVerificationNote = `amount overrun: captured ₹${capturedInr}, would book ₹${wouldBook}`;
+                    try {
+                        Sentry.captureMessage('phase7b: payment amount overrun — order HELD from settlement', { level: 'warning', extra: { paymentId, capturedInr, wouldBook, userId } });
+                    }
+                    catch { }
+                }
+                else {
+                    paymentVerified = true;
+                    paymentVerificationNote = `captured ₹${capturedInr} (${pStatus})`;
+                }
+            }
+            catch (verifyErr) {
+                const msg = String(verifyErr?.message || verifyErr);
+                // Razorpay returns a 400-ish error for unknown payment ids — treat
+                // explicit not-found as a hard reject, transport errors as null.
+                if (/does not exist|not found|invalid id/i.test(msg)) {
+                    try {
+                        Sentry.captureMessage('phase7b: paid-claim rejected — payment id unknown to Razorpay', { level: 'warning', extra: { paymentId, userId } });
+                    }
+                    catch { }
+                    return res.status(400).json({
+                        error: 'PAYMENT_NOT_VERIFIED',
+                        message: 'We could not verify this payment. If you were charged, the amount will be automatically refunded.',
+                    });
+                }
+                paymentVerified = null;
+                paymentVerificationNote = `verify-error: ${msg.slice(0, 180)}`;
+                console.warn(`[POST /orders] Phase 7B verification errored (order proceeds, cron re-verifies): ${msg}`);
+            }
+        }
+        else if (paid && paymentId && !razorpayInstance) {
+            paymentVerificationNote = 'razorpay sdk not configured at create time';
+        }
         // Option A patch #4 (2026-06-08): server-side TTL + status guard.
         // Verify the order_request is still ACCEPTED and not expired before
         // creating a paid order from it. Without this, an expired or non-ACCEPTED
@@ -2622,6 +2794,9 @@ app.post('/orders', async (req, res) => {
                             ...(orderRequestId ? { orderRequestId } : {}),
                         }
                         : undefined,
+                    // Phase 7B (2026-06-10) — server-side verification result.
+                    paymentVerified,
+                    paymentVerificationNote,
                     items: {
                         create: items.map((item) => ({
                             storeProductId: item.storeProductId || null,
@@ -2668,7 +2843,9 @@ app.post('/orders', async (req, res) => {
             // (couponId, orderId) — the partial unique index from Phase 1 #4
             // means duplicate inserts are no-ops.
             if (couponContext) {
-                // Snapshot the coupon on the Order row (immune to future archive/edit)
+                // Snapshot the coupon on the Order row (immune to future archive/edit).
+                // Phase 5: for multi-store carts, couponContext.discount is THIS
+                // store's slice from the signed breakdown — not the full cart total.
                 await tx.order.update({
                     where: { id: createdOrder.id },
                     data: {
@@ -2679,23 +2856,10 @@ app.post('/orders', async (req, res) => {
                         orderCouponDiscountType: couponContext.discountType,
                     },
                 });
-                // Idempotent ledger insert. If a redemption already exists for
-                // this (couponId, orderId), skip the increments — this is the
-                // retry/double-call defense.
-                const existingRedemption = await tx.couponRedemption.findFirst({
-                    where: { couponId: couponContext.couponId, orderId: createdOrder.id },
-                    select: { id: true },
-                });
-                if (!existingRedemption) {
-                    await tx.couponRedemption.create({
-                        data: {
-                            couponId: couponContext.couponId,
-                            userId,
-                            orderId: createdOrder.id,
-                            discountAmount: couponContext.discount,
-                            fundingSource: couponContext.fundingSource,
-                        },
-                    });
+                // Shared counter logic — runs EXACTLY ONCE per redemption row
+                // (single-store: per order; multi-store: per cart, on the
+                // first store-order's INSERT only).
+                const incrementCouponCounters = async () => {
                     // Fetch coupon caps (single read) for limit checks.
                     const couponRow = await tx.coupon.findUnique({
                         where: { id: couponContext.couponId },
@@ -2739,6 +2903,119 @@ app.post('/orders', async (req, res) => {
                         if (d.count === 0) {
                             throw new Error('Coupon daily usage limit reached');
                         }
+                    }
+                };
+                if (couponContext.fingerprint) {
+                    // ── Phase 5 (2026-06-09) — multi-store redemption path ──
+                    // ONE redemption row covers the whole cart, keyed by
+                    // (coupon_id, cart_fingerprint) via the partial unique index.
+                    // INSERT ... ON CONFLICT DO NOTHING avoids transaction
+                    // poisoning (a caught P2002 would abort the surrounding
+                    // Postgres tx) AND gives atomic first-writer-wins: the store
+                    // order that lands first creates the row + increments the
+                    // counters ONCE; every other store-order appends its orderId
+                    // to split_order_ids (deduped in-statement, so client retries
+                    // can't double-append).
+                    // Phase 5 audit fold-in (2026-06-10): discount_amount ACCUMULATES
+                    // per order slice instead of front-loading the full cart total on
+                    // the first INSERT. The ledger row's discountAmount now always
+                    // equals the sum of the slices of orders actually placed — exact
+                    // and symmetric with the Q5 partial-reversal subtraction, and it
+                    // never overstates when a sibling store's POST /orders fails.
+                    const inserted = await tx.$queryRaw `
+                        INSERT INTO "public"."coupon_redemptions"
+                            ("coupon_id", "user_id", "discount_amount", "funding_source", "split_order_ids", "cart_fingerprint")
+                        VALUES (
+                            ${couponContext.couponId},
+                            ${userId}::uuid,
+                            ${couponContext.discount},
+                            ${couponContext.fundingSource},
+                            ARRAY[${createdOrder.id}]::text[],
+                            ${couponContext.fingerprint}
+                        )
+                        ON CONFLICT ("coupon_id", "cart_fingerprint") WHERE "cart_fingerprint" IS NOT NULL
+                        DO NOTHING
+                        RETURNING "id";
+                    `;
+                    if (inserted.length > 0) {
+                        await incrementCouponCounters();
+                    }
+                    else {
+                        // Phase 5 audit fix #5b (2026-06-10): append is now CHECKED.
+                        // affected = 0 means an idempotent retry (orderId already
+                        // in the array), a replay capped by R1 below, or the row
+                        // is unexpectedly missing (Sentry-warn; do not fail the
+                        // order).
+                        //
+                        // Re-audit fix R1 (2026-06-10): array growth is capped at
+                        // the signed breakdown's store count — a cart can never
+                        // legitimately produce more orders than it has stores, so
+                        // a scripted client replaying one non-expired token across
+                        // several full checkouts can no longer ride the append
+                        // path indefinitely.
+                        const storeCap = couponContext.storeCount ?? 1;
+                        const appended = await tx.$executeRaw `
+                            UPDATE "public"."coupon_redemptions"
+                            SET "split_order_ids" = array_append("split_order_ids", ${createdOrder.id}),
+                                "discount_amount" = COALESCE("discount_amount", 0) + ${couponContext.discount}
+                            WHERE "coupon_id" = ${couponContext.couponId}
+                              AND "cart_fingerprint" = ${couponContext.fingerprint}
+                              AND NOT ("split_order_ids" @> ARRAY[${createdOrder.id}]::text[])
+                              AND COALESCE(array_length("split_order_ids", 1), 0) < ${storeCap};
+                        `;
+                        if (appended === 0) {
+                            const probe = await tx.couponRedemption.findFirst({
+                                where: { couponId: couponContext.couponId, cartFingerprint: couponContext.fingerprint },
+                                select: { id: true, splitOrderIds: true },
+                            });
+                            const isIdempotentRetry = !!probe && probe.splitOrderIds.includes(createdOrder.id);
+                            if (!isIdempotentRetry) {
+                                const cappedReplay = !!probe && probe.splitOrderIds.length >= storeCap;
+                                console.error(`[POST /orders] Phase 5 append rejected — ${cappedReplay ? 'split_order_ids at capacity (possible token replay)' : 'ledger row missing'} couponId=${couponContext.couponId} orderId=${createdOrder.id}`);
+                                try {
+                                    Sentry.captureMessage(cappedReplay ? 'phase5: append rejected — capacity cap (possible token replay)' : 'phase5: multi-store redemption append found no row', { level: 'warning', extra: { couponId: couponContext.couponId, orderId: createdOrder.id, storeCap } });
+                                }
+                                catch { }
+                                // Audit fix N3 (2026-06-10): the snapshot was written
+                                // BEFORE this branch — without rolling it back, a
+                                // replayed order still books the slice discount with
+                                // no ledger row behind it. Clear it in the same tx so
+                                // an order whose redemption was rejected never carries
+                                // a discount snapshot.
+                                await tx.order.update({
+                                    where: { id: createdOrder.id },
+                                    data: {
+                                        orderCouponId: null,
+                                        orderCouponCode: null,
+                                        orderCouponDiscount: null,
+                                        orderCouponFundingSource: null,
+                                        orderCouponDiscountType: null,
+                                    },
+                                });
+                            }
+                        }
+                    }
+                }
+                else {
+                    // ── Single-store path — unchanged Phase 2F semantics ──
+                    // Idempotent ledger insert. If a redemption already exists for
+                    // this (couponId, orderId), skip the increments — this is the
+                    // retry/double-call defense.
+                    const existingRedemption = await tx.couponRedemption.findFirst({
+                        where: { couponId: couponContext.couponId, orderId: createdOrder.id },
+                        select: { id: true },
+                    });
+                    if (!existingRedemption) {
+                        await tx.couponRedemption.create({
+                            data: {
+                                couponId: couponContext.couponId,
+                                userId,
+                                orderId: createdOrder.id,
+                                discountAmount: couponContext.discount,
+                                fundingSource: couponContext.fundingSource,
+                            },
+                        });
+                        await incrementCouponCounters();
                     }
                 }
             }
@@ -3514,6 +3791,16 @@ app.post('/orders/:id/refund', async (req, res) => {
             },
             include: { user: true }
         });
+        // Phase 7G (2026-06-11, audit fix): this endpoint can flip a settled
+        // COMPLETED order to REFUNDED — the ledger must claw the payout back
+        // on the next cycle, same as the cancel/issue/SLA refund paths.
+        const clawAmount = Number(amount) > 0 ? Number(amount) : (Number(order.totalAmount) || 0);
+        try {
+            await (0, settlement_service_1.detectClawback)(prisma, id, clawAmount, `legacy refund ${refundResult?.id ?? 'recorded'}`);
+        }
+        catch (e) {
+            console.error('[7D] clawback detect (legacy refund) failed:', e);
+        }
         if (refundedOrder.user?.phone) {
             sms_service_1.smsService.sendOrderUpdate(refundedOrder.user.phone, id, 'Refund Processed').catch(err => console.error('SMS Failed:', err));
         }
@@ -3993,6 +4280,102 @@ app.post('/orders/:id/cancel', async (req, res) => {
                         }
                     }
                 }
+                // ── Phase 5 (2026-06-09) — multi-store redemption reversal ──
+                // Q5 decision (approved): proportional PARTIAL reversal. Multi-
+                // store redemption rows have orderId = NULL and track per-store
+                // orders in splitOrderIds[], so the block above (orderId match)
+                // never finds them. When ONE of N store-orders is cancelled:
+                //   - remove its id from splitOrderIds
+                //   - subtract this Order's snapshot slice from discountAmount
+                //   - usedCount / dailyUsageCount stay (the coupon WAS used)
+                // When the LAST order is cancelled: delete the row + decrement
+                // usedCount (and dailyUsageCount if redeemed today IST) — full
+                // reversal, mirroring the single-store semantics above.
+                const multiRedemption = await tx.couponRedemption.findFirst({
+                    where: { splitOrderIds: { has: id }, userId: order.userId },
+                    select: { id: true, couponId: true, createdAt: true },
+                });
+                if (multiRedemption) {
+                    const orderSliceDiscount = Number(order.orderCouponDiscount ?? 0);
+                    // Phase 5 audit fix #5 (2026-06-10): the shrink is now atomic
+                    // IN-STATEMENT (array_remove + GREATEST guard, conditioned on
+                    // the orderId still being present), mirroring the append path.
+                    // The previous read-modify-write lost updates under concurrent
+                    // cancels of two different orders from the same cart: both read
+                    // [o1,o2], the loser overwrote with stale values, the row never
+                    // emptied, and counters never decremented.
+                    const shrunk = await tx.$queryRaw `
+                        UPDATE "public"."coupon_redemptions"
+                        SET "split_order_ids" = array_remove("split_order_ids", ${id}),
+                            "discount_amount" = GREATEST(0, COALESCE("discount_amount", 0) - ${orderSliceDiscount})
+                        WHERE "id" = ${multiRedemption.id}
+                          AND "split_order_ids" @> ARRAY[${id}]::text[]
+                        RETURNING "split_order_ids";
+                    `;
+                    if (shrunk.length > 0) {
+                        const remainingCount = shrunk[0].split_order_ids.length;
+                        if (remainingCount === 0) {
+                            // Last order of the cart cancelled — full reversal.
+                            // deleteMany guarded on isEmpty so a concurrent append
+                            // (shouldn't happen post-cancel, but defensive) can't
+                            // have its orderId deleted out from under it.
+                            const deleted = await tx.couponRedemption.deleteMany({
+                                where: { id: multiRedemption.id, splitOrderIds: { isEmpty: true } },
+                            });
+                            if (deleted.count > 0) {
+                                await tx.coupon.updateMany({
+                                    where: { id: multiRedemption.couponId, usedCount: { gte: 1 } },
+                                    data: { usedCount: { decrement: 1 } },
+                                });
+                                const nowM = new Date();
+                                const istNowM = new Date(nowM.getTime() + (5.5 * 60 * 60 * 1000));
+                                const istMidnightUtcMsM = Date.UTC(istNowM.getUTCFullYear(), istNowM.getUTCMonth(), istNowM.getUTCDate(), 0, 0, 0, 0) - (5.5 * 60 * 60 * 1000);
+                                const istMidnightTodayM = new Date(istMidnightUtcMsM);
+                                if (multiRedemption.createdAt >= istMidnightTodayM) {
+                                    await tx.coupon.updateMany({
+                                        where: { id: multiRedemption.couponId, dailyUsageCount: { gte: 1 } },
+                                        data: { dailyUsageCount: { decrement: 1 } },
+                                    });
+                                }
+                            }
+                        }
+                        // Clear this Order's coupon snapshot (mirrors single-store path).
+                        await tx.order.update({
+                            where: { id },
+                            data: {
+                                orderCouponId: null,
+                                orderCouponCode: null,
+                                orderCouponDiscount: null,
+                                orderCouponFundingSource: null,
+                                orderCouponDiscountType: null,
+                            },
+                        });
+                        try {
+                            await tx.auditLog.create({
+                                data: {
+                                    actorUserId: user.id,
+                                    action: 'coupon.redemption_reversed',
+                                    targetType: 'coupon',
+                                    targetId: multiRedemption.couponId,
+                                    beforeJson: {
+                                        orderId: id,
+                                        orderOwnerUserId: order.userId,
+                                        multiStore: true,
+                                        partial: remainingCount > 0,
+                                        remainingOrders: remainingCount,
+                                        reversedSlice: orderSliceDiscount,
+                                    },
+                                    afterJson: undefined,
+                                },
+                            });
+                        }
+                        catch (auditErr) {
+                            console.error('[Phase 5 reversal audit log] failed:', auditErr);
+                        }
+                    }
+                    // shrunk.length === 0 → a concurrent cancel already removed this
+                    // orderId — idempotent no-op (snapshot already cleared by it).
+                }
                 // Re-fetch the row we just CAS-updated so the rest of the
                 // endpoint has the canonical post-flip state.
                 return tx.order.findUnique({ where: { id } });
@@ -4047,6 +4430,14 @@ app.post('/orders/:id/cancel', async (req, res) => {
         let refundResult = null;
         if (decision.refundInr > 0) {
             refundResult = await processRazorpayRefund(order.metadata, decision.refundInr);
+            // Phase 7D (2026-06-10): if this order was already settled in a
+            // closed/paid cycle, record a clawback (claimed by the next close).
+            try {
+                await (0, settlement_service_1.detectClawback)(prisma, id, decision.refundInr, `cancel refund ${refundResult.razorpayRefundId}`);
+            }
+            catch (e) {
+                console.error('[7D] clawback detect (cancel) failed:', e);
+            }
             // Persist the refund id back to metadata. If this write fails
             // after Razorpay succeeded, ops reconciles via the Razorpay
             // dashboard — but no money is at risk.
@@ -4546,6 +4937,13 @@ app.patch('/orders/:id/issue/:issueId', async (req, res) => {
         let refundResult = null;
         if (needsRefund) {
             refundResult = await processRazorpayRefund(order.metadata, issue.refundAmountInr);
+            // Phase 7D (2026-06-10): settled-order refund → clawback entry.
+            try {
+                await (0, settlement_service_1.detectClawback)(prisma, order.id, issue.refundAmountInr, `issue refund ${refundResult.razorpayRefundId}`);
+            }
+            catch (e) {
+                console.error('[7D] clawback detect (issue) failed:', e);
+            }
             // Persist refund id back to issue + order metadata. If this
             // post-refund write fails, ops reconciles from Razorpay; the
             // status above is the canonical "approved" record.
@@ -5101,8 +5499,62 @@ app.post('/checkout/validate-coupon', async (req, res) => {
         if (!hasCartItems && (typeof clientCartTotal === 'undefined' || clientCartTotal === null)) {
             return res.status(400).json({ error: 'cartItems[] or cartTotal is required' });
         }
+        // Phase 2L hot-fix (2026-06-09) — server-side price reconciliation.
+        // Adversarial pre-merge review (PR #1, medium #11) found that
+        // effectiveCartTotal + BOGO were computed from client-supplied unit
+        // prices in cartItems[] with no server-side reconciliation. The HMAC
+        // token then signed the client-trusted discount, polluting analytics +
+        // PLATFORM-funded settlement math. Fix: when cartItems[] is present,
+        // fetch StoreProduct.price for every storeProductId; require
+        // storeProductId on every item; reject if any item references a
+        // missing/deleted/inactive product. Trusted prices are used everywhere
+        // below (effectiveCartTotal + BOGO) instead of item.price.
+        //
+        // Strict policy ("no temporary patches" per Pranav 2026-06-09): if
+        // cartItems[] is provided but ANY item lacks storeProductId or its
+        // product can't be resolved, reject the whole request. No silent fallback
+        // to client prices — that's exactly the gap this hot-fix closes.
+        let trustedPrices = null;
+        // Phase 5 (2026-06-09) — server-side store attribution per item.
+        // Maps storeProductId → { branchId, storeId } from the StoreProduct row
+        // (never from client input). Drives: (a) server-derived store ids for
+        // the eligibleVerticals check (fixes the latent bug where clients sent
+        // branch UUIDs and prisma.store.findMany matched nothing), and (b) the
+        // multi-store discount allocation breakdown.
+        let storeAttribution = null;
+        if (hasCartItems) {
+            const storeProductIds = [];
+            for (const item of cartItems) {
+                const id = item?.storeProductId;
+                if (!id) {
+                    return res.status(400).json({
+                        valid: false,
+                        error: 'Every cart item must include storeProductId so the server can verify price. Please refresh your cart.',
+                    });
+                }
+                storeProductIds.push(String(id));
+            }
+            // Single query fetches all server-trusted prices. Filter deleted /
+            // inactive — those shouldn't be orderable; if they're in the cart,
+            // the user must refresh.
+            const rows = await prisma.storeProduct.findMany({
+                where: { id: { in: storeProductIds }, is_deleted: false, active: true },
+                select: { id: true, price: true, branch_id: true, storeId: true },
+            });
+            trustedPrices = new Map(rows.map((r) => [r.id, Number(r.price) || 0]));
+            storeAttribution = new Map(rows.map((r) => [r.id, { branchId: r.branch_id ?? null, storeId: r.storeId }]));
+            const missing = storeProductIds.filter((id) => !trustedPrices.has(id));
+            if (missing.length > 0) {
+                return res.status(400).json({
+                    valid: false,
+                    error: 'One or more cart items reference a product that is no longer available. Please refresh your cart.',
+                });
+            }
+        }
+        // Phase 2L — effectiveCartTotal now uses server-trusted prices
+        // (trustedPrices Map keyed by storeProductId) rather than item.price.
         const effectiveCartTotal = hasCartItems
-            ? cartItems.reduce((sum, item) => sum + (Number(item?.price) || 0) * (Number(item?.quantity) || 0), 0)
+            ? cartItems.reduce((sum, item) => sum + (trustedPrices.get(String(item.storeProductId)) || 0) * (Number(item?.quantity) || 0), 0)
             : (Number(clientCartTotal) || 0);
         // Phase 2 (2E-1) — exclude archived coupons (deletedAt set by sub-task 2D).
         const coupon = await prisma.coupon.findFirst({ where: { code: String(code).toUpperCase(), deletedAt: null } });
@@ -5145,14 +5597,28 @@ app.post('/checkout/validate-coupon', async (req, res) => {
         }
         // Phase 2 (2E-2) — vertical scope. If coupon.eligibleVerticals is non-empty,
         // every cart store's vertical must be in the allowlist (vertical IDs).
-        if (coupon.eligibleVerticals && coupon.eligibleVerticals.length > 0 && Array.isArray(storeIds) && storeIds.length > 0) {
-            const cartStoreIds = storeIds.map((s) => String(s));
+        //
+        // Phase 5 (2026-06-09): when cartItems[] is present, derive the Store ids
+        // SERVER-SIDE from StoreProduct.storeId (storeAttribution map) instead of
+        // trusting the client's storeIds[]. Fixes the latent bug where the
+        // consumer-app sent branch UUIDs (cart item .storeId) which never matched
+        // prisma.store rows, silently rejecting every verticals-scoped coupon —
+        // and closes the "lie about storeIds to bypass eligibility" hole.
+        // Legacy clients (cartTotal-only, no cartItems) keep the old client-supplied
+        // path since there's nothing server-side to derive from.
+        const serverStoreIds = storeAttribution
+            ? Array.from(new Set(Array.from(storeAttribution.values()).map((a) => a.storeId)))
+            : [];
+        const verticalCheckStoreIds = storeAttribution
+            ? serverStoreIds
+            : (Array.isArray(storeIds) ? storeIds.map((s) => String(s)) : []);
+        if (coupon.eligibleVerticals && coupon.eligibleVerticals.length > 0 && verticalCheckStoreIds.length > 0) {
             const cartStores = await prisma.store.findMany({
-                where: { id: { in: cartStoreIds } },
+                where: { id: { in: verticalCheckStoreIds } },
                 select: { id: true, verticalId: true },
             });
             const allowedVerticalIds = new Set(coupon.eligibleVerticals);
-            const allMatch = cartStores.length === cartStoreIds.length
+            const allMatch = cartStores.length === verticalCheckStoreIds.length
                 && cartStores.every((s) => !!s.verticalId && allowedVerticalIds.has(s.verticalId));
             if (!allMatch) {
                 return res.status(400).json({ valid: false, error: 'This coupon is not valid for one or more stores in your cart' });
@@ -5204,13 +5670,17 @@ app.post('/checkout/validate-coupon', async (req, res) => {
                 const batchSize = buy + get;
                 const mode = String(coupon.bogoMode || 'CHEAPEST').toUpperCase();
                 if (mode === 'SAME_PRODUCT') {
-                    // Group items by product key (storeProductId or fallback to name).
-                    // For each group with quantity >= batchSize, discount `get` units per
-                    // complete batch at that product's price.
+                    // Group items by storeProductId. For each group with
+                    // quantity >= batchSize, discount `get` units per complete
+                    // batch at that product's server-trusted price.
+                    //
+                    // Phase 2L: keyed on storeProductId only (legacy fallbacks to
+                    // id/name removed) — server-trusted prices require the FK.
+                    // Validated above; trustedPrices is non-null here.
                     const groups = new Map();
                     for (const item of cartItems) {
-                        const key = String(item?.storeProductId || item?.id || item?.name || 'unknown');
-                        const price = Number(item?.price) || 0;
+                        const key = String(item.storeProductId);
+                        const price = trustedPrices.get(key) || 0;
                         const qty = Number(item?.quantity) || 0;
                         const existing = groups.get(key);
                         if (existing) {
@@ -5229,9 +5699,12 @@ app.post('/checkout/validate-coupon', async (req, res) => {
                     // CHEAPEST mode (default per business config) — expand all cart items
                     // to per-unit prices, sort ascending, then for every batch of
                     // (buy+get) units, discount the first `get` (cheapest) units.
+                    //
+                    // Phase 2L: uses server-trusted prices (trustedPrices map)
+                    // instead of item.price. trustedPrices is non-null here.
                     const unitPrices = [];
                     for (const item of cartItems) {
-                        const price = Number(item?.price) || 0;
+                        const price = trustedPrices.get(String(item.storeProductId)) || 0;
                         const qty = Number(item?.quantity) || 0;
                         for (let i = 0; i < qty; i++)
                             unitPrices.push(price);
@@ -5258,22 +5731,162 @@ app.post('/checkout/validate-coupon', async (req, res) => {
         // this before applying the discount — closes the cart-spoof attack.
         const roundedDiscount = Math.round(discount * 100) / 100;
         const cartHash = computeCartHash(hasCartItems ? cartItems : []);
+        let perStoreBreakdown = null;
+        let cartFingerprint = null;
+        // R2 (2026-06-10): for multi-store, the authoritative signed discount is
+        // the SUM of allocated slices (exact by construction), not the
+        // pre-allocation rounded figure.
+        let multiStoreSignedDiscount = null;
+        if (hasCartItems && storeAttribution) {
+            // Group items by branch (falls back to storeId when branch_id is
+            // null) using SERVER-side attribution — never client input.
+            const groups = new Map();
+            for (const item of cartItems) {
+                const spid = String(item.storeProductId);
+                const attr = storeAttribution.get(spid); // presence validated in Phase 2L block
+                const key = attr.branchId ?? attr.storeId;
+                let g = groups.get(key);
+                if (!g) {
+                    g = { branchId: attr.branchId, storeId: attr.storeId, storeProductIds: [], spidQty: [], subtotal: 0, discount: 0 };
+                    groups.set(key, g);
+                }
+                g.storeProductIds.push(spid);
+                g.spidQty.push(`${spid}:${Number(item?.quantity) || 0}`);
+                g.subtotal += (trustedPrices.get(spid) || 0) * (Number(item?.quantity) || 0);
+            }
+            if (groups.size > 1) {
+                // Q2 (approved 2026-06-09): store-scoped coupons reject multi-store
+                // carts outright — cart-level semantics, no partial application.
+                if (coupon.storeId) {
+                    return res.status(400).json({
+                        valid: false,
+                        error: 'This coupon is valid for a single store only. Please remove items from other stores to use it.',
+                    });
+                }
+                // Q1 (approved 2026-06-09): per-store minOrder. If ANY store's
+                // subtotal is below the coupon's minOrder, reject the whole
+                // coupon with a clear error (no skip-store half-application).
+                if (coupon.minOrder) {
+                    const violating = Array.from(groups.values()).find((g) => g.subtotal < coupon.minOrder);
+                    if (violating) {
+                        return res.status(400).json({
+                            valid: false,
+                            error: `Each store in your cart needs a minimum of ₹${coupon.minOrder} for this coupon. Please add more items or remove the coupon.`,
+                        });
+                    }
+                }
+                // Proportional allocation — largest-remainder method, in paise.
+                //
+                // Phase 5 audit fix #3 (2026-06-10): the previous "round each
+                // slice, last store absorbs residual" could sign a NEGATIVE last
+                // slice (repro: FLAT ₹1.99 over subtotals [100,100,100,100,1] →
+                // [0.50,0.50,0.50,0.50,−0.01]). Largest-remainder guarantees:
+                // every slice >= 0, slices sum EXACTLY to the signed total, and
+                // the leftover paise go to the largest fractional remainders
+                // (with per-store subtotal headroom respected) instead of an
+                // arbitrary last store.
+                const slices = Array.from(groups.values());
+                const totalSubtotal = slices.reduce((s, g) => s + g.subtotal, 0);
+                const totalPaise = Math.round(roundedDiscount * 100);
+                const exact = slices.map((g) => (totalSubtotal > 0 ? (totalPaise * g.subtotal) / totalSubtotal : 0));
+                const floors = exact.map((x) => Math.floor(x));
+                let leftover = totalPaise - floors.reduce((s, x) => s + x, 0);
+                // Hand out leftover paise to the largest fractional remainders,
+                // skipping stores already at their subtotal cap.
+                const order = exact
+                    .map((x, i) => ({ i, frac: x - Math.floor(x) }))
+                    .sort((a, b) => b.frac - a.frac);
+                const paise = floors.slice();
+                for (let round = 0; leftover > 0 && round < slices.length * 2; round++) {
+                    for (const { i } of order) {
+                        if (leftover <= 0)
+                            break;
+                        // Phase 5 re-audit fix R2 (2026-06-10): Math.round, not
+                        // Math.floor — float-dirty subtotals (33.33*100 =
+                        // 3332.999…) under-computed caps by a paisa and stranded
+                        // 1-2 paise at the 100%-discount edge.
+                        const capPaise = Math.round(slices[i].subtotal * 100);
+                        if (paise[i] < capPaise) {
+                            paise[i] += 1;
+                            leftover -= 1;
+                        }
+                    }
+                }
+                for (let i = 0; i < slices.length; i++) {
+                    slices[i].discount = paise[i] / 100;
+                }
+                perStoreBreakdown = slices;
+                // Phase 5 re-audit fix R2 (2026-06-10): the exact-sum invariant
+                // is now enforced BY CONSTRUCTION — the signed/charged total is
+                // the sum of the allocated slices, so the token discount, the
+                // client charge, and the per-order snapshots can never disagree
+                // even if cap-exhaustion strands paise. Observable via Sentry
+                // when it deviates from the pre-allocation total.
+                const allocatedTotal = paise.reduce((s, x) => s + x, 0) / 100;
+                if (leftover > 0 || Math.round(allocatedTotal * 100) !== totalPaise) {
+                    console.warn(`[validate-coupon] Phase 5 allocation residual: leftover=${leftover} paise, allocated=₹${allocatedTotal} vs requested=₹${roundedDiscount}`);
+                    try {
+                        Sentry.captureMessage('phase5: allocation residual paise', { level: 'warning', extra: { leftover, allocatedTotal, roundedDiscount } });
+                    }
+                    catch { }
+                }
+                multiStoreSignedDiscount = allocatedTotal;
+                // Cart fingerprint — dedup key for the single CouponRedemption
+                // row that covers all of this cart's orders. Integrity comes from
+                // the token signature (the fingerprint is inside the signed
+                // payload), so a plain SHA-256 suffices.
+                //
+                // Phase 5 audit fix #1 (2026-06-10): a per-validation random nonce
+                // (jti) is folded into the hash. Without it, re-ordering the
+                // IDENTICAL cart with the same coupon days later produced the SAME
+                // fingerprint — the second checkout's INSERT hit ON CONFLICT, took
+                // the append path, and usedCount/dailyUsageCount/perCustomerLimit
+                // never incremented (full usage-limit bypass with the stock app).
+                // One checkout = one token = one jti = one fingerprint; retries of
+                // the same checkout's N per-store orders still dedup onto one row,
+                // while distinct checkouts can never collide.
+                const fingerprintJti = crypto.randomUUID();
+                cartFingerprint = crypto.createHash('sha256')
+                    .update(`${coupon.id}|${userId}|${cartHash}|${fingerprintJti}`)
+                    .digest('hex');
+            }
+        }
+        // R2 (2026-06-10): for multi-store carts the signed total is the exact
+        // sum of the allocated slices.
+        const signedDiscount = multiStoreSignedDiscount ?? roundedDiscount;
         const tokenPayload = {
             couponId: coupon.id,
             userId,
             cartHash,
-            discount: roundedDiscount,
+            discount: signedDiscount,
             fundingSource: coupon.fundingSource,
             discountType: coupon.discountType,
             exp: Math.floor(Date.now() / 1000) + 10 * 60,
             iat: Math.floor(Date.now() / 1000),
         };
+        if (perStoreBreakdown) {
+            // Phase 5 — multi-store fields. Single-store tokens stay byte-
+            // compatible with Phase 4 (no new fields) for backward compat.
+            // R3 (2026-06-10): spidQty (sorted "spid:qty" pairs) binds
+            // quantities into the signed entry so POST /orders can verify the
+            // order's items, not just its product-id set.
+            tokenPayload.breakdown = perStoreBreakdown.map((s) => ({
+                branchId: s.branchId,
+                storeId: s.storeId,
+                storeProductIds: s.storeProductIds,
+                spidQty: [...s.spidQty].sort(),
+                subtotal: Math.round(s.subtotal * 100) / 100,
+                discount: s.discount,
+            }));
+            tokenPayload.fingerprint = cartFingerprint;
+        }
         const validationToken = signCouponToken(tokenPayload);
         res.json({
             valid: true,
             couponId: coupon.id,
             code: coupon.code,
-            discount: roundedDiscount,
+            // R2 (2026-06-10): exact sum of slices for multi-store carts.
+            discount: signedDiscount,
             discountType: coupon.discountType,
             discountValue: coupon.discountValue,
             maxDiscountCap: coupon.maxDiscountCap,
@@ -5281,6 +5894,14 @@ app.post('/checkout/validate-coupon', async (req, res) => {
             fundingSource: coupon.fundingSource,
             minOrder: coupon.minOrder ?? null,
             validationToken,
+            // Phase 5 — present only for multi-store carts. storeProductIds is
+            // included so the client can match each per-store order to its slice
+            // with the SAME currency the server uses (audit fix #4 — the client
+            // must use this split, never recompute its own).
+            multiStore: !!perStoreBreakdown,
+            perStoreBreakdown: perStoreBreakdown
+                ? perStoreBreakdown.map((s) => ({ branchId: s.branchId, storeId: s.storeId, storeProductIds: s.storeProductIds, subtotal: Math.round(s.subtotal * 100) / 100, discount: s.discount }))
+                : undefined,
         });
     }
     catch (error) {
@@ -8262,6 +8883,302 @@ app.post('/me/profile', async (req, res) => {
     }
     catch (e) {
         return (0, api_error_handler_1.handleApiError)(res, e, { area: 'me.profile', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to update profile' });
+    }
+});
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 7C/7E (2026-06-10) — Settlement endpoints.
+// Admin surface: close cycles, list/inspect, mark paid, manage commission
+// rules + merchant settlement profiles. Merchant surface: own settlement
+// history (7F backend — the merchant app calls with authHeaders; access is
+// gated through userCanManageOrderStore, the same merchant-side guard the
+// order endpoints use).
+// ════════════════════════════════════════════════════════════════════════════
+// Close a settlement cycle (defaults to the last fully elapsed IST week).
+// Idempotent — safe to call alongside the Monday-02:00-IST cron.
+app.post('/admin/settlements/close-cycle', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res);
+        if (!admin)
+            return;
+        const weekOf = req.body?.weekOf ? new Date(String(req.body.weekOf)) : undefined;
+        if (weekOf && isNaN(weekOf.getTime())) {
+            return res.status(400).json({ error: 'weekOf must be a valid date' });
+        }
+        // 7G: drain the verification backlog first (batch-capped at 25/call)
+        // so the close sees every verifiable order instead of holding them.
+        for (let i = 0; i < 40; i++) {
+            const n = await (0, scheduled_jobs_1.verifyPendingPayments)(prisma);
+            if (n < 25)
+                break;
+        }
+        const result = await (0, settlement_service_1.closeSettlementCycles)(prisma, { weekOf, closedBy: admin.id });
+        await writeAuditLog(admin.id, 'settlement.cycle_closed', 'settlement_period', result.periodStart, null, result);
+        res.json(result);
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'settlements.close', userMessage: error?.message || 'Failed to close settlement cycle' });
+    }
+});
+// List cycles (admin) — filterable by status / merchant.
+app.get('/admin/settlements', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res);
+        if (!admin)
+            return;
+        const status = req.query.status ? String(req.query.status) : undefined;
+        const merchantId = req.query.merchantId ? String(req.query.merchantId) : undefined;
+        const cycles = await prisma.settlementCycle.findMany({
+            where: { ...(status ? { status } : {}), ...(merchantId ? { merchantId } : {}) },
+            orderBy: [{ periodStart: 'desc' }, { netPayout: 'desc' }],
+            take: 200,
+        });
+        // Resolve store names in one pass for the table view.
+        const ids = Array.from(new Set(cycles.map((c) => c.merchantId)));
+        const stores = ids.length > 0 ? await prisma.store.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : [];
+        const nameById = new Map(stores.map((s) => [s.id, s.name]));
+        res.json({ data: cycles.map((c) => ({ ...c, merchantName: nameById.get(c.merchantId) ?? null })) });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'settlements.list', userMessage: 'Failed to load settlements' });
+    }
+});
+// Cycle detail + per-order lines (admin drill-down).
+app.get('/admin/settlements/:id', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res);
+        if (!admin)
+            return;
+        const cycle = await prisma.settlementCycle.findUnique({
+            where: { id: req.params.id },
+            include: { lines: { orderBy: { createdAt: 'asc' } } },
+        });
+        if (!cycle)
+            return res.status(404).json({ error: 'Settlement cycle not found' });
+        const store = await prisma.store.findUnique({ where: { id: cycle.merchantId }, select: { name: true } });
+        res.json({ ...cycle, merchantName: store?.name ?? null });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'settlements.detail', userMessage: 'Failed to load settlement' });
+    }
+});
+// Mark a CLOSED cycle as PAID (manual money movement until the payout vendor
+// lands — Phase 7b). Forward-only; blocked while the merchant is on hold.
+app.post('/admin/settlements/:id/mark-paid', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res);
+        if (!admin)
+            return;
+        const paymentReference = String(req.body?.paymentReference || '').trim();
+        if (!paymentReference) {
+            return res.status(400).json({ error: 'paymentReference is required (bank UTR / transfer id)' });
+        }
+        const cycle = await prisma.settlementCycle.findUnique({ where: { id: req.params.id } });
+        if (!cycle)
+            return res.status(404).json({ error: 'Settlement cycle not found' });
+        if (cycle.status !== 'CLOSED') {
+            return res.status(409).json({ error: `Cycle is ${cycle.status} — only CLOSED cycles can be marked paid` });
+        }
+        const profile = await prisma.merchantSettlementProfile.findUnique({ where: { id: cycle.merchantId } });
+        if (profile?.settlementHold) {
+            return res.status(409).json({ error: 'Merchant is on settlement hold — release the hold first' });
+        }
+        // Atomic forward-only flip.
+        const flipped = await prisma.settlementCycle.updateMany({
+            where: { id: cycle.id, status: 'CLOSED' },
+            data: { status: 'PAID', paidAt: new Date(), paidBy: admin.id, paymentReference },
+        });
+        if (flipped.count === 0) {
+            return res.status(409).json({ error: 'Cycle state changed concurrently — refresh and retry' });
+        }
+        await writeAuditLog(admin.id, 'settlement.marked_paid', 'settlement_cycle', cycle.id, null, { merchantId: cycle.merchantId, netPayout: cycle.netPayout, paymentReference });
+        res.json({ ok: true });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'settlements.markPaid', userMessage: 'Failed to mark settlement paid' });
+    }
+});
+// Commission rules — list / update / create (admin).
+app.get('/admin/commission-rules', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res);
+        if (!admin)
+            return;
+        const rules = await prisma.commissionRule.findMany({
+            orderBy: [{ category: 'asc' }, { orderType: 'asc' }, { tier: 'asc' }],
+        });
+        res.json({ data: rules });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'commissionRules.list', userMessage: 'Failed to load commission rules' });
+    }
+});
+app.put('/admin/commission-rules/:id', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res);
+        if (!admin)
+            return;
+        const { ratePct, provisional } = req.body || {};
+        const rate = Number(ratePct);
+        if (!Number.isFinite(rate) || rate < 0 || rate > 50) {
+            return res.status(400).json({ error: 'ratePct must be a number between 0 and 50' });
+        }
+        const before = await prisma.commissionRule.findUnique({ where: { id: req.params.id } });
+        if (!before)
+            return res.status(404).json({ error: 'Rule not found' });
+        const updated = await prisma.commissionRule.update({
+            where: { id: req.params.id },
+            data: { ratePct: rate, ...(typeof provisional === 'boolean' ? { provisional } : {}) },
+        });
+        await writeAuditLog(admin.id, 'settlement.commission_rule_updated', 'commission_rule', updated.id, { ratePct: before.ratePct, provisional: before.provisional }, { ratePct: updated.ratePct, provisional: updated.provisional });
+        res.json(updated);
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'commissionRules.update', userMessage: 'Failed to update commission rule' });
+    }
+});
+// 7G — settlement profile worklist: every store with its profile state, so
+// the admin can see who is configured and who is silently HELD. Without this
+// the close holds 100% of merchants with no operable remediation surface.
+app.get('/admin/settlement-profiles', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res);
+        if (!admin)
+            return;
+        const stores = await prisma.store.findMany({
+            select: { id: true, name: true },
+            orderBy: { name: 'asc' },
+            take: 500,
+        });
+        const profiles = stores.length > 0 ? await prisma.merchantSettlementProfile.findMany({
+            where: { id: { in: stores.map((s) => s.id) } },
+        }) : [];
+        const pById = new Map(profiles.map((p) => [p.id, p]));
+        res.json({
+            data: stores.map((s) => {
+                const p = pById.get(s.id);
+                return {
+                    merchantId: s.id,
+                    merchantName: s.name,
+                    commissionCategory: p?.commissionCategory ?? null,
+                    turnoverTier: p?.turnoverTier ?? null,
+                    settlementHold: p?.settlementHold ?? false,
+                    notes: p?.notes ?? null,
+                    configured: !!p?.commissionCategory,
+                };
+            }),
+        });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'settlementProfiles.list', userMessage: 'Failed to load profiles' });
+    }
+});
+// 7G — manual payment-verification override (audit release valve): a paid
+// order stuck unverified (Razorpay outage at create time + outside the cron's
+// reach, or a false-positive amount-overrun hold) can be resolved by an admin
+// after manual reconciliation against the Razorpay dashboard. Audit-logged.
+app.post('/admin/orders/:id/payment-verification', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res);
+        if (!admin)
+            return;
+        const verified = req.body?.verified;
+        const note = String(req.body?.note || '').trim();
+        if (typeof verified !== 'boolean') {
+            return res.status(400).json({ error: 'verified must be true or false' });
+        }
+        if (!note) {
+            return res.status(400).json({ error: 'note is required (what was reconciled and where)' });
+        }
+        const order = await prisma.order.findUnique({
+            where: { id: req.params.id },
+            select: { id: true, paymentVerified: true, paymentVerificationNote: true },
+        });
+        if (!order)
+            return res.status(404).json({ error: 'Order not found' });
+        const updated = await prisma.order.update({
+            where: { id: order.id },
+            data: { paymentVerified: verified, paymentVerificationNote: `ADMIN OVERRIDE: ${note}`.slice(0, 500) },
+            select: { id: true, paymentVerified: true, paymentVerificationNote: true },
+        });
+        await writeAuditLog(admin.id, 'settlement.payment_verification_override', 'order', order.id, { paymentVerified: order.paymentVerified, note: order.paymentVerificationNote }, { paymentVerified: updated.paymentVerified, note: updated.paymentVerificationNote });
+        res.json(updated);
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'settlements.paymentOverride', userMessage: 'Failed to override payment verification' });
+    }
+});
+// Merchant settlement profile — read/update (admin assigns category + tier).
+app.get('/admin/settlement-profiles/:merchantId', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res);
+        if (!admin)
+            return;
+        const profile = await prisma.merchantSettlementProfile.findUnique({ where: { id: req.params.merchantId } });
+        res.json(profile ?? { id: req.params.merchantId, commissionCategory: null, turnoverTier: null, settlementHold: false, notes: null });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'settlementProfiles.get', userMessage: 'Failed to load profile' });
+    }
+});
+app.put('/admin/settlement-profiles/:merchantId', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res);
+        if (!admin)
+            return;
+        const { commissionCategory, turnoverTier, settlementHold, notes } = req.body || {};
+        if (turnoverTier != null && (!Number.isInteger(turnoverTier) || turnoverTier < 1 || turnoverTier > 5)) {
+            return res.status(400).json({ error: 'turnoverTier must be an integer 1-5 (or null)' });
+        }
+        const profile = await prisma.merchantSettlementProfile.upsert({
+            where: { id: req.params.merchantId },
+            create: {
+                id: req.params.merchantId,
+                commissionCategory: commissionCategory ?? null,
+                turnoverTier: turnoverTier ?? null,
+                settlementHold: !!settlementHold,
+                notes: notes ?? null,
+            },
+            update: {
+                ...(commissionCategory !== undefined ? { commissionCategory } : {}),
+                ...(turnoverTier !== undefined ? { turnoverTier } : {}),
+                ...(settlementHold !== undefined ? { settlementHold: !!settlementHold } : {}),
+                ...(notes !== undefined ? { notes } : {}),
+            },
+        });
+        await writeAuditLog(admin.id, 'settlement.profile_updated', 'merchant_settlement_profile', profile.id, null, profile);
+        res.json(profile);
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'settlementProfiles.update', userMessage: 'Failed to update profile' });
+    }
+});
+// 7F backend — merchant's own settlement history (CLOSED + PAID only; OPEN
+// cycles are internal). Auth: any user who can manage the store's orders.
+app.get('/merchant/settlements', async (req, res) => {
+    try {
+        const user = await requireUser(req, res);
+        if (!user)
+            return;
+        const merchantId = String(req.query.merchantId || '');
+        if (!merchantId)
+            return res.status(400).json({ error: 'merchantId is required' });
+        const canManage = await userCanManageOrderStore(user.id, merchantId);
+        if (!canManage)
+            return res.status(403).json({ error: 'Not authorized for this store' });
+        const cycles = await prisma.settlementCycle.findMany({
+            where: { merchantId, status: { in: ['CLOSED', 'PAID'] } },
+            orderBy: { periodStart: 'desc' },
+            take: 26, // ~6 months of weekly history
+            select: {
+                id: true, periodStart: true, periodEnd: true, status: true,
+                grossSales: true, commissionAmount: true, couponReimbursement: true,
+                couponAbsorbed: true, clawbackAmount: true, netPayout: true, paidAt: true,
+            },
+        });
+        res.json({ data: cycles });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'settlements.merchant', userMessage: 'Failed to load settlements' });
     }
 });
 // --- 404 Handler ---

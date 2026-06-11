@@ -1,4 +1,17 @@
-// @lock — Do NOT overwrite. Cart merge fix approved May 19, 2026. Auth listener merges guest cart on any first-session event (SIGNED_IN or TOKEN_REFRESHED).
+// @lock — Do NOT overwrite. Multiple approved layers (cumulative):
+//   1. Cart merge fix approved May 19, 2026. Auth listener merges guest cart on
+//      any first-session event (SIGNED_IN or TOKEN_REFRESHED).
+//   2. Phase 4 coupon-state plumbing approved 2026-06-09. AppliedCoupon state
+//      + auto-clear on any cart mutation (Clear Cart alert / normal add path /
+//      removeItem / updateQuantity / clearCart). Coupon state lives in-memory
+//      only (intentionally not synced to Supabase; coupons are derived state
+//      and should always re-validate against the current cart).
+//   3. Audit fix N4 approved 2026-06-09 ("Override accepted: N3, N5, and N4"):
+//      setAppliedCoupon(null) added at the two cart-change paths that bypass
+//      the mutation methods — the SIGNED_OUT branch of the auth listener and
+//      after the cloud-cart merge in loadCartFromSupabase. The cart-merge
+//      QUANTITY logic and Supabase sync from layer 1 remain untouched; only
+//      the coupon-clear lines were added.
 // CartContext: Global cart state management with Supabase persistence and strict validation.
 import React, { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
 import { Alert } from 'react-native';
@@ -17,6 +30,56 @@ interface CartItem {
     isVeg: boolean;
     uom?: string;
     stock?: number;
+    /**
+     * Phase 4 (2026-06-09): server-side product id used by /checkout/validate-coupon
+     * (Phase 2L's strict policy) and POST /orders. Optional in legacy cart data,
+     * required for any cart that wants to use coupon discounts. Callers that add
+     * items should populate this; CartContext does NOT enforce it (a stale guest
+     * cart from before Phase 4 could lack the field).
+     */
+    storeProductId?: string;
+}
+
+/**
+ * Phase 4 (2026-06-09): coupon state held in CartContext (in-memory only —
+ * NOT synced to Supabase). Lifecycle:
+ *   - Apply: CouponsScreen / CouponsSection POST /checkout/validate-coupon;
+ *     on success, call setAppliedCoupon({ ...response fields }).
+ *   - Display: CheckoutScreen / DiningCheckoutScreen read appliedCoupon to
+ *     render the applied-coupon banner + apply discount to displayed total.
+ *   - Send: POST /orders body includes validationToken + couponId + couponCode
+ *     from this state when present.
+ *   - Auto-clear: ANY cart mutation (add/remove/quantity/clear) calls
+ *     clearAppliedCoupon() so the server never sees a stale cartHash. The
+ *     consumer-app's behavior is then deterministic: cart change = coupon gone.
+ */
+export interface AppliedCoupon {
+    code: string;
+    couponId: string;
+    discount: number;
+    fundingSource: 'PLATFORM' | 'MERCHANT' | null;
+    discountType: 'PERCENTAGE' | 'FLAT' | 'BOGO';
+    /** Server-signed HMAC. POST /orders verifies this before applying the discount. */
+    validationToken: string;
+    /** Unix seconds (from token.exp). Used by the checkout screens for the countdown UX. */
+    expiresAt: number;
+    /** For diagnostics only — server recomputes its own cartHash. */
+    cartHash: string;
+    /** Phase 5 (2026-06-10) — true when the validated cart spans >1 store. */
+    multiStore?: boolean;
+    /**
+     * Phase 5 — the server's authoritative per-store discount split. The
+     * checkout per-store order loop MUST take each store's slice from here
+     * (matched by storeProductIds), never recompute its own proportional
+     * split (Phase 5 audit fix #4).
+     */
+    perStoreBreakdown?: Array<{
+        branchId: string | null;
+        storeId: string;
+        storeProductIds: string[];
+        subtotal: number;
+        discount: number;
+    }> | null;
 }
 
 interface CartContextType {
@@ -29,6 +92,12 @@ interface CartContextType {
     getItemCount: () => number;
     getTotal: () => number;
     getItemQuantity: (id: string) => number;
+    /** Phase 4 (2026-06-09) — applied coupon state (in-memory only). */
+    appliedCoupon: AppliedCoupon | null;
+    /** Phase 4 — set after a successful POST /checkout/validate-coupon. */
+    setAppliedCoupon: (c: AppliedCoupon | null) => void;
+    /** Phase 4 — explicit clear (called automatically on cart mutations). */
+    clearAppliedCoupon: () => void;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
@@ -37,6 +106,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
     const [items, setItems] = useState<CartItem[]>([]);
     const [isInitialized, setIsInitialized] = useState(false);
     const [cartId, setCartId] = useState<string | null>(null);
+    // Phase 4 (2026-06-09) — applied coupon state. In-memory only; deliberately
+    // NOT synced to Supabase (see lock header comment).
+    const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null);
+    const clearAppliedCoupon = () => setAppliedCoupon(null);
 
     const groupedItems = items.reduce((acc, item) => {
         if (!acc[item.storeId]) acc[item.storeId] = [];
@@ -73,6 +146,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
                 setItems([]);
                 setCartId(null);
                 hasLoadedCloud.current = false;
+                // Audit fix N4 (2026-06-10, override approved): sign-out empties
+                // the cart without going through the mutation methods, so the
+                // coupon auto-clear never fired — a stale signed token could
+                // survive into the next session.
+                setAppliedCoupon(null);
             } else {
                 setIsInitialized(true);
             }
@@ -138,6 +216,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
             setCartId(cartData.id);
 
             // Map cloud items
+            // Phase 4 fix C1 (2026-06-09): hydrate storeProductId from cart_items
+            // so SIGNED_IN / TOKEN_REFRESHED reload preserves the FK that Phase 2L's
+            // strict /checkout/validate-coupon requires.
             const cloudItems: CartItem[] = cartData.cart_items.map((ci: any) => ({
                 id: String(ci.product_id),
                 name: ci.product_name,
@@ -147,7 +228,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
                 storeId: String(ci.store_id),
                 storeName: ci.store_name,
                 isDining: ci.is_dining ?? false,
-                isVeg: ci.is_veg ?? true
+                isVeg: ci.is_veg ?? true,
+                storeProductId: ci.store_product_id ?? undefined,
             }));
 
             // Merge logic: for duplicate items, take the HIGHER quantity (not sum).
@@ -171,6 +253,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
             }
 
             setItems(mergedItems);
+            // Audit fix N4 (2026-06-10, override approved): the cloud-restore
+            // merge changes cart contents without going through addItem/
+            // removeItem/updateQuantity, so the coupon auto-clear invariant was
+            // bypassed — a token signed over the pre-merge cart could be sent
+            // at checkout against different items.
+            setAppliedCoupon(null);
             setIsInitialized(true);
             hasLoadedCloud.current = true;
 
@@ -216,7 +304,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
                 store_id: String(item.storeId),
                 store_name: item.storeName,
                 is_dining: item.isDining,
-                is_veg: item.isVeg
+                is_veg: item.isVeg,
+                // Phase 4 fix C1 (2026-06-09): persist storeProductId so a
+                // subsequent loadCartFromSupabase preserves the FK.
+                store_product_id: item.storeProductId ?? null,
             }));
 
             // Safely Upsert
@@ -252,6 +343,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
                             style: "destructive",
                             onPress: () => {
                                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                                // Phase 4 — any cart shape change invalidates the applied coupon.
+                                clearAppliedCoupon();
                                 setItems([{ ...item, id: String(item.id), storeId: String(item.storeId), quantity: 1, stock: item.stock }]);
                             }
                         }
@@ -262,27 +355,48 @@ export function CartProvider({ children }: { children: ReactNode }) {
         }
 
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        // Phase 4 fix D1 (2026-06-09) — re-fixed after audit (2026-06-09 evening):
+        // Decide OUTSIDE setItems whether we'll mutate (so the coupon clear is
+        // gated on actual mutation per D1's original intent), but compute the
+        // QUANTITY INCREMENT INSIDE setItems(prev => ...) — using prev.find()
+        // — so rapid double-taps don't both read stale qty=1 and converge on
+        // qty=2 instead of qty=3 (audit's D1-regression finding).
+        //
+        // Trade-off: the stock-cap check uses closure `items` so a rapid double-
+        // tap against a stock cap could exceed by 1; this matches the audit's
+        // acknowledged minor edge ("RN batches state updates and useCart
+        // consumers gate UI on items") and is preferable to making setItems
+        // updaters call Alert.alert (anti-pattern).
+        const existing = items.find(i => String(i.id) === String(item.id));
+        let willMutate = false;
+        if (existing) {
+            const maxStock = item.stock !== undefined ? item.stock : Infinity;
+            if (existing.quantity + 1 > maxStock) {
+                Alert.alert('Max Stock', `Only ${maxStock} available.`);
+                return; // no mutation, no coupon clear
+            }
+            willMutate = true;
+        } else {
+            willMutate = true;
+        }
+        if (willMutate) clearAppliedCoupon();
         setItems(prev => {
-            const existing = prev.find(i => String(i.id) === String(item.id));
-            if (existing) {
-                // Apply optional stock cap if known
-                const maxStock = item.stock !== undefined ? item.stock : Infinity;
-                const nextQty = existing.quantity + 1;
-                if (nextQty > maxStock) {
-                    Alert.alert('Max Stock', `Only ${maxStock} available.`);
-                    return prev;
-                }
-                return prev.map(i => String(i.id) === String(item.id) ? { ...i, quantity: nextQty } : i);
+            const ex = prev.find(i => String(i.id) === String(item.id));
+            if (ex) {
+                // Use prev's quantity (the latest queued state) — NOT the closure's.
+                return prev.map(i => String(i.id) === String(item.id) ? { ...i, quantity: ex.quantity + 1 } : i);
             }
             return [...prev, { ...item, id: String(item.id), storeId: String(item.storeId), quantity: 1, stock: item.stock }];
         });
     };
 
     const removeItem = (id: string) => {
+        // Phase 4 — any cart shape change invalidates the applied coupon.
+        clearAppliedCoupon();
         setItems(prev => {
             const itemToRemove = prev.find(i => String(i.id) === String(id));
             const newItems = prev.filter(i => String(i.id) !== String(id));
-            
+
             if (itemToRemove) {
                 const storeItemsLeft = newItems.filter(i => String(i.storeId) === String(itemToRemove.storeId));
                 // Previous setPickupTimes cleanup removed
@@ -296,25 +410,32 @@ export function CartProvider({ children }: { children: ReactNode }) {
             removeItem(id);
             return;
         }
-        setItems(prev => {
-            const target = prev.find(i => String(i.id) === String(id));
-            if (!target) return prev;
+        // Phase 4 fix D1 (2026-06-09) — re-fixed after audit (2026-06-09 evening):
+        // updateQuantity's `quantity` arg is explicit (not closure-derived), so
+        // there's no rapid-tap arithmetic issue here. Pattern matches addItem
+        // for consistency: decide outside (gates coupon clear on actual mutation),
+        // mutate inside setItems(prev =>) to use the latest queued state.
+        const target = items.find(i => String(i.id) === String(id));
+        if (!target) return; // no mutation, no coupon clear
 
-            // Cap by stock if available
-            if (target.stock !== undefined && target.stock !== null) {
-                if (quantity > target.stock) {
-                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                    Alert.alert('Stock Limit Reached', `Sorry, only ${target.stock} left.`);
-                    // Explicitly return previous state without changing anything
-                    return prev;
-                }
+        if (target.stock !== undefined && target.stock !== null) {
+            if (quantity > target.stock) {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                Alert.alert('Stock Limit Reached', `Sorry, only ${target.stock} left.`);
+                return; // no mutation, no coupon clear
             }
-
+        }
+        clearAppliedCoupon();
+        setItems(prev => {
+            const t = prev.find(i => String(i.id) === String(id));
+            if (!t) return prev; // race: item removed between closure read and setItems flush
             return prev.map(i => String(i.id) === String(id) ? { ...i, quantity } : i);
         });
     };
 
     const clearCart = () => {
+        // Phase 4 — any cart shape change invalidates the applied coupon.
+        clearAppliedCoupon();
         setItems([]);
         // Explicitly clear from Supabase if we have a cartId
         if (cartId) {
@@ -332,7 +453,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
     };
 
     return (
-        <CartContext.Provider value={{ items, groupedItems, addItem, removeItem, updateQuantity, clearCart, getItemCount, getTotal, getItemQuantity }}>
+        <CartContext.Provider value={{
+            items, groupedItems, addItem, removeItem, updateQuantity, clearCart,
+            getItemCount, getTotal, getItemQuantity,
+            // Phase 4 (2026-06-09) — coupon state plumbing
+            appliedCoupon, setAppliedCoupon, clearAppliedCoupon,
+        }}>
             {children}
         </CartContext.Provider>
     );
