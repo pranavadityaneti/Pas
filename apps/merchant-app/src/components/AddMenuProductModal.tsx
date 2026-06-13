@@ -6,6 +6,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Colors } from '../../constants/Colors';
 import { supabase } from '../lib/supabase';
 import uuid from 'react-native-uuid';
+import { saveProduct } from '../services/catalog';
 import { InventoryItem } from '../hooks/useInventory';
 import { useStore } from '../hooks/useStore';
 
@@ -363,50 +364,30 @@ export default function AddMenuProductModal({ visible, onClose, onSuccess, store
             console.log('[Product upsert] Payload:', JSON.stringify(productPayload, null, 2));
             console.log('[Product upsert] activeRole?.id:', activeRole?.id, 'storeId prop:', storeId);
 
-            const { error: pError } = await supabase.from('Product').upsert(productPayload);
-            if (pError) throw pError;
-
-            if (uploadedUrls.length > 0) {
-                await supabase.from('ProductImage').delete().eq('productId', productId);
-                const imageData = uploadedUrls.map((url, i) => ({
-                    id: uuid.v4().toString(),
-                    productId,
-                    url,
-                    isPrimary: i === 0
-                }));
-                await supabase.from('ProductImage').insert(imageData);
-            }
-
             let variantsToSave = variants;
             if (variantPreset === 'none' || variants.length === 0) {
                 variantsToSave = [{ variant: 'Standard', price: discountedPrice || menuPrice }];
             }
 
-            if (isEditing) {
-                await supabase.from('StoreProduct').delete().eq('productId', productId).eq('storeId', storeId);
-            }
-
             const branchId = activeRole?.id || storeId;
-            const storeProductPayloads = variantsToSave.map(v => ({
-                id: uuid.v4().toString(),
-                storeId: branchId,
-                branch_id: branchId,
-                productId,
-                price: parseFloat(v.price),
-                stock: 0,
-                active: availableToday,
-                variant: v.variant,
-                is_best_seller: false,
-                updatedAt: new Date().toISOString()
-            }));
-
-            const { error: spError } = await supabase
-                .from('StoreProduct')
-                .upsert(storeProductPayloads, {
-                    onConflict: 'branch_id,productId,variant',
-                    ignoreDuplicates: false,
-                });
-            if (spError) throw spError;
+            // Phase 9b (2026-06-13): one composite API call replaces the direct
+            // Product upsert + ProductImage replace + StoreProduct delete/upsert.
+            // replaceVariants clears prior variants on edit (matches the old
+            // delete-then-upsert by productId+branch). Storage uploads stay
+            // client-side; images passed only when new uploads exist.
+            await saveProduct({
+                branchId,
+                product: productPayload,
+                ...(uploadedUrls.length > 0 ? { images: uploadedUrls } : {}),
+                replaceVariants: isEditing,
+                storeProducts: variantsToSave.map(v => ({
+                    price: parseFloat(v.price),
+                    stock: 0,
+                    active: availableToday,
+                    variant: v.variant,
+                    is_best_seller: false,
+                })),
+            });
 
             onSuccess();
             resetForm();

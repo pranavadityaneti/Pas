@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
+import { configureStoreProducts } from '../services/catalog';
 import { Colors } from '../../constants/Colors';
 import { useStore } from '../hooks/useStore';
 
@@ -206,25 +207,21 @@ export default function ConfigureProductsModal({ visible, storeId, products, onC
             });
 
             if (updates.length > 0) {
-                // 3. Upsert
-                // Modified onConflict to look at branch_id,productId,variant due to new constraint
-                const { error } = await supabase.from('StoreProduct').upsert(updates, { onConflict: 'branch_id, productId, variant' });
-
-                if (error) {
-                    Alert.alert('Error', error.message);
-                } else {
-                    Alert.alert(
-                        'Success',
-                        'Products saved successfully!',
-                        [{ text: 'OK', onPress: onSuccess }]
-                    );
-                }
+                // 3. Phase 9b (2026-06-13): bulk-configure via the API (forces
+                // branch/store server-side; existing ids passed above preserve
+                // PKs). Throws on error → caught by the outer catch.
+                await configureStoreProducts(targetBranchId, updates);
+                Alert.alert(
+                    'Success',
+                    'Products saved successfully!',
+                    [{ text: 'OK', onPress: onSuccess }]
+                );
             } else {
                 onSuccess();
             }
-        } catch (err) {
+        } catch (err: any) {
             console.error(err);
-            Alert.alert('Error', 'An unexpected error occurred.');
+            Alert.alert('Error', err?.message || 'An unexpected error occurred.');
         } finally {
             setIsSubmitting(false);
         }
