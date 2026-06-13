@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
@@ -14,6 +14,20 @@ export default function OTPVerificationModal({ visible, onClose, onVerify, order
     const [otp, setOtp] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    // 2026-06-13 (forlater #11): this modal stays MOUNTED in orders.tsx and is
+    // toggled via `visible`, so its internal state persisted across opens — the
+    // PIN typed for a previous order leaked into the next order's input (a
+    // real safety risk: the merchant could tap Verify against the wrong order's
+    // OTP). Reset on every open AND whenever the target order changes, so each
+    // verification starts from a clean slate.
+    useEffect(() => {
+        if (visible) {
+            setOtp('');
+            setError(null);
+            setLoading(false);
+        }
+    }, [visible, orderId]);
 
     const handlePress = (num: string) => {
         if (otp.length < 4) {
