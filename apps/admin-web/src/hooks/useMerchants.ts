@@ -353,38 +353,44 @@ export function useMerchants() {
         }
     };
 
+    // Phase 8 (2026-06-11): branch writes go through the API
+    // (POST/DELETE /merchant/branches, which accept platform admins via
+    // isPlatformAdmin), not direct supabase-js — this is what lets the
+    // merchant_branches lockdown migration revoke anon/authenticated write
+    // grants. The API body is camelCase; callers still pass the snake_case
+    // Partial<MerchantBranch>, mapped here.
     const addMerchantBranch = async (branchData: Partial<MerchantBranch>) => {
         try {
-            const { data, error } = await supabase
-                .from('merchant_branches')
-                .insert([branchData])
-                .select()
-                .single();
-
-            if (error) throw error;
+            const b = branchData as any;
+            const { data } = await api.post('/merchant/branches', {
+                merchantId:  b.merchant_id,
+                branchName:  b.branch_name,
+                managerName: b.manager_name ?? null,
+                phone:       b.phone ?? null,
+                city:        b.city ?? null,
+                address:     b.address ?? null,
+                latitude:    b.latitude ?? null,
+                longitude:   b.longitude ?? null,
+                isActive:    b.is_active ?? true,
+            });
             await fetchMerchantsGlobal();
             toast.success('Branch added successfully');
             return data;
         } catch (err: any) {
             console.error('Error adding branch:', err);
-            toast.error('Failed to add branch');
+            toast.error(err?.response?.data?.error || 'Failed to add branch');
             throw err;
         }
     };
 
     const deleteMerchantBranch = async (branchId: string) => {
         try {
-            const { error } = await supabase
-                .from('merchant_branches')
-                .delete()
-                .eq('id', branchId);
-
-            if (error) throw error;
+            await api.delete(`/merchant/branches/${branchId}`);
             await fetchMerchantsGlobal();
             toast.success('Branch deleted');
         } catch (err: any) {
             console.error('Error deleting branch:', err);
-            toast.error('Failed to delete branch');
+            toast.error(err?.response?.data?.error || 'Failed to delete branch');
             throw err;
         }
     };

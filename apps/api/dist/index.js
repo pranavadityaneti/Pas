@@ -4051,6 +4051,15 @@ async function branchRow(id) {
     return rows[0] ?? null;
 }
 /**
+ * Lightweight SUPER_ADMIN check on an already-authenticated user id (mirrors
+ * requireAdmin's rule). Lets the branch endpoints accept platform admins —
+ * the admin web's merchant-editing dialog manages any merchant's branches.
+ */
+async function isPlatformAdmin(userId) {
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { isAdmin: true, role: true } });
+    return !!u && (u.isAdmin === true || u.role === 'SUPER_ADMIN');
+}
+/**
  * Attempt a Razorpay refund using the payment_id stored in order.metadata.
  * Returns { razorpayRefundId, simulated } — if Razorpay isn't configured or
  * the order has no paymentId on record, falls back to a stub refund id
@@ -9264,7 +9273,7 @@ app.post('/merchant/branches', async (req, res) => {
             return res.status(400).json({ error: 'merchantId is required' });
         if (!branchName)
             return res.status(400).json({ error: 'branchName is required' });
-        const canManage = await userCanManageMerchant(user.id, merchantId);
+        const canManage = (await userCanManageMerchant(user.id, merchantId)) || (await isPlatformAdmin(user.id));
         if (!canManage)
             return res.status(403).json({ error: 'Not authorized to add branches for this merchant' });
         const created = await prisma.merchantBranch.create({
@@ -9303,7 +9312,7 @@ app.put('/merchant/branches/:id', async (req, res) => {
         if (!user)
             return;
         const id = req.params.id;
-        const canManage = await userCanManageBranchFull(user.id, id);
+        const canManage = (await userCanManageBranchFull(user.id, id)) || (await isPlatformAdmin(user.id));
         if (!canManage)
             return res.status(403).json({ error: 'Not authorized to edit this branch' });
         const b = req.body || {};
@@ -9332,6 +9341,23 @@ app.put('/merchant/branches/:id', async (req, res) => {
             data.restaurantType = b.restaurantType;
         if (Array.isArray(b.branchPhotos))
             data.branchPhotos = b.branchPhotos;
+        // Operational fields (online/offline toggle, store timings, service
+        // modes, slot config). Prisma field names are mixed snake/camel per the
+        // schema — operating_hours/prep_time_minutes are snake, the rest camel.
+        if (b.operatingHours !== undefined)
+            data.operating_hours = b.operatingHours;
+        if (b.prepTimeMinutes !== undefined)
+            data.prep_time_minutes = b.prepTimeMinutes;
+        if (typeof b.servicePickup === 'boolean')
+            data.servicePickup = b.servicePickup;
+        if (typeof b.serviceDinein === 'boolean')
+            data.serviceDinein = b.serviceDinein;
+        if (typeof b.serviceTableBooking === 'boolean')
+            data.serviceTableBooking = b.serviceTableBooking;
+        if (b.slotConfig !== undefined)
+            data.slotConfig = b.slotConfig;
+        if (b.email !== undefined)
+            data.email = b.email;
         await prisma.merchantBranch.update({ where: { id }, data });
         res.json(await branchRow(id));
     }
@@ -9352,7 +9378,7 @@ app.delete('/merchant/branches/:id', async (req, res) => {
         if (!user)
             return;
         const id = req.params.id;
-        const canManage = await userCanManageBranchFull(user.id, id);
+        const canManage = (await userCanManageBranchFull(user.id, id)) || (await isPlatformAdmin(user.id));
         if (!canManage)
             return res.status(403).json({ error: 'Not authorized to delete this branch' });
         await prisma.$transaction([

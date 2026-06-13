@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { updateBranch, toBranchWritePayload } from '../services/branches';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface Store {
@@ -487,16 +488,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         toggleStoreStatus: async (newStatus: boolean) => {
             if (!activeStoreId) return { success: false, error: 'No active branch' };
             try {
-                const { error, data } = await supabase
-                    .from('merchant_branches')
-                    .update({ is_active: newStatus })
-                    .eq('id', activeStoreId)
-                    .select('id');
-                if (error) throw new Error(error.message);
-                if (!data || data.length === 0) {
-                    console.error('[toggleStoreStatus] 0 rows updated — activeStoreId may not exist in merchant_branches:', activeStoreId);
-                    return { success: false, error: 'Branch not found. Please restart the app.' };
-                }
+                // Phase 8 (2026-06-11): online/offline toggle goes through the API
+                // (services/branches.ts → PUT /merchant/branches/:id), not direct
+                // supabase-js. updateBranch throws on 404/403/network error.
+                await updateBranch(activeStoreId, { isActive: newStatus });
                 // Update local branches state
                 setBranches(prev => prev.map(b => b.id === activeStoreId ? { ...b, isActive: newStatus } : b));
                 return { success: true };
@@ -508,19 +503,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         updateStoreDetails: async (updates) => {
             if (!activeStoreId) return { success: false, error: 'No active branch' };
             try {
-                // Write ONLY to merchant_branches — this is the source of truth for
-                // operating_hours and prep_time_minutes.
-                const { error: bError, data: updatedRows } = await supabase
-                    .from('merchant_branches')
-                    .update(updates)
-                    .eq('id', activeStoreId)
-                    .select('id');
-
-                if (bError) throw new Error(bError.message);
-                if (!updatedRows || updatedRows.length === 0) {
-                    console.error('[updateStoreDetails] 0 rows updated — activeStoreId may not exist in merchant_branches:', activeStoreId);
-                    return { success: false, error: 'Branch not found. Changes were not saved. Please restart the app.' };
-                }
+                // Phase 8 (2026-06-11): store-detail writes (timings, prep time,
+                // service modes, slot config) go through the API
+                // (services/branches.ts → PUT /merchant/branches/:id), not direct
+                // supabase-js. merchant_branches is the source of truth.
+                // toBranchWritePayload maps the snake_case `updates` from callers
+                // (timings.tsx, slot-config.tsx) to the camelCase API body.
+                await updateBranch(activeStoreId, toBranchWritePayload(updates));
 
                 // Optimistically update the branchDataMap so the UI reflects changes immediately
                 setBranchDataMap(prev => ({
