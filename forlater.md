@@ -47,7 +47,7 @@
 - **Rollout order**: (1) merge PR #3 → main (admin-web live, API already deployed); (2) Pranav OTAs merchant app; (3) after OTA propagates, apply the staged lockdown migration + verify.
 
 ### Remaining verified-pending items from the June 6 audit (next, in priority order)
-- **#11 OTP modal reset** (merchant Ready-tab OTP persists across orders — safety bug). OTPVerificationModal.tsx never resets `otp` on visible/orderId change. Small, OTA-eligible.
+- ~~**#11 OTP modal reset**~~ — ✅ FIXED 2026-06-13 (PR #4, branch fix/merchant-otp-modal-reset). useEffect keyed on (visible, orderId) clears otp/error/loading on each open. Rides next merchant OTA.
 - **#7 operating_hours**: 25/26 branches NULL → customer app defaults "Open Now" to true on NULL. Fix: flip default to fail-closed + backfill/prompt.
 - **#1 order_number unification** (order_requests has no order_number column).
 - **Wati-OTP name capture** (22/32 consumers NULL name).
