@@ -10,6 +10,7 @@ import { Colors } from '../../../constants/Colors';
 import { useStoreContext } from '../../../src/context/StoreContext';
 import { useUser } from '../../../src/context/UserContext';
 import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
+import { updateStoreProfile } from '../../../src/services/merchant';
 import Constants from 'expo-constants';
 
 const SUPABASE_PROJECT_ID = 'llhxkonraqaxtradyycj';
@@ -121,27 +122,19 @@ export default function StoreDetailsScreen() {
 
         setSaving(true);
         try {
-            const { error } = await supabase
-                .from('Store')
-                .update({
-                    name: details.name,
-                    address: details.address,
-                })
-                .eq('id', store.id);
-
-            if (error) throw error;
-
-            if (isDining) {
-                const { error: mError } = await supabase
-                    .from('merchants')
-                    .update({
-                        cuisines: details.cuisines,
-                        is_veg: details.isVeg,
-                        restaurant_type: details.restaurantType,
-                    })
-                    .eq('id', store.id);
-                if (mError) throw mError;
-            }
+            // Phase 9a (2026-06-13): write through the API (services/merchant.ts
+            // → PATCH /merchant/profile), not direct supabase-js. The endpoint
+            // updates Store {name,address} and, for dining merchants, the
+            // merchants {cuisines,is_veg,restaurant_type} fields in one call.
+            await updateStoreProfile(store.id, {
+                name: details.name,
+                address: details.address,
+                ...(isDining ? {
+                    cuisines: details.cuisines,
+                    is_veg: details.isVeg,
+                    restaurant_type: details.restaurantType,
+                } : {}),
+            });
 
             setInitialDetails(details);
             Alert.alert('Success', 'Store details updated successfully', [
