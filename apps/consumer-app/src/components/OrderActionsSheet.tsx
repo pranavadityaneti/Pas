@@ -26,7 +26,7 @@
 import React, { useMemo, useState } from 'react';
 import {
     View, Text, TouchableOpacity, ScrollView, Modal, Pressable,
-    TextInput, ActivityIndicator, Alert, Platform,
+    TextInput, ActivityIndicator, Alert, Platform, KeyboardAvoidingView,
 } from 'react-native';
 import { X, Ban, Calendar, RotateCcw, RefreshCw, ChevronLeft } from 'lucide-react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -372,7 +372,10 @@ export default function OrderActionsSheet({ visible, order, onClose, onSuccess }
 
     return (
         <Modal visible={visible} transparent animationType="slide" onRequestClose={resetAndClose}>
-            <View className="flex-1">
+            <KeyboardAvoidingView
+                className="flex-1"
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
                 <Pressable className="flex-1 bg-black/50" onPress={resetAndClose} />
                 <View className="bg-white rounded-t-[32px]" style={{ maxHeight: '90%' }}>
                     <View className="px-6 pt-6 pb-4">
@@ -398,7 +401,7 @@ export default function OrderActionsSheet({ visible, order, onClose, onSuccess }
                         {action === 'exchange' && renderExchange()}
                     </ScrollView>
                 </View>
-            </View>
+            </KeyboardAvoidingView>
         </Modal>
     );
 }

@@ -1,4 +1,7 @@
 // @lock — DO NOT EDIT WITHOUT EXPLICIT USER PERMISSION.
+//   2026-06-13 (approved): added automaticallyAdjustKeyboardInsets +
+//     keyboardShouldPersistTaps to the main ScrollView — iOS keyboard fix
+//     (Bug #16). No layout/footer change.
 // Dining Checkout — multiple approved layers (cumulative, latest 2026-06-09):
 //   1. Sticky header/CTA, non-absolute bottom button, Android time picker dismiss
 //      handling, iOS-only spinner guard (original layout fix).
@@ -1066,7 +1069,10 @@ export default function DiningCheckoutScreen() {
                 <Text className="text-[20px] font-bold text-gray-900">Confirm Dining Order</Text>
             </View>
 
-            <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
+            {/* Bug #16 keyboard fix (2026-06-13): iOS auto-insets the focused
+                input above the keyboard; Android handled via app.json
+                softwareKeyboardLayoutMode. No layout/footer change. */}
+            <ScrollView className="flex-1" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled">
                 {/* Restaurant Card */}
                 <View className="mx-5 mt-6 bg-white rounded-[20px] border border-gray-100 p-5 shadow-sm">
                     <Text className="text-[17px] font-extrabold text-[#111827] leading-tight">{restaurantName}</Text>
