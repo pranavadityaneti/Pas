@@ -1,4 +1,6 @@
 // @lock — Do NOT overwrite. Approved layout & FAQ logic as of April 1, 2026.
+//   2026-06-13 (approved): added automaticallyAdjustKeyboardInsets +
+//     keyboardShouldPersistTaps to the FAQ ScrollView — iOS keyboard fix (Bug #16).
 import React, { useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, Linking, StyleSheet, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -42,7 +44,9 @@ export default function SupportScreen() {
         <Text className="text-2xl font-bold text-[#111827]">FAQ and Support</Text>
       </View>
 
-      <ScrollView className="flex-1 px-6" showsVerticalScrollIndicator={false}>
+      {/* Bug #16 keyboard fix (2026-06-13): FAQ search input auto-insets above
+          the keyboard on iOS; Android handled via app.json. */}
+      <ScrollView className="flex-1 px-6" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled">
         {/* Support Subtitle */}
         <View className="mb-8">
           <Text className="text-gray-500 text-base leading-relaxed">

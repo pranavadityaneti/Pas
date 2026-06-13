@@ -1,4 +1,7 @@
 // @lock — DO NOT EDIT WITHOUT EXPLICIT USER PERMISSION.
+//   2026-06-13 (approved): added automaticallyAdjustKeyboardInsets +
+//     keyboardShouldPersistTaps to the main ScrollView — iOS keyboard fix
+//     (Bug #16) for the 'Someone Else' name/phone fields. No layout/footer change.
 // Pickup Checkout — multiple approved layers (cumulative, latest 2026-06-09):
 //   1. Non-absolute bottom CTA with pb-[100px] for tab bar clearance (original layout fix).
 //   2. handlePaymentSuccess session-recovery block: refresh + getSession to recover
@@ -1282,7 +1285,12 @@ export default function CheckoutScreen() {
     // ==================== MAIN FORM RENDER ====================
     return (
         <SafeAreaView className="flex-1 bg-gray-50">
-            <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
+            {/* Bug #16 keyboard fix (2026-06-13): iOS auto-insets the focused
+                input (e.g. 'Someone Else' name/phone) above the keyboard;
+                Android is handled globally by app.json softwareKeyboardLayoutMode.
+                keyboardShouldPersistTaps lets the Place Order tap work with the
+                keyboard open. No layout/footer change. */}
+            <ScrollView className="flex-1" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled">
                 <View className="flex-row items-center px-5 py-4 bg-white border-b border-gray-100">
                     <TouchableOpacity onPress={() => navigation.goBack()} className="mr-4"><ArrowLeftCircle size={28} color="#1F2937" fill="white" /></TouchableOpacity>
                     <Text className="text-[20px] font-bold text-gray-900">Checkout</Text>

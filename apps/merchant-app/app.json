@@ -2,7 +2,7 @@
   "expo": {
     "name": "PAS Partner",
     "slug": "pas-merchant-app",
-    "version": "1.2.3",
+    "version": "1.2.4",
     "scheme": "pasmerchant",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -30,7 +30,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.pas.merchant",
-      "buildNumber": "13",
+      "buildNumber": "14",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Your location is used to set your shop address, allowing customers to find your store correctly on the map.",
         "NSCameraUsageDescription": "Camera access is required to capture and upload KYC documents for account verification.",
@@ -45,7 +45,7 @@
     },
     "android": {
       "package": "io.pickatstore.merchant",
-      "versionCode": 15,
+      "versionCode": 16,
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyAZPXR9kkXQj_JkrLM2V8L1qvBYwoI5bN4"
