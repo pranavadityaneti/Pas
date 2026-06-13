@@ -36,6 +36,25 @@
 
 ## 🎟️ Coupon Foolproof — deferred audit findings + open flags (added 2026-06-10)
 
+### 🔐 Phase 8 RLS lockdown — IN PROGRESS (2026-06-13)
+**Item 1 (User + order_items + 5 defense tables RLS) — DONE & APPLIED to prod** (PR #3, migrations 20260611020000 + 030000). Verified: scripts/p8_rls_verify.ts all pass.
+
+**Item 2 (merchant_branches write lockdown) — backend + app routing DONE; lockdown migration GATED:**
+- ✅ API: POST/PUT/DELETE /merchant/branches (userCanManageMerchant / userCanManageBranchFull / isPlatformAdmin). Deployed to EB.
+- ✅ merchant-app: services/branches.ts + branches.tsx + settings/index.tsx + StoreContext (toggleStoreStatus, updateStoreDetails) all route through API. **Rides next merchant OTA.**
+- ✅ admin-web: useMerchants.ts add/deleteMerchantBranch → API. Ships on PR #3 merge to main (Vercel).
+- ⛔ **GATED — DO NOT APPLY until merchant OTA propagated**: `apps/api/scripts/phase8_branch_lockdown.STAGED.sql` revokes anon/authenticated INSERT/UPDATE/DELETE on merchant_branches. Verify with phase8_branch_lockdown_verify.ts. This closes "any logged-in user can modify/delete any branch." SELECT stays open (discovery + storefront).
+- **Rollout order**: (1) merge PR #3 → main (admin-web live, API already deployed); (2) Pranav OTAs merchant app; (3) after OTA propagates, apply the staged lockdown migration + verify.
+
+### Remaining verified-pending items from the June 6 audit (next, in priority order)
+- **#11 OTP modal reset** (merchant Ready-tab OTP persists across orders — safety bug). OTPVerificationModal.tsx never resets `otp` on visible/orderId change. Small, OTA-eligible.
+- **#7 operating_hours**: 25/26 branches NULL → customer app defaults "Open Now" to true on NULL. Fix: flip default to fail-closed + backfill/prompt.
+- **#1 order_number unification** (order_requests has no order_number column).
+- **Wati-OTP name capture** (22/32 consumers NULL name).
+- **#14 data hygiene**: 2 NULL-merchant_id stores (Clean cuts, Folli Medicals), 2 test cities.
+- **#15 phone format** (3 merchants; defer until more scale).
+
+
 ### Phase 7G audit — deferred mediums/lows (added 2026-06-11; blockers + highs all FIXED in commit 04734624)
 - **Negative-net cycles & mark-paid semantics** — a clawback-only week produces netPayout < 0; the mark-paid flow treats it like a payout. Needs a founder decision: carry the debt into the next cycle automatically vs invoice the merchant. (audit M-22/M-24)
 - **Refund rupee-rounding vs clawback paise** — the cancel path rounds refunds to whole rupees before paise conversion; recorded clawback can differ from moved money by <₹1. Align rounding in one place. (M-21)
