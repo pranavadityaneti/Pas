@@ -103,6 +103,39 @@
 <tr><td>FQ-6</td><td>GST-on-commission + TCS (share Phase 7 doc with CA)</td><td>Before first PAID cycle</td></tr>
 </table>
 
-<p style="color:#777;font-size:12px;margin-top:40px;">Generated 2026-06-13 · sources: live prod RLS sweep (<code>scripts/p8c_rls_sweep.ts</code>), forlater.md, SESSION_LOG.md, git log. Saved at <code>docs/pending-queue-2026-06-13.html</code>.</p>
+<h2>8. Phase 9 RLS epic — turn-key build plan (investigation complete 2026-06-13)</h2>
+<div class="note"><b>Investigation done — the hard, error-prone part.</b> Key findings that de-risk the build:
+<ul>
+<li>The <b>mobile merchant signup already routes through the API</b> (<code>POST /auth/merchant/draft</code>, Prisma) — it does NOT write <code>merchants</code> directly. Only <b>merchant-web</b> <code>SignupWizard</code> does a direct insert, and merchant-web is <b>legacy</b> (v0.0.1, no deploy config, untouched since 2026-04-03). So live onboarding is unaffected by the lockdown.</li>
+<li>The API's own <code>merchants</code> write at index.ts:5568 used the <b>anon</b> client — <span class="pill done">FIXED 2026-06-13</span> → <code>supabaseAdmin</code> (rides next API deploy). This was the only API-internal anon write to any Phase 9 / locked table (verified).</li>
+<li><b>Grep lesson:</b> write chains span multiple lines (<code>supabase</code> / <code>.from()</code> / <code>.upsert()</code> on separate lines) — detect with <code>.from('T')</code> + context window, not <code>supabase.from</code> on one line.</li>
+</ul></div>
+
+<h3>9a — merchants + Store (do first; merchants is anon-writable)</h3>
+<b>API endpoints to build</b> (additive — deploy is safe, apps keep working until refactored):
+<table>
+<tr><th>Endpoint</th><th>Replaces</th><th>Payload / auth</th></tr>
+<tr><td><code>PATCH /merchant/profile/:merchantId</code></td><td>merchant-app <code>store-details.tsx</code> (Store + merchants writes)</td><td>Store {name,address} + (dining) merchants {cuisines,is_veg,restaurant_type}. Auth: <code>userCanManageMerchant</code> OR <code>isPlatformAdmin</code>.</td></tr>
+<tr><td><code>PUT /merchant/payout/:merchantId</code></td><td>merchant-app <code>payouts.tsx</code> (×2)</td><td>merchants {bank_account_number, ifsc_code, bank_name, bank_beneficiary_name, bank_accounts}. <b>Sensitive — owner-only</b> (Store.managerId == user) OR admin; NOT staff.</td></tr>
+<tr><td><code>POST /admin/merchants</code></td><td>admin <code>useMerchants.createMerchant</code> (big KYC insert)</td><td>requireAdmin. Whitelist the full create payload (see useMerchants.ts:187-219).</td></tr>
+<tr><td><code>PATCH /admin/merchants/:id</code></td><td>admin <code>useMerchants.updateMerchant</code> (generic) + <code>MerchantDirectory.tsx:140</code> (status)</td><td>requireAdmin. Whitelist updatable fields incl. <code>status</code>. (Or reuse <code>POST /merchants/:id/kyc-decision</code> for status.)</td></tr>
+</table>
+<b>App refactors</b> (each rides an OTA / Vercel deploy):
+<ul>
+<li>merchant-app: <code>store-details.tsx</code> → PATCH /merchant/profile; <code>payouts.tsx</code> (handleAddBank + handleSetPrimaryBank) → PUT /merchant/payout. Add to <code>services/branches.ts</code>-style service (e.g. <code>services/merchant.ts</code>).</li>
+<li>admin-web: <code>useMerchants.ts</code> createMerchant/updateMerchant → API; <code>MerchantDirectory.tsx</code> status → API.</li>
+</ul>
+<b>Then</b>: exhaustive re-grep (zero direct merchants/Store writes) → <span class="pill gated">GATED</span> lockdown migration: <code>REVOKE INSERT/UPDATE/DELETE ON merchants, "Store" FROM anon, authenticated;</code> + drop the qual=true write policies (incl. the <b>"Enable all operations for anon"</b> on merchants). Keep SELECT (storefront + discovery). Gate on merchant-app OTA propagation.
+
+<h3>9b — StoreProduct + Product + ProductImage (catalog/inventory cluster)</h3>
+Written together in the merchant-app product modals + admin StoreProductTable. Sites (all merchant-app unless noted):
+<ul>
+<li><code>StoreProduct</code>: AddCustomProductModal (update/insert), ConfigureProductsModal (upsert), AddMenuProductModal (delete+upsert), useInventory (update, soft-delete); admin <code>StoreProductTable.tsx:73</code> (update).</li>
+<li><code>Product</code>: AddMenuProductModal (upsert), AddCustomProductModal (update/insert).</li>
+<li><code>ProductImage</code>: AddCustomProductModal (delete+insert), AddMenuProductModal (delete+insert).</li>
+</ul>
+Plan: build catalog write endpoints (create/update/delete StoreProduct; upsert Product + ProductImage) gated by <code>userCanManageBranchFull</code> (the StoreProduct.branch_id owner) / admin → refactor the 4 modals + useInventory + StoreProductTable → verify → gated lockdown. Larger than 9a (more sites); do as its own pass after 9a.
+
+<p style="color:#777;font-size:12px;margin-top:40px;">Generated 2026-06-13 · sources: live prod RLS sweep (<code>scripts/p8c_rls_sweep.ts</code>), exhaustive write-site grep, forlater.md, SESSION_LOG.md, git log. Saved at <code>docs/pending-queue-2026-06-13.html</code>.</p>
 </body>
 </html>

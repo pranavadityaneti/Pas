@@ -5564,13 +5564,19 @@ app.patch('/stores/:id', async (req, res) => {
                 updatedAt: new Date().toISOString()
             };
 
-            const { error: syncError } = await supabase
+            // Phase 9 (2026-06-13): use the service-role client, not the anon
+            // client. The API's `supabase` is the ANON key (index.ts:78), so
+            // this sync only worked because merchants had "Enable all operations
+            // for anon" RLS — the exact hole Phase 9 closes. supabaseAdmin
+            // (service_role) writes regardless of grants, so this keeps working
+            // after the merchants write-lockdown lands.
+            const { error: syncError } = await supabaseAdmin
                 .from('merchants')
                 .upsert(merchantPayload, { onConflict: 'id' });
 
             if (syncError) {
                 console.error('Failed to sync to merchants table:', syncError);
-                // Don't fail the request, just log it. 
+                // Don't fail the request, just log it.
                 // In production, might want a queue or retry mechanism.
             } else {
                 console.log('Synced store update to merchants table:', fullStore.name);
