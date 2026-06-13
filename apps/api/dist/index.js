@@ -3992,6 +3992,74 @@ async function userCanManageBranch(userId, branchId) {
     return false;
 }
 /**
+ * Phase 8 (2026-06-11) — "can this user manage this MERCHANT (parent store)?"
+ * Used for branch CREATE (the branch row doesn't exist yet, so the branch-level
+ * userCanManageBranch cannot apply). The canonical owner link is
+ * Store.managerId (set at signup to the owner's auth UUID — verified populated
+ * for every store on prod); store_staff and a last-10-digit phone match cover
+ * provisioned managers and any owner predating the managerId backfill.
+ */
+async function userCanManageMerchant(userId, merchantId) {
+    if (!merchantId)
+        return false;
+    // (a) Owner via Store.managerId (canonical).
+    const store = await prisma.store.findUnique({ where: { id: merchantId }, select: { managerId: true } });
+    if (store?.managerId === userId)
+        return true;
+    // (b) store_staff scoped to the merchant/store id.
+    const staffRow = await prisma.storeStaff.findFirst({
+        where: { storeId: merchantId, OR: [{ user_id: userId }, { authUserId: userId }] },
+        select: { id: true },
+    });
+    if (staffRow)
+        return true;
+    // (c) Phone-matched owner (last-10-digit, tolerant of the 91-prefix drift).
+    const [merchant, u] = await Promise.all([
+        prisma.merchant.findUnique({ where: { id: merchantId }, select: { phone: true } }),
+        prisma.user.findUnique({ where: { id: userId }, select: { phone: true } }),
+    ]);
+    if (merchant?.phone && u?.phone) {
+        const a = u.phone.replace(/\D/g, '').slice(-10);
+        const b = merchant.phone.replace(/\D/g, '').slice(-10);
+        if (a.length === 10 && a === b)
+            return true;
+    }
+    return false;
+}
+/**
+ * Complete branch-management authority for an EXISTING branch: branch-level
+ * (owner-by-id / phone-manager / store_staff for the branch) OR
+ * parent-merchant-level (owner / staff of the parent store). Covers every real
+ * case — owner editing the main or an additional branch, a provisioned branch
+ * manager, or a phone-only owner.
+ */
+async function userCanManageBranchFull(userId, branchId) {
+    if (await userCanManageBranch(userId, branchId))
+        return true;
+    const branch = await prisma.merchantBranch.findUnique({ where: { id: branchId }, select: { merchantId: true } });
+    if (branch?.merchantId && (await userCanManageMerchant(userId, branch.merchantId)))
+        return true;
+    return false;
+}
+/**
+ * Return a branch row in the exact snake_case shape supabase-js select('*')
+ * produces, so the merchant app's Branch interface + optimistic list update
+ * consume the API response with zero shape drift.
+ */
+async function branchRow(id) {
+    const rows = await prisma.$queryRaw `SELECT * FROM "public"."merchant_branches" WHERE "id" = ${id} LIMIT 1;`;
+    return rows[0] ?? null;
+}
+/**
+ * Lightweight SUPER_ADMIN check on an already-authenticated user id (mirrors
+ * requireAdmin's rule). Lets the branch endpoints accept platform admins —
+ * the admin web's merchant-editing dialog manages any merchant's branches.
+ */
+async function isPlatformAdmin(userId) {
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { isAdmin: true, role: true } });
+    return !!u && (u.isAdmin === true || u.role === 'SUPER_ADMIN');
+}
+/**
  * Attempt a Razorpay refund using the payment_id stored in order.metadata.
  * Returns { razorpayRefundId, simulated } — if Razorpay isn't configured or
  * the order has no paymentId on record, falls back to a stub refund id
@@ -5225,12 +5293,18 @@ app.patch('/stores/:id', async (req, res) => {
                 status: fullStore.active ? 'active' : 'inactive',
                 updatedAt: new Date().toISOString()
             };
-            const { error: syncError } = await supabase
+            // Phase 9 (2026-06-13): use the service-role client, not the anon
+            // client. The API's `supabase` is the ANON key (index.ts:78), so
+            // this sync only worked because merchants had "Enable all operations
+            // for anon" RLS — the exact hole Phase 9 closes. supabaseAdmin
+            // (service_role) writes regardless of grants, so this keeps working
+            // after the merchants write-lockdown lands.
+            const { error: syncError } = await supabaseAdmin
                 .from('merchants')
                 .upsert(merchantPayload, { onConflict: 'id' });
             if (syncError) {
                 console.error('Failed to sync to merchants table:', syncError);
-                // Don't fail the request, just log it. 
+                // Don't fail the request, just log it.
                 // In production, might want a queue or retry mechanism.
             }
             else {
@@ -9179,6 +9253,473 @@ app.get('/merchant/settlements', async (req, res) => {
     }
     catch (error) {
         return (0, api_error_handler_1.handleApiError)(res, error, { area: 'settlements.merchant', userMessage: 'Failed to load settlements' });
+    }
+});
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 8 (2026-06-11) — Merchant branch CRUD via the API.
+// Replaces the merchant app's direct supabase-js writes to merchant_branches,
+// which relied on over-permissive qual=true RLS (any authenticated user could
+// modify/delete ANY branch). All three writes are gated by the branch/merchant
+// authority helpers. Once the merchant OTA carrying these calls has propagated,
+// a follow-up migration revokes anon/authenticated WRITE grants on
+// merchant_branches (SELECT stays open — discovery + storefront need it, and
+// branch data is semi-public). Body is camelCase (API convention); the app
+// builds a camelCase payload.
+// ════════════════════════════════════════════════════════════════════════════
+// Create a branch under a merchant (auth: can-manage the parent merchant).
+app.post('/merchant/branches', async (req, res) => {
+    try {
+        const user = await requireUser(req, res);
+        if (!user)
+            return;
+        const b = req.body || {};
+        const merchantId = String(b.merchantId || '').trim();
+        const branchName = String(b.branchName || '').trim();
+        if (!merchantId)
+            return res.status(400).json({ error: 'merchantId is required' });
+        if (!branchName)
+            return res.status(400).json({ error: 'branchName is required' });
+        const canManage = (await userCanManageMerchant(user.id, merchantId)) || (await isPlatformAdmin(user.id));
+        if (!canManage)
+            return res.status(403).json({ error: 'Not authorized to add branches for this merchant' });
+        const created = await prisma.merchantBranch.create({
+            data: {
+                ...(b.id ? { id: String(b.id) } : {}),
+                merchantId,
+                branchName,
+                address: b.address ?? null,
+                city: b.city ?? null,
+                latitude: b.latitude ?? null,
+                longitude: b.longitude ?? null,
+                managerName: b.managerName ?? null,
+                phone: b.phone ?? null,
+                isActive: b.isActive ?? true,
+                ...(Array.isArray(b.cuisines) ? { cuisines: b.cuisines } : {}),
+                ...(typeof b.isVeg === 'boolean' ? { isVeg: b.isVeg } : {}),
+                ...(b.restaurantType !== undefined ? { restaurantType: b.restaurantType } : {}),
+                ...(Array.isArray(b.branchPhotos) ? { branchPhotos: b.branchPhotos } : {}),
+            },
+        });
+        // Return the snake_case DB row (matches supabase-js select('*'), which
+        // the merchant app's Branch shape + optimistic list update expect).
+        res.json(await branchRow(created.id));
+    }
+    catch (error) {
+        if (error?.code === 'P2002')
+            return res.status(409).json({ error: 'A branch with this name already exists for this merchant' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchant.branches.create', userMessage: 'Failed to create branch' });
+    }
+});
+// Update a branch (auth: can-manage the branch or its parent merchant).
+// Never lets the client re-point a branch to a different merchant.
+app.put('/merchant/branches/:id', async (req, res) => {
+    try {
+        const user = await requireUser(req, res);
+        if (!user)
+            return;
+        const id = req.params.id;
+        const canManage = (await userCanManageBranchFull(user.id, id)) || (await isPlatformAdmin(user.id));
+        if (!canManage)
+            return res.status(403).json({ error: 'Not authorized to edit this branch' });
+        const b = req.body || {};
+        const data = {};
+        if (b.branchName !== undefined)
+            data.branchName = String(b.branchName).trim();
+        if (b.address !== undefined)
+            data.address = b.address;
+        if (b.city !== undefined)
+            data.city = b.city;
+        if (b.latitude !== undefined)
+            data.latitude = b.latitude;
+        if (b.longitude !== undefined)
+            data.longitude = b.longitude;
+        if (b.managerName !== undefined)
+            data.managerName = b.managerName;
+        if (b.phone !== undefined)
+            data.phone = b.phone;
+        if (b.isActive !== undefined)
+            data.isActive = b.isActive;
+        if (Array.isArray(b.cuisines))
+            data.cuisines = b.cuisines;
+        if (typeof b.isVeg === 'boolean')
+            data.isVeg = b.isVeg;
+        if (b.restaurantType !== undefined)
+            data.restaurantType = b.restaurantType;
+        if (Array.isArray(b.branchPhotos))
+            data.branchPhotos = b.branchPhotos;
+        // Operational fields (online/offline toggle, store timings, service
+        // modes, slot config). Prisma field names are mixed snake/camel per the
+        // schema — operating_hours/prep_time_minutes are snake, the rest camel.
+        if (b.operatingHours !== undefined)
+            data.operating_hours = b.operatingHours;
+        if (b.prepTimeMinutes !== undefined)
+            data.prep_time_minutes = b.prepTimeMinutes;
+        if (typeof b.servicePickup === 'boolean')
+            data.servicePickup = b.servicePickup;
+        if (typeof b.serviceDinein === 'boolean')
+            data.serviceDinein = b.serviceDinein;
+        if (typeof b.serviceTableBooking === 'boolean')
+            data.serviceTableBooking = b.serviceTableBooking;
+        if (b.slotConfig !== undefined)
+            data.slotConfig = b.slotConfig;
+        if (b.email !== undefined)
+            data.email = b.email;
+        await prisma.merchantBranch.update({ where: { id }, data });
+        res.json(await branchRow(id));
+    }
+    catch (error) {
+        if (error?.code === 'P2025')
+            return res.status(404).json({ error: 'Branch not found' });
+        if (error?.code === 'P2002')
+            return res.status(409).json({ error: 'A branch with this name already exists for this merchant' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchant.branches.update', userMessage: 'Failed to update branch' });
+    }
+});
+// Delete a branch + its store_staff rows (auth: can-manage the branch/merchant).
+// store_staff deleted FIRST (FK-safe). FK violations from orders/products are
+// surfaced as a clean "deactivate instead" message rather than a raw error.
+app.delete('/merchant/branches/:id', async (req, res) => {
+    try {
+        const user = await requireUser(req, res);
+        if (!user)
+            return;
+        const id = req.params.id;
+        const canManage = (await userCanManageBranchFull(user.id, id)) || (await isPlatformAdmin(user.id));
+        if (!canManage)
+            return res.status(403).json({ error: 'Not authorized to delete this branch' });
+        await prisma.$transaction([
+            prisma.storeStaff.deleteMany({ where: { storeId: id } }),
+            prisma.merchantBranch.delete({ where: { id } }),
+        ]);
+        res.json({ ok: true });
+    }
+    catch (error) {
+        if (error?.code === 'P2025')
+            return res.status(404).json({ error: 'Branch not found' });
+        if (error?.code === 'P2003')
+            return res.status(409).json({ error: 'This branch has orders or products and cannot be deleted. Deactivate it instead.' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchant.branches.delete', userMessage: 'Failed to delete branch' });
+    }
+});
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 9a (2026-06-13) — merchants + Store writes via the API.
+// Replaces direct supabase-js writes that relied on the over-permissive RLS on
+// `merchants` ("Enable all operations for anon"!) and `Store` ("all access for
+// all users"). Writes use supabaseAdmin (service_role) so they survive the
+// follow-up write-lockdown; auth is enforced here in Express. Additive — the
+// apps keep using their direct writes until refactored; only then does the
+// lockdown migration land (gated on the merchant OTA). Bodies are snake_case
+// (these tables have many snake_case columns; passthrough minimises app churn),
+// but every field is WHITELISTED — clients cannot set status/commission/kyc via
+// the merchant-facing endpoints.
+// ════════════════════════════════════════════════════════════════════════════
+const pick = (body, cols) => {
+    const out = {};
+    for (const c of cols)
+        if (body && body[c] !== undefined)
+            out[c] = body[c];
+    return out;
+};
+// Merchant edits their own store profile (Settings → Store Details).
+// Store {name,address}; dining-only merchants {cuisines,is_veg,restaurant_type}.
+app.patch('/merchant/profile/:merchantId', async (req, res) => {
+    try {
+        const user = await requireUser(req, res);
+        if (!user)
+            return;
+        const merchantId = req.params.merchantId;
+        const can = (await userCanManageMerchant(user.id, merchantId)) || (await isPlatformAdmin(user.id));
+        if (!can)
+            return res.status(403).json({ error: 'Not authorized to edit this store' });
+        const b = req.body || {};
+        const storeData = {};
+        if (b.name !== undefined)
+            storeData.name = String(b.name).trim();
+        if (b.address !== undefined)
+            storeData.address = b.address;
+        if (Object.keys(storeData).length > 0) {
+            await prisma.store.update({ where: { id: merchantId }, data: storeData });
+        }
+        const mData = pick(b, ['cuisines', 'is_veg', 'restaurant_type']);
+        if (Object.keys(mData).length > 0) {
+            const { error } = await supabaseAdmin.from('merchants').update(mData).eq('id', merchantId);
+            if (error)
+                throw new Error(error.message);
+        }
+        res.json({ ok: true });
+    }
+    catch (error) {
+        if (error?.code === 'P2025')
+            return res.status(404).json({ error: 'Store not found' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchant.profile.update', userMessage: 'Failed to update store details' });
+    }
+});
+// Merchant updates payout/bank details (Settings → Payouts). OWNER-ONLY —
+// bank details are sensitive, so staff are excluded (unlike profile). Returns
+// the updated row (the app reflects it immediately).
+app.put('/merchant/payout/:merchantId', async (req, res) => {
+    try {
+        const user = await requireUser(req, res);
+        if (!user)
+            return;
+        const merchantId = req.params.merchantId;
+        const store = await prisma.store.findUnique({ where: { id: merchantId }, select: { managerId: true } });
+        let owner = !!store && store.managerId === user.id;
+        if (!owner) {
+            const [m, u] = await Promise.all([
+                prisma.merchant.findUnique({ where: { id: merchantId }, select: { phone: true } }),
+                prisma.user.findUnique({ where: { id: user.id }, select: { phone: true } }),
+            ]);
+            const a = u?.phone?.replace(/\D/g, '').slice(-10);
+            const bn = m?.phone?.replace(/\D/g, '').slice(-10);
+            if (a && a.length === 10 && a === bn)
+                owner = true;
+        }
+        if (!owner && !(await isPlatformAdmin(user.id))) {
+            return res.status(403).json({ error: 'Only the store owner can update payout details' });
+        }
+        const mData = pick(req.body, ['bank_account_number', 'ifsc_code', 'bank_name', 'bank_beneficiary_name', 'bank_accounts']);
+        if (Object.keys(mData).length === 0)
+            return res.status(400).json({ error: 'No payout fields provided' });
+        const { data, error } = await supabaseAdmin.from('merchants').update(mData).eq('id', merchantId).select().single();
+        if (error)
+            throw new Error(error.message);
+        res.json(data);
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchant.payout.update', userMessage: 'Failed to update payout details' });
+    }
+});
+// Admin-facing columns of the merchants table (trusted SUPER_ADMIN). Excludes
+// id; everything else an admin legitimately sets when creating/editing a
+// merchant from the dashboard.
+const ADMIN_MERCHANT_COLS = [
+    'store_name', 'branch_name', 'owner_name', 'designation', 'email', 'phone', 'city', 'address',
+    'latitude', 'longitude', 'has_branches', 'kyc_status', 'status', 'rating', 'commission_rate',
+    'operating_hours', 'operating_days', 'vertical', 'vertical_id', 'category', 'cuisines', 'is_veg',
+    'restaurant_type', 'pan_number', 'aadhar_number', 'gst_number', 'msme_number', 'fssai_number',
+    'turnover_range', 'bank_account_number', 'ifsc_code', 'bank_name', 'bank_beneficiary_name',
+    'bank_accounts', 'pan_document_url', 'aadhar_front_url', 'aadhar_back_url', 'gst_certificate_url',
+    'store_photos',
+];
+// Admin creates a merchant (admin-web merchant directory). requireAdmin.
+app.post('/admin/merchants', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res);
+        if (!admin)
+            return;
+        const payload = pick(req.body, ADMIN_MERCHANT_COLS);
+        if (!payload.store_name)
+            return res.status(400).json({ error: 'store_name is required' });
+        payload.kyc_status = payload.kyc_status ?? 'pending';
+        payload.status = payload.status ?? 'active';
+        const { data, error } = await supabaseAdmin.from('merchants').insert([payload]).select().single();
+        if (error)
+            throw new Error(error.message);
+        await writeAuditLog(admin.id, 'merchant.created', 'merchant', data?.id ?? null, null, payload);
+        res.json(data);
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'admin.merchants.create', userMessage: 'Failed to create merchant' });
+    }
+});
+// Admin updates a merchant (generic edit + KYC/status changes). requireAdmin.
+app.patch('/admin/merchants/:id', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res);
+        if (!admin)
+            return;
+        const id = req.params.id;
+        const updates = pick(req.body, ADMIN_MERCHANT_COLS);
+        if (Object.keys(updates).length === 0)
+            return res.status(400).json({ error: 'No updatable fields provided' });
+        updates.updated_at = new Date().toISOString();
+        const { data, error } = await supabaseAdmin.from('merchants').update(updates).eq('id', id).select().single();
+        if (error)
+            throw new Error(error.message);
+        await writeAuditLog(admin.id, 'merchant.updated', 'merchant', id, null, updates);
+        res.json(data);
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'admin.merchants.update', userMessage: 'Failed to update merchant' });
+    }
+});
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 9b (2026-06-13) — catalog/inventory writes via the API
+// (StoreProduct + Product + ProductImage). Replaces direct supabase-js writes in
+// the product modals (AddCustomProductModal, AddMenuProductModal,
+// ConfigureProductsModal), useInventory, and admin StoreProductTable — all of
+// which relied on the over-permissive qual=true RLS on these tables. Writes via
+// supabaseAdmin (service_role) so they survive the lockdown; auth is the branch
+// owner (userCanManageBranchFull on the StoreProduct.branch_id) or a platform
+// admin. Faithful port of the existing (non-transactional, sequential) flows —
+// same semantics, just authorized + lockdown-safe. Column names are the literal
+// DB columns the apps already send (mixed snake/camel), whitelisted.
+// ════════════════════════════════════════════════════════════════════════════
+const PRODUCT_COLS = ['id', 'name', 'mrp', 'subcategory', 'brand', 'ean', 'uom', 'gstRate', 'description', 'image', 'createdByStoreId', 'extra_data', 'category', 'updatedAt'];
+const STORE_PRODUCT_UPDATE_COLS = ['price', 'stock', 'active', 'variant', 'is_best_seller', 'is_deleted'];
+// Look up a StoreProduct's branch, then authorize the caller against it.
+async function authorizeStoreProduct(userId, storeProductId) {
+    const rows = await prisma.$queryRaw `SELECT "branch_id"::text AS branch_id FROM "public"."StoreProduct" WHERE "id" = ${storeProductId} LIMIT 1;`;
+    if (rows.length === 0)
+        return { ok: false, found: false };
+    const branchId = rows[0].branch_id;
+    const ok = (branchId && (await userCanManageBranchFull(userId, branchId))) || (await isPlatformAdmin(userId));
+    return { ok: !!ok, found: true };
+}
+// Composite product save (create OR edit), for both custom + menu modals.
+// body: { branchId, product{...}, images?: string[], storeProducts: [{price,stock,
+//   active,variant,is_best_seller?,id?}], replaceVariants?: boolean }
+app.post('/merchant/products/save', async (req, res) => {
+    try {
+        const user = await requireUser(req, res);
+        if (!user)
+            return;
+        const b = req.body || {};
+        const branchId = String(b.branchId || '').trim();
+        const product = b.product || {};
+        const storeProducts = Array.isArray(b.storeProducts) ? b.storeProducts : [];
+        if (!branchId)
+            return res.status(400).json({ error: 'branchId is required' });
+        if (!product.id)
+            return res.status(400).json({ error: 'product.id is required' });
+        if (storeProducts.length === 0)
+            return res.status(400).json({ error: 'storeProducts is required' });
+        const can = (await userCanManageBranchFull(user.id, branchId)) || (await isPlatformAdmin(user.id));
+        if (!can)
+            return res.status(403).json({ error: 'Not authorized to manage products for this branch' });
+        const productId = String(product.id);
+        // 1. Upsert the Product (PK = id).
+        const productRow = pick(product, PRODUCT_COLS);
+        productRow.id = productId;
+        const { error: pErr } = await supabaseAdmin.from('Product').upsert(productRow);
+        if (pErr)
+            throw new Error(`Product: ${pErr.message}`);
+        // 2. Replace images iff `images` was provided.
+        if (Array.isArray(b.images)) {
+            const { error: delErr } = await supabaseAdmin.from('ProductImage').delete().eq('productId', productId);
+            if (delErr)
+                throw new Error(`ProductImage delete: ${delErr.message}`);
+            if (b.images.length > 0) {
+                const imageData = b.images.map((url, idx) => ({
+                    id: crypto.randomUUID(), productId, url, isPrimary: idx === 0, createdAt: new Date().toISOString(),
+                }));
+                const { error: insErr } = await supabaseAdmin.from('ProductImage').insert(imageData);
+                if (insErr)
+                    throw new Error(`ProductImage insert: ${insErr.message}`);
+            }
+        }
+        // 3. Optionally clear existing variants for this product+branch (menu edit).
+        if (b.replaceVariants === true) {
+            const { error: dErr } = await supabaseAdmin.from('StoreProduct').delete().eq('productId', productId).eq('branch_id', branchId);
+            if (dErr)
+                throw new Error(`StoreProduct clear: ${dErr.message}`);
+        }
+        // 4. Upsert StoreProduct rows (branch + store forced server-side).
+        const spRows = storeProducts.map((sp) => ({
+            id: sp.id ? String(sp.id) : crypto.randomUUID(),
+            storeId: branchId,
+            branch_id: branchId,
+            productId,
+            price: Number(sp.price) || 0,
+            stock: sp.stock != null ? Number(sp.stock) : 0,
+            active: sp.active != null ? !!sp.active : true,
+            variant: sp.variant ? String(sp.variant) : 'Standard',
+            is_best_seller: !!sp.is_best_seller,
+            updatedAt: new Date().toISOString(),
+        }));
+        const { error: spErr } = await supabaseAdmin.from('StoreProduct').upsert(spRows, { onConflict: 'branch_id,productId,variant' });
+        if (spErr)
+            throw new Error(`StoreProduct: ${spErr.message}`);
+        res.json({ ok: true, productId });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchant.products.save', userMessage: error?.message || 'Failed to save product' });
+    }
+});
+// Update a single StoreProduct (inventory: price/stock/active; admin table edits).
+app.patch('/merchant/store-products/:id', async (req, res) => {
+    try {
+        const user = await requireUser(req, res);
+        if (!user)
+            return;
+        const id = req.params.id;
+        const auth = await authorizeStoreProduct(user.id, id);
+        if (!auth.found)
+            return res.status(404).json({ error: 'Product not found' });
+        if (!auth.ok)
+            return res.status(403).json({ error: 'Not authorized to edit this product' });
+        const updates = pick(req.body, STORE_PRODUCT_UPDATE_COLS);
+        if (Object.keys(updates).length === 0)
+            return res.status(400).json({ error: 'No updatable fields provided' });
+        updates.updatedAt = new Date().toISOString();
+        const { error } = await supabaseAdmin.from('StoreProduct').update(updates).eq('id', id);
+        if (error)
+            throw new Error(error.message);
+        res.json({ ok: true });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchant.storeProducts.update', userMessage: 'Failed to update product' });
+    }
+});
+// Soft-delete a StoreProduct (inventory delete).
+app.delete('/merchant/store-products/:id', async (req, res) => {
+    try {
+        const user = await requireUser(req, res);
+        if (!user)
+            return;
+        const id = req.params.id;
+        const auth = await authorizeStoreProduct(user.id, id);
+        if (!auth.found)
+            return res.status(404).json({ error: 'Product not found' });
+        if (!auth.ok)
+            return res.status(403).json({ error: 'Not authorized to delete this product' });
+        const { error } = await supabaseAdmin.from('StoreProduct').update({ is_deleted: true, updatedAt: new Date().toISOString() }).eq('id', id);
+        if (error)
+            throw new Error(error.message);
+        res.json({ ok: true });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchant.storeProducts.delete', userMessage: 'Failed to delete product' });
+    }
+});
+// Bulk-configure existing catalog products for a branch (ConfigureProductsModal).
+// body: { branchId, items: [{ productId, variant, price, stock, active? }] }
+app.post('/merchant/store-products/configure', async (req, res) => {
+    try {
+        const user = await requireUser(req, res);
+        if (!user)
+            return;
+        const b = req.body || {};
+        const branchId = String(b.branchId || '').trim();
+        const items = Array.isArray(b.items) ? b.items : [];
+        if (!branchId)
+            return res.status(400).json({ error: 'branchId is required' });
+        if (items.length === 0)
+            return res.status(400).json({ error: 'items is required' });
+        const can = (await userCanManageBranchFull(user.id, branchId)) || (await isPlatformAdmin(user.id));
+        if (!can)
+            return res.status(403).json({ error: 'Not authorized to configure products for this branch' });
+        const now = new Date().toISOString();
+        const rows = items.map((it) => ({
+            id: it.id ? String(it.id) : crypto.randomUUID(),
+            storeId: branchId,
+            branch_id: branchId,
+            productId: String(it.productId),
+            variant: it.variant ? String(it.variant) : 'Standard',
+            price: Number(it.price) || 0,
+            stock: it.stock != null ? Number(it.stock) : 0,
+            active: it.active != null ? !!it.active : true,
+            createdAt: now,
+            updatedAt: now,
+        }));
+        const { error } = await supabaseAdmin.from('StoreProduct').upsert(rows, { onConflict: 'branch_id,productId,variant' });
+        if (error)
+            throw new Error(error.message);
+        res.json({ ok: true, count: rows.length });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchant.storeProducts.configure', userMessage: 'Failed to configure products' });
     }
 });
 // --- 404 Handler ---

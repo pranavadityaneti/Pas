@@ -181,47 +181,43 @@ export function useMerchants() {
                 }
             }
 
-            const { data, error } = await supabase
-                .from('merchants')
-                .insert([
-                    {
-                        store_name: merchantData.store_name,
-                        branch_name: merchantData.branch_name,
-                        owner_name: merchantData.owner_name,
-                        email: merchantData.email,
-                        phone: merchantData.phone,
-                        city: merchantData.city,
-                        address: merchantData.address,
-                        latitude: merchantData.latitude,
-                        longitude: merchantData.longitude,
-                        has_branches: merchantData.has_branches || false,
-                        kyc_status: 'pending',
-                        status: 'active',
-                        commission_rate: merchantData.commission_rate || 10,
-                        operating_hours: merchantData.operating_hours,
-                        operating_days: merchantData.operating_days,
-                        pan_number: merchantData.pan_number,
-                        aadhar_number: merchantData.aadhar_number,
-                        bank_account_number: merchantData.bank_account_number,
-                        ifsc_code: merchantData.ifsc_code,
-                        turnover_range: merchantData.turnover_range,
-                        category: merchantData.category,
-                        msme_number: merchantData.msme_number,
-                        fssai_number: merchantData.fssai_number,
-                        bank_beneficiary_name: merchantData.bank_beneficiary_name,
-                        // Document URLs
-                        pan_document_url: panUrl || null,
-                        aadhar_front_url: aadharFrontUrl || null,
-                        aadhar_back_url: aadharBackUrl || null,
-                        gst_certificate_url: gstUrl || null,
-                        gst_number: merchantData.gst_number,
-                        store_photos: storePhotoUrls.length > 0 ? storePhotoUrls : merchantData.store_photos || []
-                    }
-                ])
-                .select()
-                .single();
-
-            if (error) throw error;
+            // Phase 9a (2026-06-13): create via the API (POST /admin/merchants,
+            // requireAdmin + whitelisted + audit-logged), not direct supabase-js.
+            // Document/photo uploads above stay client-side; only the merchants
+            // row write moves server-side.
+            const { data } = await api.post('/admin/merchants', {
+                store_name: merchantData.store_name,
+                branch_name: merchantData.branch_name,
+                owner_name: merchantData.owner_name,
+                email: merchantData.email,
+                phone: merchantData.phone,
+                city: merchantData.city,
+                address: merchantData.address,
+                latitude: merchantData.latitude,
+                longitude: merchantData.longitude,
+                has_branches: merchantData.has_branches || false,
+                kyc_status: 'pending',
+                status: 'active',
+                commission_rate: merchantData.commission_rate || 10,
+                operating_hours: merchantData.operating_hours,
+                operating_days: merchantData.operating_days,
+                pan_number: merchantData.pan_number,
+                aadhar_number: merchantData.aadhar_number,
+                bank_account_number: merchantData.bank_account_number,
+                ifsc_code: merchantData.ifsc_code,
+                turnover_range: merchantData.turnover_range,
+                category: merchantData.category,
+                msme_number: merchantData.msme_number,
+                fssai_number: merchantData.fssai_number,
+                bank_beneficiary_name: merchantData.bank_beneficiary_name,
+                // Document URLs
+                pan_document_url: panUrl || null,
+                aadhar_front_url: aadharFrontUrl || null,
+                aadhar_back_url: aadharBackUrl || null,
+                gst_certificate_url: gstUrl || null,
+                gst_number: merchantData.gst_number,
+                store_photos: storePhotoUrls.length > 0 ? storePhotoUrls : merchantData.store_photos || []
+            });
 
             await fetchMerchantsGlobal();
             toast.success('Merchant application submitted successfully');
@@ -240,17 +236,10 @@ export function useMerchants() {
         globalLoading = true;
         notifyListeners();
         try {
-            const { data, error } = await supabase
-                .from('merchants')
-                .update({
-                    ...updates,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', id)
-                .select()
-                .single();
-
-            if (error) throw error;
+            // Phase 9a (2026-06-13): update via the API (PATCH /admin/merchants/:id,
+            // requireAdmin + whitelisted + audit-logged). The endpoint stamps
+            // updated_at server-side.
+            const { data } = await api.patch(`/admin/merchants/${id}`, updates);
 
             await fetchMerchantsGlobal();
             toast.success('Merchant updated successfully');
@@ -353,38 +342,44 @@ export function useMerchants() {
         }
     };
 
+    // Phase 8 (2026-06-11): branch writes go through the API
+    // (POST/DELETE /merchant/branches, which accept platform admins via
+    // isPlatformAdmin), not direct supabase-js — this is what lets the
+    // merchant_branches lockdown migration revoke anon/authenticated write
+    // grants. The API body is camelCase; callers still pass the snake_case
+    // Partial<MerchantBranch>, mapped here.
     const addMerchantBranch = async (branchData: Partial<MerchantBranch>) => {
         try {
-            const { data, error } = await supabase
-                .from('merchant_branches')
-                .insert([branchData])
-                .select()
-                .single();
-
-            if (error) throw error;
+            const b = branchData as any;
+            const { data } = await api.post('/merchant/branches', {
+                merchantId:  b.merchant_id,
+                branchName:  b.branch_name,
+                managerName: b.manager_name ?? null,
+                phone:       b.phone ?? null,
+                city:        b.city ?? null,
+                address:     b.address ?? null,
+                latitude:    b.latitude ?? null,
+                longitude:   b.longitude ?? null,
+                isActive:    b.is_active ?? true,
+            });
             await fetchMerchantsGlobal();
             toast.success('Branch added successfully');
             return data;
         } catch (err: any) {
             console.error('Error adding branch:', err);
-            toast.error('Failed to add branch');
+            toast.error(err?.response?.data?.error || 'Failed to add branch');
             throw err;
         }
     };
 
     const deleteMerchantBranch = async (branchId: string) => {
         try {
-            const { error } = await supabase
-                .from('merchant_branches')
-                .delete()
-                .eq('id', branchId);
-
-            if (error) throw error;
+            await api.delete(`/merchant/branches/${branchId}`);
             await fetchMerchantsGlobal();
             toast.success('Branch deleted');
         } catch (err: any) {
             console.error('Error deleting branch:', err);
-            toast.error('Failed to delete branch');
+            toast.error(err?.response?.data?.error || 'Failed to delete branch');
             throw err;
         }
     };

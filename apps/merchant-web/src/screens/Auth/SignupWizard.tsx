@@ -167,6 +167,15 @@ export default function SignupWizard() {
             }
 
             // 3. Create Merchant Record
+            // ⚠️ RETIRED (Phase 9a, 2026-06-13): this is the LEGACY web signup
+            // (merchant-web is not deployed — superseded by the PAS Merchant
+            // mobile app, which onboards via POST /auth/merchant/draft). This
+            // direct supabase-js insert relied on the "Enable all operations for
+            // anon" RLS hole on `merchants`; once the Phase 9 write-lockdown
+            // lands it will fail (permission denied). If merchant-web is ever
+            // revived, route this through an API signup endpoint instead of a
+            // direct insert. Left in place (not deleted) to avoid touching a
+            // dormant app's flow.
             const { error: dbError } = await supabase
                 .from('merchants')
                 .insert({

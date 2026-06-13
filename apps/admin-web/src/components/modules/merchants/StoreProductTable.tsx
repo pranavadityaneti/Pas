@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import api from "../../../lib/api";
 import { supabase } from "../../../lib/supabaseClient";
 import {
     Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -68,12 +69,11 @@ export function StoreProductTable({ storeId }: StoreProductTableProps) {
         // Optimistic Update
         setProducts(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
 
-        const { error } = await supabase
-            .from('StoreProduct')
-            .update(updates)
-            .eq('id', id);
-
-        if (error) {
+        // Phase 9b (2026-06-13): update via the API (admin-allowed via
+        // isPlatformAdmin), not direct supabase-js.
+        try {
+            await api.patch(`/merchant/store-products/${id}`, updates);
+        } catch (error) {
             toast.error("Update failed");
             fetchInventory(); // Revert on fail
         }

@@ -1,0 +1,55 @@
+-- ════════════════════════════════════════════════════════════════════════════
+-- Phase 9a — merchants + Store WRITE lockdown   (STAGED — DO NOT APPLY YET)
+-- ════════════════════════════════════════════════════════════════════════════
+--
+-- ⛔ GATING CONDITION (hard): apply ONLY after the merchant-app OTA carrying the
+--    Phase 9a rewires (services/merchant.ts + store-details.tsx + payouts.tsx,
+--    commit 565bc6f6) has PROPAGATED, AND PR #3 has merged so admin-web (Vercel)
+--    is calling the new endpoints. Until then, old merchant installs still write
+--    merchants/Store directly via supabase-js; revoking now breaks store-details
+--    save + payout/bank edits on those installs.
+--
+--    Same discipline as the merchant_branches + REQUIRE_COUPON_TOKEN flips: code
+--    ships and propagates first, THEN enforcement lands.
+--
+-- WHY SAFE ONCE GATED — every LIVE write path now goes through the API:
+--   merchant-app  store-details → PATCH /merchant/profile
+--                 payouts       → PUT  /merchant/payout
+--   admin-web     useMerchants  → POST/PATCH /admin/merchants
+--                 MerchantDirectory bulk-status → PATCH /admin/merchants/:id
+--   API internal  PATCH /stores/:id sync → supabaseAdmin (fixed, commit 5d3466ca)
+--   (verified: exhaustive grep shows ZERO direct merchants/Store writes in any
+--    live app. merchant-web SignupWizard is legacy/not-deployed and annotated
+--    RETIRED — if revived, route it through an API signup endpoint first.)
+--   The API writes these tables via supabaseAdmin (service_role) / Prisma, both
+--   of which BYPASS grants + RLS — unaffected by this lockdown.
+--
+-- WHAT THIS CLOSES (the worst exposures found in the RLS sweep):
+--   merchants : "Enable all operations for anon" — ANY caller, even unauthenticated,
+--               could modify/delete merchant records (incl. bank details, KYC, status).
+--   Store     : "Enable all access for all users" + authenticated writes — anyone
+--               could modify/delete any store.
+--
+-- WHAT STAYS OPEN: SELECT. The consumer storefront (anon) + merchant/admin reads
+--   need it, and this data is largely public. Removing the write GRANT blocks
+--   writes at the privilege layer BEFORE any RLS policy is evaluated, so the
+--   leftover permissive policies become toothless for writes without risking reads.
+--
+-- HOW TO APPLY (when gated condition met):
+--   1. mkdir prisma/migrations/<ts>_phase9a_merchants_store_lockdown
+--   2. cp this file there as migration.sql (strip this STAGED header)
+--   3. npx prisma migrate deploy
+--   4. npx ts-node scripts/phase9a_merchants_store_lockdown_verify.ts  (all pass)
+--   5. Smoke: merchant app store-details save + payout edit still work (they hit
+--      the API now); admin merchant create/edit/status still work; a raw
+--      supabase-js write to merchants/Store returns permission denied.
+-- ════════════════════════════════════════════════════════════════════════════
+
+REVOKE INSERT, UPDATE, DELETE ON public.merchants  FROM anon, authenticated;
+REVOKE INSERT, UPDATE, DELETE ON public."Store"     FROM anon, authenticated;
+
+-- ROLLBACK (if needed):
+--   GRANT INSERT, UPDATE, DELETE ON public.merchants TO authenticated;
+--   GRANT INSERT, UPDATE, DELETE ON public."Store"    TO authenticated;
+--   (restores pre-lockdown behaviour; the merchants anon hole would also need
+--    GRANT ... TO anon to fully restore, but you would never want that.)

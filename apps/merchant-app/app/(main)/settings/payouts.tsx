@@ -12,6 +12,7 @@ import { useRealtimeTable } from '../../../src/hooks/useRealtimeTable';
 import { useEarnings } from '../../../src/hooks/useEarnings';
 
 import { useStoreContext } from '../../../src/context/StoreContext';
+import { updatePayout } from '../../../src/services/merchant';
 
 function formatCurrency(amount: number) {
     return '₹' + amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -160,23 +161,17 @@ export default function PayoutsScreen() {
             // 2. Map back to compatible state
             const primary = updatedList.find((a: BankAccount) => a.isPrimary) || newAcc;
 
-            // 3. Update DB
-            const { data: updatedRecord, error } = await supabase
-                .from('merchants')
-                .update({
-                    // Legacy singleton fields (for system compatibility)
-                    bank_account_number: primary.accountNumber,
-                    ifsc_code: primary.ifsc,
-                    bank_name: primary.bankName,
-                    bank_beneficiary_name: primary.beneficiary,
-                    // New multi-account list
-                    bank_accounts: updatedList
-                })
-                .eq('id', targetId)
-                .select()
-                .single();
-
-            if (error) throw error;
+            // 3. Update DB via the API (Phase 9a — owner-only payout endpoint;
+            // bank details no longer written via direct supabase-js).
+            const updatedRecord = await updatePayout(targetId, {
+                // Legacy singleton fields (for system compatibility)
+                bank_account_number: primary.accountNumber,
+                ifsc_code: primary.ifsc,
+                bank_name: primary.bankName,
+                bank_beneficiary_name: primary.beneficiary,
+                // New multi-account list
+                bank_accounts: updatedList,
+            });
 
             // 4. Manually update state to ensure UI reflects changes immediately
             if (updatedRecord) {
@@ -205,20 +200,15 @@ export default function PayoutsScreen() {
 
             const primary = updatedList.find((a: BankAccount) => a.isPrimary)!;
 
-            const { data: updatedRecord, error } = await supabase
-                .from('merchants')
-                .update({
-                    bank_account_number: primary.accountNumber,
-                    ifsc_code: primary.ifsc,
-                    bank_name: primary.bankName,
-                    bank_beneficiary_name: primary.beneficiary,
-                    bank_accounts: updatedList
-                })
-                .eq('id', targetId)
-                .select()
-                .single();
+            // Phase 9a — owner-only payout endpoint (no direct supabase-js write).
+            const updatedRecord = await updatePayout(targetId, {
+                bank_account_number: primary.accountNumber,
+                ifsc_code: primary.ifsc,
+                bank_name: primary.bankName,
+                bank_beneficiary_name: primary.beneficiary,
+                bank_accounts: updatedList,
+            });
 
-            if (error) throw error;
             if (updatedRecord) {
                 setData([updatedRecord as any]);
             }

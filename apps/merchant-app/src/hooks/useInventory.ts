@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Alert } from 'react-native';
 import uuid from 'react-native-uuid';
 import { supabase } from '../lib/supabase';
+import { updateStoreProduct, deleteStoreProduct } from '../services/catalog';
 import { useStore } from './useStore';
 
 export interface InventoryItem {
@@ -133,12 +134,11 @@ export function useInventory() {
         // Optimistic Update
         setInventory(prev => prev.map(item => item.id === id ? { ...item, ...updates } : item));
 
-        const { error } = await supabase
-            .from('StoreProduct')
-            .update(updates)
-            .eq('id', id);
-
-        if (error) {
+        // Phase 9b (2026-06-13): update via the API (branch-authorized), not
+        // direct supabase-js.
+        try {
+            await updateStoreProduct(id, updates as any);
+        } catch (error) {
             console.error('Update failed:', error);
             // Revert or fetch? For now log error.
             fetchInventory();
@@ -193,16 +193,14 @@ export function useInventory() {
         // Optimistic UI update
         setInventory(prev => prev.filter(item => item.id !== id));
 
-        const { error } = await supabase
-            .from('StoreProduct')
-            .update({ is_deleted: true })
-            .eq('id', id);
-
-        if (error) {
+        // Phase 9b (2026-06-13): soft-delete via the API (branch-authorized).
+        try {
+            await deleteStoreProduct(id);
+        } catch (error: any) {
             console.error('Delete failed:', error);
             // Revert the UI back to what it was
             setInventory(previousState);
-            Alert.alert('Error', error.message || 'Failed to delete the product.');
+            Alert.alert('Error', error?.message || 'Failed to delete the product.');
         }
     };
 

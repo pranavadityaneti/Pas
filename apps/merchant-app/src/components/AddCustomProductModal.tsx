@@ -9,6 +9,7 @@ import { useRouter } from 'expo-router';
 import { Colors } from '../../constants/Colors';
 import { supabase } from '../lib/supabase';
 import uuid from 'react-native-uuid';
+import { saveProduct } from '../services/catalog';
 import { InventoryItem } from '../hooks/useInventory';
 import { useStore } from '../hooks/useStore';
 
@@ -469,78 +470,30 @@ export default function AddCustomProductModal({ visible, onClose, onSuccess, sto
                 updatedAt: new Date().toISOString(),
             };
 
-            if (isEditing) {
-                const { error: productError } = await supabase
-                    .from('Product')
-                    .update(productPayload)
-                    .eq('id', productId);
-                if (productError) throw productError;
-            } else {
-                const { error: productError } = await supabase
-                    .from('Product')
-                    .insert({
-                        id: productId,
-                        ...productPayload,
-                        createdByStoreId: activeRole?.id || storeId,
-                    });
-                if (productError) throw productError;
-            }
-
-            // 3. Upsert StoreProduct
-            const storeProductPayload = {
-                price: parsedSellingPrice,
-                stock: parseInt(stock) || 0,
-                updatedAt: new Date().toISOString(),
-            };
-
-            if (isEditing) {
-                const { error: storeProductError } = await supabase
-                    .from('StoreProduct')
-                    .update(storeProductPayload)
-                    .eq('id', itemToEdit.id);
-                if (storeProductError) throw storeProductError;
-            } else {
-                const { error: storeProductError } = await supabase
-                    .from('StoreProduct')
-                    .insert({
-                        id: uuid.v4().toString(),
-                        storeId: activeRole?.id || storeId,
-                        branch_id: activeRole?.id || storeId, // Explicit branch map to prevent feed dropout
-                        productId: productId,
-                        ...storeProductPayload,
-                        active: true,
-                        variant: "Standard",
-                        is_best_seller: false
-                    });
-                if (storeProductError) throw storeProductError;
-            }
-
-            // 4. Update Images in ProductImage table
-            // Simple approach: Delete all existing for this product and re-insert
-            if (uploadedUrls.length > 0) {
-                console.log("[AddCustomProductModal] Saving images. Total:", uploadedUrls.length);
-                const { error: delError } = await supabase.from('ProductImage').delete().eq('productId', productId);
-                if (delError) console.warn("[AddCustomProductModal] Error deleting old images:", delError);
-                
-                const imageData = uploadedUrls.map((url, idx) => ({
-                    id: uuid.v4().toString(),
-                    productId: productId,
-                    url,
-                    isPrimary: idx === 0,
-                    createdAt: new Date().toISOString()
-                }));
-
-                console.log("[AddCustomProductModal] Inserting image data count:", imageData.length);
-                const { error: imageError } = await supabase
-                    .from('ProductImage')
-                    .insert(imageData);
-
-                if (imageError) {
-                    console.error("[AddCustomProductModal] Failed to save product images:", imageError);
-                } else {
-                    console.log("[AddCustomProductModal] Successfully saved images to ProductImage");
-                }
-            }
+            // Phase 9b (2026-06-13): one composite API call replaces the
+            // direct Product + StoreProduct + ProductImage writes. Storage
+            // uploads (uploadedUrls) stay client-side; images are passed only
+            // when new uploads exist (else existing images are left untouched).
+            // On edit, the existing StoreProduct id is passed so the upsert
+            // keeps the same row (no PK churn).
+            const branchId = activeRole?.id || storeId;
+            await saveProduct({
+                branchId,
+                product: {
+                    id: productId,
+                    ...productPayload,
+                    ...(isEditing ? {} : { createdByStoreId: branchId }),
+                },
+                ...(uploadedUrls.length > 0 ? { images: uploadedUrls } : {}),
+                storeProducts: [{
+                    ...(isEditing ? { id: itemToEdit.id } : {}),
+                    price: parsedSellingPrice,
+                    stock: parseInt(stock) || 0,
+                    active: true,
+                    variant: "Standard",
+                    is_best_seller: false,
+                }],
+            });
 
             Alert.alert("Success", isEditing ? "Product updated!" : "Custom product created!");
             onSuccess();

@@ -36,6 +36,25 @@
 
 ## 🎟️ Coupon Foolproof — deferred audit findings + open flags (added 2026-06-10)
 
+### 🔐 Phase 8 RLS lockdown — IN PROGRESS (2026-06-13)
+**Item 1 (User + order_items + 5 defense tables RLS) — DONE & APPLIED to prod** (PR #3, migrations 20260611020000 + 030000). Verified: scripts/p8_rls_verify.ts all pass.
+
+**Item 2 (merchant_branches write lockdown) — backend + app routing DONE; lockdown migration GATED:**
+- ✅ API: POST/PUT/DELETE /merchant/branches (userCanManageMerchant / userCanManageBranchFull / isPlatformAdmin). Deployed to EB.
+- ✅ merchant-app: services/branches.ts + branches.tsx + settings/index.tsx + StoreContext (toggleStoreStatus, updateStoreDetails) all route through API. **Rides next merchant OTA.**
+- ✅ admin-web: useMerchants.ts add/deleteMerchantBranch → API. Ships on PR #3 merge to main (Vercel).
+- ⛔ **GATED — DO NOT APPLY until merchant OTA propagated**: `apps/api/scripts/phase8_branch_lockdown.STAGED.sql` revokes anon/authenticated INSERT/UPDATE/DELETE on merchant_branches. Verify with phase8_branch_lockdown_verify.ts. This closes "any logged-in user can modify/delete any branch." SELECT stays open (discovery + storefront).
+- **Rollout order**: (1) merge PR #3 → main (admin-web live, API already deployed); (2) Pranav OTAs merchant app; (3) after OTA propagates, apply the staged lockdown migration + verify.
+
+### Remaining verified-pending items from the June 6 audit (next, in priority order)
+- ~~**#11 OTP modal reset**~~ — ✅ FIXED 2026-06-13 (PR #4, branch fix/merchant-otp-modal-reset). useEffect keyed on (visible, orderId) clears otp/error/loading on each open. Rides next merchant OTA.
+- **#7 operating_hours**: 25/26 branches NULL → customer app defaults "Open Now" to true on NULL. Fix: flip default to fail-closed + backfill/prompt.
+- **#1 order_number unification** (order_requests has no order_number column).
+- **Wati-OTP name capture** (22/32 consumers NULL name).
+- **#14 data hygiene**: 2 NULL-merchant_id stores (Clean cuts, Folli Medicals), 2 test cities.
+- **#15 phone format** (3 merchants; defer until more scale).
+
+
 ### Phase 7G audit — deferred mediums/lows (added 2026-06-11; blockers + highs all FIXED in commit 04734624)
 - **Negative-net cycles & mark-paid semantics** — a clawback-only week produces netPayout < 0; the mark-paid flow treats it like a payout. Needs a founder decision: carry the debt into the next cycle automatically vs invoice the merchant. (audit M-22/M-24)
 - **Refund rupee-rounding vs clawback paise** — the cancel path rounds refunds to whole rupees before paise conversion; recorded clawback can differ from moved money by <₹1. Align rounding in one place. (M-21)
@@ -711,3 +730,33 @@
 ## Strikethroughs (no longer relevant)
 
 *(none)*
+
+### 2026-06-13 — queue decisions + Phase 9 RLS epic kickoff
+- **D1 store-hours — DECIDED (Pranav):** capture open/close time DURING merchant signup (when adding each store), editable later in Settings. Structural fix, forward-looking. NOTE: does not retro-fix the 25 existing NULL-hours branches — those merchants set hours in Settings (save bug already fixed) or via a one-time nudge. Implementation = merchant signup-flow change (rides OTA/native). QUEUED to build.
+- **D2 data hygiene — DONE 2026-06-13:** deleted 2 "Test City" rows (0 refs); backfilled Clean cuts Store.merchant_id (= its own id; merchants row + branch already existed). 
+- **⚠️ Folli Medicals (7c575305-…) — STRUCTURAL REPAIR NEEDED (separate):** Store.merchant_id still NULL because it has NO merchants row and NO merchant_branches row (lost them). Needs the "Part 0" repair from the see-the-attached-screenshots plan: recreate merchants row + main branch with real storefront lat/long (needs Pranav's confirmation of the store's real address/coords). Until then it stays invisible to customers.
+- **Phase 9 RLS epic — STARTED:** route-through-API + gated lockdown for the 5 app-written exposed tables. Order (Pranav): merchants + Store FIRST (worst — merchants is anon-writable), then StoreProduct, Product, ProductImage. See docs/pending-queue-2026-06-13.html §3.
+
+### Phase 9a backend — DONE 2026-06-13 (deployed; apps + lockdown remain)
+- API L5568 merchants-sync: anon → supabaseAdmin ✅ (commit 5d3466ca).
+- Endpoints LIVE (commit 2974e080, deployed + smoke-verified 401): PATCH /merchant/profile/:merchantId (Store+dining, whitelisted, userCanManageMerchant/admin), PUT /merchant/payout/:merchantId (bank, OWNER-ONLY/admin), POST /admin/merchants + PATCH /admin/merchants/:id (requireAdmin, whitelisted, audit-logged).
+- **9a app rewires — DONE 2026-06-13 (commit 565bc6f6):** store-details.tsx + payouts.tsx (merchant-app, services/merchant.ts) → API; useMerchants + MerchantDirectory (admin-web) → API; merchant-web SignupWizard annotated RETIRED. Exhaustive re-grep: 0 direct merchants/Store writes in any live app. tsc clean.
+- **9a lockdown — STAGED + GATED:** apps/api/scripts/phase9a_merchants_store_lockdown.STAGED.sql (REVOKE writes on merchants + Store, keep SELECT) + _verify.ts. APPLY ONLY after (a) PR #3 merged (admin-web live) AND (b) merchant OTA propagated.
+- **9b (StoreProduct/Product/ProductImage)** still pending — see docs/pending-queue-2026-06-13.html §8.
+
+### Phase 9b (StoreProduct/Product/ProductImage) — investigation + design DONE 2026-06-13; build pending
+Most intricate cluster (core daily merchant catalog/inventory flows). Full write-flow analysis + proposed endpoint design in docs/pending-queue-2026-06-13.html §8 (9b). 5 endpoints: POST/PATCH /merchant/products (composite Product+StoreProduct+ProductImage txn, kind custom|menu), PATCH+DELETE /merchant/store-products/:id (inventory), POST /merchant/store-products/configure (bulk). Auth: userCanManageBranchFull on StoreProduct.branch_id / admin. Refactor 5 sites: AddCustomProductModal, AddMenuProductModal, ConfigureProductsModal, useInventory, admin StoreProductTable → re-grep → gated lockdown. RECOMMEND a dedicated session (breaking these = merchants can't manage catalog/stock).
+
+### Phase 9b backend — DONE 2026-06-13 (deployed; app rewires + lockdown remain)
+Endpoints LIVE (commit 020584b2, deployed + smoke-verified 401): POST /merchant/products/save (composite Product+ProductImage+StoreProduct, custom+menu, create+edit), PATCH + DELETE /merchant/store-products/:id (inventory; authorizeStoreProduct → branch owner/admin), POST /merchant/store-products/configure (bulk). Writes via supabaseAdmin, whitelisted literal DB cols.
+**REMAINING 9b (next session — app rewires):** AddCustomProductModal + AddMenuProductModal → POST /merchant/products/save (build {product, images[], storeProducts[], replaceVariants}); ConfigureProductsModal → POST /merchant/store-products/configure; useInventory updateItem/deleteItem → PATCH/DELETE /merchant/store-products/:id; admin StoreProductTable → PATCH /merchant/store-products/:id. Keep storage uploads client-side (pass URLs). Then re-grep (0 direct StoreProduct/Product/ProductImage writes) → GATED lockdown (REVOKE writes on all 3, keep SELECT). Gate on merchant OTA + PR #3 merge.
+
+### Phase 9b app rewires — DONE 2026-06-13 (commit d9d2a2bb); lockdown staged + gated
+All 5 catalog write sites routed through the API: AddCustomProductModal + AddMenuProductModal → saveProduct; ConfigureProductsModal → configureStoreProducts; useInventory update/delete → PATCH/DELETE; admin StoreProductTable → PATCH. services/catalog.ts (NEW). Storage uploads stay client-side. Exhaustive re-grep: 0 direct StoreProduct/Product/ProductImage writes in any live app. tsc clean both apps.
+**9b lockdown — STAGED + GATED:** apps/api/scripts/phase9b_catalog_lockdown.STAGED.sql + _verify.ts. APPLY ONLY after PR #3 merged + merchant OTA propagated.
+
+### 🔐 PHASE 9 COMPLETE (code) — 3 staged lockdowns awaiting the SAME gate (PR #3 merge + merchant OTA propagation):
+1. apps/api/scripts/phase8_branch_lockdown.STAGED.sql  (merchant_branches)
+2. apps/api/scripts/phase9a_merchants_store_lockdown.STAGED.sql  (merchants + Store)
+3. apps/api/scripts/phase9b_catalog_lockdown.STAGED.sql  (StoreProduct + Product + ProductImage)
+Each has a matching *_verify.ts. Apply order doesn't matter; run each migrate deploy + verify once the gate opens. Also still pending from the broad sweep: ProductAuditLog/_prisma_migrations already locked (2026-06-13); City/table_bookings already locked.

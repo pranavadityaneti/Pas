@@ -8,6 +8,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { supabase } from '../../../src/lib/supabase';
 import { Colors } from '../../../constants/Colors';
 import { useStore } from '../../../src/hooks/useStore';
+import { createBranch } from '../../../src/services/branches';
 import { deregisterPushToken } from '../../../src/hooks/usePushNotifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -123,20 +124,23 @@ export default function SettingsScreen() {
             Alert.alert('Required', 'Branch name is required.');
             return;
         }
+        if (!merchantId) {
+            Alert.alert('Error', 'No store selected. Please reopen this screen.');
+            return;
+        }
         setIsSubmitting(true);
         try {
-            const { error } = await supabase
-                .from('merchant_branches')
-                .insert({
-                    id: uuid.v4(),
-                    merchant_id: merchantId,
-                    branch_name: branchForm.name.trim(),
-                    manager_name: branchForm.manager.trim() || null,
-                    phone: branchForm.phone.trim() || null,
-                    city: branchForm.city.trim() || null,
-                    is_active: true,
-                });
-            if (error) throw error;
+            // Phase 8 (2026-06-11): create via the API (services/branches.ts),
+            // not direct supabase-js — gated by userCanManageMerchant.
+            await createBranch({
+                id: uuid.v4() as string,
+                merchantId: merchantId,
+                branchName: branchForm.name.trim(),
+                managerName: branchForm.manager.trim() || null,
+                phone: branchForm.phone.trim() || null,
+                city: branchForm.city.trim() || null,
+                isActive: true,
+            });
 
             Alert.alert('Success', `Branch "${branchForm.name}" created successfully.`);
             setBranchForm({ name: '', manager: '', phone: '', city: '' });

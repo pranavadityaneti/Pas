@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PAS — Pending Queue & Status (2026-06-13)</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 1000px; margin: 0 auto; padding: 28px 32px 80px; color: #1a1a1a; background: #fafafa; line-height: 1.55; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  h2 { font-size: 18px; margin: 32px 0 10px; padding-bottom: 6px; border-bottom: 1.5px solid #d4d4d4; }
+  .lead { color: #555; font-size: 14px; margin-bottom: 20px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 8px 0 16px; background:#fff; }
+  th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #eee; vertical-align: top; }
+  th { background: #f6f6f6; font-weight: 700; }
+  code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 90%; }
+  .pill { display:inline-block; padding:1px 7px; border-radius:10px; font-size:10.5px; font-weight:700; }
+  .done { background:#d1fae5; color:#065f46; } .gated { background:#fef9c3; color:#713f12; }
+  .now { background:#dbeafe; color:#1e40af; } .epic { background:#fee2e2; color:#991b1b; }
+  .defer { background:#ede9fe; color:#5b21b6; } .decide { background:#ffedd5; color:#9a3412; }
+  .note { background:#fffbe6; border-left:3px solid #f59e0b; padding:8px 14px; margin:10px 0; font-size:13px; }
+  .crit { background:#fef2f2; border-left:3px solid #dc2626; padding:8px 14px; margin:10px 0; font-size:13px; }
+  @media print { body { background:#fff; max-width:none; } }
+</style>
+</head>
+<body>
+<h1>PAS — Pending Queue & Status</h1>
+<div class="lead">Reference snapshot, <strong>2026-06-13</strong>. Supersedes the June-6 pending audit for status tracking. Legend:
+<span class="pill done">DONE</span> shipped/applied ·
+<span class="pill gated">GATED</span> built, waiting on a deploy/OTA ·
+<span class="pill now">DO-NOW</span> safe & scoped, actionable immediately ·
+<span class="pill epic">EPIC</span> large multi-step (needs sequencing) ·
+<span class="pill decide">DECIDE</span> needs your call ·
+<span class="pill defer">DEFER</span> product feature / blocked / low-priority.</div>
+
+<h2>1. Done this session</h2>
+<table>
+<tr><th>Item</th><th>Status</th><th>Where</th></tr>
+<tr><td><b>RLS lockdown — User, order_items + 5 settlement/audit tables</b></td><td><span class="pill done">DONE</span> applied to prod</td><td>PR #3, migrations <code>020000</code>+<code>030000</code></td></tr>
+<tr><td><b>OTP modal reset</b> (merchant Ready-tab safety bug, #11)</td><td><span class="pill done">DONE</span></td><td>PR #4 (rides merchant OTA)</td></tr>
+<tr><td><b>Timings save bug (#4)</b></td><td><span class="pill done">verified already fixed</span></td><td>—</td></tr>
+<tr><td>Phase 7 settlement + 7G audit fixes; FQ-1 (7%); Phase 8 backend</td><td><span class="pill done">DONE</span> earlier</td><td>main / PR #3</td></tr>
+</table>
+
+<h2>2. Gated — built, waiting on deploy/OTA</h2>
+<table>
+<tr><th>Item</th><th>Blocking on</th></tr>
+<tr><td><b>merchant_branches write lockdown</b> — all writes routed through API (merchant + admin); SQL staged at <code>scripts/phase8_branch_lockdown.STAGED.sql</code></td><td>(1) merge PR #3 → main, (2) merchant OTA propagates, (3) I apply the staged migration + verify</td></tr>
+<tr><td><b>Consumer Phase 4/5 + merchant Phase 6/7F</b> (coupons, settlement UI)</td><td>the pending EAS OTAs you're pushing tonight/tomorrow</td></tr>
+<tr><td><b>Settlement flags</b> — <code>REQUIRE_COUPON_TOKEN</code>, <code>REQUIRE_ORDERS_AUTH</code>, <code>CRON_DRY_RUN</code> flip-back</td><td>OTA propagation + 24h clean Sentry (your call)</td></tr>
+</table>
+
+<h2>3. 🔴 NEW — Broad RLS write-exposure epic (was #8 "RLS sweep")</h2>
+<div class="crit"><b>The sweep found the over-permissive-write problem is system-wide, not just merchant_branches.</b> Tables where <em>any logged-in user — and in two cases any anonymous user — can INSERT/UPDATE/DELETE rows that aren't theirs:</em></div>
+<table>
+<tr><th>Table</th><th>Exposure</th><th>Written by an app directly?</th><th>Plan</th></tr>
+<tr><td><code>merchants</code></td><td><b>"Enable all operations for anon"</b> + authenticated writes — anyone can alter/delete merchant records</td><td>Yes (6 callsites — signup)</td><td>route → API, then lock</td></tr>
+<tr><td><code>Store</code></td><td>"all access for all users" + authenticated INSERT/UPDATE/DELETE — modify/delete any store</td><td>Yes (1)</td><td>route → API, then lock</td></tr>
+<tr><td><code>StoreProduct</code></td><td>authenticated write on any row — a merchant could edit another merchant's catalog/prices</td><td>Yes (8 — inventory mgmt)</td><td>route → API, then lock</td></tr>
+<tr><td><code>Product</code> (global catalog)</td><td>authenticated INSERT/UPDATE/DELETE</td><td>Yes (3)</td><td>route → API, then lock</td></tr>
+<tr><td><code>ProductImage</code></td><td>ALL qual=true</td><td>Yes (4)</td><td>route → API, then lock</td></tr>
+<tr><td><code>merchant_branches</code></td><td>(same class)</td><td>Yes</td><td><span class="pill gated">GATED</span> already done — see §2</td></tr>
+<tr><td><code>City</code></td><td>"Enable all access for all users"</td><td>No (0)</td><td><span class="pill now">DO-NOW</span> lock writes, keep SELECT</td></tr>
+<tr><td><code>table_bookings</code></td><td>ALL qual=true</td><td>No (0)</td><td><span class="pill now">DO-NOW</span> verify + lock</td></tr>
+<tr><td><code>ProductAuditLog</code></td><td>RLS off + write grants</td><td>No (0)</td><td><span class="pill now">DO-NOW</span> RLS + revoke</td></tr>
+<tr><td><code>_prisma_migrations</code></td><td>RLS off + write grants</td><td>No (0)</td><td><span class="pill now">DO-NOW</span> revoke anon/auth</td></tr>
+</table>
+<div class="note"><b>Recommendation:</b> this is a "Phase 9" security epic. The 4 <span class="pill now">DO-NOW</span> tables I can lock safely right away (no app writes them via PostgREST; reads preserved). The 5 app-written tables each need the same disciplined treatment merchant_branches got: build API write endpoints → refactor the app → OTA → gated lockdown. That's real work and several OTAs — best done table-by-table, not rushed. <b>Biggest single risk to close first: <code>merchants</code> (anon can write) and <code>Store</code>.</b></div>
+
+<h2>4. Actionable now (safe, scoped) — executing this session</h2>
+<table>
+<tr><th>Item</th><th>What</th><th>Risk</th></tr>
+<tr><td><span class="pill now">DO-NOW</span> RLS quick-locks</td><td>City / table_bookings / ProductAuditLog / _prisma_migrations — revoke anon/auth writes, keep reads (one migration, confirm before apply)</td><td>Low (no app writes them)</td></tr>
+<tr><td><span class="pill decide">DECIDE</span> #7 operating_hours</td><td>25 of 26 branches have NULL hours; consumer app defaults NULL→"Open Now". See decision below.</td><td><b>High UX impact</b> — flipping to fail-closed darkens 25 stores</td></tr>
+<tr><td><span class="pill decide">DECIDE</span> #14 data hygiene</td><td>Backfill 2 NULL-<code>merchant_id</code> Stores (Clean cuts, Folli Medicals); delete 2 "Test City" rows</td><td>Deletes prod rows → needs your OK</td></tr>
+<tr><td><span class="pill now">DO-NOW</span> Wati-OTP name capture</td><td>22/32 consumers have NULL name; prompt for name at first login (consumer OTA)</td><td>Low (consumer UI)</td></tr>
+</table>
+
+<h2>5. Medium features — ready to build, not rushed</h2>
+<table>
+<tr><th>Item</th><th>Scope</th></tr>
+<tr><td><b>#1 Order-number unification</b></td><td>DB migration (add <code>order_number</code> to <code>order_requests</code>) + API at request/order create + consumer & merchant UI + 2 OTAs. Touches the checkout path — wants its own careful pass.</td></tr>
+<tr><td><b>#22 Customer notifications</b></td><td>14-scenario lifecycle plan (pickup 6 + dining 3 + scheduled reminders + return/exchange). Large; design exists in forlater.</td></tr>
+</table>
+
+<h2>6. Deferred (product / blocked / low) — reference only</h2>
+<table>
+<tr><th>Item</th><th>Why deferred</th></tr>
+<tr><td><span class="pill defer">DEFER</span> #5 <code>is_active</code> field overload</td><td>Architectural split (is_active vs accepting_orders) — pre-scale refactor, no active bug</td></tr>
+<tr><td><span class="pill defer">DEFER</span> #15 phone-format normalize</td><td>Only 3 merchants; revisit at scale</td></tr>
+<tr><td><span class="pill defer">DEFER</span> #20 Reschedule + Reorder</td><td>Customer product feature; significant scope</td></tr>
+<tr><td><span class="pill defer">DEFER</span> #21 Instagram campaign</td><td>Needs Meta App Review (2–4 wks) + business account setup</td></tr>
+<tr><td><span class="pill defer">DEFER</span> Audit-log viewer page</td><td>Build once audit data accumulates</td></tr>
+<tr><td><span class="pill defer">DEFER</span> Customers load-more UI</td><td>Only needed past ~400 customers (currently 32)</td></tr>
+<tr><td><span class="pill defer">DEFER</span> KYC vendor, Payouts vendor, Cloudinary, PostHog</td><td>Vendor selection / founder decisions (separate epics)</td></tr>
+</table>
+
+<h2>7. Founder decisions needed</h2>
+<table>
+<tr><th>#</th><th>Decision</th><th>Recommendation</th></tr>
+<tr><td>D1</td><td><b>operating_hours</b>: 25/26 branches have no hours set. Default behavior on NULL?</td><td>Backfill a sane default (e.g. 9am–9pm, all days) for the 25 NULL branches + prompt merchants to confirm — rather than flip to fail-closed (which darkens them). Then change the NULL default to fail-closed going forward.</td></tr>
+<tr><td>D2</td><td><b>Delete test data?</b> "Test City" + "Test City 1774176523" rows</td><td>Yes — confirm and I'll delete + backfill the 2 NULL-merchant_id stores.</td></tr>
+<tr><td>D3</td><td><b>Phase 9 RLS epic vs product features</b> — which next after the safe locks?</td><td>Close <code>merchants</code> (anon-writable) + <code>Store</code> first; they're the worst exposures.</td></tr>
+<tr><td>FQ-2</td><td>Stationery sub-split + F&amp;B tiers 3–5 (commission rates, still provisional)</td><td>Your input when ready</td></tr>
+<tr><td>FQ-6</td><td>GST-on-commission + TCS (share Phase 7 doc with CA)</td><td>Before first PAID cycle</td></tr>
+</table>
+
+<h2>8. Phase 9 RLS epic — turn-key build plan (investigation complete 2026-06-13)</h2>
+<div class="note"><b>Investigation done — the hard, error-prone part.</b> Key findings that de-risk the build:
+<ul>
+<li>The <b>mobile merchant signup already routes through the API</b> (<code>POST /auth/merchant/draft</code>, Prisma) — it does NOT write <code>merchants</code> directly. Only <b>merchant-web</b> <code>SignupWizard</code> does a direct insert, and merchant-web is <b>legacy</b> (v0.0.1, no deploy config, untouched since 2026-04-03). So live onboarding is unaffected by the lockdown.</li>
+<li>The API's own <code>merchants</code> write at index.ts:5568 used the <b>anon</b> client — <span class="pill done">FIXED 2026-06-13</span> → <code>supabaseAdmin</code> (rides next API deploy). This was the only API-internal anon write to any Phase 9 / locked table (verified).</li>
+<li><b>Grep lesson:</b> write chains span multiple lines (<code>supabase</code> / <code>.from()</code> / <code>.upsert()</code> on separate lines) — detect with <code>.from('T')</code> + context window, not <code>supabase.from</code> on one line.</li>
+</ul></div>
+
+<h3>9a — merchants + Store (do first; merchants is anon-writable)</h3>
+<b>API endpoints to build</b> (additive — deploy is safe, apps keep working until refactored):
+<table>
+<tr><th>Endpoint</th><th>Replaces</th><th>Payload / auth</th></tr>
+<tr><td><code>PATCH /merchant/profile/:merchantId</code></td><td>merchant-app <code>store-details.tsx</code> (Store + merchants writes)</td><td>Store {name,address} + (dining) merchants {cuisines,is_veg,restaurant_type}. Auth: <code>userCanManageMerchant</code> OR <code>isPlatformAdmin</code>.</td></tr>
+<tr><td><code>PUT /merchant/payout/:merchantId</code></td><td>merchant-app <code>payouts.tsx</code> (×2)</td><td>merchants {bank_account_number, ifsc_code, bank_name, bank_beneficiary_name, bank_accounts}. <b>Sensitive — owner-only</b> (Store.managerId == user) OR admin; NOT staff.</td></tr>
+<tr><td><code>POST /admin/merchants</code></td><td>admin <code>useMerchants.createMerchant</code> (big KYC insert)</td><td>requireAdmin. Whitelist the full create payload (see useMerchants.ts:187-219).</td></tr>
+<tr><td><code>PATCH /admin/merchants/:id</code></td><td>admin <code>useMerchants.updateMerchant</code> (generic) + <code>MerchantDirectory.tsx:140</code> (status)</td><td>requireAdmin. Whitelist updatable fields incl. <code>status</code>. (Or reuse <code>POST /merchants/:id/kyc-decision</code> for status.)</td></tr>
+</table>
+<b>App refactors</b> (each rides an OTA / Vercel deploy):
+<ul>
+<li>merchant-app: <code>store-details.tsx</code> → PATCH /merchant/profile; <code>payouts.tsx</code> (handleAddBank + handleSetPrimaryBank) → PUT /merchant/payout. Add to <code>services/branches.ts</code>-style service (e.g. <code>services/merchant.ts</code>).</li>
+<li>admin-web: <code>useMerchants.ts</code> createMerchant/updateMerchant → API; <code>MerchantDirectory.tsx</code> status → API.</li>
+</ul>
+<b>Then</b>: exhaustive re-grep (zero direct merchants/Store writes) → <span class="pill gated">GATED</span> lockdown migration: <code>REVOKE INSERT/UPDATE/DELETE ON merchants, "Store" FROM anon, authenticated;</code> + drop the qual=true write policies (incl. the <b>"Enable all operations for anon"</b> on merchants). Keep SELECT (storefront + discovery). Gate on merchant-app OTA propagation.
+
+<h3>9b — StoreProduct + Product + ProductImage (catalog/inventory cluster) — investigation DONE 2026-06-13</h3>
+<div class="note"><b>The most intricate part of the system</b> — core daily merchant workflows (add/edit product, inventory). Each save is a multi-table transaction. Build it in a dedicated session; do NOT rush (breaking these = merchants can't manage their catalog/stock).</div>
+<b>Write flows (verified by reading each):</b>
+<ul>
+<li><b>AddCustomProductModal</b> (grocery): <code>Product</code> insert/update → <code>StoreProduct</code> insert/update (price,stock) → <code>ProductImage</code> delete+insert. Storage uploads before.</li>
+<li><b>AddMenuProductModal</b> (dining): <code>Product</code> upsert → <code>ProductImage</code> delete+insert → <code>StoreProduct</code> delete(if edit)+upsert with VARIANTS (onConflict <code>branch_id,productId,variant</code>).</li>
+<li><b>useInventory</b>: <code>updateItem</code> (StoreProduct update price/stock/active) + <code>deleteItem</code> (StoreProduct soft-delete <code>is_deleted=true</code>). Also inserts <code>notifications</code> (separate table — leave).</li>
+<li><b>ConfigureProductsModal</b>: bulk <code>StoreProduct</code> upsert (onConflict <code>branch_id,productId,variant</code>) — configure existing catalog items for a branch.</li>
+<li><b>admin StoreProductTable.tsx:73</b>: <code>StoreProduct</code> update.</li>
+</ul>
+<b>Proposed endpoints</b> (writes via supabaseAdmin/Prisma; auth: <code>userCanManageBranchFull</code> on the StoreProduct <code>branch_id</code>, or admin). All additive — safe to build+deploy before refactoring:
+<table>
+<tr><th>Endpoint</th><th>Serves</th><th>Body</th></tr>
+<tr><td><code>POST /merchant/products</code></td><td>AddCustomProductModal + AddMenuProductModal (create)</td><td>composite: {product{...}, storeProducts[{price,stock,variant,active}], images[url]} → one transaction (Product + StoreProduct rows + ProductImage replace). <code>kind: 'custom'|'menu'</code> to branch the variant logic.</td></tr>
+<tr><td><code>PATCH /merchant/products/:productId</code></td><td>both modals (edit)</td><td>same composite, edit semantics (update Product, replace images, delete+re-upsert StoreProduct variants).</td></tr>
+<tr><td><code>PATCH /merchant/store-products/:id</code></td><td>useInventory.updateItem; admin StoreProductTable</td><td>{price?,stock?,active?,...} single-row update.</td></tr>
+<tr><td><code>DELETE /merchant/store-products/:id</code></td><td>useInventory.deleteItem</td><td>soft-delete (is_deleted=true).</td></tr>
+<tr><td><code>POST /merchant/store-products/configure</code></td><td>ConfigureProductsModal</td><td>bulk upsert StoreProduct rows for a branch.</td></tr>
+</table>
+<b>Auth nuance:</b> <code>Product</code> is the global catalog but merchants create custom rows — gate Product writes by "user manages the branch this product is being listed at" (the accompanying StoreProduct.branch_id), not by Product ownership. Admin bypasses.<br>
+<b>Then</b>: refactor the 5 sites → exhaustive re-grep (0 direct StoreProduct/Product/ProductImage writes) → <span class="pill gated">GATED</span> lockdown (REVOKE writes on all three; keep SELECT — storefront reads catalog). Gate on merchant OTA.
+
+<p style="color:#777;font-size:12px;margin-top:40px;">Generated 2026-06-13 · sources: live prod RLS sweep (<code>scripts/p8c_rls_sweep.ts</code>), exhaustive write-site grep, forlater.md, SESSION_LOG.md, git log. Saved at <code>docs/pending-queue-2026-06-13.html</code>.</p>
+</body>
+</html>

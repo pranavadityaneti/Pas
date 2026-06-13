@@ -15,6 +15,7 @@ import { Colors } from '../../../constants/Colors'
 import BottomModal from '../../../src/components/BottomModal';
 import { useCreateManager } from '../../../src/hooks/useStaff';
 import { useImageUpload } from '../../../src/hooks/useImageUpload';
+import { createBranch, updateBranch, deleteBranch, BranchWritePayload } from '../../../src/services/branches';
 
 LogBox.ignoreLogs(['VirtualizedLists should never be nested']);interface Branch {
     id: string;
@@ -201,37 +202,34 @@ export default function BranchesScreen() {
         setSaving(true);
         try {
             let finalBranchId = editingBranch?.id;
-            const payload: any = {
-                merchant_id: targetMerchantId,
-                branch_name: form.name.trim(),
+            // Phase 8 (2026-06-11): branch writes go through the API
+            // (services/branches.ts) instead of direct supabase-js. camelCase
+            // body; the API returns the snake_case DB row, so the optimistic
+            // list update below stays shape-consistent with the read.
+            const payload: BranchWritePayload = {
+                merchantId: targetMerchantId,
+                branchName: form.name.trim(),
                 address: form.address.trim() || null,
                 latitude: form.latitude,
                 longitude: form.longitude,
                 city: form.city.trim() || null,
-                manager_name: form.manager.trim() || null,
+                managerName: form.manager.trim() || null,
                 phone: form.phone.trim() || null,
-                is_active: true
+                isActive: true
             };
 
             if (isDining) {
                 payload.cuisines = form.cuisines;
-                payload.is_veg = form.isVeg;
-                payload.restaurant_type = form.restaurantType || null;
+                payload.isVeg = form.isVeg;
+                payload.restaurantType = form.restaurantType || null;
             }
 
             if (editingBranch) {
                 // Upload photos
                 const photoPaths = await uploadBranchPhotos(editingBranch.id, form.branchPhotos);
-                payload.branch_photos = photoPaths;
+                payload.branchPhotos = photoPaths;
 
-                const { data: updatedBranch, error: updateError } = await supabase
-                    .from('merchant_branches')
-                    .update(payload)
-                    .eq('id', editingBranch.id)
-                    .select()
-                    .single();
-
-                if (updateError) throw updateError;
+                const updatedBranch = await updateBranch(editingBranch.id, payload);
                 if (updatedBranch) {
                     setBranches(prev => prev.map(b => b.id === updatedBranch.id ? updatedBranch : b));
                 }
@@ -239,15 +237,9 @@ export default function BranchesScreen() {
                 const newId = uuid.v4() as string;
                 // Upload photos
                 const photoPaths = await uploadBranchPhotos(newId, form.branchPhotos);
-                payload.branch_photos = photoPaths;
+                payload.branchPhotos = photoPaths;
 
-                const { data: newBranch, error: insertError } = await supabase
-                    .from('merchant_branches')
-                    .insert({ ...payload, id: newId })
-                    .select()
-                    .single();
-
-                if (insertError) throw insertError;
+                const newBranch = await createBranch({ ...payload, id: newId });
                 if (newBranch) {
                     finalBranchId = newBranch.id;
                     setBranches(prev => [newBranch, ...prev]);
@@ -293,13 +285,14 @@ export default function BranchesScreen() {
                     const previousBranches = branches;
                     setBranches(prev => prev.filter(b => b.id !== id));
 
-                    const { error } = await supabase.from('merchant_branches').delete().eq('id', id);
-                    if (error) {
-                        setBranches(previousBranches);
-                        Alert.alert('Error', error.message);
-                    } else {
-                        await supabase.from('store_staff').delete().eq('store_id', id);
+                    // Phase 8: API deletes the branch AND its store_staff rows
+                    // (FK-safe order) under one authorization check.
+                    try {
+                        await deleteBranch(id);
                         await refreshStore();
+                    } catch (e: any) {
+                        setBranches(previousBranches);
+                        Alert.alert('Error', e?.message || 'Failed to delete branch');
                     }
                 }
             }

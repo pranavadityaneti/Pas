@@ -36,7 +36,6 @@ import { MerchantDetailsSheet } from './MerchantDetailsSheet';
 import { MerchantReportDialog } from './MerchantReportDialog';
 import { useMerchants, Merchant } from '../../../hooks/useMerchants';
 import api from '../../../lib/api';
-import { supabase } from '../../../lib/supabaseClient';
 
 type SortField = 'rating' | 'city' | 'orders_30d' | 'revenue_30d' | null;
 type SortDirection = 'asc' | 'desc';
@@ -135,19 +134,19 @@ export function MerchantDirectory() {
   const handleBulkStatus = async (status: 'active' | 'inactive') => {
     const toastId = toast.loading(`Updating status to ${status}...`);
     try {
-      const { error } = await supabase
-        .from('merchants')
-        .update({ status })
-        .in('id', selectedMerchants);
-
-      if (error) throw error;
+      // Phase 9a (2026-06-13): status writes go through the API
+      // (PATCH /admin/merchants/:id, requireAdmin + audit-logged), not direct
+      // supabase-js. One call per selected merchant.
+      await Promise.all(
+        selectedMerchants.map((id) => api.patch(`/admin/merchants/${id}`, { status }))
+      );
 
       toast.success(`Selected merchants marked as ${status}`, { id: toastId });
       setSelectedMerchants([]);
       fetchMerchants();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Bulk status update failed:', error);
-      toast.error('Failed to update status', { id: toastId });
+      toast.error(error?.response?.data?.error || 'Failed to update status', { id: toastId });
     }
   };
 
