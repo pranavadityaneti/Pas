@@ -127,14 +127,27 @@
 </ul>
 <b>Then</b>: exhaustive re-grep (zero direct merchants/Store writes) → <span class="pill gated">GATED</span> lockdown migration: <code>REVOKE INSERT/UPDATE/DELETE ON merchants, "Store" FROM anon, authenticated;</code> + drop the qual=true write policies (incl. the <b>"Enable all operations for anon"</b> on merchants). Keep SELECT (storefront + discovery). Gate on merchant-app OTA propagation.
 
-<h3>9b — StoreProduct + Product + ProductImage (catalog/inventory cluster)</h3>
-Written together in the merchant-app product modals + admin StoreProductTable. Sites (all merchant-app unless noted):
+<h3>9b — StoreProduct + Product + ProductImage (catalog/inventory cluster) — investigation DONE 2026-06-13</h3>
+<div class="note"><b>The most intricate part of the system</b> — core daily merchant workflows (add/edit product, inventory). Each save is a multi-table transaction. Build it in a dedicated session; do NOT rush (breaking these = merchants can't manage their catalog/stock).</div>
+<b>Write flows (verified by reading each):</b>
 <ul>
-<li><code>StoreProduct</code>: AddCustomProductModal (update/insert), ConfigureProductsModal (upsert), AddMenuProductModal (delete+upsert), useInventory (update, soft-delete); admin <code>StoreProductTable.tsx:73</code> (update).</li>
-<li><code>Product</code>: AddMenuProductModal (upsert), AddCustomProductModal (update/insert).</li>
-<li><code>ProductImage</code>: AddCustomProductModal (delete+insert), AddMenuProductModal (delete+insert).</li>
+<li><b>AddCustomProductModal</b> (grocery): <code>Product</code> insert/update → <code>StoreProduct</code> insert/update (price,stock) → <code>ProductImage</code> delete+insert. Storage uploads before.</li>
+<li><b>AddMenuProductModal</b> (dining): <code>Product</code> upsert → <code>ProductImage</code> delete+insert → <code>StoreProduct</code> delete(if edit)+upsert with VARIANTS (onConflict <code>branch_id,productId,variant</code>).</li>
+<li><b>useInventory</b>: <code>updateItem</code> (StoreProduct update price/stock/active) + <code>deleteItem</code> (StoreProduct soft-delete <code>is_deleted=true</code>). Also inserts <code>notifications</code> (separate table — leave).</li>
+<li><b>ConfigureProductsModal</b>: bulk <code>StoreProduct</code> upsert (onConflict <code>branch_id,productId,variant</code>) — configure existing catalog items for a branch.</li>
+<li><b>admin StoreProductTable.tsx:73</b>: <code>StoreProduct</code> update.</li>
 </ul>
-Plan: build catalog write endpoints (create/update/delete StoreProduct; upsert Product + ProductImage) gated by <code>userCanManageBranchFull</code> (the StoreProduct.branch_id owner) / admin → refactor the 4 modals + useInventory + StoreProductTable → verify → gated lockdown. Larger than 9a (more sites); do as its own pass after 9a.
+<b>Proposed endpoints</b> (writes via supabaseAdmin/Prisma; auth: <code>userCanManageBranchFull</code> on the StoreProduct <code>branch_id</code>, or admin). All additive — safe to build+deploy before refactoring:
+<table>
+<tr><th>Endpoint</th><th>Serves</th><th>Body</th></tr>
+<tr><td><code>POST /merchant/products</code></td><td>AddCustomProductModal + AddMenuProductModal (create)</td><td>composite: {product{...}, storeProducts[{price,stock,variant,active}], images[url]} → one transaction (Product + StoreProduct rows + ProductImage replace). <code>kind: 'custom'|'menu'</code> to branch the variant logic.</td></tr>
+<tr><td><code>PATCH /merchant/products/:productId</code></td><td>both modals (edit)</td><td>same composite, edit semantics (update Product, replace images, delete+re-upsert StoreProduct variants).</td></tr>
+<tr><td><code>PATCH /merchant/store-products/:id</code></td><td>useInventory.updateItem; admin StoreProductTable</td><td>{price?,stock?,active?,...} single-row update.</td></tr>
+<tr><td><code>DELETE /merchant/store-products/:id</code></td><td>useInventory.deleteItem</td><td>soft-delete (is_deleted=true).</td></tr>
+<tr><td><code>POST /merchant/store-products/configure</code></td><td>ConfigureProductsModal</td><td>bulk upsert StoreProduct rows for a branch.</td></tr>
+</table>
+<b>Auth nuance:</b> <code>Product</code> is the global catalog but merchants create custom rows — gate Product writes by "user manages the branch this product is being listed at" (the accompanying StoreProduct.branch_id), not by Product ownership. Admin bypasses.<br>
+<b>Then</b>: refactor the 5 sites → exhaustive re-grep (0 direct StoreProduct/Product/ProductImage writes) → <span class="pill gated">GATED</span> lockdown (REVOKE writes on all three; keep SELECT — storefront reads catalog). Gate on merchant OTA.
 
 <p style="color:#777;font-size:12px;margin-top:40px;">Generated 2026-06-13 · sources: live prod RLS sweep (<code>scripts/p8c_rls_sweep.ts</code>), exhaustive write-site grep, forlater.md, SESSION_LOG.md, git log. Saved at <code>docs/pending-queue-2026-06-13.html</code>.</p>
 </body>
