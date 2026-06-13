@@ -3992,6 +3992,56 @@ async function userCanManageBranch(userId, branchId) {
     return false;
 }
 /**
+ * Phase 8 (2026-06-11) — "can this user manage this MERCHANT (parent store)?"
+ * Used for branch CREATE (the branch row doesn't exist yet, so the branch-level
+ * userCanManageBranch cannot apply). The canonical owner link is
+ * Store.managerId (set at signup to the owner's auth UUID — verified populated
+ * for every store on prod); store_staff and a last-10-digit phone match cover
+ * provisioned managers and any owner predating the managerId backfill.
+ */
+async function userCanManageMerchant(userId, merchantId) {
+    if (!merchantId)
+        return false;
+    // (a) Owner via Store.managerId (canonical).
+    const store = await prisma.store.findUnique({ where: { id: merchantId }, select: { managerId: true } });
+    if (store?.managerId === userId)
+        return true;
+    // (b) store_staff scoped to the merchant/store id.
+    const staffRow = await prisma.storeStaff.findFirst({
+        where: { storeId: merchantId, OR: [{ user_id: userId }, { authUserId: userId }] },
+        select: { id: true },
+    });
+    if (staffRow)
+        return true;
+    // (c) Phone-matched owner (last-10-digit, tolerant of the 91-prefix drift).
+    const [merchant, u] = await Promise.all([
+        prisma.merchant.findUnique({ where: { id: merchantId }, select: { phone: true } }),
+        prisma.user.findUnique({ where: { id: userId }, select: { phone: true } }),
+    ]);
+    if (merchant?.phone && u?.phone) {
+        const a = u.phone.replace(/\D/g, '').slice(-10);
+        const b = merchant.phone.replace(/\D/g, '').slice(-10);
+        if (a.length === 10 && a === b)
+            return true;
+    }
+    return false;
+}
+/**
+ * Complete branch-management authority for an EXISTING branch: branch-level
+ * (owner-by-id / phone-manager / store_staff for the branch) OR
+ * parent-merchant-level (owner / staff of the parent store). Covers every real
+ * case — owner editing the main or an additional branch, a provisioned branch
+ * manager, or a phone-only owner.
+ */
+async function userCanManageBranchFull(userId, branchId) {
+    if (await userCanManageBranch(userId, branchId))
+        return true;
+    const branch = await prisma.merchantBranch.findUnique({ where: { id: branchId }, select: { merchantId: true } });
+    if (branch?.merchantId && (await userCanManageMerchant(userId, branch.merchantId)))
+        return true;
+    return false;
+}
+/**
  * Attempt a Razorpay refund using the payment_id stored in order.metadata.
  * Returns { razorpayRefundId, simulated } — if Razorpay isn't configured or
  * the order has no paymentId on record, falls back to a stub refund id
@@ -9179,6 +9229,133 @@ app.get('/merchant/settlements', async (req, res) => {
     }
     catch (error) {
         return (0, api_error_handler_1.handleApiError)(res, error, { area: 'settlements.merchant', userMessage: 'Failed to load settlements' });
+    }
+});
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 8 (2026-06-11) — Merchant branch CRUD via the API.
+// Replaces the merchant app's direct supabase-js writes to merchant_branches,
+// which relied on over-permissive qual=true RLS (any authenticated user could
+// modify/delete ANY branch). All three writes are gated by the branch/merchant
+// authority helpers. Once the merchant OTA carrying these calls has propagated,
+// a follow-up migration revokes anon/authenticated WRITE grants on
+// merchant_branches (SELECT stays open — discovery + storefront need it, and
+// branch data is semi-public). Body is camelCase (API convention); the app
+// builds a camelCase payload.
+// ════════════════════════════════════════════════════════════════════════════
+// Create a branch under a merchant (auth: can-manage the parent merchant).
+app.post('/merchant/branches', async (req, res) => {
+    try {
+        const user = await requireUser(req, res);
+        if (!user)
+            return;
+        const b = req.body || {};
+        const merchantId = String(b.merchantId || '').trim();
+        const branchName = String(b.branchName || '').trim();
+        if (!merchantId)
+            return res.status(400).json({ error: 'merchantId is required' });
+        if (!branchName)
+            return res.status(400).json({ error: 'branchName is required' });
+        const canManage = await userCanManageMerchant(user.id, merchantId);
+        if (!canManage)
+            return res.status(403).json({ error: 'Not authorized to add branches for this merchant' });
+        const created = await prisma.merchantBranch.create({
+            data: {
+                ...(b.id ? { id: String(b.id) } : {}),
+                merchantId,
+                branchName,
+                address: b.address ?? null,
+                city: b.city ?? null,
+                latitude: b.latitude ?? null,
+                longitude: b.longitude ?? null,
+                managerName: b.managerName ?? null,
+                phone: b.phone ?? null,
+                isActive: b.isActive ?? true,
+                ...(Array.isArray(b.cuisines) ? { cuisines: b.cuisines } : {}),
+                ...(typeof b.isVeg === 'boolean' ? { isVeg: b.isVeg } : {}),
+                ...(b.restaurantType !== undefined ? { restaurantType: b.restaurantType } : {}),
+                ...(Array.isArray(b.branchPhotos) ? { branchPhotos: b.branchPhotos } : {}),
+            },
+        });
+        res.json(created);
+    }
+    catch (error) {
+        if (error?.code === 'P2002')
+            return res.status(409).json({ error: 'A branch with this name already exists for this merchant' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchant.branches.create', userMessage: 'Failed to create branch' });
+    }
+});
+// Update a branch (auth: can-manage the branch or its parent merchant).
+// Never lets the client re-point a branch to a different merchant.
+app.put('/merchant/branches/:id', async (req, res) => {
+    try {
+        const user = await requireUser(req, res);
+        if (!user)
+            return;
+        const id = req.params.id;
+        const canManage = await userCanManageBranchFull(user.id, id);
+        if (!canManage)
+            return res.status(403).json({ error: 'Not authorized to edit this branch' });
+        const b = req.body || {};
+        const data = {};
+        if (b.branchName !== undefined)
+            data.branchName = String(b.branchName).trim();
+        if (b.address !== undefined)
+            data.address = b.address;
+        if (b.city !== undefined)
+            data.city = b.city;
+        if (b.latitude !== undefined)
+            data.latitude = b.latitude;
+        if (b.longitude !== undefined)
+            data.longitude = b.longitude;
+        if (b.managerName !== undefined)
+            data.managerName = b.managerName;
+        if (b.phone !== undefined)
+            data.phone = b.phone;
+        if (b.isActive !== undefined)
+            data.isActive = b.isActive;
+        if (Array.isArray(b.cuisines))
+            data.cuisines = b.cuisines;
+        if (typeof b.isVeg === 'boolean')
+            data.isVeg = b.isVeg;
+        if (b.restaurantType !== undefined)
+            data.restaurantType = b.restaurantType;
+        if (Array.isArray(b.branchPhotos))
+            data.branchPhotos = b.branchPhotos;
+        const updated = await prisma.merchantBranch.update({ where: { id }, data });
+        res.json(updated);
+    }
+    catch (error) {
+        if (error?.code === 'P2025')
+            return res.status(404).json({ error: 'Branch not found' });
+        if (error?.code === 'P2002')
+            return res.status(409).json({ error: 'A branch with this name already exists for this merchant' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchant.branches.update', userMessage: 'Failed to update branch' });
+    }
+});
+// Delete a branch + its store_staff rows (auth: can-manage the branch/merchant).
+// store_staff deleted FIRST (FK-safe). FK violations from orders/products are
+// surfaced as a clean "deactivate instead" message rather than a raw error.
+app.delete('/merchant/branches/:id', async (req, res) => {
+    try {
+        const user = await requireUser(req, res);
+        if (!user)
+            return;
+        const id = req.params.id;
+        const canManage = await userCanManageBranchFull(user.id, id);
+        if (!canManage)
+            return res.status(403).json({ error: 'Not authorized to delete this branch' });
+        await prisma.$transaction([
+            prisma.storeStaff.deleteMany({ where: { storeId: id } }),
+            prisma.merchantBranch.delete({ where: { id } }),
+        ]);
+        res.json({ ok: true });
+    }
+    catch (error) {
+        if (error?.code === 'P2025')
+            return res.status(404).json({ error: 'Branch not found' });
+        if (error?.code === 'P2003')
+            return res.status(409).json({ error: 'This branch has orders or products and cannot be deleted. Deactivate it instead.' });
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchant.branches.delete', userMessage: 'Failed to delete branch' });
     }
 });
 // --- 404 Handler ---
