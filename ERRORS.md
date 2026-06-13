@@ -27,3 +27,10 @@
 - **What didn't work:** `old_string` that omitted a trailing inline comment (e.g. `retryable: !isStock,   // ...`) → "String to replace not found."
 - **What worked:** re-read the exact lines (Read tool) and copy the literal text including trailing comments/whitespace before editing.
 - **Remember:** after a prior Edit changes a block, re-read before the next Edit on the same region.
+
+## Postgres column-level REVOKE is a no-op against a table-level grant (2026-06-13)
+- **Context:** Phase 8 RLS lockdown — tried to block consumers from self-promoting via PostgREST by `REVOKE UPDATE ("role","isAdmin",...) ON "User" FROM authenticated`.
+- **What didn't work:** column-specific `REVOKE UPDATE (cols)` while the role still holds **table-level** `UPDATE`. Postgres column privileges are ADDITIVE — a table-level grant covers every column, so the column REVOKE changed nothing. The post-migration verify caught it (escalation columns still UPDATE-grantable).
+- **What worked:** `REVOKE UPDATE ON "User" FROM authenticated, anon;` (drop table-level) **then** `GRANT UPDATE (name, email, notification_preferences, updatedAt) ON "User" TO authenticated;` (re-grant only the safe columns). Now any non-listed column (role/isAdmin/status/…) is denied at the privilege layer before RLS evaluates.
+- **Remember:** to restrict specific columns for a role, you must revoke the table-level privilege first, then grant the allowed columns. Always run a post-migration verify that queries `information_schema.column_privileges` to confirm the escalation columns are actually gone — don't assume the REVOKE worked.
+- **Also (process):** before locking down ANY table's writes, exhaustively grep EVERY app (consumer/merchant/admin) for direct `supabase.from('<table>').(insert|update|delete|upsert)`. Phase 8 found 3 write sites beyond the obvious one (merchant online/offline toggle, store-timings save, admin merchant-edit dialog) that a shallow check missed — each would have broken on lockdown.
