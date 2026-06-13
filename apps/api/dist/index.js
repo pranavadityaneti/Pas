@@ -9544,6 +9544,184 @@ app.patch('/admin/merchants/:id', async (req, res) => {
         return (0, api_error_handler_1.handleApiError)(res, error, { area: 'admin.merchants.update', userMessage: 'Failed to update merchant' });
     }
 });
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 9b (2026-06-13) — catalog/inventory writes via the API
+// (StoreProduct + Product + ProductImage). Replaces direct supabase-js writes in
+// the product modals (AddCustomProductModal, AddMenuProductModal,
+// ConfigureProductsModal), useInventory, and admin StoreProductTable — all of
+// which relied on the over-permissive qual=true RLS on these tables. Writes via
+// supabaseAdmin (service_role) so they survive the lockdown; auth is the branch
+// owner (userCanManageBranchFull on the StoreProduct.branch_id) or a platform
+// admin. Faithful port of the existing (non-transactional, sequential) flows —
+// same semantics, just authorized + lockdown-safe. Column names are the literal
+// DB columns the apps already send (mixed snake/camel), whitelisted.
+// ════════════════════════════════════════════════════════════════════════════
+const PRODUCT_COLS = ['id', 'name', 'mrp', 'subcategory', 'brand', 'ean', 'uom', 'gstRate', 'description', 'image', 'createdByStoreId', 'extra_data', 'category', 'updatedAt'];
+const STORE_PRODUCT_UPDATE_COLS = ['price', 'stock', 'active', 'variant', 'is_best_seller', 'is_deleted'];
+// Look up a StoreProduct's branch, then authorize the caller against it.
+async function authorizeStoreProduct(userId, storeProductId) {
+    const rows = await prisma.$queryRaw `SELECT "branch_id"::text AS branch_id FROM "public"."StoreProduct" WHERE "id" = ${storeProductId} LIMIT 1;`;
+    if (rows.length === 0)
+        return { ok: false, found: false };
+    const branchId = rows[0].branch_id;
+    const ok = (branchId && (await userCanManageBranchFull(userId, branchId))) || (await isPlatformAdmin(userId));
+    return { ok: !!ok, found: true };
+}
+// Composite product save (create OR edit), for both custom + menu modals.
+// body: { branchId, product{...}, images?: string[], storeProducts: [{price,stock,
+//   active,variant,is_best_seller?,id?}], replaceVariants?: boolean }
+app.post('/merchant/products/save', async (req, res) => {
+    try {
+        const user = await requireUser(req, res);
+        if (!user)
+            return;
+        const b = req.body || {};
+        const branchId = String(b.branchId || '').trim();
+        const product = b.product || {};
+        const storeProducts = Array.isArray(b.storeProducts) ? b.storeProducts : [];
+        if (!branchId)
+            return res.status(400).json({ error: 'branchId is required' });
+        if (!product.id)
+            return res.status(400).json({ error: 'product.id is required' });
+        if (storeProducts.length === 0)
+            return res.status(400).json({ error: 'storeProducts is required' });
+        const can = (await userCanManageBranchFull(user.id, branchId)) || (await isPlatformAdmin(user.id));
+        if (!can)
+            return res.status(403).json({ error: 'Not authorized to manage products for this branch' });
+        const productId = String(product.id);
+        // 1. Upsert the Product (PK = id).
+        const productRow = pick(product, PRODUCT_COLS);
+        productRow.id = productId;
+        const { error: pErr } = await supabaseAdmin.from('Product').upsert(productRow);
+        if (pErr)
+            throw new Error(`Product: ${pErr.message}`);
+        // 2. Replace images iff `images` was provided.
+        if (Array.isArray(b.images)) {
+            const { error: delErr } = await supabaseAdmin.from('ProductImage').delete().eq('productId', productId);
+            if (delErr)
+                throw new Error(`ProductImage delete: ${delErr.message}`);
+            if (b.images.length > 0) {
+                const imageData = b.images.map((url, idx) => ({
+                    id: crypto.randomUUID(), productId, url, isPrimary: idx === 0, createdAt: new Date().toISOString(),
+                }));
+                const { error: insErr } = await supabaseAdmin.from('ProductImage').insert(imageData);
+                if (insErr)
+                    throw new Error(`ProductImage insert: ${insErr.message}`);
+            }
+        }
+        // 3. Optionally clear existing variants for this product+branch (menu edit).
+        if (b.replaceVariants === true) {
+            const { error: dErr } = await supabaseAdmin.from('StoreProduct').delete().eq('productId', productId).eq('branch_id', branchId);
+            if (dErr)
+                throw new Error(`StoreProduct clear: ${dErr.message}`);
+        }
+        // 4. Upsert StoreProduct rows (branch + store forced server-side).
+        const spRows = storeProducts.map((sp) => ({
+            id: sp.id ? String(sp.id) : crypto.randomUUID(),
+            storeId: branchId,
+            branch_id: branchId,
+            productId,
+            price: Number(sp.price) || 0,
+            stock: sp.stock != null ? Number(sp.stock) : 0,
+            active: sp.active != null ? !!sp.active : true,
+            variant: sp.variant ? String(sp.variant) : 'Standard',
+            is_best_seller: !!sp.is_best_seller,
+            updatedAt: new Date().toISOString(),
+        }));
+        const { error: spErr } = await supabaseAdmin.from('StoreProduct').upsert(spRows, { onConflict: 'branch_id,productId,variant' });
+        if (spErr)
+            throw new Error(`StoreProduct: ${spErr.message}`);
+        res.json({ ok: true, productId });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchant.products.save', userMessage: error?.message || 'Failed to save product' });
+    }
+});
+// Update a single StoreProduct (inventory: price/stock/active; admin table edits).
+app.patch('/merchant/store-products/:id', async (req, res) => {
+    try {
+        const user = await requireUser(req, res);
+        if (!user)
+            return;
+        const id = req.params.id;
+        const auth = await authorizeStoreProduct(user.id, id);
+        if (!auth.found)
+            return res.status(404).json({ error: 'Product not found' });
+        if (!auth.ok)
+            return res.status(403).json({ error: 'Not authorized to edit this product' });
+        const updates = pick(req.body, STORE_PRODUCT_UPDATE_COLS);
+        if (Object.keys(updates).length === 0)
+            return res.status(400).json({ error: 'No updatable fields provided' });
+        updates.updatedAt = new Date().toISOString();
+        const { error } = await supabaseAdmin.from('StoreProduct').update(updates).eq('id', id);
+        if (error)
+            throw new Error(error.message);
+        res.json({ ok: true });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchant.storeProducts.update', userMessage: 'Failed to update product' });
+    }
+});
+// Soft-delete a StoreProduct (inventory delete).
+app.delete('/merchant/store-products/:id', async (req, res) => {
+    try {
+        const user = await requireUser(req, res);
+        if (!user)
+            return;
+        const id = req.params.id;
+        const auth = await authorizeStoreProduct(user.id, id);
+        if (!auth.found)
+            return res.status(404).json({ error: 'Product not found' });
+        if (!auth.ok)
+            return res.status(403).json({ error: 'Not authorized to delete this product' });
+        const { error } = await supabaseAdmin.from('StoreProduct').update({ is_deleted: true, updatedAt: new Date().toISOString() }).eq('id', id);
+        if (error)
+            throw new Error(error.message);
+        res.json({ ok: true });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchant.storeProducts.delete', userMessage: 'Failed to delete product' });
+    }
+});
+// Bulk-configure existing catalog products for a branch (ConfigureProductsModal).
+// body: { branchId, items: [{ productId, variant, price, stock, active? }] }
+app.post('/merchant/store-products/configure', async (req, res) => {
+    try {
+        const user = await requireUser(req, res);
+        if (!user)
+            return;
+        const b = req.body || {};
+        const branchId = String(b.branchId || '').trim();
+        const items = Array.isArray(b.items) ? b.items : [];
+        if (!branchId)
+            return res.status(400).json({ error: 'branchId is required' });
+        if (items.length === 0)
+            return res.status(400).json({ error: 'items is required' });
+        const can = (await userCanManageBranchFull(user.id, branchId)) || (await isPlatformAdmin(user.id));
+        if (!can)
+            return res.status(403).json({ error: 'Not authorized to configure products for this branch' });
+        const now = new Date().toISOString();
+        const rows = items.map((it) => ({
+            id: it.id ? String(it.id) : crypto.randomUUID(),
+            storeId: branchId,
+            branch_id: branchId,
+            productId: String(it.productId),
+            variant: it.variant ? String(it.variant) : 'Standard',
+            price: Number(it.price) || 0,
+            stock: it.stock != null ? Number(it.stock) : 0,
+            active: it.active != null ? !!it.active : true,
+            createdAt: now,
+            updatedAt: now,
+        }));
+        const { error } = await supabaseAdmin.from('StoreProduct').upsert(rows, { onConflict: 'branch_id,productId,variant' });
+        if (error)
+            throw new Error(error.message);
+        res.json({ ok: true, count: rows.length });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchant.storeProducts.configure', userMessage: 'Failed to configure products' });
+    }
+});
 // --- 404 Handler ---
 app.use((req, res, next) => {
     res.status(404).json({ error: 'Endpoint not found', path: req.path });
