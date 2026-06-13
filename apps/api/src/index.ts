@@ -9767,6 +9767,130 @@ app.delete('/merchant/branches/:id', async (req, res) => {
     }
 });
 
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 9a (2026-06-13) — merchants + Store writes via the API.
+// Replaces direct supabase-js writes that relied on the over-permissive RLS on
+// `merchants` ("Enable all operations for anon"!) and `Store` ("all access for
+// all users"). Writes use supabaseAdmin (service_role) so they survive the
+// follow-up write-lockdown; auth is enforced here in Express. Additive — the
+// apps keep using their direct writes until refactored; only then does the
+// lockdown migration land (gated on the merchant OTA). Bodies are snake_case
+// (these tables have many snake_case columns; passthrough minimises app churn),
+// but every field is WHITELISTED — clients cannot set status/commission/kyc via
+// the merchant-facing endpoints.
+// ════════════════════════════════════════════════════════════════════════════
+
+const pick = (body: any, cols: string[]): Record<string, any> => {
+    const out: Record<string, any> = {};
+    for (const c of cols) if (body && body[c] !== undefined) out[c] = body[c];
+    return out;
+};
+
+// Merchant edits their own store profile (Settings → Store Details).
+// Store {name,address}; dining-only merchants {cuisines,is_veg,restaurant_type}.
+app.patch('/merchant/profile/:merchantId', async (req, res) => {
+    try {
+        const user = await requireUser(req, res); if (!user) return;
+        const merchantId = req.params.merchantId;
+        const can = (await userCanManageMerchant(user.id, merchantId)) || (await isPlatformAdmin(user.id));
+        if (!can) return res.status(403).json({ error: 'Not authorized to edit this store' });
+        const b = req.body || {};
+        const storeData: any = {};
+        if (b.name !== undefined) storeData.name = String(b.name).trim();
+        if (b.address !== undefined) storeData.address = b.address;
+        if (Object.keys(storeData).length > 0) {
+            await prisma.store.update({ where: { id: merchantId }, data: storeData });
+        }
+        const mData = pick(b, ['cuisines', 'is_veg', 'restaurant_type']);
+        if (Object.keys(mData).length > 0) {
+            const { error } = await supabaseAdmin.from('merchants').update(mData).eq('id', merchantId);
+            if (error) throw new Error(error.message);
+        }
+        res.json({ ok: true });
+    } catch (error: any) {
+        if (error?.code === 'P2025') return res.status(404).json({ error: 'Store not found' });
+        return handleApiError(res, error, { area: 'merchant.profile.update', userMessage: 'Failed to update store details' });
+    }
+});
+
+// Merchant updates payout/bank details (Settings → Payouts). OWNER-ONLY —
+// bank details are sensitive, so staff are excluded (unlike profile). Returns
+// the updated row (the app reflects it immediately).
+app.put('/merchant/payout/:merchantId', async (req, res) => {
+    try {
+        const user = await requireUser(req, res); if (!user) return;
+        const merchantId = req.params.merchantId;
+        const store = await prisma.store.findUnique({ where: { id: merchantId }, select: { managerId: true } });
+        let owner = !!store && store.managerId === user.id;
+        if (!owner) {
+            const [m, u] = await Promise.all([
+                prisma.merchant.findUnique({ where: { id: merchantId }, select: { phone: true } }),
+                prisma.user.findUnique({ where: { id: user.id }, select: { phone: true } }),
+            ]);
+            const a = u?.phone?.replace(/\D/g, '').slice(-10);
+            const bn = m?.phone?.replace(/\D/g, '').slice(-10);
+            if (a && a.length === 10 && a === bn) owner = true;
+        }
+        if (!owner && !(await isPlatformAdmin(user.id))) {
+            return res.status(403).json({ error: 'Only the store owner can update payout details' });
+        }
+        const mData = pick(req.body, ['bank_account_number', 'ifsc_code', 'bank_name', 'bank_beneficiary_name', 'bank_accounts']);
+        if (Object.keys(mData).length === 0) return res.status(400).json({ error: 'No payout fields provided' });
+        const { data, error } = await supabaseAdmin.from('merchants').update(mData).eq('id', merchantId).select().single();
+        if (error) throw new Error(error.message);
+        res.json(data);
+    } catch (error: any) {
+        return handleApiError(res, error, { area: 'merchant.payout.update', userMessage: 'Failed to update payout details' });
+    }
+});
+
+// Admin-facing columns of the merchants table (trusted SUPER_ADMIN). Excludes
+// id; everything else an admin legitimately sets when creating/editing a
+// merchant from the dashboard.
+const ADMIN_MERCHANT_COLS = [
+    'store_name', 'branch_name', 'owner_name', 'designation', 'email', 'phone', 'city', 'address',
+    'latitude', 'longitude', 'has_branches', 'kyc_status', 'status', 'rating', 'commission_rate',
+    'operating_hours', 'operating_days', 'vertical', 'vertical_id', 'category', 'cuisines', 'is_veg',
+    'restaurant_type', 'pan_number', 'aadhar_number', 'gst_number', 'msme_number', 'fssai_number',
+    'turnover_range', 'bank_account_number', 'ifsc_code', 'bank_name', 'bank_beneficiary_name',
+    'bank_accounts', 'pan_document_url', 'aadhar_front_url', 'aadhar_back_url', 'gst_certificate_url',
+    'store_photos',
+];
+
+// Admin creates a merchant (admin-web merchant directory). requireAdmin.
+app.post('/admin/merchants', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res); if (!admin) return;
+        const payload = pick(req.body, ADMIN_MERCHANT_COLS);
+        if (!payload.store_name) return res.status(400).json({ error: 'store_name is required' });
+        payload.kyc_status = payload.kyc_status ?? 'pending';
+        payload.status = payload.status ?? 'active';
+        const { data, error } = await supabaseAdmin.from('merchants').insert([payload]).select().single();
+        if (error) throw new Error(error.message);
+        await writeAuditLog(admin.id, 'merchant.created', 'merchant', data?.id ?? null, null, payload as any);
+        res.json(data);
+    } catch (error: any) {
+        return handleApiError(res, error, { area: 'admin.merchants.create', userMessage: 'Failed to create merchant' });
+    }
+});
+
+// Admin updates a merchant (generic edit + KYC/status changes). requireAdmin.
+app.patch('/admin/merchants/:id', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res); if (!admin) return;
+        const id = req.params.id;
+        const updates = pick(req.body, ADMIN_MERCHANT_COLS);
+        if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No updatable fields provided' });
+        updates.updated_at = new Date().toISOString();
+        const { data, error } = await supabaseAdmin.from('merchants').update(updates).eq('id', id).select().single();
+        if (error) throw new Error(error.message);
+        await writeAuditLog(admin.id, 'merchant.updated', 'merchant', id, null, updates as any);
+        res.json(data);
+    } catch (error: any) {
+        return handleApiError(res, error, { area: 'admin.merchants.update', userMessage: 'Failed to update merchant' });
+    }
+});
+
 // --- 404 Handler ---
 app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
     res.status(404).json({ error: 'Endpoint not found', path: req.path });
