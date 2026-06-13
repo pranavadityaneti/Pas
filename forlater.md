@@ -750,3 +750,13 @@ Most intricate cluster (core daily merchant catalog/inventory flows). Full write
 ### Phase 9b backend — DONE 2026-06-13 (deployed; app rewires + lockdown remain)
 Endpoints LIVE (commit 020584b2, deployed + smoke-verified 401): POST /merchant/products/save (composite Product+ProductImage+StoreProduct, custom+menu, create+edit), PATCH + DELETE /merchant/store-products/:id (inventory; authorizeStoreProduct → branch owner/admin), POST /merchant/store-products/configure (bulk). Writes via supabaseAdmin, whitelisted literal DB cols.
 **REMAINING 9b (next session — app rewires):** AddCustomProductModal + AddMenuProductModal → POST /merchant/products/save (build {product, images[], storeProducts[], replaceVariants}); ConfigureProductsModal → POST /merchant/store-products/configure; useInventory updateItem/deleteItem → PATCH/DELETE /merchant/store-products/:id; admin StoreProductTable → PATCH /merchant/store-products/:id. Keep storage uploads client-side (pass URLs). Then re-grep (0 direct StoreProduct/Product/ProductImage writes) → GATED lockdown (REVOKE writes on all 3, keep SELECT). Gate on merchant OTA + PR #3 merge.
+
+### Phase 9b app rewires — DONE 2026-06-13 (commit d9d2a2bb); lockdown staged + gated
+All 5 catalog write sites routed through the API: AddCustomProductModal + AddMenuProductModal → saveProduct; ConfigureProductsModal → configureStoreProducts; useInventory update/delete → PATCH/DELETE; admin StoreProductTable → PATCH. services/catalog.ts (NEW). Storage uploads stay client-side. Exhaustive re-grep: 0 direct StoreProduct/Product/ProductImage writes in any live app. tsc clean both apps.
+**9b lockdown — STAGED + GATED:** apps/api/scripts/phase9b_catalog_lockdown.STAGED.sql + _verify.ts. APPLY ONLY after PR #3 merged + merchant OTA propagated.
+
+### 🔐 PHASE 9 COMPLETE (code) — 3 staged lockdowns awaiting the SAME gate (PR #3 merge + merchant OTA propagation):
+1. apps/api/scripts/phase8_branch_lockdown.STAGED.sql  (merchant_branches)
+2. apps/api/scripts/phase9a_merchants_store_lockdown.STAGED.sql  (merchants + Store)
+3. apps/api/scripts/phase9b_catalog_lockdown.STAGED.sql  (StoreProduct + Product + ProductImage)
+Each has a matching *_verify.ts. Apply order doesn't matter; run each migrate deploy + verify once the gate opens. Also still pending from the broad sweep: ProductAuditLog/_prisma_migrations already locked (2026-06-13); City/table_bookings already locked.
