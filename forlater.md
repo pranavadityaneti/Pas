@@ -730,3 +730,9 @@
 ## Strikethroughs (no longer relevant)
 
 *(none)*
+
+### 2026-06-13 — queue decisions + Phase 9 RLS epic kickoff
+- **D1 store-hours — DECIDED (Pranav):** capture open/close time DURING merchant signup (when adding each store), editable later in Settings. Structural fix, forward-looking. NOTE: does not retro-fix the 25 existing NULL-hours branches — those merchants set hours in Settings (save bug already fixed) or via a one-time nudge. Implementation = merchant signup-flow change (rides OTA/native). QUEUED to build.
+- **D2 data hygiene — DONE 2026-06-13:** deleted 2 "Test City" rows (0 refs); backfilled Clean cuts Store.merchant_id (= its own id; merchants row + branch already existed). 
+- **⚠️ Folli Medicals (7c575305-…) — STRUCTURAL REPAIR NEEDED (separate):** Store.merchant_id still NULL because it has NO merchants row and NO merchant_branches row (lost them). Needs the "Part 0" repair from the see-the-attached-screenshots plan: recreate merchants row + main branch with real storefront lat/long (needs Pranav's confirmation of the store's real address/coords). Until then it stays invisible to customers.
+- **Phase 9 RLS epic — STARTED:** route-through-API + gated lockdown for the 5 app-written exposed tables. Order (Pranav): merchants + Store FIRST (worst — merchants is anon-writable), then StoreProduct, Product, ProductImage. See docs/pending-queue-2026-06-13.html §3.
