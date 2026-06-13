@@ -4042,6 +4042,15 @@ async function userCanManageBranchFull(userId, branchId) {
     return false;
 }
 /**
+ * Return a branch row in the exact snake_case shape supabase-js select('*')
+ * produces, so the merchant app's Branch interface + optimistic list update
+ * consume the API response with zero shape drift.
+ */
+async function branchRow(id) {
+    const rows = await prisma.$queryRaw `SELECT * FROM "public"."merchant_branches" WHERE "id" = ${id} LIMIT 1;`;
+    return rows[0] ?? null;
+}
+/**
  * Attempt a Razorpay refund using the payment_id stored in order.metadata.
  * Returns { razorpayRefundId, simulated } — if Razorpay isn't configured or
  * the order has no paymentId on record, falls back to a stub refund id
@@ -9276,7 +9285,9 @@ app.post('/merchant/branches', async (req, res) => {
                 ...(Array.isArray(b.branchPhotos) ? { branchPhotos: b.branchPhotos } : {}),
             },
         });
-        res.json(created);
+        // Return the snake_case DB row (matches supabase-js select('*'), which
+        // the merchant app's Branch shape + optimistic list update expect).
+        res.json(await branchRow(created.id));
     }
     catch (error) {
         if (error?.code === 'P2002')
@@ -9321,8 +9332,8 @@ app.put('/merchant/branches/:id', async (req, res) => {
             data.restaurantType = b.restaurantType;
         if (Array.isArray(b.branchPhotos))
             data.branchPhotos = b.branchPhotos;
-        const updated = await prisma.merchantBranch.update({ where: { id }, data });
-        res.json(updated);
+        await prisma.merchantBranch.update({ where: { id }, data });
+        res.json(await branchRow(id));
     }
     catch (error) {
         if (error?.code === 'P2025')
