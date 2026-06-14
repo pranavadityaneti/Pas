@@ -9921,6 +9921,43 @@ const ADMIN_MERCHANT_COLS = [
     'store_photos',
 ];
 
+// 2026-06-14: full merchant detail for the admin KYC review — resolves the
+// vertical NAME (the list RPC exposes no vertical_id, so the screen's `category`
+// was always blank) and surfaces signup fields the list omits (designation,
+// multi-account bank, additional branches, store hours).
+app.get('/admin/merchants/:id', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res); if (!admin) return;
+        const m = await prisma.merchant.findUnique({
+            where: { id: req.params.id },
+            include: { Vertical: { select: { name: true } }, branches: true },
+        });
+        if (!m) return res.status(404).json({ error: 'Merchant not found' });
+        return res.json({
+            verticalName: m.Vertical?.name ?? null,
+            designation: m.designation ?? null,
+            bankName: m.bankName ?? null,
+            bankAccounts: m.bankAccounts ?? null,
+            hasBranches: m.hasBranches ?? null,
+            operatingHours: m.operatingHours ?? null,
+            operatingDays: m.operatingDays ?? [],
+            branches: m.branches.map((b) => ({
+                id: b.id,
+                branchName: b.branchName,
+                managerName: b.managerName ?? null,
+                address: b.address ?? null,
+                city: b.city ?? null,
+                latitude: b.latitude ?? null,
+                longitude: b.longitude ?? null,
+                isActive: b.isActive ?? null,
+            })),
+        });
+    } catch (err: any) {
+        console.error('[admin/merchants/:id detail] error:', err?.message || err);
+        return res.status(500).json({ error: 'Failed to load merchant detail' });
+    }
+});
+
 // 2026-06-14 (e-Sign V1): latest signed-agreement consent record for a merchant,
 // for the admin KYC review screen. Returns { consent: null } when none exists.
 app.get('/admin/merchants/:id/consent', async (req, res) => {
