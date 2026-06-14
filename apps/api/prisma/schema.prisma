@@ -605,9 +605,39 @@ model Merchant {
   Vertical            Vertical?        @relation(fields: [verticalId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   subscriptions       Subscription[]
   signupCouponRedemption MerchantSignupCouponRedemption?
+  consents            MerchantConsent[]
 
   @@index([verticalId])
   @@map("merchants")
+  @@schema("public")
+}
+
+/// 2026-06-14 (e-Sign V1): append-only audit record of a merchant's accepted +
+/// on-screen drawn-signature partner agreement. Written at Step 4 of signup via
+/// POST /merchant-signup/consent. Replaces the stubbed Aadhaar eSign. Backed by
+/// migration docs/migrations-pending-2026-06-14-merchant-consents.sql (STAGED).
+model MerchantConsent {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  merchantId       String    @map("merchant_id")
+  agreementType    String    @map("agreement_type")
+  agreementVersion String    @map("agreement_version")
+  acceptedPrivacy  Boolean   @map("accepted_privacy")
+  acceptedTerms    Boolean   @map("accepted_terms")
+  acceptedPartner  Boolean   @map("accepted_partner")
+  signatoryName    String?   @map("signatory_name")
+  designation      String?   @map("designation")
+  signature        Json?     @map("signature")
+  signedPdfPath    String?   @map("signed_pdf_path")
+  signedAt         DateTime  @map("signed_at") @db.Timestamptz(6)
+  ip               String?   @map("ip")
+  device           String?   @map("device")
+  docHash          String?   @map("doc_hash")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  merchant         Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId])
+  @@index([createdAt])
+  @@map("merchant_consents")
   @@schema("public")
 }
 
