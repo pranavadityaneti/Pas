@@ -9921,6 +9921,115 @@ const ADMIN_MERCHANT_COLS = [
     'store_photos',
 ];
 
+// 2026-06-14: refund/dispute resolution queue — surfaces stranded (charged but
+// coherence-failed) payments + pending refunds for the admin Refunds & Disputes
+// screen. requireAdmin.
+app.get('/admin/disputes', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res); if (!admin) return;
+        const shape = (o: any) => ({
+            id: o.id,
+            orderNumber: o.orderNumber,
+            totalAmount: o.totalAmount,
+            status: o.status,
+            isPaid: o.isPaid,
+            storeName: o.store_name,
+            createdAt: o.createdAt,
+            paymentVerified: o.paymentVerified,
+            hasPaymentId: !!((o.metadata as any)?.razorpayPaymentId),
+            customer: o.user ? { name: o.user.name ?? null } : null,
+        });
+        const [stranded, pendingRefunds] = await Promise.all([
+            prisma.order.findMany({
+                where: { paymentVerified: false },
+                orderBy: { createdAt: 'desc' }, take: 100,
+                include: { user: { select: { name: true } } },
+            }),
+            prisma.order.findMany({
+                where: { status: 'CANCELLED', isPaid: true },
+                orderBy: { createdAt: 'desc' }, take: 100,
+                include: { user: { select: { name: true } } },
+            }),
+        ]);
+        // Exclude orders already refunded (refund id recorded in metadata).
+        const notYetRefunded = pendingRefunds.filter((o: any) => !((o.metadata as any)?.razorpayRefundId));
+        return res.json({ strandedPayments: stranded.map(shape), pendingRefunds: notYetRefunded.map(shape) });
+    } catch (err: any) {
+        console.error('[admin/disputes] error:', err?.message || err);
+        return res.status(500).json({ error: 'Failed to load disputes' });
+    }
+});
+
+// 2026-06-14: admin-issued refund (Refunds & Disputes queue). Issues a REAL
+// Razorpay refund and only marks the order REFUNDED when Razorpay confirms.
+// Idempotent (refuses already-refunded) + audited.
+app.post('/admin/orders/:id/refund', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res); if (!admin) return;
+        const { id } = req.params;
+        const reason = req.body?.reason ? String(req.body.reason) : 'Admin refund (Refunds & Disputes)';
+        const order = await prisma.order.findUnique({ where: { id } });
+        if (!order) return res.status(404).json({ error: 'Order not found' });
+        if (!order.isPaid) return res.status(400).json({ error: 'Order is not paid — nothing to refund' });
+        if (order.status === 'REFUNDED' || (order.metadata as any)?.razorpayRefundId) {
+            return res.status(409).json({ error: 'Order has already been refunded' });
+        }
+        const amountInr = Math.round(order.totalAmount || 0);
+        if (amountInr <= 0) return res.status(400).json({ error: 'Order amount is zero' });
+        const paymentId = (order.metadata as any)?.razorpayPaymentId;
+        if (!paymentId) {
+            return res.status(400).json({ error: 'No Razorpay payment id on this order — it must be refunded manually.' });
+        }
+
+        let razorpayInstance: any = null;
+        try {
+            const Razorpay = require('razorpay');
+            if (process.env.RAZORPAY_KEY_ID) {
+                razorpayInstance = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID, key_secret: process.env.RAZORPAY_KEY_SECRET });
+            }
+        } catch { /* ignore */ }
+        if (!razorpayInstance) {
+            return res.status(503).json({ error: 'Refunds unavailable — Razorpay is not configured on the server.' });
+        }
+
+        let refund: any;
+        try {
+            refund = await razorpayInstance.payments.refund(paymentId, { amount: amountInr * 100 });
+        } catch (rpErr: any) {
+            console.error('[admin refund] Razorpay error:', rpErr?.message || rpErr);
+            return res.status(502).json({ error: `Razorpay refund failed: ${rpErr?.error?.description || rpErr?.message || 'unknown error'}` });
+        }
+
+        const updated = await prisma.order.update({
+            where: { id },
+            data: {
+                status: 'REFUNDED', isPaid: false,
+                returnReason: reason,
+                metadata: {
+                    ...(typeof order.metadata === 'object' && order.metadata !== null ? (order.metadata as any) : {}),
+                    razorpayRefundId: refund.id,
+                    adminRefundAt: new Date().toISOString(),
+                    adminRefundAmountInr: amountInr,
+                    adminRefundBy: admin.id,
+                } as any,
+            },
+        });
+        await recordAdminAudit(req, {
+            actorId: admin.id,
+            action: 'order.refund',
+            targetTable: 'orders',
+            targetId: id,
+            before: { status: order.status, isPaid: order.isPaid },
+            after: { status: 'REFUNDED', refundRazorpayId: refund.id, refundAmountInr: amountInr },
+            reason,
+        });
+        return res.json({ ok: true, refundId: refund.id, amountInr, order: { id: updated.id, status: updated.status } });
+    } catch (err: any) {
+        console.error('[admin/orders/:id/refund] error:', err?.message || err);
+        return res.status(500).json({ error: 'Refund failed' });
+    }
+});
+
 // 2026-06-14: analytics depth — top products + GMV by category + by city for the
 // Reports dashboard. GET /admin/analytics/breakdowns?from&to (ISO). requireAdmin.
 app.get('/admin/analytics/breakdowns', async (req, res) => {
