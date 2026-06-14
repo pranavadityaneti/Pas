@@ -35,6 +35,9 @@ export function KYCQueue() {
   const [consent, setConsent] = useState<any | null>(null);
   const [consentLoading, setConsentLoading] = useState(false);
 
+  // 2026-06-14: full merchant detail (vertical name + signup fields the list RPC omits).
+  const [detail, setDetail] = useState<any | null>(null);
+
   const [checklist, setChecklist] = useState({
     nameMatch: false,
     validDoc: false,
@@ -42,7 +45,7 @@ export function KYCQueue() {
     addressMatch: false,
   });
 
-  const pendingApplications = merchants.filter(m => m.kyc_status === 'pending');
+  const pendingApplications = merchants.filter(m => m.kyc_status === 'pending' || m.kyc_status === 'needs_info');
 
   // Select first app on load if none selected, or clear if deleted
   useEffect(() => {
@@ -70,6 +73,16 @@ export function KYCQueue() {
       .then(({ data }) => { if (active) setConsent(data?.consent ?? null); })
       .catch(() => { if (active) setConsent(null); })
       .finally(() => { if (active) setConsentLoading(false); });
+    return () => { active = false; };
+  }, [selectedApp?.id]);
+
+  // 2026-06-14: fetch full merchant detail (resolves vertical name + extra signup fields).
+  useEffect(() => {
+    if (!selectedApp?.id) { setDetail(null); return; }
+    let active = true;
+    api.get(`/admin/merchants/${selectedApp.id}`)
+      .then(({ data }) => { if (active) setDetail(data ?? null); })
+      .catch(() => { if (active) setDetail(null); });
     return () => { active = false; };
   }, [selectedApp?.id]);
 
@@ -165,6 +178,9 @@ export function KYCQueue() {
                     {app.store_name}
                   </p>
                   <p className="text-xs text-gray-500 mt-1 truncate max-w-[140px]">{app.owner_name}</p>
+                  {app.kyc_status === 'needs_info' && (
+                    <span className="inline-block mt-1 text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 py-0.5">Needs info</span>
+                  )}
                 </div>
                 <span className="text-xs text-gray-400 whitespace-nowrap">
                   {app.created_at && formatDistanceToNow(new Date(app.created_at), { addSuffix: true }).replace('about ', '')}
@@ -289,7 +305,7 @@ export function KYCQueue() {
                   <div className="text-gray-600 truncate border-b border-gray-50 pb-1" title={selectedApp.address}>
                     {selectedApp.city}
                     <div className="text-[10px] text-gray-500 font-normal mt-0.5 truncate">{selectedApp.address}</div>
-                    <div className="text-[10px] text-blue-500 font-medium mt-0.5">{selectedApp.category}</div>
+                    <div className="text-[10px] text-blue-500 font-medium mt-0.5">{detail?.verticalName || '—'}</div>
                   </div>
 
                   <FileText className="w-3 h-3 text-gray-400" />
@@ -365,6 +381,44 @@ export function KYCQueue() {
                       </span>
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* Signup Details — surfaced via /admin/merchants/:id (2026-06-14) */}
+              <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm mb-4">
+                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Signup Details</h4>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center bg-gray-50/50 p-1.5 rounded">
+                    <span className="text-[11px] text-gray-500">Signatory role</span>
+                    <span className="text-[11px] font-semibold text-gray-900">{detail?.designation || '—'}</span>
+                  </div>
+                  <div className="flex justify-between items-center bg-gray-50/50 p-1.5 rounded">
+                    <span className="text-[11px] text-gray-500">Store hours</span>
+                    <span className="text-[11px] font-semibold text-gray-900 truncate ml-2 max-w-[170px]" title={selectedApp.operating_hours || ''}>{selectedApp.operating_hours || 'Not set'}</span>
+                  </div>
+                  {Array.isArray(selectedApp.operating_days) && selectedApp.operating_days.length > 0 && (
+                    <div className="flex justify-between items-center bg-gray-50/50 p-1.5 rounded">
+                      <span className="text-[11px] text-gray-500">Open days</span>
+                      <span className="text-[11px] text-gray-700 truncate ml-2 max-w-[170px]">{selectedApp.operating_days.join(', ')}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center bg-gray-50/50 p-1.5 rounded">
+                    <span className="text-[11px] text-gray-500">Branches</span>
+                    <span className="text-[11px] font-semibold text-gray-900">{detail?.branches?.length ? `${detail.branches.length} branch${detail.branches.length > 1 ? 'es' : ''}` : (selectedApp.has_branches ? 'Has branches' : 'Single outlet')}</span>
+                  </div>
+                  {(detail?.branches?.length ?? 0) > 0 && (
+                    <div className="text-[10px] text-gray-500 px-1.5 space-y-0.5">
+                      {detail.branches.map((b: any) => (
+                        <div key={b.id} className="truncate" title={`${b.branchName} — ${b.address || ''}`}>• {b.branchName}{b.city ? ` (${b.city})` : ''}</div>
+                      ))}
+                    </div>
+                  )}
+                  {Array.isArray(detail?.bankAccounts) && detail.bankAccounts.length > 0 && (
+                    <div className="flex justify-between items-center bg-gray-50/50 p-1.5 rounded">
+                      <span className="text-[11px] text-gray-500">Bank accounts</span>
+                      <span className="text-[11px] text-gray-700">{detail.bankAccounts.length} on file</span>
+                    </div>
+                  )}
                 </div>
               </div>
 

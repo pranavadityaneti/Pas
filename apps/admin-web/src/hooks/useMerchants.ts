@@ -15,7 +15,7 @@ export interface Merchant {
     latitude?: number;
     longitude?: number;
     has_branches: boolean;
-    kyc_status: 'pending' | 'approved' | 'rejected';
+    kyc_status: 'pending' | 'approved' | 'rejected' | 'needs_info';
     status: 'active' | 'inactive' | 'blacklisted';
     rating?: number;
     commission_rate?: number;
