@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { AnalyticsDashboard } from './AnalyticsDashboard';
 import { AuditLog } from './AuditLog';
-import { BarChart3, ShieldAlert, LineChart } from 'lucide-react';
+import { GlobalConfig } from './GlobalConfig';
+import { BarChart3, ShieldAlert, LineChart, Settings } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { cn } from '../../ui/utils';
 
@@ -14,7 +15,7 @@ import { cn } from '../../ui/utils';
  */
 
 export function AnalyticsHub() {
-  const [activeTab, setActiveTab] = useState<'reports' | 'audit'>('reports');
+  const [activeTab, setActiveTab] = useState<'reports' | 'audit' | 'config'>('reports');
 
   return (
     <div className="h-full flex flex-col bg-gray-50 px-6 pt-10 pb-6 space-y-6">
@@ -62,6 +63,21 @@ export function AnalyticsHub() {
             <ShieldAlert className="w-4 h-4" />
             Audit Logs
           </Button>
+          <div className="w-px h-4 bg-gray-200 mx-1"></div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn(
+              "gap-2 rounded-lg transition-all",
+              activeTab === 'config'
+                ? "bg-gray-900 text-white hover:bg-gray-800 shadow-md"
+                : "text-gray-600 hover:text-[#B52725] hover:bg-gray-50"
+            )}
+            onClick={() => setActiveTab('config')}
+          >
+            <Settings className="w-4 h-4" />
+            Config
+          </Button>
         </div>
       </div>
 
@@ -70,6 +86,7 @@ export function AnalyticsHub() {
         <div className="flex-1 overflow-auto p-6">
           {activeTab === 'reports' && <AnalyticsDashboard />}
           {activeTab === 'audit'   && <AuditLog />}
+          {activeTab === 'config'  && <GlobalConfig />}
         </div>
       </div>
     </div>

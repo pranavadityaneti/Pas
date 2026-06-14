@@ -8631,6 +8631,62 @@ app.get('/wati/inbox', async (req, res) => {
 
 const ANY_ADMIN_TIER = ['SUPER_ADMIN', 'OPERATIONS', 'FINANCE', 'SUPPORT'] as const;
 
+// 2026-06-14: Global Config — platform_settings key/value store.
+// GET/PATCH /admin/config (admin) + GET /config/public (apps consume).
+app.get('/admin/config', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER as any); if (!caller) return;
+    try {
+        const rows: any[] = await prisma.$queryRawUnsafe(`SELECT key, value FROM public.platform_settings`);
+        const settings: Record<string, any> = {};
+        for (const r of rows) settings[r.key] = r.value;
+        return res.json({ settings });
+    } catch (e: any) {
+        console.error('[admin/config GET] error:', e?.message || e);
+        return res.status(500).json({ error: 'Failed to load config' });
+    }
+});
+
+app.patch('/admin/config', async (req, res) => {
+    const caller = await requireRole(req, res, ['SUPER_ADMIN'] as any); if (!caller) return;
+    try {
+        const updates = (req.body || {}) as Record<string, any>;
+        const allowed = ['service_radius_km', 'min_order_value'];
+        const entries = Object.entries(updates).filter(([k]) => allowed.includes(k));
+        if (!entries.length) return res.status(400).json({ error: 'No valid settings provided' });
+        for (const [k, v] of entries) {
+            const num = Number(v);
+            if (!isFinite(num) || num < 0) return res.status(400).json({ error: `${k} must be a non-negative number` });
+            await prisma.$executeRaw`
+                INSERT INTO public.platform_settings (key, value, updated_at, updated_by)
+                VALUES (${k}, to_jsonb(${num}::numeric), now(), ${caller.id}::uuid)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`;
+        }
+        await recordAdminAudit(req, {
+            actorId: caller.id, action: 'config.update', targetTable: 'platform_settings',
+            targetId: entries.map((e) => e[0]).join(','), after: Object.fromEntries(entries), reason: 'Global Config update',
+        });
+        return res.json({ ok: true });
+    } catch (e: any) {
+        console.error('[admin/config PATCH] error:', e?.message || e);
+        return res.status(500).json({ error: 'Failed to update config' });
+    }
+});
+
+// Public platform config for the consumer/merchant apps (no auth — 2 numbers only).
+app.get('/config/public', async (_req, res) => {
+    try {
+        const rows: any[] = await prisma.$queryRawUnsafe(`SELECT key, value FROM public.platform_settings WHERE key IN ('service_radius_km','min_order_value')`);
+        const cfg = { serviceRadiusKm: 10, minOrderValue: 0 };
+        for (const r of rows) {
+            if (r.key === 'service_radius_km') cfg.serviceRadiusKm = Number(r.value);
+            if (r.key === 'min_order_value') cfg.minOrderValue = Number(r.value);
+        }
+        return res.json(cfg);
+    } catch {
+        return res.json({ serviceRadiusKm: 10, minOrderValue: 0 });
+    }
+});
+
 // 2026-06-14: two-way Wati support inbox — threaded conversations + reply.
 // Threads = wati_inbox grouped by waPhone (latest 500 messages).
 app.get('/admin/wati/threads', async (req, res) => {
