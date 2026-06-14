@@ -627,6 +627,61 @@ app.post('/payments/create-order', async (req, res) => {
  * coupon scraping wouldn't be useful and the client is always authed by
  * the time it reaches Step 5.
  */
+// 2026-06-14 (e-Sign V1): persist a merchant's accepted + on-screen drawn-
+// signature partner agreement (Step 4 of signup). Append-only audit record in
+// merchant_consents. The merchants row already exists by Step 4 (created at the
+// Step-3→4 draft sync), so the merchant_id FK is satisfied. Server stamps IP +
+// an integrity hash. Replaces the stubbed Aadhaar eSign.
+app.post('/merchant-signup/consent', async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user)
+        return;
+    try {
+        const { agreementType, agreementVersion, acceptedPrivacy, acceptedTerms, acceptedPartner, signatoryName, designation, signature, signedPdfPath, signedAtIso, device, } = req.body || {};
+        if (!agreementType || !agreementVersion) {
+            return res.status(400).json({ error: 'agreementType and agreementVersion are required' });
+        }
+        if (!acceptedPrivacy || !acceptedTerms || !acceptedPartner) {
+            return res.status(400).json({ error: 'All three agreements must be accepted before signing' });
+        }
+        if (!signature || !Array.isArray(signature.paths) || signature.paths.length === 0) {
+            return res.status(400).json({ error: 'A drawn signature is required' });
+        }
+        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || null;
+        const signedAt = signedAtIso ? new Date(signedAtIso) : new Date();
+        // Integrity fingerprint binding merchant + agreement + signature + time.
+        const docHash = crypto.createHash('sha256').update(JSON.stringify({
+            merchantId: user.id,
+            agreementType, agreementVersion,
+            signatoryName: signatoryName || null,
+            signedAt: signedAt.toISOString(),
+            paths: signature.paths,
+        })).digest('hex');
+        const consent = await prisma.merchantConsent.create({
+            data: {
+                merchantId: user.id,
+                agreementType: String(agreementType),
+                agreementVersion: String(agreementVersion),
+                acceptedPrivacy: !!acceptedPrivacy,
+                acceptedTerms: !!acceptedTerms,
+                acceptedPartner: !!acceptedPartner,
+                signatoryName: signatoryName ? String(signatoryName) : null,
+                designation: designation ? String(designation) : null,
+                signature: signature,
+                signedPdfPath: signedPdfPath ? String(signedPdfPath) : null,
+                signedAt,
+                ip,
+                device: device ? String(device) : null,
+                docHash,
+            },
+        });
+        return res.json({ ok: true, consentId: consent.id });
+    }
+    catch (err) {
+        console.error('[merchant-signup/consent] error:', err?.message || err);
+        return res.status(500).json({ error: 'Failed to record consent' });
+    }
+});
 app.post('/merchant-signup/validate-coupon', async (req, res) => {
     const user = await requireUser(req, res);
     if (!user)
@@ -9502,6 +9557,43 @@ const ADMIN_MERCHANT_COLS = [
     'bank_accounts', 'pan_document_url', 'aadhar_front_url', 'aadhar_back_url', 'gst_certificate_url',
     'store_photos',
 ];
+// 2026-06-14 (e-Sign V1): latest signed-agreement consent record for a merchant,
+// for the admin KYC review screen. Returns { consent: null } when none exists.
+app.get('/admin/merchants/:id/consent', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res);
+        if (!admin)
+            return;
+        const consent = await prisma.merchantConsent.findFirst({
+            where: { merchantId: req.params.id },
+            orderBy: { createdAt: 'desc' },
+        });
+        if (!consent)
+            return res.json({ consent: null });
+        return res.json({
+            consent: {
+                id: consent.id,
+                agreementType: consent.agreementType,
+                agreementVersion: consent.agreementVersion,
+                acceptedPrivacy: consent.acceptedPrivacy,
+                acceptedTerms: consent.acceptedTerms,
+                acceptedPartner: consent.acceptedPartner,
+                signatoryName: consent.signatoryName,
+                designation: consent.designation,
+                signedPdfPath: consent.signedPdfPath,
+                signedAt: consent.signedAt,
+                ip: consent.ip,
+                device: consent.device,
+                docHash: consent.docHash,
+                createdAt: consent.createdAt,
+            },
+        });
+    }
+    catch (err) {
+        console.error('[admin/merchants/:id/consent] error:', err?.message || err);
+        return res.status(500).json({ error: 'Failed to load consent' });
+    }
+});
 // Admin creates a merchant (admin-web merchant directory). requireAdmin.
 app.post('/admin/merchants', async (req, res) => {
     try {

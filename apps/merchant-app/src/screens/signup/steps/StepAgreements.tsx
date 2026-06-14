@@ -1,239 +1,313 @@
 /**
- * StepAgreements — Step 4 of merchant signup (v2 NEW).
+ * StepAgreements — Step 4 of merchant signup.
  *
- * 2026-06-04 (Phase 2.D): Three documents must be read and accepted before
- * the merchant can sign with Aadhaar eSign:
- *   1. Privacy Policy (constant URL)
- *   2. Terms & Conditions (constant URL)
- *   3. Partner Agreement (selected by vertical:
- *      restaurant / grocery / other)
+ * 2026-06-14 (e-Sign V1): Replaces the v0 stub (external links + trust checkbox
+ * + fake 1.5s Digio simulation). The merchant now:
+ *   1. Reads the personalized Partner Agreement IN-APP (their own details merged
+ *      into the header), gated by scroll-to-end.
+ *   2. Accepts Privacy + Terms + Partner Agreement (checkboxes enable only after
+ *      scrolling the agreement to the end).
+ *   3. Draws their signature on screen (SignaturePad).
+ *   4. A personalized, signed PDF is generated (expo-print), uploaded to the
+ *      private merchant-docs bucket, and a consent record is persisted server-
+ *      side (merchant_consents) with IP + audit trail.
  *
- * Per spec docs/merchant-signup-v2-spec.md (Step 4):
- *  - Each doc rendered in a viewer with "I have read" checkbox below
- *  - Spec calls for the checkbox to be DISABLED until scroll-to-bottom,
- *    but that requires react-native-webview which needs a native build.
- *    v0 ships with a trust-based checkbox + external-browser link via
- *    expo-linking.openURL — upgrade to scroll-tracked WebView in the
- *    next native build cycle.
- *  - All 3 checkboxes checked → "Sign with Aadhaar eSign" button enables
- *  - eSign uses Digio Aadhaar OTP batch flow (server endpoint TBD,
- *    blocked on Digio credentials per spec blocker B7). v0 stubs the
- *    eSign with a 1.5s success simulation so the rest of the flow
- *    end-to-end-tests; Phase 2.D2 wires real Digio.
- *
- * Per-vertical agreement selection follows spec:
- *   - vertical.requiresFssai || vertical.isDining → "For Restaurants"
- *   - (TODO when we have a clear grocery flag) → "For Groceries"
- *   - default → "For Other Stores"
+ * Routing: the correct agreement (grocery / other-stores / restaurant) is chosen
+ * from the merchant's vertical via verticalToAgreement(). Aadhaar eSign is NOT
+ * used — this is a drawn electronic signature under the IT Act, 2000.
  */
 
-import React, { useState, useMemo } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, Linking, Alert } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  ActivityIndicator,
+  Linking,
+  Alert,
+  ScrollView,
+  Modal,
+  type NativeSyntheticEvent,
+  type NativeScrollEvent,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../../../constants/Colors';
+import { supabase } from '../../../lib/supabase';
 import { useSignupContext } from '../shared/SignupContext';
 import { styles } from '../shared/signupStyles';
+import AgreementDocumentView from '../agreements/components/AgreementDocumentView';
+import SignaturePad from '../agreements/components/SignaturePad';
+import { verticalToAgreement } from '../agreements/content';
+import type { MerchantAgreementData } from '../agreements/content/types';
+import type { DrawnSignature } from '../agreements/buildAgreementHtml';
+import { signAndPersistAgreement, formatAcceptanceDate } from '../agreements/services/signAgreement';
 
-/**
- * 2026-06-04 (Phase 2.D): Document URLs. v0 hardcoded to public marketing
- * pages; Phase 2.D2 will swap to versioned PDFs in the merchant-agreements
- * bucket with per-merchant signatory blocks filled in.
- */
 const DOC_URLS = {
-    privacy: 'https://www.pickatstore.io/privacypolicy/merchant-app',
-    terms: 'https://www.pickatstore.io/terms/merchant-app',
-    partnerRestaurant: 'https://www.pickatstore.io/agreements/partner-restaurant',
-    partnerGrocery: 'https://www.pickatstore.io/agreements/partner-grocery',
-    partnerOther: 'https://www.pickatstore.io/agreements/partner-other',
+  privacy: 'https://www.pickatstore.io/privacypolicy/merchant-app',
+  terms: 'https://www.pickatstore.io/terms/merchant-app',
 };
 
 export function StepAgreements() {
-    const { agreements, setAgreements, selectedVertical, identity } = useSignupContext();
-    const [signing, setSigning] = useState(false);
+  const { agreements, setAgreements, selectedVertical, identity, store, stores, kyc } = useSignupContext();
 
-    const partnerDoc = useMemo(() => {
-        if (selectedVertical?.requiresFssai || selectedVertical?.isDining) {
-            return { title: 'Partner Agreement — For Restaurants', url: DOC_URLS.partnerRestaurant };
-        }
-        // TODO: when grocery vertical flag is defined, route to partnerGrocery
-        return { title: 'Partner Agreement — For Other Stores', url: DOC_URLS.partnerOther };
-    }, [selectedVertical]);
+  const [userId, setUserId] = useState<string>('');
+  const [scrolledEnd, setScrolledEnd] = useState(false);
+  const [showPad, setShowPad] = useState(false);
+  const [signing, setSigning] = useState(false);
 
-    const openDoc = async (url: string) => {
-        try {
-            const supported = await Linking.canOpenURL(url);
-            if (supported) {
-                await Linking.openURL(url);
-            } else {
-                Alert.alert('Cannot Open', `Unable to open ${url}. Please check your browser.`);
-            }
-        } catch (e) {
-            Alert.alert('Error', 'Failed to open the document. Try again.');
-        }
+  useEffect(() => {
+    let active = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (active && data?.session?.user?.id) setUserId(data.session.user.id);
+    });
+    return () => {
+      active = false;
     };
+  }, []);
 
-    const allAccepted =
-        agreements.privacyAccepted &&
-        agreements.termsAccepted &&
-        agreements.partnerAccepted;
+  const agreementType = useMemo(
+    () => verticalToAgreement(selectedVertical?.name ?? store.categoryName),
+    [selectedVertical, store.categoryName],
+  );
 
-    /**
-     * 2026-06-04 (Phase 2.D): eSign stub. Real Digio integration (Phase 2.D2)
-     * will call POST /merchant-signup/esign-batch on the API, redirect to
-     * Digio's webview for Aadhaar OTP, and webhook back with signed PDFs +
-     * txn IDs.
-     */
-    const handleSign = async () => {
-        if (!allAccepted) return;
-        if (!identity.ownerName || !identity.designation) {
-            Alert.alert(
-                'Profile Incomplete',
-                'Your owner name and designation must be filled at Step 1 before signing. Please go back and complete them.',
-            );
-            return;
-        }
-        setSigning(true);
-        try {
-            // ── Digio stub ─────────────────────────────────────────────────
-            // Simulates a successful Aadhaar eSign after 1.5s. The real flow
-            // opens Digio's webview, collects Aadhaar OTP, signs, webhooks back.
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            const stubTxnIds = [
-                `STUB-PRIV-${Date.now()}`,
-                `STUB-TERM-${Date.now()}`,
-                `STUB-PART-${Date.now()}`,
-            ];
-            setAgreements({
-                ...agreements,
-                signed: true,
-                txnIds: stubTxnIds,
-            });
-            Alert.alert(
-                'Signed (simulated)',
-                'Documents signed via simulated Digio eSign. Real Aadhaar OTP integration is staged for Phase 2.D2.',
-            );
-        } catch (e: any) {
-            Alert.alert('Sign Failed', e?.message || 'Could not complete eSign. Please try again.');
-        } finally {
-            setSigning(false);
-        }
+  const merchant: MerchantAgreementData = useMemo(() => {
+    const primary = stores?.[0];
+    const merchantId = userId
+      ? `PAS-${userId.replace(/-/g, '').slice(0, 8).toUpperCase()}`
+      : '—';
+    return {
+      businessName: primary?.name || store.storeName || '—',
+      storeCategory: selectedVertical?.name || store.categoryName || '—',
+      signatoryName: identity.ownerName || '—',
+      designation: identity.designation || '—',
+      placeOfBusiness:
+        [primary?.address || store.address, primary?.city || store.city].filter(Boolean).join(', ') || '—',
+      pan: kyc.panNumber || '—',
+      aadhaar: kyc.aadharNumber || undefined,
+      gstin: kyc.gstNumber || undefined,
+      fssai: kyc.fssaiNumber || undefined,
+      phone: identity.phone || '—',
+      email: identity.email || '—',
+      merchantId,
+      acceptanceDate: formatAcceptanceDate(new Date()),
     };
+  }, [userId, identity, store, stores, kyc, selectedVertical]);
 
-    const renderDocCard = (
-        title: string,
-        description: string,
-        url: string,
-        accepted: boolean,
-        toggle: () => void,
-    ) => (
-        <View style={[styles.card, accepted && { borderColor: Colors.primary, borderWidth: 1 }]}>
-            <View style={styles.cardHeader}>
-                <Ionicons name="document-text-outline" size={20} color={Colors.primary} />
-                <Text style={styles.cardTitle}>{title}</Text>
-                {accepted && <Ionicons name="checkmark-circle" size={20} color="#10B981" />}
-            </View>
-            <Text style={{ fontSize: 13, color: '#6B7280', marginBottom: 12 }}>
-                {description}
-            </Text>
-            <TouchableOpacity
-                style={[styles.locationButton, { marginBottom: 12 }]}
-                onPress={() => openDoc(url)}
-            >
-                <Ionicons name="open-outline" size={18} color={Colors.primary} />
-                <Text style={styles.locationButtonText}>Open document</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-                style={styles.checkboxRow}
-                onPress={toggle}
-            >
-                <View style={[styles.checkbox, accepted && styles.checkboxChecked]}>
-                    {accepted && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
-                </View>
-                <View style={{ flex: 1 }}>
-                    <Text style={styles.checkboxLabel}>I have read this document</Text>
-                </View>
-            </TouchableOpacity>
+  const allAccepted = agreements.privacyAccepted && agreements.termsAccepted && agreements.partnerAccepted;
+  const canSign = scrolledEnd && allAccepted && !signing && !agreements.signed;
+
+  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (scrolledEnd) return;
+    const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+    if (layoutMeasurement.height + contentOffset.y >= contentSize.height - 28) {
+      setScrolledEnd(true);
+    }
+  };
+
+  // If the rendered agreement is shorter than the box (unlikely), don't trap the user.
+  const onContentSizeChange = (_w: number, h: number) => {
+    if (!scrolledEnd && h <= 360) setScrolledEnd(true);
+  };
+
+  const openDoc = async (url: string) => {
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (supported) await Linking.openURL(url);
+      else Alert.alert('Cannot open', 'Unable to open this document in your browser.');
+    } catch {
+      Alert.alert('Error', 'Failed to open the document. Try again.');
+    }
+  };
+
+  const startSigning = () => {
+    if (!identity.ownerName || !identity.designation) {
+      Alert.alert(
+        'Profile incomplete',
+        'Your owner name and designation (Step 1) are required on the signed agreement. Please go back and complete them.',
+      );
+      return;
+    }
+    if (!kyc.panNumber) {
+      Alert.alert('PAN required', 'Your PAN (Step 5) appears on the agreement. Please add it before signing.');
+      return;
+    }
+    setShowPad(true);
+  };
+
+  const handleSignatureConfirm = async (signature: DrawnSignature) => {
+    setShowPad(false);
+    setSigning(true);
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const uid = sess?.session?.user?.id;
+      if (!uid) throw new Error('Your session expired. Please restart signup and try again.');
+      const now = new Date();
+      const res = await signAndPersistAgreement({
+        type: agreementType,
+        merchant,
+        userId: uid,
+        signature,
+        accepted: {
+          privacy: agreements.privacyAccepted,
+          terms: agreements.termsAccepted,
+          partner: agreements.partnerAccepted,
+        },
+        signedAt: now,
+      });
+      setAgreements({ ...agreements, signed: true, txnIds: res.consentId ? [res.consentId] : [] });
+    } catch (e: any) {
+      Alert.alert('Could not sign', e?.message || 'Please try again.');
+    } finally {
+      setSigning(false);
+    }
+  };
+
+  const renderCheckbox = (label: string, checked: boolean, toggle: () => void, openUrl?: string) => (
+    <View style={{ marginBottom: 12 }}>
+      <TouchableOpacity
+        style={[styles.checkboxRow, !scrolledEnd && styles.buttonDisabled]}
+        onPress={scrolledEnd ? toggle : undefined}
+        activeOpacity={scrolledEnd ? 0.7 : 1}
+      >
+        <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
+          {checked && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
         </View>
-    );
-
-    return (
-        <>
-            <View style={styles.card}>
-                <View style={styles.cardHeader}>
-                    <Ionicons name="shield-checkmark-outline" size={20} color={Colors.primary} />
-                    <Text style={styles.cardTitle}>Agreements & Consent</Text>
-                </View>
-                <Text style={{ fontSize: 13, color: '#6B7280' }}>
-                    Read the three documents below, mark each as read, then sign all of them in
-                    one Aadhaar OTP via Digio.
-                </Text>
-            </View>
-
-            {renderDocCard(
-                'Privacy Policy',
-                'How Pick At Store handles personal data and merchant information.',
-                DOC_URLS.privacy,
-                agreements.privacyAccepted,
-                () => setAgreements({ ...agreements, privacyAccepted: !agreements.privacyAccepted }),
-            )}
-
-            {renderDocCard(
-                'Terms & Conditions',
-                'Platform usage rules, dispute resolution, and your obligations as a partner.',
-                DOC_URLS.terms,
-                agreements.termsAccepted,
-                () => setAgreements({ ...agreements, termsAccepted: !agreements.termsAccepted }),
-            )}
-
-            {renderDocCard(
-                partnerDoc.title,
-                'The category-specific partner agreement covering commission, settlements, and lifetime listing rights.',
-                partnerDoc.url,
-                agreements.partnerAccepted,
-                () => setAgreements({ ...agreements, partnerAccepted: !agreements.partnerAccepted }),
-            )}
-
-            <TouchableOpacity
-                onPress={handleSign}
-                disabled={!allAccepted || signing || agreements.signed}
-                style={[
-                    {
-                        height: 56,
-                        backgroundColor: agreements.signed ? '#10B981' : Colors.primary,
-                        borderRadius: 12,
-                        flexDirection: 'row',
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                        marginVertical: 16,
-                    },
-                    (!allAccepted || signing) && styles.buttonDisabled,
-                ]}
-            >
-                {signing ? (
-                    <ActivityIndicator color="#FFFFFF" />
-                ) : agreements.signed ? (
-                    <>
-                        <Ionicons name="checkmark-circle" size={22} color="#FFFFFF" />
-                        <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700', marginLeft: 8 }}>
-                            Signed
-                        </Text>
-                    </>
-                ) : (
-                    <>
-                        <Ionicons name="finger-print-outline" size={22} color="#FFFFFF" />
-                        <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700', marginLeft: 8 }}>
-                            Sign with Aadhaar eSign
-                        </Text>
-                    </>
-                )}
+        <View style={{ flex: 1 }}>
+          <Text style={styles.checkboxLabel}>{label}</Text>
+          {openUrl && (
+            <TouchableOpacity onPress={() => openDoc(openUrl)}>
+              <Text style={{ fontSize: 13, color: Colors.primary, marginTop: 2, fontWeight: '600' }}>
+                Open document
+              </Text>
             </TouchableOpacity>
+          )}
+        </View>
+      </TouchableOpacity>
+    </View>
+  );
 
-            {!agreements.signed && (
-                <Text style={{ fontSize: 12, color: '#9CA3AF', textAlign: 'center', marginBottom: 12 }}>
-                    Once signed, the documents and your signature timestamps are stored permanently
-                    in your account audit log.
-                </Text>
-            )}
-        </>
+  // ── Signed success state ─────────────────────────────────────────────
+  if (agreements.signed) {
+    return (
+      <View style={[styles.card, styles.successCard]}>
+        <Ionicons name="checkmark-circle" size={48} color="#10B981" />
+        <Text style={styles.successTitle}>Agreement signed</Text>
+        <Text style={styles.successText}>
+          Signed by {identity.ownerName} ({identity.designation}) on {merchant.acceptanceDate}.{'\n'}
+          A signed copy has been saved to your account.
+        </Text>
+      </View>
     );
+  }
+
+  return (
+    <>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Ionicons name="shield-checkmark-outline" size={20} color={Colors.primary} />
+          <Text style={styles.cardTitle}>Agreement & signature</Text>
+        </View>
+        <Text style={{ fontSize: 13, color: '#6B7280' }}>
+          Please read the full Partner Agreement below — it carries your business details. Scroll to the
+          end, accept all three, then sign on screen.
+        </Text>
+      </View>
+
+      {/* In-app, scroll-gated agreement reader */}
+      <View style={styles.card}>
+        <ScrollView
+          style={{
+            height: 360,
+            borderWidth: 1,
+            borderColor: '#E5E7EB',
+            borderRadius: 8,
+            paddingHorizontal: 12,
+            backgroundColor: '#FFFFFF',
+          }}
+          nestedScrollEnabled
+          onScroll={onScroll}
+          scrollEventThrottle={64}
+          onContentSizeChange={onContentSizeChange}
+          showsVerticalScrollIndicator
+        >
+          <AgreementDocumentView type={agreementType} merchant={merchant} />
+        </ScrollView>
+        <Text style={{ fontSize: 12, color: scrolledEnd ? '#10B981' : '#9CA3AF', textAlign: 'center', marginTop: 8 }}>
+          {scrolledEnd ? '✓ You have read the full agreement' : '↓ scroll to the end to continue'}
+        </Text>
+      </View>
+
+      {/* Acceptance checkboxes (enabled only after scroll-to-end) */}
+      <View style={styles.card}>
+        {renderCheckbox(
+          'I have read the Privacy Policy',
+          agreements.privacyAccepted,
+          () => setAgreements({ ...agreements, privacyAccepted: !agreements.privacyAccepted }),
+          DOC_URLS.privacy,
+        )}
+        {renderCheckbox(
+          'I accept the Terms of Service',
+          agreements.termsAccepted,
+          () => setAgreements({ ...agreements, termsAccepted: !agreements.termsAccepted }),
+          DOC_URLS.terms,
+        )}
+        {renderCheckbox(
+          'I accept the Partner Agreement above',
+          agreements.partnerAccepted,
+          () => setAgreements({ ...agreements, partnerAccepted: !agreements.partnerAccepted }),
+        )}
+      </View>
+
+      <TouchableOpacity
+        onPress={startSigning}
+        disabled={!canSign}
+        style={[
+          {
+            height: 56,
+            backgroundColor: Colors.primary,
+            borderRadius: 12,
+            flexDirection: 'row',
+            justifyContent: 'center',
+            alignItems: 'center',
+            marginVertical: 16,
+          },
+          !canSign && styles.buttonDisabled,
+        ]}
+      >
+        {signing ? (
+          <ActivityIndicator color="#FFFFFF" />
+        ) : (
+          <>
+            <Ionicons name="create-outline" size={22} color="#FFFFFF" />
+            <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700', marginLeft: 8 }}>Sign agreement</Text>
+          </>
+        )}
+      </TouchableOpacity>
+
+      <Text style={{ fontSize: 12, color: '#9CA3AF', textAlign: 'center', marginBottom: 12 }}>
+        Your drawn signature, the accepted documents, and a timestamped audit record are saved with your
+        application.
+      </Text>
+
+      {/* Signature pad modal */}
+      <Modal visible={showPad} transparent animationType="slide" onRequestClose={() => setShowPad(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: undefined }]}>
+            <Text style={styles.modalTitle}>Sign here</Text>
+            <Text style={{ fontSize: 13, color: '#6B7280', marginBottom: 12, textAlign: 'center' }}>
+              Use your finger to sign inside the box.
+            </Text>
+            <SignaturePad
+              onConfirm={handleSignatureConfirm}
+              signatoryLabel={`${identity.ownerName} · ${identity.designation}`}
+              height={200}
+            />
+            <TouchableOpacity onPress={() => setShowPad(false)} style={styles.modalCloseBtn}>
+              <Text style={styles.modalCloseText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </>
+  );
 }

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>PAS — Merchant Signup + Admin Approval Audit (2026-06-14)</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:1040px;margin:0 auto;padding:28px 32px 80px;color:#1a1a1a;background:#fafafa;line-height:1.55}
+h1{font-size:24px;margin:0 0 4px}h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1.5px solid #d4d4d4}
+h3{font-size:15px;margin:20px 0 6px;color:#222}
+.lead{color:#555;font-size:14px;margin-bottom:18px}
+table{border-collapse:collapse;width:100%;font-size:12.5px;margin:8px 0 16px;background:#fff}
+th,td{padding:7px 9px;text-align:left;border-bottom:1px solid #eee;vertical-align:top}th{background:#f6f6f6;font-weight:700}
+code{background:#f0f0f0;padding:1px 5px;border-radius:3px;font-family:'SF Mono',Menlo,Consolas,monospace;font-size:90%}
+.pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:10.5px;font-weight:700}
+.ok{background:#d1fae5;color:#065f46}.part{background:#fef3c7;color:#92400e}.no{background:#fee2e2;color:#991b1b}
+.hi{background:#fee2e2;color:#991b1b}.med{background:#fef3c7;color:#92400e}.low{background:#dbeafe;color:#1e40af}
+.crit{background:#fef2f2;border-left:3px solid #dc2626;padding:8px 14px;margin:10px 0;font-size:13px}
+.note{background:#fffbe6;border-left:3px solid #f59e0b;padding:8px 14px;margin:10px 0;font-size:13px}
+@media print{body{background:#fff;max-width:none}}
+</style></head><body>
+<h1>Merchant Signup + Admin Approval — Audit</h1>
+<div class="lead"><strong>2026-06-14.</strong> Two-track read-only code audit. (1) Is the merchant signup wizard fully wired, what's pending? (2) Does the admin approval UI surface the new signup fields? Legend: <span class="pill ok">wired/shown</span> <span class="pill part">partial</span> <span class="pill no">missing/stubbed</span> · severity <span class="pill hi">HIGH</span> <span class="pill med">MED</span> <span class="pill low">LOW</span>.</div>
+
+<div class="crit"><strong>Headline:</strong> The signup wizard works end-to-end for the money + KYC-document path (a merchant can register, upload all docs, pay, submit — all persisted). The admin KYC screen <em>does</em> show the uploaded documents + numbers + bank (a reviewer can actually verify). <strong>But the legal layer is hollow:</strong> Aadhaar eSign is a 1.5-second fake, and the agreement/consent acceptance is <strong>never saved to the database at all</strong> — so the admin approves with zero recorded proof the partner agreement was signed. Plus the newer fields (designation, store hours, agreements, extra branches) aren't shown in the review screen.</div>
+
+<h2>Part 1 — Merchant signup wizard status</h2>
+<p>6-step wizard (<code>apps/merchant-app/app/(auth)/signup.tsx</code> 🔒 + <code>src/screens/signup/</code>). Backend persists via Prisma/service-role through <code>PATCH /auth/merchant/draft</code> (not direct supabase). Draft autosaved to AsyncStorage.</p>
+<table>
+<tr><th>Step</th><th>Captures</th><th>Status</th><th>Notes</th></tr>
+<tr><td>1 Identity</td><td>ownerName, designation, phone, email, phone-OTP</td><td><span class="pill ok">fully wired</span></td><td>all land in <code>merchants</code></td></tr>
+<tr><td>2 Stores</td><td>per-store name, address, lat/long, city, manager, photos(min 2); food: cuisines, isVeg, restaurantType; vertical/category</td><td><span class="pill ok">mostly wired</span></td><td>→ <code>merchant_branches</code>. Hours NOT captured (see gaps)</td></tr>
+<tr><td>3 KYC</td><td>turnover, PAN+img, Aadhaar#+front/back, GST#+cert, FSSAI(food), MSME(opt), bank acct/IFSC/beneficiary</td><td><span class="pill ok">fully wired</span></td><td>numbers + doc URLs persisted to <code>merchant-docs</code> bucket</td></tr>
+<tr><td>4 Agreements / eSign</td><td>privacy/terms/partner accept, "signed", txnIds</td><td><span class="pill no">STUBBED</span></td><td>eSign = <code>setTimeout(1500)</code> fake; <strong>nothing persisted</strong>; no PDF generation; docs open external links</td></tr>
+<tr><td>5 Subscription</td><td>tier, per-store pricing, coupon, Razorpay payment</td><td><span class="pill ok">fully wired</span></td><td>coupon validation + redemption + payment all real; server re-validates discount</td></tr>
+<tr><td>6 Review</td><td>read-only summary + confirm</td><td><span class="pill ok">wired</span></td><td>gates submit (cosmetic: button label reads "Next" not "Submit")</td></tr>
+</table>
+
+<h3>Pending / stubbed (signup)</h3>
+<table>
+<tr><th>Item</th><th>Severity</th><th>Detail</th></tr>
+<tr><td>Aadhaar eSign (Digio)</td><td><span class="pill hi">HIGH</span></td><td>Fake <code>setTimeout</code> + stub txn IDs (<code>STUB-…</code>). No Digio call, no Aadhaar OTP. Blocked on Digio credentials. (Task #33)</td></tr>
+<tr><td>Agreement/consent persistence</td><td><span class="pill hi">HIGH</span></td><td>Client builds an <code>agreements</code> object but the server <strong>drops it</strong> — no <code>merchant_consents</code> table exists. No record of what was accepted/signed, by whom, when, IP. (Task #32 backend half)</td></tr>
+<tr><td>Agreement PDF generation</td><td><span class="pill med">MED</span></td><td>Spec wants a filled, signed partner-agreement PDF per merchant → bucket. Not built. <code>partnerGrocery</code> doc never selected.</td></tr>
+<tr><td>Store operating hours at signup</td><td><span class="pill med">MED</span></td><td>Your D1 decision (capture hours at signup) is <strong>not built</strong> — zero hours fields in the wizard. <code>merchant_branches.operating_hours</code> stays null (ties to consumer bug #12 / the 25 NULL-hours stores).</td></tr>
+<tr><td>Server-side coord validation</td><td><span class="pill med">MED</span></td><td>No India-bounds / sentinel (<code>17.385,78.4867</code>) rejection — server writes lat/long unconditionally.</td></tr>
+<tr><td>bank_name / bank_accounts not written</td><td><span class="pill low">LOW</span></td><td>Captured beneficiary/acct/IFSC persist; <code>bank_name</code> + multi-account <code>bank_accounts</code> never set.</td></tr>
+<tr><td>"Submit" button shows "Next"; agreements not in draft snapshot</td><td><span class="pill low">LOW</span></td><td>Cosmetic + re-sign-on-resume (low impact while eSign is stubbed).</td></tr>
+</table>
+
+<h2>Part 2 — Admin approval (KYC review)</h2>
+<p>The real approval screen is <code>KYCQueue.tsx</code> (a read-only drawer <code>MerchantDetailsSheet.tsx</code> also exists). Approve/reject/<strong>needs_info</strong> → <code>POST /merchants/:id/kyc-decision</code> (OPERATIONS role) → sets kyc_status + emails the merchant. <strong>This flow is solid.</strong></p>
+
+<h3>What the reviewer CAN see (good)</h3>
+<p><span class="pill ok">shown</span> Document images in a zoomable signed-URL viewer: PAN, Aadhaar front/back, GST, MSME, FSSAI certs, store photos. Plus owner/email/phone, city/address, all KYC numbers (PAN/Aadhaar/GST/MSME/FSSAI), turnover, bank beneficiary/account/IFSC. So a reviewer can genuinely verify documents — the core KYC job works.</p>
+
+<h3>GAP table — captured at signup but NOT shown for approval</h3>
+<table>
+<tr><th>Field</th><th>Shown?</th><th>Severity</th><th>Fix location</th></tr>
+<tr><td><strong>Agreements + eSign acceptance</strong></td><td><span class="pill no">no — not even persisted</span></td><td><span class="pill hi">HIGH</span></td><td>persist first (new table), then a "Legal/Consent" block in KYCQueue</td></tr>
+<tr><td>designation (signatory title)</td><td><span class="pill no">no</span></td><td><span class="pill med">MED</span></td><td>KYCQueue owner block</td></tr>
+<tr><td>additional branches</td><td><span class="pill no">no</span> (joined in fetch, not rendered)</td><td><span class="pill med">MED</span></td><td>KYCQueue / details sheet</td></tr>
+<tr><td>bank_accounts (multi-account)</td><td><span class="pill no">no</span></td><td><span class="pill med">MED</span></td><td>KYCQueue bank block</td></tr>
+<tr><td>store operating hours</td><td><span class="pill no">no</span> in review (only editable in EditMerchantDialog)</td><td><span class="pill low">LOW</span></td><td>KYCQueue meta</td></tr>
+<tr><td>lat/long, has_branches, bank_name</td><td><span class="pill no">no</span></td><td><span class="pill low">LOW</span></td><td>KYCQueue meta</td></tr>
+</table>
+
+<h3>Cross-cutting bugs found (both sides)</h3>
+<table>
+<tr><th>#</th><th>Issue</th><th>Severity</th></tr>
+<tr><td>X1</td><td><strong>Agreements/eSign never persisted</strong> — captured → faked → dropped server-side. No consent table. Admin approves with no signed-agreement record. <em>Legal exposure.</em></td><td><span class="pill hi">HIGH</span></td></tr>
+<tr><td>X2</td><td><strong>Phantom <code>category</code> field</strong> — admin-create sends it + it's whitelisted, but <code>Merchant</code> has NO <code>category</code> column (only <code>vertical_id</code> UUID + <code>cuisines[]</code>). KYCQueue renders <code>merchant.category</code> → blank. The vertical name isn't resolved/shown.</td><td><span class="pill med">MED</span></td></tr>
+<tr><td>X3</td><td><strong>Two PAN columns</strong> — app-signup writes <code>pan_doc_url</code>, admin-create writes <code>pan_document_url</code>. KYCQueue reads both (ok); MerchantDetailsSheet reads only <code>pan_doc_url</code> → admin-created merchants' PAN link missing there.</td><td><span class="pill med">MED</span></td></tr>
+<tr><td>X4</td><td><code>needs_info</code> missing from the <code>Merchant</code> TS type (backend writes it; queue filters <code>pending</code>) — a needs_info merchant drops out of the queue with no dedicated view.</td><td><span class="pill med">MED</span></td></tr>
+<tr><td>X5</td><td>Admin reads merchants via supabase RPC <code>get_merchants_with_stats</code> (<strong>not in the repo</strong>) with a <code>select('*')</code> fallback. If the RPC's column list is narrower than the doc-URL columns, doc images could silently fail on the happy path. Verify the live function.</td><td><span class="pill med">MED</span></td></tr>
+<tr><td>X6</td><td>Reviewer's 4-point verification checklist is <strong>local UI state only</strong> — not persisted. No audit trail of what the reviewer attested to.</td><td><span class="pill low">LOW</span></td></tr>
+<tr><td>X7</td><td>MerchantDetailsSheet uses raw <code>&lt;img&gt;/&lt;a&gt;</code> (not signed URLs like KYCQueue) — broken if the <code>merchant-docs</code> bucket is private.</td><td><span class="pill low">LOW</span></td></tr>
+</table>
+
+<h2>Recommended priority order</h2>
+<ol>
+<li><strong>X1 — Agreement/eSign persistence (HIGH, legal).</strong> Add a <code>merchant_consents</code> table; have <code>/auth/merchant/draft</code> (or finalize) record accepted docs + versions + timestamp + IP + (real) eSign txn ids; surface a "Legal/Consent" block in KYCQueue. <em>Note: real eSign needs Digio (Task #33) — but persisting the acceptance + doc versions should not wait for Digio.</em></li>
+<li><strong>X2/X3 — Data-integrity fixes (MED).</strong> Resolve/show the vertical name (drop the dead <code>category</code> ref); unify the PAN column to one name. Quick, prevents blank/missing fields in review.</li>
+<li><strong>Surface the new fields in KYCQueue (MED):</strong> designation, branches, bank_accounts, (consent block from #1).</li>
+<li><strong>Store hours at signup (MED)</strong> — your D1 decision; also fixes the consumer "store always open" issue and the 25 NULL-hours stores.</li>
+<li><strong>X4/X5/X6/X7 (MED/LOW):</strong> needs_info in the type + a queue view; verify the merchants RPC returns doc columns; persist the reviewer checklist for audit; signed URLs in the details sheet.</li>
+<li><strong>Aadhaar eSign / Digio (HIGH for go-live, but vendor-blocked) — Task #33.</strong></li>
+</ol>
+
+<p style="color:#777;font-size:12px;margin-top:36px">Generated 2026-06-14 from a 2-track parallel read-only code audit (signup + admin). No files changed. Spec ref: <code>docs/merchant-signup-v2-spec.md</code>. Schema: <code>Merchant</code> @ prisma/schema.prisma:556-612.</p>
+</body></html>

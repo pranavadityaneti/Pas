@@ -8,7 +8,9 @@ import {
   User,
   MapPin,
   Loader2,
-  Trash2
+  Trash2,
+  ShieldCheck,
+  ExternalLink
 } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { Textarea } from '../../ui/textarea';
@@ -19,6 +21,8 @@ import { SecureImage } from '../../SecureImage';
 import { toast } from 'sonner';
 import { useMerchants, Merchant } from '../../../hooks/useMerchants';
 import { formatDistanceToNow } from 'date-fns';
+import api from '../../../lib/api';
+import { supabase } from '../../../lib/supabaseClient';
 
 export function KYCQueue() {
   const { merchants, updateMerchant, deleteMerchant, kycDecision, loading } = useMerchants();
@@ -26,6 +30,10 @@ export function KYCQueue() {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [activeDoc, setActiveDoc] = useState<string>('pan');
   const [rejectionReason, setRejectionReason] = useState('');
+
+  // e-Sign V1 (2026-06-14): signed-agreement consent record for the selected merchant.
+  const [consent, setConsent] = useState<any | null>(null);
+  const [consentLoading, setConsentLoading] = useState(false);
 
   const [checklist, setChecklist] = useState({
     nameMatch: false,
@@ -52,6 +60,28 @@ export function KYCQueue() {
     setZoomLevel(1);
     setActiveDoc('pan');
   }, [selectedApp?.id]);
+
+  // e-Sign V1: fetch the signed-agreement consent record for the selected merchant.
+  useEffect(() => {
+    if (!selectedApp?.id) { setConsent(null); return; }
+    let active = true;
+    setConsentLoading(true);
+    api.get(`/admin/merchants/${selectedApp.id}/consent`)
+      .then(({ data }) => { if (active) setConsent(data?.consent ?? null); })
+      .catch(() => { if (active) setConsent(null); })
+      .finally(() => { if (active) setConsentLoading(false); });
+    return () => { active = false; };
+  }, [selectedApp?.id]);
+
+  const openSignedPdf = async (path: string) => {
+    try {
+      const { data, error } = await supabase.storage.from('merchant-docs').createSignedUrl(path, 120);
+      if (error || !data?.signedUrl) throw error || new Error('no url');
+      window.open(data.signedUrl, '_blank', 'noopener');
+    } catch {
+      toast.error('Could not open the signed agreement.');
+    }
+  };
 
   // Extended 2026-06-02: added 'needs_info' branch — merchant gets a "we need more details" email
   // (via Resend) without rejecting the application outright. KYC status flips to 'needs_info'.
@@ -336,6 +366,54 @@ export function KYCQueue() {
                     </div>
                   </div>
                 </div>
+              </div>
+
+              {/* Legal & Signature — e-Sign V1 (2026-06-14) */}
+              <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm mb-4">
+                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Legal & Signature</h4>
+                {consentLoading ? (
+                  <div className="text-[11px] text-gray-400">Loading consent…</div>
+                ) : consent ? (
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center bg-green-50/60 p-1.5 rounded border border-green-100">
+                      <span className="text-[11px] text-green-700 font-medium flex items-center gap-1"><ShieldCheck className="w-3 h-3" /> Signed</span>
+                      <span className="text-[11px] font-semibold text-gray-900">{consent.agreementVersion} · {consent.agreementType}</span>
+                    </div>
+                    <div className="flex justify-between items-center bg-gray-50/50 p-1.5 rounded">
+                      <span className="text-[11px] text-gray-500">Signatory</span>
+                      <span className="text-[11px] font-semibold text-gray-900 truncate ml-2" title={`${consent.signatoryName ?? ''} ${consent.designation ? '— ' + consent.designation : ''}`}>
+                        {consent.signatoryName || 'N/A'}{consent.designation ? ` (${consent.designation})` : ''}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center bg-gray-50/50 p-1.5 rounded">
+                      <span className="text-[11px] text-gray-500">Signed at</span>
+                      <span className="text-[11px] text-gray-700">{consent.signedAt ? new Date(consent.signedAt).toLocaleString() : 'N/A'}</span>
+                    </div>
+                    <div className="flex justify-between items-center bg-gray-50/50 p-1.5 rounded">
+                      <span className="text-[11px] text-gray-500">Accepted</span>
+                      <span className="text-[11px] text-gray-700">
+                        {[consent.acceptedPrivacy && 'Privacy', consent.acceptedTerms && 'Terms', consent.acceptedPartner && 'Partner'].filter(Boolean).join(', ') || '—'}
+                      </span>
+                    </div>
+                    {(consent.device || consent.ip) && (
+                      <div className="text-[10px] text-gray-400 px-1.5 truncate" title={`${consent.device ?? ''} ${consent.ip ?? ''}`}>
+                        {[consent.device, consent.ip].filter(Boolean).join(' · ')}
+                      </div>
+                    )}
+                    {consent.docHash && (
+                      <div className="text-[10px] text-gray-400 px-1.5 font-mono truncate" title={consent.docHash}>hash: {String(consent.docHash).slice(0, 16)}…</div>
+                    )}
+                    {consent.signedPdfPath && (
+                      <Button variant="outline" size="sm" className="w-full h-8 text-xs mt-1" onClick={() => openSignedPdf(consent.signedPdfPath)}>
+                        <ExternalLink className="w-3.5 h-3.5 mr-2" /> View signed agreement (PDF)
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-amber-600 bg-amber-50/60 p-1.5 rounded border border-amber-100">
+                    ⚠ No signed agreement on record for this merchant.
+                  </div>
+                )}
               </div>
 
               {/* Checklist - Compact */}

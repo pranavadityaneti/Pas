@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>PAS — Merchant e-Sign V1 Build Plan (2026-06-14)</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:980px;margin:0 auto;padding:28px 32px 80px;color:#1a1a1a;background:#fafafa;line-height:1.55}
+h1{font-size:23px;margin:0 0 4px}h2{font-size:17px;margin:28px 0 10px;padding-bottom:6px;border-bottom:1.5px solid #d4d4d4}
+h3{font-size:14px;margin:18px 0 6px;color:#222}
+.lead{color:#555;font-size:14px;margin-bottom:16px}
+code{background:#f0f0f0;padding:1px 5px;border-radius:3px;font-family:'SF Mono',Menlo,Consolas,monospace;font-size:90%}
+pre{background:#1e1e1e;color:#e6e6e6;padding:12px 14px;border-radius:6px;overflow:auto;font-size:12px;line-height:1.5}
+table{border-collapse:collapse;width:100%;font-size:12.5px;margin:8px 0 14px;background:#fff}
+th,td{padding:7px 9px;text-align:left;border-bottom:1px solid #eee;vertical-align:top}th{background:#f6f6f6;font-weight:700}
+.step{background:#fff;border-left:3px solid #B52725;padding:6px 12px;margin:6px 0;font-size:13px}
+.flag{background:#fffbe6;border-left:3px solid #f59e0b;padding:8px 14px;margin:10px 0;font-size:13px}
+.gate{background:#fef2f2;border-left:3px solid #dc2626;padding:8px 14px;margin:10px 0;font-size:13px}
+.toc a{color:#1e40af;text-decoration:none}.toc li{margin:2px 0;font-size:13px}
+@media print{body{background:#fff;max-width:none}pre{background:#f4f4f4;color:#111;border:1px solid #ccc}}
+</style></head><body>
+<h1>Merchant e-Sign V1 — Build Plan</h1>
+<div class="lead"><strong>2026-06-14.</strong> On-screen drawn signature + personalized, attributed, signed PDF for merchant onboarding. Replaces the stubbed Aadhaar/eSign. Free, no external API. Executed one change at a time — diff + <code>tsc --noEmit</code> after each, STOP for approval between steps.</div>
+
+<div class="toc"><strong>Contents</strong><ul>
+<li><a href="#arch">Architecture</a></li><li><a href="#flags">Scope &amp; build flags</a></li>
+<li><a href="#p0">Phase 0 — Agreement templates</a></li><li><a href="#p1">Phase 1 — Signature pad</a></li>
+<li><a href="#p2">Phase 2 — Step 4 screen</a></li><li><a href="#p3">Phase 3 — Upload + persistence</a></li>
+<li><a href="#p4">Phase 4 — Admin KYC display</a></li><li><a href="#p5">Phase 5 — Rollout</a></li>
+<li><a href="#open">Open confirmations</a></li></ul></div>
+
+<h2 id="arch">Architecture — single source of truth</h2>
+<ul>
+<li><strong>Agreement content = structured data</strong> (sections/clauses per vertical), rendered two ways: React Native components for the in-app read view, and an HTML string for the <code>expo-print</code> PDF. This avoids needing a WebView in the app.</li>
+<li><strong>Signature = SVG path</strong> (gesture-handler captures strokes → <code>react-native-svg</code> renders). Embedded inline in the PDF HTML and stored as vector — no rasterization, so no extra native dependency.</li>
+<li><strong>Legal record</strong> → new <code>merchant_consents</code> table; signed PDF stored in a private <code>merchant-agreements</code> bucket.</li>
+<li><strong>Attribution</strong> = Merchant Details header (top) + Execution block (end), both merge-filled from data already captured at signup.</li>
+</ul>
+
+<h2 id="flags">Scope &amp; build flags (read first)</h2>
+<div class="flag">Adds <code>react-native-svg</code> (native module) → <strong>requires a new native build</strong> of the merchant app. You confirmed this is acceptable (build immediately after).</div>
+<div class="flag">Adds one new DB table <code>merchant_consents</code> (additive — no change to existing tables) and one new storage bucket. Touches a second app surface (admin-web <code>KYCQueue</code>) to display the consent — same feature deliverable. No other signup steps are modified.</div>
+
+<h2 id="p0">Phase 0 — Agreement templates (content; zero runtime risk)</h2>
+<div class="step"><strong>0.1</strong> Transcribe the 3 agreements (Grocery, Other Stores, Restaurants) from the PDFs into structured data → <code>apps/merchant-app/src/screens/signup/agreements/content/{grocery,otherStores,restaurants}.ts</code>. Requires reading all pages of each PDF.</div>
+<div class="step"><strong>0.2</strong> <code>buildAgreementHtml(vertical, merchant)</code> → full HTML (Merchant Details header + body + Execution block + audit footer) for <code>expo-print</code>.</div>
+<div class="step"><strong>0.3</strong> <code>&lt;AgreementBody sections={…} /&gt;</code> RN component — renders the same content for the in-app read view.</div>
+<div class="step"><strong>0.4</strong> Vertical → template mapping helper.</div>
+
+<h2 id="p1">Phase 1 — Signature pad (native dep)</h2>
+<div class="step"><strong>1.1</strong> <code>npx expo install react-native-svg</code>. (Native build needed from here on.)</div>
+<div class="step"><strong>1.2</strong> <code>&lt;SignaturePad onConfirm={(svgPath)=&gt;…} /&gt;</code> — gesture-handler → live SVG path; Clear + Confirm; returns the SVG path string(s).</div>
+
+<h2 id="p2">Phase 2 — Step 4 screen</h2>
+<div class="step"><strong>2.1</strong> Replace the stub <code>StepAgreements</code>: render Merchant Details header + <code>&lt;AgreementBody/&gt;</code> in a ScrollView; detect scroll-to-end → enable the 3 accept checkboxes.</div>
+<div class="step"><strong>2.2</strong> All 3 checked → enable "Sign agreement" → open <code>&lt;SignaturePad/&gt;</code>; on confirm store signature + metadata in signup context (removes the fake <code>setTimeout</code> / <code>STUB-</code> txn ids).</div>
+<div class="step"><strong>2.3</strong> On confirm, generate signed PDF via <code>expo-print</code> (template + embedded signature + audit footer) → local file URI in context.</div>
+
+<h2 id="p3">Phase 3 — Upload + persistence (API + DB)</h2>
+<div class="step"><strong>3.1</strong> Migration (STAGED + verify script): create <code>merchant_consents</code> — merchant_id, vertical, agreement_version, accepted_privacy/terms/partner, signature_svg, signed_pdf_url, signatory_name, designation, signed_at, ip, device, doc_hash, created_at.</div>
+<div class="step"><strong>3.2</strong> Create private <code>merchant-agreements</code> storage bucket.</div>
+<div class="step"><strong>3.3</strong> Merchant app: upload signed PDF (+ signature) to the bucket on submit.</div>
+<div class="step"><strong>3.4</strong> API: persist a consent row (server stamps IP, verifies doc hash) — extend the signup finalize path or new <code>POST /merchant-signup/consent</code>. Closes the audit-flagged "agreements never persisted" gap.</div>
+<div class="gate">DB migration runs only on your explicit in-session go (per your rules).</div>
+
+<h2 id="p4">Phase 4 — Admin KYC display</h2>
+<div class="step"><strong>4.1</strong> Ensure the merchant fetch returns the consent record.</div>
+<div class="step"><strong>4.2</strong> Add a "Legal / Consent" block to <code>KYCQueue.tsx</code>: agreement version, signatory, accepted timestamp, audit metadata, and a signed-URL link to the signed PDF.</div>
+
+<h2 id="p5">Phase 5 — Rollout</h2>
+<div class="step"><strong>5.1</strong> Bump merchant version → native build (carries <code>react-native-svg</code>) → submit. (Your go.)</div>
+<div class="step"><strong>5.2</strong> Apply <code>merchant_consents</code> migration. (Your go.)</div>
+<div class="step"><strong>5.3</strong> Verify end-to-end: new signup → read-to-end → sign → PDF generated + stored → admin sees consent + PDF.</div>
+
+<h2 id="open">Open confirmations before Phase 0</h2>
+<table>
+<tr><th>#</th><th>Decision</th><th>Default</th></tr>
+<tr><td>1</td><td>Vertical → template mapping</td><td>restaurant→restaurants; grocery/food→grocery; everything else→otherStores</td></tr>
+<tr><td>2</td><td>Storage bucket name</td><td><code>merchant-agreements</code> (private)</td></tr>
+<tr><td>3</td><td>PAS side of execution block</td><td>"Accepted electronically" (as mocked)</td></tr>
+<tr><td>4</td><td>Agreement version label</td><td><code>v1.0</code></td></tr>
+</table>
+
+<p style="color:#777;font-size:12px;margin-top:30px">Generated 2026-06-14. Companion to <code>merchant-signup-and-admin-audit-2026-06-14.html</code>. Closes audit gap X1 (agreements never persisted) + Task #32 (Agreements V1) + reframes Task #33 (eSign — drawn signature instead of Digio).</p>
+</body></html>

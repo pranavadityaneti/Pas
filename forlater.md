@@ -114,6 +114,26 @@
 
 ---
 
+## ✍️ Merchant e-Sign V1 — deferred reconciliation items (added 2026-06-14)
+
+> The on-screen drawn-signature + personalized signed-PDF feature is IN PROGRESS (plan: `docs/merchant-esign-v1-build-plan-2026-06-14.html`; routing analysis confirmed the vertical→agreement map). These two items were consciously deferred during that design.
+
+### A. Agreement commercial terms vs admin commission_rate — alignment (DECISION: "leave independent for now", 2026-06-14)
+- **What:** Each vendor agreement states a FIXED commission in its text (Grocery 2% / Other Stores 5% / Restaurant 5% pickup, 7% pickup+dining) and a fixed onboarding fee (₹999 standard / ₹2,999 restaurant). But admin sets each merchant's `commission_rate` INDEPENDENTLY (`apps/api/src/index.ts:9850`, ADMIN_MERCHANT_COLS). So a merchant can sign a "5%" contract yet be charged a different rate in admin — a contradiction in a legal document.
+- **Why deferred:** Pranav chose to ship the fixed-text agreements as-is for V1 and revisit alignment later (AskUserQuestion 2026-06-14).
+- **Revisit options:** (1) treat the agreement's stated % as binding + add an admin guard so `commission_rate` must match the vertical's agreement rate; or (2) merge-fill each merchant's actual commission + fee into the agreement so the signed PDF always matches reality (changes legal-text figures → needs CA sign-off).
+- **Scope:** apps/api (commission_rate guard) + agreement template (if option 2) + admin-web warning.
+- **Originated from:** agreement-routing analysis during eSign V1 design, 2026-06-14.
+
+### B. Bakeries & Desserts — routing/pricing/fee mismatch (added 2026-06-14)
+- **What:** Bakeries & Desserts is routed to the **Restaurant agreement** (Pranav's decision — it's food + dining-enabled), but it's priced **standard (₹999)**, not premium. The Restaurant agreement's text states **₹2,999** onboarding + 5/7% commission, so a bakery's signed contract will show ₹2,999 while they actually paid ₹999. Tied to item A.
+- **Config inconsistency to resolve:** `getIsDining('Bakeries & Desserts') = true` (`apps/consumer-app/src/utils/dataTransformer.ts:93`) yet the vertical is `isPremium = no`. Decide whether bakeries should be premium-priced (so the Restaurant agreement's fee matches) or whether the dining flag / chosen agreement should change.
+- **Why deferred:** rolled up under decision A ("leave independent for now").
+- **Scope:** vertical config (isPremium / pricing) + the agreement fee line + the routing helper.
+- **Originated from:** agreement-routing analysis 2026-06-14.
+
+---
+
 ## 🚀 June 6 Build Sprint (target: native build + production push)
 
 > **Founder commitment for June 6, 2026.** All items here must land in the build that goes out that day. Scope is heavy for 11 days — see "Sprint scope concerns" in the founder questions doc.
