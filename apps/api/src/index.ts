@@ -8631,6 +8631,84 @@ app.get('/wati/inbox', async (req, res) => {
 
 const ANY_ADMIN_TIER = ['SUPER_ADMIN', 'OPERATIONS', 'FINANCE', 'SUPPORT'] as const;
 
+// 2026-06-14: two-way Wati support inbox — threaded conversations + reply.
+// Threads = wati_inbox grouped by waPhone (latest 500 messages).
+app.get('/admin/wati/threads', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER as any); if (!caller) return;
+    try {
+        const rows = await prisma.watiInbox.findMany({ orderBy: { receivedAt: 'desc' }, take: 500 });
+        const byPhone = new Map<string, any>();
+        for (const r of rows) {
+            if (!byPhone.has(r.waPhone)) {
+                byPhone.set(r.waPhone, {
+                    waPhone: r.waPhone,
+                    contactName: r.contactName,
+                    lastBody: r.body,
+                    lastAt: r.receivedAt,
+                    lastDirection: r.direction,
+                    status: r.status,
+                    unread: 0,
+                    count: 0,
+                });
+            }
+            const t = byPhone.get(r.waPhone);
+            t.count++;
+            if (r.direction === 'inbound' && !r.isRead) t.unread++;
+        }
+        return res.json({ threads: Array.from(byPhone.values()) });
+    } catch (e: any) {
+        return handleApiError(res, e, { area: 'wati.threads', extra: undefined, userMessage: 'Failed to load conversations' });
+    }
+});
+
+// All messages for one conversation (asc). Marks inbound as read.
+app.get('/admin/wati/thread', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER as any); if (!caller) return;
+    try {
+        const phone = String(req.query.phone || '');
+        if (!phone) return res.status(400).json({ error: 'phone is required' });
+        const messages = await prisma.watiInbox.findMany({
+            where: { waPhone: phone }, orderBy: { receivedAt: 'asc' }, take: 300,
+        });
+        await prisma.watiInbox.updateMany({
+            where: { waPhone: phone, direction: 'inbound', isRead: false }, data: { isRead: true },
+        });
+        return res.json({ phone, messages });
+    } catch (e: any) {
+        return handleApiError(res, e, { area: 'wati.thread', extra: undefined, userMessage: 'Failed to load conversation' });
+    }
+});
+
+// Reply into a Wati thread (free-text session message, 24h window). Records the
+// outbound message so the thread shows it. Returns 502 with Wati's reason if the
+// window has expired / Wati rejects.
+app.post('/admin/wati/reply', async (req, res) => {
+    const caller = await requireRole(req, res, ANY_ADMIN_TIER as any); if (!caller) return;
+    try {
+        const phone = String(req.body?.phone || '');
+        const body = String(req.body?.body || '').trim();
+        if (!phone || !body) return res.status(400).json({ error: 'phone and body are required' });
+        const result = await watiService.sendSessionMessage(phone, body);
+        if (!result.ok) {
+            return res.status(502).json({ error: result.error || 'Failed to send WhatsApp reply' });
+        }
+        const saved = await prisma.watiInbox.create({
+            data: {
+                waPhone: phone,
+                direction: 'outbound',
+                messageType: 'text',
+                body,
+                rawPayload: { sentBy: caller.id, via: 'admin-support-inbox' } as any,
+                status: 'open',
+                isRead: true,
+            },
+        });
+        return res.json({ ok: true, message: saved });
+    } catch (e: any) {
+        return handleApiError(res, e, { area: 'wati.reply', extra: undefined, userMessage: 'Failed to send reply' });
+    }
+});
+
 /**
  * recordAdminAudit — best-effort audit-trail writer.
  *

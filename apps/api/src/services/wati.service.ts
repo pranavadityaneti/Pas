@@ -83,6 +83,38 @@ class WatiService {
         }
     }
 
+    /**
+     * Send a free-text SESSION message (WhatsApp 24-hour customer-service window).
+     * Used by the admin support inbox to reply to a customer. Returns ok:false
+     * with an error when the window has expired or Wati rejects — the caller
+     * surfaces it. (Outside the 24h window WhatsApp only allows template sends.)
+     */
+    async sendSessionMessage(phone: string, text: string): Promise<{ ok: boolean; error?: string }> {
+        if (!this.apiEndpoint || !this.apiToken) {
+            return { ok: false, error: 'Wati is not configured on the server.' };
+        }
+        if (process.env.NODE_ENV === 'test') {
+            console.log(`[Wati MOCK] session → ${phone}: ${text}`);
+            return { ok: true };
+        }
+        try {
+            const url = `${this.apiEndpoint}/api/v1/sendSessionMessage/${encodeURIComponent(phone)}`;
+            const response = await axios.post(url, {}, {
+                headers: { 'Authorization': `Bearer ${this.apiToken}` },
+                params: { messageText: text },
+                timeout: 10000,
+            });
+            if (response.data?.result === true || response.status === 200) {
+                return { ok: true };
+            }
+            return { ok: false, error: response.data?.info || 'Wati rejected the message — the 24-hour reply window may have expired.' };
+        } catch (error: any) {
+            const msg = error.response?.data?.info || error.response?.data?.message || error.message;
+            console.error('[Wati] sendSessionMessage error:', msg);
+            return { ok: false, error: msg };
+        }
+    }
+
     // ─── AUTHENTICATION (live) ───────────────────────────────────────────────
 
     /**
