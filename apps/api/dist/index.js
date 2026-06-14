@@ -9557,6 +9557,46 @@ const ADMIN_MERCHANT_COLS = [
     'bank_accounts', 'pan_document_url', 'aadhar_front_url', 'aadhar_back_url', 'gst_certificate_url',
     'store_photos',
 ];
+// 2026-06-14: analytics depth — top products + GMV by category + by city for the
+// Reports dashboard. GET /admin/analytics/breakdowns?from&to (ISO). requireAdmin.
+app.get('/admin/analytics/breakdowns', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res);
+        if (!admin)
+            return;
+        const from = new Date(String(req.query.from || ''));
+        const to = new Date(String(req.query.to || ''));
+        if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+            return res.status(400).json({ error: 'from and to (ISO dates) are required' });
+        }
+        const [topProducts, byCategory, byCity] = await Promise.all([
+            prisma.$queryRaw `
+                SELECT oi.product_name AS name, SUM(oi.quantity)::int AS qty, SUM(oi.price * oi.quantity)::float AS revenue
+                FROM order_items oi JOIN orders o ON o.id = oi.order_id
+                WHERE o.created_at >= ${from} AND o.created_at < ${to}
+                  AND o.status NOT IN ('CANCELLED','REFUNDED') AND oi.product_name IS NOT NULL
+                GROUP BY oi.product_name ORDER BY revenue DESC LIMIT 10`,
+            prisma.$queryRaw `
+                SELECT COALESCE(v.name, 'Uncategorized') AS category, SUM(o.total_amount)::float AS gmv, COUNT(*)::int AS orders
+                FROM orders o
+                LEFT JOIN merchant_branches b ON b.id = o.branch_id
+                LEFT JOIN merchants m ON m.id = b.merchant_id
+                LEFT JOIN "Vertical" v ON v.id = m.vertical_id
+                WHERE o.created_at >= ${from} AND o.created_at < ${to} AND o.status NOT IN ('CANCELLED','REFUNDED')
+                GROUP BY v.name ORDER BY gmv DESC`,
+            prisma.$queryRaw `
+                SELECT COALESCE(b.city, 'Unknown') AS city, SUM(o.total_amount)::float AS gmv, COUNT(*)::int AS orders
+                FROM orders o LEFT JOIN merchant_branches b ON b.id = o.branch_id
+                WHERE o.created_at >= ${from} AND o.created_at < ${to} AND o.status NOT IN ('CANCELLED','REFUNDED')
+                GROUP BY b.city ORDER BY gmv DESC LIMIT 15`,
+        ]);
+        return res.json({ topProducts, byCategory, byCity });
+    }
+    catch (err) {
+        console.error('[admin/analytics/breakdowns] error:', err?.message || err);
+        return res.status(500).json({ error: 'Failed to load analytics breakdowns' });
+    }
+});
 // 2026-06-14: full merchant detail for the admin KYC review — resolves the
 // vertical NAME (the list RPC exposes no vertical_id, so the screen's `category`
 // was always blank) and surfaces signup fields the list omits (designation,
