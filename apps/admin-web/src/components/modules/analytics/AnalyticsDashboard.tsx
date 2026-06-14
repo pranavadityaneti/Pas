@@ -14,14 +14,15 @@
  *
  * Source-of-truth: the same `"Order"` table the main Dashboard uses.
  *
- * Still out of scope (deferred, surfaced honestly):
- *   - Product-level analytics (top SKUs, category breakdown) — needs OrderItem joins
- *   - City / geo breakdown — needs branch-join aggregation
- *   - Compare-vs-previous-period — needs delta computation in RPC
+ * 2026-06-14: added compare-vs-previous-period deltas on the KPI tiles, plus
+ *   Top Selling Products, Sales by Category, and Sales by City — the latter three
+ *   via GET /admin/analytics/breakdowns (Prisma raw aggregations over order_items
+ *   and orders → merchant_branches → merchants → Vertical).
  */
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
+import api from '../../../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Button } from '../../ui/button';
 import {
@@ -163,6 +164,8 @@ export function AnalyticsDashboard() {
   const [fallbackMode, setFallbackMode] = useState(false);          // true → using old 30-day RPC
   const [topStoresN,   setTopStoresN]   = useState<5 | 10 | 25>(10);
   const [sortKey,      setSortKey]      = useState<'gmv' | 'orders'>('gmv');
+  const [prevStats,    setPrevStats]    = useState<Stats | null>(null);   // prior equal-length window (compare-vs-previous)
+  const [breakdowns,   setBreakdowns]   = useState<{ topProducts: any[]; byCategory: any[]; byCity: any[] } | null>(null);
 
   // Resolve the active range
   const range = useMemo(() => rangeFromPreset(preset, customRange), [preset, customRange]);
@@ -185,6 +188,14 @@ export function AnalyticsDashboard() {
           if (cancelled) return;
           setFallbackMode(false);
           setStats(tryNew.data as Stats);
+          // Compare-vs-previous: fetch the immediately-prior equal-length window.
+          const span = range.to.getTime() - range.from.getTime();
+          const prevFrom = new Date(range.from.getTime() - span);
+          const prev = await supabase.rpc('get_super_admin_stats_in_range', {
+            from_date: prevFrom.toISOString(),
+            to_date:   range.from.toISOString(),
+          });
+          if (!cancelled) setPrevStats(prev.error ? null : (prev.data as Stats));
           return;
         }
 
@@ -197,12 +208,22 @@ export function AnalyticsDashboard() {
         }
         setFallbackMode(true);
         setStats(tryOld.data as Stats);
+        setPrevStats(null);   // old RPC has no range → no comparison
       } catch (err: any) {
         if (!cancelled) setError(err?.message ?? 'Failed to load analytics');
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
+    return () => { cancelled = true; };
+  }, [range.from.getTime(), range.to.getTime()]);
+
+  // Depth breakdowns (top products / category / city) via the admin API.
+  useEffect(() => {
+    let cancelled = false;
+    api.get('/admin/analytics/breakdowns', { params: { from: range.from.toISOString(), to: range.to.toISOString() } })
+      .then(({ data }) => { if (!cancelled) setBreakdowns(data ?? null); })
+      .catch(() => { if (!cancelled) setBreakdowns(null); });
     return () => { cancelled = true; };
   }, [range.from.getTime(), range.to.getTime()]);
 
@@ -217,6 +238,21 @@ export function AnalyticsDashboard() {
   const totalStatus = statusBrk.reduce((s, x) => s + (x.count ?? 0), 0);
   const cancelled   = statusBrk.find(x => x.status === 'CANCELLED')?.count ?? 0;
   const cancelRate  = totalStatus > 0 ? (cancelled / totalStatus) * 100 : 0;
+
+  // Compare-vs-previous-period KPIs (null prevStats → no deltas shown)
+  const pDaily       = prevStats?.dailyStats      ?? [];
+  const pStatus      = prevStats?.statusBreakdown ?? [];
+  const prevGmv      = prevStats?.totalGmv    ?? pDaily.reduce((s, d) => s + (d.gmv ?? 0), 0);
+  const prevOrders   = prevStats?.totalOrders ?? pDaily.reduce((s, d) => s + (d.orders ?? 0), 0);
+  const prevAov      = prevOrders > 0 ? prevGmv / prevOrders : 0;
+  const pStatusTotal = pStatus.reduce((s, x) => s + (x.count ?? 0), 0);
+  const prevCancelled = pStatus.find(x => x.status === 'CANCELLED')?.count ?? 0;
+  const prevCancelRate = pStatusTotal > 0 ? (prevCancelled / pStatusTotal) * 100 : 0;
+  const pctDelta = (curr: number, prev: number): number | undefined => {
+    if (prevStats == null) return undefined;
+    if (prev === 0) return curr === 0 ? 0 : 100;
+    return ((curr - prev) / prev) * 100;
+  };
 
   // Sorted top stores
   const sortedStores = useMemo(() => {
@@ -357,22 +393,27 @@ export function AnalyticsDashboard() {
           value={fmtINR(totalGmv)}
           icon={<Wallet className="w-4 h-4" />}
           accent
+          delta={pctDelta(totalGmv, prevGmv)}
         />
         <KpiTile
           label="Total Orders"
           value={totalOrders.toLocaleString('en-IN')}
           icon={<Receipt className="w-4 h-4" />}
+          delta={pctDelta(totalOrders, prevOrders)}
         />
         <KpiTile
           label="Avg Order Value"
           value={fmtINR(aov)}
           icon={<Activity className="w-4 h-4" />}
+          delta={pctDelta(aov, prevAov)}
         />
         <KpiTile
           label="Cancellation Rate"
           value={`${cancelRate.toFixed(1)}%`}
           icon={<AlertTriangle className="w-4 h-4" />}
           tone={cancelRate > 10 ? 'warn' : undefined}
+          delta={pctDelta(cancelRate, prevCancelRate)}
+          deltaInvert
         />
       </div>
 
@@ -544,11 +585,45 @@ export function AnalyticsDashboard() {
           <CardHeader>
             <CardTitle className="text-base">Top Selling Products</CardTitle>
           </CardHeader>
-          <CardContent className="px-6 py-10 text-center">
-            <p className="text-sm font-bold text-gray-700">Product-level analytics — coming soon</p>
-            <p className="text-xs text-gray-500 mt-1">
-              Needs an OrderItem → Product join. Planned post-launch.
-            </p>
+          <CardContent className="p-0">
+            {(breakdowns?.topProducts?.length ?? 0) === 0 ? (
+              <div className="px-6 py-10 text-center text-sm text-gray-500">No product sales in {range.label.toLowerCase()}</div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Product</TableHead>
+                    <TableHead className="text-right">Qty</TableHead>
+                    <TableHead className="text-right">Revenue</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {breakdowns!.topProducts.map((p: any, i: number) => (
+                    <TableRow key={i}>
+                      <TableCell className="font-medium text-gray-900 truncate max-w-[200px]">{p.name}</TableCell>
+                      <TableCell className="text-right">{p.qty}</TableCell>
+                      <TableCell className="text-right">{fmtINR(Number(p.revenue) || 0)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ─── Row 4 — Sales by category + by city (2026-06-14) ─── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-6">
+        <Card>
+          <CardHeader><CardTitle className="text-base">Sales by Category</CardTitle></CardHeader>
+          <CardContent className="p-0">
+            <BreakdownList items={breakdowns?.byCategory ?? []} labelKey="category" />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-base">Sales by City</CardTitle></CardHeader>
+          <CardContent className="p-0">
+            <BreakdownList items={breakdowns?.byCity ?? []} labelKey="city" />
           </CardContent>
         </Card>
       </div>
@@ -561,18 +636,24 @@ export function AnalyticsDashboard() {
 // ────────────────────────────────────────────────────────────────────────────
 
 function KpiTile({
-  label, value, icon, accent, tone,
+  label, value, icon, accent, tone, delta, deltaInvert,
 }: {
   label: string;
   value: string;
   icon: React.ReactNode;
   accent?: boolean;
   tone?: 'warn';
+  delta?: number;          // % change vs previous period (undefined → hidden)
+  deltaInvert?: boolean;   // true when "down is good" (e.g. cancellation rate)
 }) {
   const valueClass =
     accent      ? 'text-[#B52725]' :
     tone === 'warn' ? 'text-amber-600' :
     'text-gray-900';
+  const showDelta = typeof delta === 'number' && isFinite(delta);
+  const up = (delta ?? 0) >= 0;
+  const good = deltaInvert ? !up : up;
+  const deltaColor = !showDelta ? '' : (Math.abs(delta!) < 0.05 ? 'text-gray-400' : good ? 'text-green-600' : 'text-red-600');
   return (
     <Card>
       <CardContent className="p-4">
@@ -581,8 +662,35 @@ function KpiTile({
           <span className="text-gray-400">{icon}</span>
         </div>
         <div className={`text-2xl font-bold ${valueClass}`}>{value}</div>
+        {showDelta && (
+          <div className={`text-[11px] font-medium mt-1 ${deltaColor}`}>
+            {up ? '▲' : '▼'} {Math.abs(delta!).toFixed(1)}% vs prev
+          </div>
+        )}
       </CardContent>
     </Card>
+  );
+}
+
+function BreakdownList({ items, labelKey }: { items: any[]; labelKey: string }) {
+  if (!items || items.length === 0) {
+    return <div className="px-6 py-8 text-center text-sm text-gray-500">No data in this range</div>;
+  }
+  const max = Math.max(1, ...items.map(i => Number(i.gmv) || 0));
+  return (
+    <div className="px-4 py-3 space-y-2.5">
+      {items.map((it, i) => (
+        <div key={i}>
+          <div className="flex justify-between items-baseline text-xs mb-1">
+            <span className="font-medium text-gray-800 truncate max-w-[150px]" title={String(it[labelKey])}>{it[labelKey]}</span>
+            <span className="text-gray-500">{fmtINR(Number(it.gmv) || 0)} · {it.orders} ord</span>
+          </div>
+          <div className="h-2 bg-gray-100 rounded overflow-hidden">
+            <div className="h-full bg-[#B52725] rounded" style={{ width: `${Math.round(((Number(it.gmv) || 0) / max) * 100)}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
