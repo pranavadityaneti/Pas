@@ -1162,8 +1162,16 @@ app.get('/products/export', async (req, res) => {
         return (0, api_error_handler_1.handleApiError)(res, error, { area: 'products.export', extra: { userId: req?.user?.id ?? undefined }, userMessage: 'Failed to export products' });
     }
 });
+// Phase 1 (2026-06-15): catalog/product mutation + export endpoints were
+// previously UNAUTHENTICATED — anyone could inject/promote/bulk-delete catalog
+// rows (bulk-delete cascades into merchant inventory). Require an authenticated
+// admin (any tier) on all of them.
+const CATALOG_ADMIN_ROLES = ['SUPER_ADMIN', 'OPERATIONS', 'FINANCE', 'SUPPORT'];
 // Export Selected Products (Template Format)
 app.post('/products/export-selected', async (req, res) => {
+    const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+    if (!caller)
+        return;
     try {
         const { ids } = req.body;
         if (!Array.isArray(ids) || ids.length === 0) {
@@ -1217,6 +1225,9 @@ app.post('/products/export-selected', async (req, res) => {
 const upload = (0, multer_1.default)({ dest: 'uploads/' });
 // Image Upload to Supabase Storage
 app.post('/products/upload-image', upload.single('file'), async (req, res) => {
+    const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+    if (!caller)
+        return;
     try {
         if (!req.file)
             return res.status(400).json({ error: 'No file uploaded' });
@@ -1428,6 +1439,9 @@ async function processScraperDataset(datasetId) {
 }
 // Trigger a new sync run
 app.post('/catalog/sync/trigger', async (req, res) => {
+    const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+    if (!caller)
+        return;
     try {
         const { queries, location = 'Mumbai', limit = 20 } = req.body;
         if (!queries || !Array.isArray(queries) || queries.length === 0) {
@@ -1497,6 +1511,9 @@ app.post('/catalog/sync/trigger', async (req, res) => {
 });
 // Get run status and fetch results to queue
 app.get('/catalog/sync/status/:runId', async (req, res) => {
+    const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+    if (!caller)
+        return;
     try {
         const { runId } = req.params;
         const result = await apify_service_1.apifyService.getRunStatus(runId);
@@ -1514,6 +1531,19 @@ app.get('/catalog/sync/status/:runId', async (req, res) => {
 });
 // Webhook listener for Apify
 app.post('/catalog/sync/webhook', async (req, res) => {
+    // Phase 1 (2026-06-15): the Apify webhook can't send a Bearer token, so it is
+    // gated by a shared secret (?secret= or x-webhook-secret header) matched against
+    // CATALOG_WEBHOOK_SECRET. Fail-closed: if the secret is unset on the server or
+    // mismatched, the call is rejected. (Moving off Apify to the purchased dataset —
+    // set this env + add ?secret= to the Apify webhook URL if Apify sync is still
+    // used; otherwise these calls are correctly rejected.)
+    const expectedSecret = process.env.CATALOG_WEBHOOK_SECRET;
+    const providedSecret = req.query.secret || req.get('x-webhook-secret') || '';
+    if (!expectedSecret || providedSecret !== expectedSecret) {
+        if (!expectedSecret)
+            console.warn('[Webhook] CATALOG_WEBHOOK_SECRET not set — rejecting catalog webhook call');
+        return res.status(401).send('Unauthorized');
+    }
     try {
         const { eventType, resource } = req.body;
         // Check if it's the specific SUCCEEDED event from Apify
@@ -1532,6 +1562,9 @@ app.post('/catalog/sync/webhook', async (req, res) => {
 });
 // Get current sync queue
 app.get('/catalog/sync/queue', async (req, res) => {
+    const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+    if (!caller)
+        return;
     try {
         const queue = await prisma.syncQueue.findMany({
             where: { status: 'PENDING' },
@@ -1646,6 +1679,9 @@ app.delete('/categories/:id', async (req, res) => {
 });
 // Approve items from sync queue to master catalog (O(1) Raw SQL Batch)
 app.post('/catalog/sync/approve', async (req, res) => {
+    const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+    if (!caller)
+        return;
     const { items } = req.body;
     if (!items || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'Valid items array required' });
@@ -1735,6 +1771,9 @@ app.post('/catalog/sync/approve', async (req, res) => {
 });
 // Reject and delete junk items from sync queue
 app.post('/catalog/sync/reject', async (req, res) => {
+    const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+    if (!caller)
+        return;
     try {
         const { ids } = req.body;
         if (!ids || !Array.isArray(ids) || ids.length === 0) {
@@ -1754,6 +1793,9 @@ app.post('/catalog/sync/reject', async (req, res) => {
 });
 // Bulk Import
 app.post('/products/bulk', upload.single('file'), async (req, res) => {
+    const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+    if (!caller)
+        return;
     try {
         if (!req.file) {
             return res.status(400).json({ error: 'No file uploaded' });
@@ -1842,6 +1884,9 @@ app.post('/products/bulk', upload.single('file'), async (req, res) => {
 });
 // Delete Product
 app.delete('/products/:id', async (req, res) => {
+    const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+    if (!caller)
+        return;
     try {
         const { id } = req.params;
         const product = await prisma.product.findUnique({ where: { id } });
@@ -1861,6 +1906,9 @@ app.delete('/products/:id', async (req, res) => {
 });
 // BULK DELETE Products
 app.post('/products/bulk-delete', async (req, res) => {
+    const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+    if (!caller)
+        return;
     try {
         const { ids } = req.body;
         if (!Array.isArray(ids) || ids.length === 0) {
@@ -1889,6 +1937,9 @@ app.post('/products/bulk-delete', async (req, res) => {
 });
 // BULK UPDATE Products (category, GST rate, etc.)
 app.post('/products/bulk-update', async (req, res) => {
+    const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+    if (!caller)
+        return;
     try {
         const { ids, updates } = req.body;
         if (!Array.isArray(ids) || ids.length === 0) {
@@ -1944,6 +1995,9 @@ app.post('/products/bulk-update', async (req, res) => {
 });
 // Patch Product (with Audit)
 app.patch('/products/:id', async (req, res) => {
+    const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+    if (!caller)
+        return;
     const { id } = req.params;
     const updates = req.body;
     // Build update data object
@@ -2011,6 +2065,9 @@ app.patch('/products/:id', async (req, res) => {
 });
 // Add Image to Product
 app.post('/products/:id/images', async (req, res) => {
+    const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+    if (!caller)
+        return;
     const { id } = req.params;
     const { url, name, isPrimary } = req.body;
     try {
@@ -2047,6 +2104,9 @@ app.post('/products/:id/images', async (req, res) => {
 });
 // Delete Image
 app.delete('/products/images/:imageId', async (req, res) => {
+    const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+    if (!caller)
+        return;
     try {
         const { imageId } = req.params;
         const image = await prisma.productImage.findUnique({ where: { id: imageId } });
@@ -2068,6 +2128,9 @@ app.delete('/products/images/:imageId', async (req, res) => {
 });
 // Update Image Details (Name/Primary)
 app.patch('/products/images/:imageId', async (req, res) => {
+    const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+    if (!caller)
+        return;
     try {
         const { imageId } = req.params;
         const { name, isPrimary } = req.body;
@@ -2093,6 +2156,9 @@ app.patch('/products/images/:imageId', async (req, res) => {
 // Accepts JSON array of products from purchased catalog
 // Supports field mapping, batch processing, and merge deduplication
 app.post('/products/bulk-import-json', express_1.default.json({ limit: '100mb' }), async (req, res) => {
+    const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+    if (!caller)
+        return;
     try {
         const { products, fieldMapping, source = 'purchased_catalog' } = req.body;
         if (!Array.isArray(products) || products.length === 0) {
@@ -3294,6 +3360,26 @@ app.post('/orders', async (req, res) => {
         });
     }
 });
+// 2026-06-15: Server-side minimum-order floor. The consumer cart greys out
+// checkout below the admin-configured minimum (Global Config → platform_settings),
+// but that gate is client-side and bypassable. POST /order-requests is the FIRST
+// server step (pre-payment), so enforcing here makes the minimum un-bypassable
+// without ever orphaning a payment. Cached 60s to avoid a DB read per order.
+let _minOrderCache = { value: 0, at: 0 };
+async function getMinOrderValueInr() {
+    const now = Date.now();
+    if (now - _minOrderCache.at < 60000)
+        return _minOrderCache.value;
+    try {
+        const rows = await prisma.$queryRawUnsafe(`SELECT value FROM public.platform_settings WHERE key = 'min_order_value'`);
+        const v = rows.length ? Number(rows[0].value) : 0;
+        _minOrderCache = { value: Number.isFinite(v) && v > 0 ? v : 0, at: now };
+        return _minOrderCache.value;
+    }
+    catch {
+        return _minOrderCache.value;
+    }
+}
 // Create Order Requests (from Consumer App) with Merchant Notification
 app.post('/order-requests', async (req, res) => {
     try {
@@ -3312,6 +3398,21 @@ app.post('/order-requests', async (req, res) => {
         if (!Array.isArray(requests) || requests.length === 0) {
             console.warn(`[POST /order-requests] 400 — Missing/empty requests array | user=${user.id}`);
             return res.status(400).json({ error: 'Missing or empty requests array' });
+        }
+        // ── Minimum-order floor (server-side, un-bypassable mirror of the cart gate) ──
+        // requests[] is the whole cart split per store, so the sum of subtotals
+        // equals the cart subtotal the consumer cart checks before checkout. This
+        // runs PRE-payment, so a rejection never orphans a Razorpay charge.
+        const minOrderInr = await getMinOrderValueInr();
+        if (minOrderInr > 0) {
+            const cartSubtotal = requests.reduce((sum, r) => sum + (Number(r?.subtotal) || 0), 0);
+            if (cartSubtotal < minOrderInr) {
+                console.warn(`[POST /order-requests] 400 — Below minimum order | cart=₹${cartSubtotal} min=₹${minOrderInr} user=${user.id}`);
+                return res.status(400).json({
+                    error: 'BELOW_MINIMUM_ORDER',
+                    message: `Minimum order value is ₹${minOrderInr}. Your cart total is ₹${Math.round(cartSubtotal)}.`,
+                });
+            }
         }
         // ── Store Status Gate: reject requests for offline/closed branches ──
         for (const reqRow of requests) {
