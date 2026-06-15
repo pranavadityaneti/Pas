@@ -97,6 +97,32 @@ model Tier2Category {
   @@schema("public")
 }
 
+/// Phase 2 (2026-06-15): maps a purchased-catalog source taxonomy
+/// (e.g. BLINKIT's 47 categories / 643 category-subcategory pairs) onto PAS's
+/// finalized 15 verticals + Tier2Categories. The bulk-load importer looks up
+/// (sourcePlatform, sourceCategory, sourceSubcategory); an empty sourceSubcategory
+/// ('') is the category-wide default. status (plain text, validated app-side,
+/// coupon-theme precedent): ACTIVE = assign vertical+category; PENDING_DECISION /
+/// EXCLUDED = route to a review queue, never to the live storefront.
+/// vertical_id/category_id are nullable (PENDING/EXCLUDED rows have none) and
+/// FK-constrained in SQL (ON DELETE SET NULL) — no Prisma back-relations needed.
+model CategoryMapping {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sourcePlatform    String   @map("source_platform")
+  sourceCategory    String   @map("source_category")
+  sourceSubcategory String   @default("") @map("source_subcategory")
+  verticalId        String?  @map("vertical_id") @db.Uuid
+  categoryId        String?  @map("category_id") @db.Uuid
+  status            String   @default("ACTIVE")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @default(now())
+
+  @@unique([sourcePlatform, sourceCategory, sourceSubcategory])
+  @@index([sourcePlatform])
+  @@map("CategoryMapping")
+  @@schema("public")
+}
+
 model User {
   id                      String   @id @default(uuid()) @db.Uuid
   email                   String   @unique
