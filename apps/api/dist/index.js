@@ -923,11 +923,14 @@ app.get('/products', async (req, res) => {
                 { ean: { contains: String(search) } }
             ];
         }
+        // 2026-06-15: filter by category/vertical NAME via the FK relation. Product has
+        // no scalar category/vertical columns (only category_id/vertical_id), so the old
+        // where.category/where.vertical threw on every filtered query.
         if (category) {
-            where.category = { in: String(category).split(',') };
+            where.Tier2Category = { name: { in: String(category).split(',') } };
         }
         if (vertical) {
-            where.vertical = { in: String(vertical).split(',') };
+            where.Vertical = { name: { in: String(vertical).split(',') } };
         }
         if (brand) {
             where.brand = { in: String(brand).split(',') };
@@ -958,12 +961,20 @@ app.get('/products', async (req, res) => {
                 skip,
                 take,
                 orderBy: { createdAt: 'desc' },
-                include: { images: true }
+                include: { images: true, Vertical: { select: { name: true } }, Tier2Category: { select: { name: true } } }
             }),
             prisma.product.count({ where })
         ]);
+        // 2026-06-15: flatten the FK relations to the category/vertical NAME strings the
+        // admin grid binds to (otherwise the Category/Vertical columns render blank for
+        // every row, even correctly-categorised ones).
+        const data = products.map((p) => ({
+            ...p,
+            category: p.Tier2Category?.name ?? null,
+            vertical: p.Vertical?.name ?? null,
+        }));
         res.json({
-            data: products,
+            data,
             pagination: {
                 total,
                 page: Number(page),
@@ -1677,14 +1688,17 @@ app.post('/catalog/sync/approve', async (req, res) => {
                 `;
             }
             // 5. Batched Audit (Inside Transaction for Atomicity)
+            // 2026-06-15: join product -> source item by sourceProductId, NOT by array
+            // index — findMany returns rows in DB order, so the old `resolvedItems[idx]`
+            // paired each product with the WRONG source item in the audit log.
             const auditProducts = await tx.product.findMany({
                 where: { sourceProductId: { in: resolvedItems.map((i) => i.source_product_id || i.sourceProductId) } },
-                select: { id: true }
+                select: { id: true, sourceProductId: true }
             });
-            await logBulkAudit(auditProducts.map((p, idx) => ({
-                id: p.id,
-                item: resolvedItems[idx]
-            })), 'CATALOG_SYNC_APPROVE', 'system', tx);
+            const idBySource = new Map(auditProducts.map((p) => [String(p.sourceProductId), p.id]));
+            await logBulkAudit(resolvedItems
+                .map((item) => ({ id: idBySource.get(String(item.source_product_id || item.sourceProductId)), item }))
+                .filter((x) => x.id), 'CATALOG_SYNC_APPROVE', 'system', tx);
             // 6. Batch Cleanup
             const idsToDelete = resolvedItems.map((i) => i.id);
             await tx.syncQueue.deleteMany({
@@ -1878,14 +1892,30 @@ app.post('/products/bulk-update', async (req, res) => {
         }
         // Build safe update data
         const updateData = {};
-        if (updates.vertical !== undefined)
-            updateData.vertical = updates.vertical;
-        if (updates.category !== undefined)
-            updateData.category = updates.category;
         if (updates.vertical_id !== undefined)
             updateData.vertical_id = updates.vertical_id;
         if (updates.category_id !== undefined)
             updateData.category_id = updates.category_id;
+        // 2026-06-15: resolve category/vertical NAMES → FK ids (Product has no scalar
+        // category/vertical columns — the old phantom writes made bulk-update 500).
+        if (updates.vertical !== undefined) {
+            const v = updates.vertical
+                ? await prisma.vertical.findUnique({ where: { name: String(updates.vertical) }, select: { id: true } })
+                : null;
+            updateData.vertical_id = v?.id ?? null;
+        }
+        if (updates.category !== undefined) {
+            const t2 = updates.category
+                ? await prisma.tier2Category.findFirst({
+                    where: { name: String(updates.category), ...(updateData.vertical_id ? { verticalId: updateData.vertical_id } : {}) },
+                    select: { id: true, verticalId: true }
+                })
+                : null;
+            updateData.category_id = t2?.id ?? null;
+            // keep the (vertical, category) pair consistent across the bulk set
+            if (t2?.verticalId && updateData.vertical_id === undefined)
+                updateData.vertical_id = t2.verticalId;
+        }
         if (updates.gstRate !== undefined)
             updateData.gstRate = parseFloat(updates.gstRate);
         if (updates.unitType !== undefined)
@@ -1935,24 +1965,14 @@ app.patch('/products/:id', async (req, res) => {
     const updateData = {};
     if (updates.mrp !== undefined)
         updateData.mrp = parseFloat(updates.mrp);
-    if (updates.category !== undefined)
-        updateData.category = updates.category;
     if (updates.name !== undefined)
         updateData.name = updates.name;
     if (updates.brand !== undefined)
         updateData.brand = updates.brand;
-    if (updates.vertical !== undefined)
-        updateData.vertical = updates.vertical;
     if (updates.vertical_id !== undefined)
         updateData.vertical_id = updates.vertical_id;
     if (updates.category_id !== undefined)
         updateData.category_id = updates.category_id;
-    // Taxonomy Integrity Check
-    if (updateData.vertical_id && updateData.category_id) {
-        const isValid = await validateTaxonomy(updateData.vertical_id, updateData.category_id);
-        if (!isValid)
-            return res.status(400).json({ error: 'Invalid Category for the selected Vertical' });
-    }
     if (updates.ean !== undefined)
         updateData.ean = updates.ean;
     if (updates.image !== undefined)
@@ -1966,6 +1986,32 @@ app.patch('/products/:id', async (req, res) => {
     if (updates.gstRate !== undefined)
         updateData.gstRate = updates.gstRate;
     try {
+        // 2026-06-15: Product has NO scalar category/vertical columns. The admin grid
+        // dropdowns send category/vertical NAMES — resolve them to the FK ids here.
+        // (Previously these were written to phantom scalars, so Prisma threw and every
+        // inline taxonomy edit failed + rolled back.)
+        if (updates.vertical !== undefined) {
+            const v = updates.vertical
+                ? await prisma.vertical.findUnique({ where: { name: String(updates.vertical) }, select: { id: true } })
+                : null;
+            updateData.vertical_id = v?.id ?? null;
+        }
+        if (updates.category !== undefined) {
+            // Tier2Category names repeat across verticals → scope to the new or existing vertical.
+            const vId = updateData.vertical_id !== undefined
+                ? updateData.vertical_id
+                : ((await prisma.product.findUnique({ where: { id }, select: { vertical_id: true } }))?.vertical_id ?? null);
+            const t2 = (updates.category && vId)
+                ? await prisma.tier2Category.findFirst({ where: { name: String(updates.category), verticalId: vId }, select: { id: true } })
+                : null;
+            updateData.category_id = t2?.id ?? null;
+        }
+        // Taxonomy integrity: the category must belong to the vertical.
+        if (updateData.vertical_id && updateData.category_id) {
+            const isValid = await validateTaxonomy(updateData.vertical_id, updateData.category_id);
+            if (!isValid)
+                return res.status(400).json({ error: 'Invalid Category for the selected Vertical' });
+        }
         // Single DB call: Update and return the new product
         const newProduct = await prisma.product.update({
             where: { id },
@@ -2255,7 +2301,7 @@ app.get('/consumer/stores', async (req, res) => {
             where.products = {
                 some: {
                     active: true,
-                    product: { category: String(category) }
+                    product: { subcategory: String(category) } // 2026-06-15: real column; `category` scalar doesn't exist → was a 500
                 }
             };
         }
@@ -2320,7 +2366,10 @@ app.get('/consumer/stores/:id', async (req, res) => {
         // Build product filter
         const productWhere = { storeId: id, active: true };
         if (category) {
-            productWhere.product = { category: String(category) };
+            // 2026-06-15: filter on the real `subcategory` column (the storefront groups +
+            // displays by subcategory). The old `category` scalar doesn't exist on Product,
+            // so this WHERE threw a 500 whenever a customer filtered by category.
+            productWhere.product = { subcategory: String(category) };
         }
         if (search) {
             productWhere.product = {
@@ -2398,7 +2447,7 @@ app.get('/consumer/products/search', async (req, res) => {
                 store: { active: true },
                 product: {
                     name: { contains: String(q), mode: 'insensitive' },
-                    ...(category ? { category: String(category) } : {})
+                    ...(category ? { subcategory: String(category) } : {}) // real column; `category` scalar doesn't exist → threw 500
                 }
             },
             include: {
@@ -2415,7 +2464,7 @@ app.get('/consumer/products/search', async (req, res) => {
                 name: sp.product?.name,
                 image: sp.product?.image,
                 mrp: sp.product?.mrp,
-                category: sp.product?.category,
+                category: sp.product?.subcategory, // `category` scalar doesn't exist → was always undefined
                 brand: sp.product?.brand,
             },
             price: sp.price,
