@@ -7,7 +7,12 @@
 //      call's selectedCoupon param — checkout screens read CartContext.
 //      Does NOT touch the layout, isWaitingForAuthSync timer logic, or the
 //      Supabase sync from layer 1.
+//   3. Global Config min-order gate approved 2026-06-14 (Pranav: "Go ahead and
+//      unlock. Wire everything properly."). Add-only: reads platform minOrderValue
+//      from /config/public and blocks checkout below it (button greyed + tap
+//      Alert + a note). Inert while minOrderValue=0. Does NOT touch layers 1-2.
 import React, { useState, useMemo, useEffect } from 'react';
+import { getPlatformConfig } from '../lib/platformConfig';
 import { View, Text, TouchableOpacity, ScrollView, Image, Alert, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ShoppingBag, ArrowLeftCircle, Minus, Plus, ChevronRight, ChevronDown, Ticket, CheckCircle, Clock } from 'lucide-react-native';
@@ -35,6 +40,14 @@ export default function CartScreen() {
     const { session: currentSession, isLoading: authLoading, user, isProfileLoading } = useAuth();
     const [authModalVisible, setAuthModalVisible] = useState(false);
     const [isWaitingForAuthSync, setIsWaitingForAuthSync] = useState(false);
+
+    // 2026-06-14: platform minimum-order value (admin Global Config → /config/public).
+    const [minOrderValue, setMinOrderValue] = useState(0);
+    useEffect(() => {
+        let m = true;
+        getPlatformConfig().then(c => { if (m) setMinOrderValue(c.minOrderValue || 0); }).catch(() => {});
+        return () => { m = false; };
+    }, []);
 
     // Phase 4 fix B2 (2026-06-09): removed local `coupon` state, the
     // route.params.selectedCoupon useEffect, and the minOrder watchdog.
@@ -93,6 +106,11 @@ export default function CartScreen() {
             return;
         }
 
+        if (minOrderValue > 0 && subtotal < minOrderValue) {
+            Alert.alert('Minimum order not met', `Add ₹${Math.ceil(minOrderValue - subtotal)} more to checkout (minimum order ₹${minOrderValue}).`);
+            return;
+        }
+
         const isRestaurantOrder = items.length > 0 && items[0].isDining;
         // Phase 4 fix B2 (2026-06-09): no selectedCoupon param.
         if (isRestaurantOrder) {
@@ -102,7 +120,8 @@ export default function CartScreen() {
         }
     };
 
-    const isCheckoutDisabled = isWaitingForAuthSync;
+    const belowMinOrder = minOrderValue > 0 && subtotal < minOrderValue;
+    const isCheckoutDisabled = isWaitingForAuthSync || belowMinOrder;
 
     if (items.length === 0) {
         return (
@@ -228,6 +247,11 @@ export default function CartScreen() {
             </ScrollView>
 
             <View className="absolute left-0 right-0 px-4" pointerEvents="box-none" style={{ bottom: 105, zIndex: 99, elevation: 20 }}>
+                {belowMinOrder && (
+                    <View className="mb-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                        <Text className="text-[13px] text-amber-800 font-medium text-center">Add ₹{Math.ceil(minOrderValue - subtotal)} more — minimum order ₹{minOrderValue}</Text>
+                    </View>
+                )}
                 <TouchableOpacity
                     delayPressIn={0}
                     onPress={handleCheckout}

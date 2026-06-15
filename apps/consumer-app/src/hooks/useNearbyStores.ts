@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useLocation } from '../context/LocationContext';
+import { getPlatformConfig } from '../lib/platformConfig';
 
 export const useNearbyStores = () => {
     const channelId = useRef(`nearby-stores-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).current;
@@ -34,11 +35,16 @@ export const useNearbyStores = () => {
                     setError(null);
                 }
 
+                // Service radius is admin-configurable via Global Config (/config/public);
+                // falls back to 10 km if the config is unreachable.
+                const cfg = await getPlatformConfig();
+                const radiusMeters = Math.round((cfg.serviceRadiusKm || 10) * 1000);
+
                 // CRITICAL EXECUTE: Native PostGIS geospatial query against live GPS
                 const { data, error: rpcError } = await supabase.rpc('get_nearby_stores', {
                     user_lat: activeLocation.latitude,
                     user_lon: activeLocation.longitude,
-                    radius_meters: 10000
+                    radius_meters: radiusMeters
                 });
 
                 console.log('POSTGIS_RAW_PAYLOAD:', data, rpcError);
