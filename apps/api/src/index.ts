@@ -472,84 +472,11 @@ async function logAudit(productId: string, action: string, field: string | null,
     }
 }
 
-// --- MOCK DATABASE (In-Memory Fallback) ---
-// This allows the app to work fully even without a PostgreSQL connection.
-let MOCK_PRODUCTS: any[] = [
-    {
-        id: 'mock-1',
-        name: 'Amul Gold Milk',
-        description: 'Full cream milk',
-        mrp: 68,
-        category: 'Dairy & Milk',
-        vertical: 'Grocery & Kirana',
-        brand: 'Amul',
-        ean: '8901262010043',
-        image: 'https://m.media-amazon.com/images/I/61lzZAgv5GL.jpg',
-        images: [{ id: 'img-1', url: 'https://m.media-amazon.com/images/I/61lzZAgv5GL.jpg', isPrimary: true }],
-        unitType: 'ml',
-        unitValue: 500,
-        hsnCode: '0401',
-        gstRate: 5,
-        createdAt: new Date().toISOString()
-    },
-    {
-        id: 'mock-2',
-        name: 'Britannia Good Day',
-        description: 'Cashew Cookies',
-        mrp: 30,
-        category: 'Bakery',
-        brand: 'Britannia',
-        ean: '8901063010023',
-        image: 'https://m.media-amazon.com/images/I/71uOt9s-uEL.jpg',
-        images: [],
-        unitType: 'g',
-        unitValue: 200,
-        hsnCode: '1905',
-        gstRate: 18,
-        createdAt: new Date().toISOString()
-    },
-    {
-        id: 'mock-3',
-        name: 'Tata Salt',
-        description: 'Iodized Salt 1kg',
-        mrp: 28,
-        category: 'Staples',
-        brand: 'Tata',
-        ean: '8901063000000',
-        image: 'https://m.media-amazon.com/images/I/61K-uO6v1IL._AC_UF1000,1000_QL80_.jpg',
-        images: [],
-        unitType: 'kg',
-        unitValue: 1,
-        hsnCode: '2501',
-        gstRate: 0,
-        createdAt: new Date().toISOString()
-    }
-];
-
-// Helper to update mock data
-const updateMockProduct = (id: string, updates: any) => {
-    const idx = MOCK_PRODUCTS.findIndex(p => p.id === id);
-    if (idx !== -1) {
-        MOCK_PRODUCTS[idx] = { ...MOCK_PRODUCTS[idx], ...updates };
-        return MOCK_PRODUCTS[idx];
-    }
-    return null;
-};
-
-const addMockImage = (productId: string, url: string, name: string, isPrimary: boolean) => {
-    const product = MOCK_PRODUCTS.find(p => p.id === productId);
-    if (product) {
-        if (!product.images) product.images = [];
-        const newImg = { id: `img-${Date.now()}`, url, name, isPrimary, productId };
-        product.images.push(newImg);
-        // Update main image if primary
-        if (isPrimary || product.images.length === 1) {
-            product.image = url;
-        }
-        return newImg;
-    }
-    return null;
-};
+// (Phase 1, 2026-06-15) MOCK_PRODUCTS in-memory fallback REMOVED. It served 3
+// fabricated products as a "successful" HTTP 200 response whenever a DB/query
+// error occurred — masking real bugs (e.g. the category/vertical FK mismatch) as
+// silently-wrong data in production. Catalog/product endpoints now surface honest
+// errors via handleApiError instead.
 
 // --- Routes ---
 
@@ -1104,9 +1031,7 @@ app.get('/products', async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('Products API Error:', error);
-        // Fallback for dev only - usually wouldn't do this in prod but keeping for safety
-        res.json({ data: MOCK_PRODUCTS, pagination: { total: MOCK_PRODUCTS.length, page: 1, limit: 100, totalPages: 1 } });
+        return handleApiError(res, error, { area: 'products.list', userMessage: 'Failed to load products' });
     }
 });
 
@@ -1463,8 +1388,13 @@ async function processScraperDataset(datasetId: string) {
             // MRP Logic
             let rawMrp = entry?.mrp || entry?.price?.mrp || 0;
             let rawSp = entry?.sellingPrice || entry?.discountedSellingPrice || entry?.price?.sp || 0;
-            const mrp = rawMrp > 1000 ? rawMrp / 100 : rawMrp;
-            const sellingPrice = rawSp > 1000 ? rawSp / 100 : rawSp;
+            // 2026-06-15: removed the `> 1000 ? /100` paise heuristic (it stored ₹1899
+            // as ₹18.99, corrupting the high-value tail). All current/purchased data is
+            // rupee-denominated; the bulk-import-json path already parses plain rupees.
+            // (This is the now-abandoned APIFY webhook path; existing zepto rows that
+            // were divided need a one-time price audit — see forlater cleanup list.)
+            const mrp = rawMrp;
+            const sellingPrice = rawSp;
 
             const rawCategory = sanitizeNullBytes(entry?.primaryCategoryName) || sanitizeNullBytes(productData?.category);
             const { vertical, category } = mapCategory(rawCategory);
@@ -2160,15 +2090,7 @@ app.patch('/products/:id', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('PATCH DB Error:', error);
-        // MOCK FALLBACK: Update in-memory data
-        console.warn('⚠️ DB unavailable. Using MOCK fallback for PATCH.');
-        const updated = updateMockProduct(id, updateData);
-        if (updated) {
-            res.json(updated);
-        } else {
-            res.status(404).json({ error: 'Product not found in mock data' });
-        }
+        return handleApiError(res, error, { area: 'products.patch', extra: { id }, userMessage: 'Failed to update product' });
     }
 });
 
@@ -2199,15 +2121,7 @@ app.post('/products/:id/images', async (req, res) => {
         await logAudit(id, 'ADD_IMAGE', 'images', null, url);
         res.json(image);
     } catch (error) {
-        console.error('Add Image DB Error:', error);
-        // MOCK FALLBACK
-        console.warn('⚠️ DB unavailable. Using MOCK fallback for Add Image.');
-        const newImg = addMockImage(id, url, name || 'Product Image', isPrimary || false);
-        if (newImg) {
-            res.json(newImg);
-        } else {
-            res.status(404).json({ error: 'Product not found in mock data' });
-        }
+        return handleApiError(res, error, { area: 'products.add-image', extra: { id }, userMessage: 'Failed to add image' });
     }
 });
 
@@ -2376,7 +2290,10 @@ app.post('/products/bulk-import-json', express.json({ limit: '100mb' }), async (
                     const productData: any = {
                         name: mapped.name,
                         mrp: mapped.mrp,
-                        category: mapped.category || 'Uncategorized',
+                        // 2026-06-15: removed phantom `category` field — Product has NO scalar
+                        // `category` column (only the category_id FK), so this made Prisma reject
+                        // EVERY row → 0 inserted while returning HTTP 200 "success". category_id
+                        // is resolved via CategoryMapping in the Phase 5 bulk-load importer.
                         image: mapped.image || null,
                         subcategory: mapped.subcategory || null,
                         source: mapped.source,
