@@ -1,4 +1,6 @@
 // @lock — Do NOT overwrite.
+//   2026-06-16 (approved, Phase 3 Item 1): added .eq('is_deleted', false) to the
+//     StoreProduct fetch — soft-deleted listings must never reach customers.
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -58,7 +60,8 @@ export const useProducts = (storeId: string | null) => {
                     )
                 `)
                 .eq('branch_id', storeId)
-                .eq('active', true);
+                .eq('active', true)
+                .eq('is_deleted', false);
 
             if (fetchError) throw fetchError;
 

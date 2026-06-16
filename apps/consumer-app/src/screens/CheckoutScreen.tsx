@@ -40,6 +40,11 @@
 //      gate at confirmAccepted keeps the storeProductId invariant but no
 //      longer rejects multi-store carts. Does NOT touch layers 1-5; layer 6's
 //      CartContext-sourced storeProductId lookup is unchanged.
+//   8. Phase 3 Item 1 approved 2026-06-16: added .eq('is_deleted', false) to the
+//      alternative-branch inventory lookup (the .from('StoreProduct') query that
+//      finds branches stocking the cart's items) — soft-deleted listings must not
+//      be suggested as alternatives. Single filter added; does NOT touch layers 1-7,
+//      session-recovery, errorDiagnostic, or the coupon flow.
 // Any modification to the checkout flow, error UI, or session-handling logic
 // REQUIRES the user's explicit chat-confirmed approval. Hard lock.
 // Confirm Pre-order Screen: Order review with arrival details → Order confirmed with OTP.
@@ -335,6 +340,7 @@ export default function CheckoutScreen() {
                         .from('StoreProduct')
                         .select('branch_id, stock, active, price, productId')
                         .eq('active', true)
+                        .eq('is_deleted', false)
                         .gt('stock', 0)
                         .neq('branch_id', req.store_id)
                         .in('productId', productIds);
