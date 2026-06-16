@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blinkit Bulk-Loader — Design Spec (Phase 4, sub-project 1)</title>
+<style>
+  :root { --ink:#1a2233; --muted:#5b6676; --line:#e3e8ef; --accent:#B52725; --ok:#166534; --warn:#9a6700; --bg:#fff; --code:#f6f8fa; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; color:var(--ink); background:var(--bg); line-height:1.55; margin:0; padding:0 20px 80px; }
+  .wrap { max-width:920px; margin:0 auto; }
+  h1 { font-size:26px; margin:28px 0 4px; }
+  h2 { font-size:20px; margin:34px 0 8px; padding-top:8px; border-top:2px solid var(--line); }
+  h3 { font-size:15px; margin:18px 0 6px; color:var(--ink); }
+  .meta { color:var(--muted); font-size:13px; margin-bottom:6px; }
+  .tag { display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; background:#eef2f7; color:var(--muted); margin-right:6px; }
+  .tag.go { background:#e7f6ec; color:var(--ok); }
+  p, li { font-size:14.5px; }
+  code { background:var(--code); padding:1px 5px; border-radius:4px; font-size:13px; }
+  pre { background:var(--code); border:1px solid var(--line); border-radius:8px; padding:12px 14px; overflow:auto; font-size:12.5px; line-height:1.5; }
+  table { border-collapse:collapse; width:100%; margin:10px 0; font-size:13px; }
+  th, td { border:1px solid var(--line); padding:7px 9px; text-align:left; vertical-align:top; }
+  th { background:#f3f6fa; font-weight:600; }
+  .toc { background:#fafbfc; border:1px solid var(--line); border-radius:8px; padding:12px 18px; margin:18px 0; }
+  .toc a { color:var(--accent); text-decoration:none; }
+  .toc ol { margin:6px 0; padding-left:20px; }
+  .callout { border-left:4px solid var(--accent); background:#fdf3f3; padding:8px 14px; margin:12px 0; border-radius:0 6px 6px 0; }
+  .callout.ok { border-color:var(--ok); background:#f1f9f3; }
+  .callout.warn { border-color:var(--warn); background:#fdf8ec; }
+  .small { font-size:12.5px; color:var(--muted); }
+  @media print { body { padding:0; } .toc { break-inside:avoid; } h2 { break-after:avoid; } pre,table { break-inside:avoid; } a { color:var(--ink); text-decoration:none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Blinkit Bulk-Loader — Design Spec</h1>
+<div class="meta">Phase 4 · sub-project 1 of 3 · 2026-06-16 · <span class="tag go">DESIGN APPROVED</span> <span class="tag">awaiting spec review</span></div>
+<p class="small">Owner: Pranav · drafted via the brainstorming workflow. Saved as HTML per Pranav's global HTML-first doc rule (overrides the skill's default markdown path). Sub-projects 2 (paginated picker) and 3 (consumer veg/non-veg filter + dots) get their own specs.</p>
+
+<div class="toc">
+<strong>Contents</strong>
+<ol>
+  <li><a href="#purpose">Purpose &amp; success criteria</a></li>
+  <li><a href="#decisions">Approved decisions (the brainstorm)</a></li>
+  <li><a href="#arch">Architecture &amp; execution</a></li>
+  <li><a href="#pipeline">Per-row pipeline</a></li>
+  <li><a href="#mapping">Field mapping (Blinkit → Product)</a></li>
+  <li><a href="#veg">Veg-derivation rules</a></li>
+  <li><a href="#idem">Idempotency, resume &amp; batching</a></li>
+  <li><a href="#report">Reporting &amp; observability</a></li>
+  <li><a href="#errors">Error handling</a></li>
+  <li><a href="#revert">Reversibility</a></li>
+  <li><a href="#test">Testing plan</a></li>
+  <li><a href="#scope">Out of scope / carry-forward</a></li>
+  <li><a href="#risks">Open risks &amp; notes</a></li>
+</ol>
+</div>
+
+<h2 id="purpose">1. Purpose &amp; success criteria</h2>
+<p>Load the purchased Blinkit dataset (<strong>141,405 rows</strong>, 165&nbsp;MB CSV) into the PAS <strong>master catalog</strong> — i.e. <code>Product</code> rows only. These are catalog entries, not inventory: they become <em>pickable</em> by merchants (sub-project 2) and surface to customers only when a merchant lists one (creates a <code>StoreProduct</code> with price/stock). <strong>This load exposes nothing to customers.</strong></p>
+<p><strong>Success =</strong> a clean, correctly-categorized, veg-derived catalog where every loaded row has a real PAS vertical + category, a preserved sibling fingerprint, an MRP, and a suggested selling price — ready for the picker. Unmappable rows are skipped (not polluted in), and the run is safe, resumable, and fully reported.</p>
+
+<h2 id="decisions">2. Approved decisions (the brainstorm)</h2>
+<table>
+<tr><th>Decision</th><th>Choice</th><th>Why</th></tr>
+<tr><td>Image re-host timing</td><td><strong>Lazy / on-list</strong></td><td>Store the grofers URL; re-host to Supabase only when a merchant actually lists the product. Customers only see listed products → only see re-hosted images. Load stays metadata-only (fast).</td></tr>
+<tr><td>Siblings / variants</td><td><strong>Defer — load flat</strong></td><td>Store sibling fields in <code>extraData</code>; add <code>variantGroupId</code>/<code>variantLabel</code> + grouping UI as a later sub-project. Nothing lost — linkage is recoverable from <code>extraData</code>.</td></tr>
+<tr><td>Veg default (unsignalled food)</td><td><strong>Default VEG</strong></td><td>Indian q-commerce norm (most grocery is veg); maximizes dot coverage. Mitigated by a thorough non-veg keyword + subcategory list.</td></tr>
+<tr><td>Unmapped category rows</td><td><strong>Skip</strong></td><td>Don't insert rows whose (category, subcategory) doesn't resolve via <code>CategoryMapping</code>. Keeps the catalog 100% categorized; deferred rows can load later once mappings extend.</td></tr>
+<tr><td>Loader architecture</td><td><strong>Local streaming Node CLI (option A)</strong></td><td>Same proven pattern as the Phase 2/3 migration scripts; full per-row control; zero new infra; lazy images mean speed isn't the bottleneck.</td></tr>
+<tr><td>MRP vs price</td><td><strong>mrp = ceiling; price = suggested selling price</strong></td><td>Verified on 20k rows: <code>price ≤ mrp</code> (16,207 discounted / 3,792 equal / 1 anomaly). <code>price</code> is the real selling price, never additive to MRP.</td></tr>
+</table>
+
+<h2 id="arch">3. Architecture &amp; execution</h2>
+<p>A single TypeScript CLI: <code>apps/api/scripts/load_blinkit_catalog.ts</code>, run with <code>npx tsx</code> from <code>apps/api</code> using the production <code>DATABASE_URL</code> (the same way every migration this session ran). It streams the CSV with <code>csv-parse</code> in stream mode (constant memory — never the whole 165&nbsp;MB in RAM), transforms each row, and upserts in batches via the Prisma client.</p>
+<pre>FLAGS
+  --file &lt;path&gt;        path to Blinkit Data.csv (required)
+  --dry-run            run the full pipeline, write NOTHING, print the report (incl. category hit-rate)
+  --limit &lt;N&gt;          process only the first N data rows (for test loads)
+  --batch-size &lt;N&gt;     rows per upsert batch (default 500)
+  --skip-existing      preload existing source_product_ids into a Set and skip them (fast resume)
+
+RUN ORDER (enforced by us, not the script)
+  1. --dry-run on the full file        → review skip-rate + sample mapped rows
+  2. --limit 100 real load             → spot-check 100 inserted rows
+  3. full load                         → only on Pranav's explicit go (migration rule)</pre>
+<p class="small">No HTTP endpoint, no queue, no worker. The existing in-memory <code>POST /products/bulk-import-json</code> is explicitly NOT used (it buffers the whole payload).</p>
+
+<h2 id="pipeline">4. Per-row pipeline</h2>
+<pre>for each CSV row:
+  1. PARSE      14 columns + data_dump JSON
+  2. CATEGORY   lookup (category, subcategory) in CategoryMapping
+                  → vertical_id + category_id
+                  unmapped / pending / NULL  →  SKIP (count: skipped_unmapped)
+  3. VEG        is_food = vertical.requiresFssai
+                  non-food            → isVeg = NULL  (unknown, no dot)
+                  food + non-veg sig  → isVeg = false
+                  food + no signal    → isVeg = true
+  4. MAP        build the Product row (see §5), incl. extraData
+  5. BUFFER     push to batch; flush at batch-size (upsert on source_product_id)</pre>
+
+<h2 id="mapping">5. Field mapping (Blinkit → Product)</h2>
+<table>
+<tr><th>Blinkit column</th><th>Product field</th><th>Transform / note</th></tr>
+<tr><td><code>product_id</code></td><td><code>sourceProductId</code> (<code>@unique</code>)</td><td>The idempotency / resume key.</td></tr>
+<tr><td><code>name</code></td><td><code>name</code></td><td>Trimmed; sanitized of control chars.</td></tr>
+<tr><td><code>mrp</code></td><td><code>mrp</code></td><td>Parsed float. <strong>No MRP÷100 heuristic</strong> (deleted Phase 1). The ceiling.</td></tr>
+<tr><td><code>price</code></td><td><code>extraData.suggestedPrice</code></td><td>Parsed float, <strong>clamped to ≤ mrp</strong> (guards the 1-in-20k <code>price&gt;mrp</code> anomaly). The picker pre-fills the selling price from this.</td></tr>
+<tr><td><code>brand</code></td><td><code>brand</code></td><td>Nullable (2.7% null in source).</td></tr>
+<tr><td><code>images</code> (JSON array)</td><td><code>image</code></td><td>First URL only, <strong>stored as the raw grofers URL</strong> (lazy re-host later). SafeImage covers admin-side breakage.</td></tr>
+<tr><td><code>quantity</code></td><td><code>uom</code> + <code>unitType</code>/<code>unitValue</code></td><td>Raw string → <code>uom</code>; best-effort parse (e.g. "500 g" → value 500, type "g").</td></tr>
+<tr><td><code>category</code>, <code>subcategory</code></td><td><code>vertical_id</code>, <code>category_id</code>, <code>subcategory</code></td><td>Resolved via <code>CategoryMapping</code>; raw subcategory string kept on <code>Product.subcategory</code>.</td></tr>
+<tr><td><code>deeplink</code></td><td><code>extraData.sourceUrl</code></td><td>Kept for provenance.</td></tr>
+<tr><td><code>data_dump</code></td><td><code>extraData.{siblings, parentIndex, childIndex}</code></td><td>Extract only the sibling fields (+ bonus <code>rating</code>/<code>ratingCount</code> if present) — not the whole blob.</td></tr>
+<tr><td>— (constant)</td><td><code>source</code> = <code>'blinkit'</code></td><td>Tags the whole load for clean rollback + the deferred zepto cleanup.</td></tr>
+<tr><td>— (derived)</td><td><code>Product.isVeg</code> (new tri-state col)</td><td>See §6. <code>true</code>/<code>false</code>/<code>NULL</code>(unknown). Recommended over <code>extraData.isVeg</code> for queryable filtering — see the open decision in §6.</td></tr>
+</table>
+<p class="small"><code>StoreProduct</code> fields (price/stock/active) are NOT written — this is catalog only.</p>
+
+<h2 id="veg">6. Veg-derivation rules</h2>
+<p>Blinkit has no veg flag, so the loader derives one. Tri-state: <code>true</code> / <code>false</code> / <code>NULL</code>(unknown).</p>
+<div class="callout"><strong>OPEN DECISION — where to store it.</strong> Recommended: a new <strong><code>Product.isVeg Boolean?</code> column</strong> (added by a small additive migration before the load). Reason: sub-project 3 builds a veg/non-veg <em>filter</em> over 141k rows — a real, indexable column is far better than querying a JSON field. <br><span class="small">Trade-off: the consumer <code>useProducts</code> hook (<code>@lock</code>) currently reads <code>extra_data?.isVeg</code>. Switching it to read the column is part of <strong>sub-project 3</strong> (the veg UI work) — fine, because loaded products aren't customer-visible until a merchant lists them (sub-project 2), so no veg dot renders from this data until then anyway. Alternative: write <code>extraData.isVeg</code> (no migration, matches today's read, but JSON-filtering later). <strong>Pranav to confirm.</strong></span></div>
+<pre>is_food   := resolved vertical.requiresFssai == true
+             (food verticals: Grocery &amp; Kirana, Fresh Items,
+              Bakeries &amp; Desserts, Restaurants &amp; Cafes)
+
+NON-VEG if is_food AND (
+     subcategory IN {"Chicken, Meat &amp; Fish", "Frozen Non-Veg", ...}
+  OR name/subcategory matches any of:
+     chicken, mutton, fish, prawn, shrimp, seafood, crab, meat,
+     egg, anda, pork, bacon, ham, sausage, salami, keema, fillet,
+     lamb, tuna, squid, octopus
+)
+VEG     if is_food AND no non-veg signal      (default-veg, per decision)
+UNKNOWN if NOT is_food                        (electronics, pet, fashion → no dot)</pre>
+<div class="callout warn"><strong>Tunable + reviewable.</strong> The keyword/subcategory list is data-driven and the <code>--dry-run</code> report prints the veg/non-veg/unknown distribution + a sample of each, so we tune the list <em>before</em> the real load. Egg is treated non-veg (Indian convention).</div>
+
+<h2 id="idem">7. Idempotency, resume &amp; batching</h2>
+<ul>
+  <li><strong>Upsert</strong> keyed on <code>sourceProductId</code> — a re-run inserts new rows and updates existing ones; it never duplicates.</li>
+  <li><strong>Batches of ~500, per-batch commit.</strong> Never one giant transaction (the forlater's 60s-tx warning). A crash at row 90,000 loses nothing committed.</li>
+  <li><strong>Resume</strong> is just "run it again." <code>--skip-existing</code> preloads existing ids to skip re-processing for speed.</li>
+  <li><strong>In-file dedup:</strong> Blinkit <code>product_id</code> has 0 dups (verified), but the loader still guards against a duplicate id within the file (counts <code>skipped_dup</code>).</li>
+</ul>
+
+<h2 id="report">8. Reporting &amp; observability</h2>
+<p>Live progress every N rows, and a final summary:</p>
+<pre>BLINKIT LOAD — summary
+  total rows read .......... 141,405
+  loaded (insert+update) ... &lt;n&gt;
+  skipped — unmapped cat ... &lt;n&gt;   (category hit-rate = loaded / mappable)
+  skipped — dup in file .... &lt;n&gt;
+  errors ................... &lt;n&gt;   (+ first 20 samples)
+  veg / non-veg / unknown .. &lt;a&gt; / &lt;b&gt; / &lt;c&gt;
+  per-vertical counts ...... { ... }</pre>
+<p>The <code>--dry-run</code> produces this exact report writing nothing — so the category hit-rate and veg distribution are reviewed before any prod write.</p>
+
+<h2 id="errors">9. Error handling</h2>
+<p>Per-row errors are caught, logged, and counted — a malformed row never aborts the run. A failed batch is retried row-by-row to isolate the offender, which is logged (with its <code>product_id</code>) and skipped; the run continues. The summary surfaces the total error count + samples so nothing fails silently.</p>
+
+<h2 id="revert">10. Reversibility</h2>
+<p>Every row is tagged <code>source='blinkit'</code>. Before any merchant lists a Blinkit product, a full rollback is a single statement:</p>
+<pre>DELETE FROM "Product" WHERE source = 'blinkit';   -- safe pre-listing</pre>
+<p>(Cascades to <code>ProductImage</code>; no <code>StoreProduct</code> exists yet for these.) This dovetails with the deferred "delete old <code>source='zepto'</code> data" cleanup, which happens after this load is verified.</p>
+
+<h2 id="test">11. Testing plan</h2>
+<ol>
+  <li><strong>Dry-run, full file</strong> → review category hit-rate, veg distribution, and a sample of mapped rows. Tune the veg keyword list / flag any category-mapping gaps.</li>
+  <li><strong><code>--limit 100</code> real load</strong> → spot-check 100 inserted rows in the DB: category/vertical correct, veg sensible, mrp + suggestedPrice + uom + image URL + sibling fields all present and right.</li>
+  <li><strong>Idempotency check</strong> → re-run the same 100; assert 0 duplicates, counts stable.</li>
+  <li><strong>Full load</strong> → only on explicit go; verify final counts + per-vertical + veg distribution against the dry-run prediction.</li>
+</ol>
+
+<h2 id="scope">12. Out of scope / carry-forward</h2>
+<table>
+<tr><th>Item</th><th>Where it belongs</th></tr>
+<tr><td><strong>Lazy image re-host mechanism</strong> (download grofers → upload Supabase → swap URL on first listing)</td><td>Small follow-up in the <code>StoreProduct</code> write path. The loader only stores the grofers URL.</td></tr>
+<tr><td><strong>Sibling linkage</strong> — <code>variantGroupId</code>/<code>variantLabel</code> cols + grouping + variant UI</td><td>Deferred sub-project; raw data preserved in <code>extraData</code>.</td></tr>
+<tr><td><strong>FSSAI listing gate</strong> — block food-vertical listings unless the merchant has an FSSAI licence</td><td>Separate item in the <code>StoreProduct</code> write path (it's a merchant-listing rule, not an ingest rule). Loader only needs correct vertical assignment.</td></tr>
+<tr><td><strong>MRP-ceiling enforcement</strong> — merchant's <code>StoreProduct.price ≤ Product.mrp</code> at listing <span class="tag go">Pranav: must enforce</span></td><td>Picker/listing guard (sub-project 2), ideally backed by a <code>StoreProduct</code> CHECK (like the ₹0 one). Logged so it isn't lost.</td></tr>
+<tr><td><strong>Paginated catalog picker</strong></td><td>Sub-project 2 (own spec).</td></tr>
+<tr><td><strong>Consumer veg/non-veg filter + dots</strong></td><td>Sub-project 3 (own spec) — consumes the <code>extraData.isVeg</code> this loader writes.</td></tr>
+<tr><td><strong>Delete old <code>source='zepto'</code> / test data</strong></td><td>Deferred until this load is verified live.</td></tr>
+</table>
+
+<h2 id="risks">13. Open risks &amp; notes</h2>
+<ul>
+  <li><strong>Category hit-rate is unknown until the dry-run.</strong> If a large fraction skips (mapping gaps beyond the known ~325 NULL + 13 pending), we extend <code>CategoryMapping</code> before the real load rather than loading a partial catalog.</li>
+  <li><strong>Veg false-positives.</strong> Default-veg means an unflagged non-veg item (e.g. a sauce with fish extract) could show a veg dot. The dry-run distribution + keyword tuning is the mitigation; absolute correctness needs human spot-review of the non-veg-adjacent subcategories.</li>
+  <li><strong>quantity parsing is best-effort.</strong> Free-text units ("1 kg", "6 x 100 g", "per piece") won't all parse cleanly; raw value is always kept in <code>uom</code> so nothing is lost.</li>
+  <li><strong>Grofers image URLs may already be expiring.</strong> Acceptable: customers never see them (lazy re-host on listing), and SafeImage covers the admin picker.</li>
+  <li><strong>This is a prod write.</strong> Dry-run → limited load → explicit go → full load. Rollback is one DELETE by <code>source</code>.</li>
+</ul>
+
+<p class="small">— End of spec. Next: writing-plans (implementation plan) after Pranav reviews this document.</p>
+
+</div>
+</body>
+</html>
