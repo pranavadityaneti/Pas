@@ -749,12 +749,12 @@ model MerchantBranch {
   serviceDinein       Boolean        @default(true) @map("service_dinein")
   serviceTableBooking Boolean        @default(false) @map("service_table_booking")
   slotConfig          Json?          @default("[]") @map("slot_config")
-  // Phase 2 FINAL — B1 (2026-06-16): added store_id to move the Store↔branch link
-  // OUT of StoreProduct.storeId (vestigial, drift-prone) and INTO the schema
-  // location that matches the real domain. Nullable + no DB FK yet — B2 backfills,
-  // B5 adds the FK, B10 drops StoreProduct.storeId.
-  storeId             String?        @map("store_id") @db.Uuid
-  store               Store?         @relation("StoreBranches", fields: [storeId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  // Phase 2 FINAL (2026-06-16): store_id is the canonical Store↔branch link
+  // (moved off the vestigial StoreProduct.storeId). B5 added the FK; F4b made it
+  // NOT NULL — the DB now forbids a store-less branch. Every creation path (F1)
+  // sets it; B10 drops StoreProduct.storeId.
+  storeId             String         @map("store_id") @db.Uuid
+  store               Store          @relation("StoreBranches", fields: [storeId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   StoreProduct        StoreProduct[]
   merchant            Merchant?      @relation(fields: [merchantId], references: [id])
   orders              Order[]
