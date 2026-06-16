@@ -6104,26 +6104,42 @@ app.post('/checkout/validate-coupon', async (req, res) => {
         // and closes the "lie about storeIds to bypass eligibility" hole.
         // Legacy clients (cartTotal-only, no cartItems) keep the old client-supplied
         // path since there's nothing server-side to derive from.
-        const serverStoreIds: string[] = storeAttribution
-            ? Array.from(new Set(
-                Array.from(storeAttribution.values())
-                    .map((a) => a.storeId)
-                    .filter((id): id is string => !!id),
-            ))
+        // Phase 2 FINAL — F3 (2026-06-16): FAIL CLOSED. Compute the unresolvable
+        // flag from the RAW attribution values (before filtering nulls). A null
+        // storeId means the cart item's branch isn't linked to a Store, so we
+        // CANNOT prove it sits in an allowed vertical. The pre-F3 code silently
+        // dropped such items from the check (fail OPEN) — a money-path hole that
+        // activates the moment any branch has a null store_id.
+        const rawServerStoreIds: (string | null)[] = storeAttribution
+            ? Array.from(storeAttribution.values()).map((a) => a.storeId)
             : [];
+        const hasUnresolvableStore: boolean = storeAttribution
+            ? rawServerStoreIds.some((id) => !id)
+            : false;
+        const serverStoreIds: string[] = Array.from(new Set(
+            rawServerStoreIds.filter((id): id is string => !!id),
+        ));
         const verticalCheckStoreIds: string[] = storeAttribution
             ? serverStoreIds
             : (Array.isArray(storeIds) ? storeIds.map((s: any) => String(s)) : []);
-        if (coupon.eligibleVerticals && coupon.eligibleVerticals.length > 0 && verticalCheckStoreIds.length > 0) {
-            const cartStores = await prisma.store.findMany({
-                where: { id: { in: verticalCheckStoreIds } },
-                select: { id: true, verticalId: true },
-            });
-            const allowedVerticalIds = new Set(coupon.eligibleVerticals);
-            const allMatch = cartStores.length === verticalCheckStoreIds.length
-                && cartStores.every((s) => !!s.verticalId && allowedVerticalIds.has(s.verticalId));
-            if (!allMatch) {
+        if (coupon.eligibleVerticals && coupon.eligibleVerticals.length > 0) {
+            // F3: on the server-derived path, reject if ANY cart item's store is
+            // unresolvable — even when that leaves zero resolvable stores to check
+            // (the all-null case the old `length > 0` guard let slip through).
+            if (hasUnresolvableStore) {
                 return res.status(400).json({ valid: false, error: 'This coupon is not valid for one or more stores in your cart' });
+            }
+            if (verticalCheckStoreIds.length > 0) {
+                const cartStores = await prisma.store.findMany({
+                    where: { id: { in: verticalCheckStoreIds } },
+                    select: { id: true, verticalId: true },
+                });
+                const allowedVerticalIds = new Set(coupon.eligibleVerticals);
+                const allMatch = cartStores.length === verticalCheckStoreIds.length
+                    && cartStores.every((s) => !!s.verticalId && allowedVerticalIds.has(s.verticalId));
+                if (!allMatch) {
+                    return res.status(400).json({ valid: false, error: 'This coupon is not valid for one or more stores in your cart' });
+                }
             }
         }
 
@@ -7784,6 +7800,10 @@ app.patch('/auth/merchant/draft', async (req, res) => {
                 for (const s of payload.stores) {
                     const branchData = {
                         merchantId: userId,
+                        // Phase 2 FINAL — F1 (2026-06-16): parent Store is created at
+                        // id=userId above; set store_id so the branch is reachable to
+                        // its Store (no orphaned inventory). FK rejects a wrong value.
+                        storeId: userId,
                         branchName: s.name || 'Store',
                         managerName: s.manager_name,
                         phone: s.phone,
@@ -7857,6 +7877,8 @@ app.patch('/auth/merchant/draft', async (req, res) => {
                 // merchants are still geo-located and findable. (Fix: stores were invisible because
                 // the old code only created added branches and deleted the main one.)
                 const mainBranchData = {
+                    // Phase 2 FINAL — F1 (2026-06-16): parent Store is at id=userId.
+                    storeId: userId,
                     branchName: payload.storeName || 'Main Branch',
                     managerName: payload.ownerName,
                     phone: payload.phone,
@@ -7886,6 +7908,7 @@ app.patch('/auth/merchant/draft', async (req, res) => {
                             .filter((b: any) => (b.name || 'Branch') !== (payload.storeName || 'Main Branch'))
                             .map((b: any) => ({
                                 merchantId: userId,
+                                storeId: userId, // Phase 2 FINAL — F1 (2026-06-16): parent Store = userId
                                 branchName: b.name || 'Branch',
                                 managerName: b.manager_name,
                                 phone: b.phone,
@@ -8247,6 +8270,7 @@ app.post('/auth/merchant/signup', async (req, res) => {
                     data: {
                         id: userId, // critical: same UUID as merchant_id
                         merchantId: userId,
+                        storeId: userId, // Phase 2 FINAL — F1 (2026-06-16): parent Store = userId
                         branchName: payload.storeName || 'Main Branch',
                         managerName: payload.ownerName,
                         phone: payload.phone,
@@ -8268,6 +8292,7 @@ app.post('/auth/merchant/signup', async (req, res) => {
                     await tx.merchantBranch.createMany({
                         data: payload.branches.map((b: any) => ({
                             merchantId: userId,
+                            storeId: userId, // Phase 2 FINAL — F1 (2026-06-16): parent Store = userId
                             branchName: b.name || 'Branch',
                             managerName: b.manager_name,
                             phone: b.phone,
@@ -9948,6 +9973,10 @@ app.post('/merchant/branches', async (req, res) => {
             data: {
                 ...(b.id ? { id: String(b.id) } : {}),
                 merchantId,
+                // Phase 2 FINAL — F1 (2026-06-16): merchantId is the parent Store id
+                // (userCanManageMerchant verifies it against Store). Set store_id so
+                // the new branch is reachable to its Store; FK rejects a wrong value.
+                storeId: merchantId,
                 branchName,
                 address:     b.address ?? null,
                 city:        b.city ?? null,
