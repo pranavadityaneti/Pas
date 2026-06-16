@@ -5995,7 +5995,10 @@ app.post('/checkout/validate-coupon', async (req, res) => {
         // the eligibleVerticals check (fixes the latent bug where clients sent
         // branch UUIDs and prisma.store.findMany matched nothing), and (b) the
         // multi-store discount allocation breakdown.
-        let storeAttribution: Map<string, { branchId: string | null; storeId: string }> | null = null;
+        // Phase 2 FINAL — B6 (2026-06-16): storeId is now derived via the branch's
+        // merchant_branches.store_id (the canonical link added in B1/B2/B5),
+        // not from the vestigial StoreProduct.storeId (dropped in B10).
+        let storeAttribution: Map<string, { branchId: string | null; storeId: string | null }> | null = null;
         if (hasCartItems) {
             const storeProductIds: string[] = [];
             for (const item of cartItems) {
@@ -6013,10 +6016,18 @@ app.post('/checkout/validate-coupon', async (req, res) => {
             // the user must refresh.
             const rows = await prisma.storeProduct.findMany({
                 where: { id: { in: storeProductIds }, is_deleted: false, active: true },
-                select: { id: true, price: true, branch_id: true, storeId: true },
+                select: {
+                    id: true,
+                    price: true,
+                    branch_id: true,
+                    merchant_branches: { select: { storeId: true } },
+                },
             });
             trustedPrices = new Map(rows.map((r) => [r.id, Number(r.price) || 0]));
-            storeAttribution = new Map(rows.map((r) => [r.id, { branchId: r.branch_id ?? null, storeId: r.storeId }]));
+            storeAttribution = new Map(rows.map((r) => [
+                r.id,
+                { branchId: r.branch_id ?? null, storeId: r.merchant_branches?.storeId ?? null },
+            ]));
             const missing = storeProductIds.filter((id) => !trustedPrices!.has(id));
             if (missing.length > 0) {
                 return res.status(400).json({
@@ -6094,7 +6105,11 @@ app.post('/checkout/validate-coupon', async (req, res) => {
         // Legacy clients (cartTotal-only, no cartItems) keep the old client-supplied
         // path since there's nothing server-side to derive from.
         const serverStoreIds: string[] = storeAttribution
-            ? Array.from(new Set(Array.from(storeAttribution.values()).map((a) => a.storeId)))
+            ? Array.from(new Set(
+                Array.from(storeAttribution.values())
+                    .map((a) => a.storeId)
+                    .filter((id): id is string => !!id),
+            ))
             : [];
         const verticalCheckStoreIds: string[] = storeAttribution
             ? serverStoreIds
@@ -6229,7 +6244,11 @@ app.post('/checkout/validate-coupon', async (req, res) => {
         // for settlement math).
         type StoreSlice = {
             branchId: string | null;
-            storeId: string;
+            // Phase 2 FINAL — B6 (2026-06-16): nullable because the source is now
+            // merchant_branches.store_id (NULL for the 21 orphan/test branches).
+            // In practice every cart-item path leads to a real Store (branches
+            // with StoreProducts always have a parent Store).
+            storeId: string | null;
             storeProductIds: string[];
             // Phase 5 re-audit fix R3 (2026-06-10): "spid:qty" pairs — signed
             // into the token so POST /orders can bind quantities, not just the
@@ -6251,7 +6270,10 @@ app.post('/checkout/validate-coupon', async (req, res) => {
             for (const item of cartItems) {
                 const spid = String(item.storeProductId);
                 const attr = storeAttribution.get(spid)!; // presence validated in Phase 2L block
-                const key = attr.branchId ?? attr.storeId;
+                // Group key: prefer branchId (NOT NULL after B9), fall back to
+                // storeId, then spid as the ultimate guard so the key is always
+                // a non-null string.
+                const key = attr.branchId ?? attr.storeId ?? spid;
                 let g = groups.get(key);
                 if (!g) {
                     g = { branchId: attr.branchId, storeId: attr.storeId, storeProductIds: [], spidQty: [], subtotal: 0, discount: 0 };
@@ -10421,10 +10443,12 @@ app.post('/merchant/products/save', async (req, res) => {
             if (dErr) throw new Error(`StoreProduct clear: ${dErr.message}`);
         }
 
-        // 4. Upsert StoreProduct rows (branch + store forced server-side).
+        // 4. Upsert StoreProduct rows. branch_id is the canonical key; the parent
+        // Store is derivable via merchant_branches.store_id (Phase 2 FINAL B1-B5,
+        // 2026-06-16). The vestigial StoreProduct.storeId column is dropped at B10
+        // and intentionally NOT written here — new rows leave it NULL.
         const spRows = storeProducts.map((sp) => ({
             id: sp.id ? String(sp.id) : crypto.randomUUID(),
-            storeId: branchId,
             branch_id: branchId,
             productId,
             price: Number(sp.price) || 0,
@@ -10492,9 +10516,11 @@ app.post('/merchant/store-products/configure', async (req, res) => {
         if (!can) return res.status(403).json({ error: 'Not authorized to configure products for this branch' });
 
         const now = new Date().toISOString();
+        // branch_id is the canonical key; parent Store derives via
+        // merchant_branches.store_id (Phase 2 FINAL B1-B5, 2026-06-16). storeId
+        // (dropped at B10) intentionally NOT written — new rows leave it NULL.
         const rows = items.map((it) => ({
             id: it.id ? String(it.id) : crypto.randomUUID(),
-            storeId: branchId,
             branch_id: branchId,
             productId: String(it.productId),
             variant: it.variant ? String(it.variant) : 'Standard',
