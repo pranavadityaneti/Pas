@@ -70,6 +70,7 @@
 <tr><td>Unmapped category rows</td><td><strong>Skip</strong></td><td>Don't insert rows whose (category, subcategory) doesn't resolve via <code>CategoryMapping</code>. Keeps the catalog 100% categorized; deferred rows can load later once mappings extend.</td></tr>
 <tr><td>Loader architecture</td><td><strong>Local streaming Node CLI (option A)</strong></td><td>Same proven pattern as the Phase 2/3 migration scripts; full per-row control; zero new infra; lazy images mean speed isn't the bottleneck.</td></tr>
 <tr><td>MRP vs price</td><td><strong>mrp = ceiling; price = suggested selling price</strong></td><td>Verified on 20k rows: <code>price ≤ mrp</code> (16,207 discounted / 3,792 equal / 1 anomaly). <code>price</code> is the real selling price, never additive to MRP.</td></tr>
+<tr><td>Veg storage</td><td><strong>new <code>Product.isVeg Boolean?</code> column</strong></td><td>Indexable tri-state column (vs JSON) — the right base for the sub-project-3 veg filter over 141k rows. Additive migration before load.</td></tr>
 </table>
 
 <h2 id="arch">3. Architecture &amp; execution</h2>
@@ -114,13 +115,13 @@ RUN ORDER (enforced by us, not the script)
 <tr><td><code>deeplink</code></td><td><code>extraData.sourceUrl</code></td><td>Kept for provenance.</td></tr>
 <tr><td><code>data_dump</code></td><td><code>extraData.{siblings, parentIndex, childIndex}</code></td><td>Extract only the sibling fields (+ bonus <code>rating</code>/<code>ratingCount</code> if present) — not the whole blob.</td></tr>
 <tr><td>— (constant)</td><td><code>source</code> = <code>'blinkit'</code></td><td>Tags the whole load for clean rollback + the deferred zepto cleanup.</td></tr>
-<tr><td>— (derived)</td><td><code>Product.isVeg</code> (new tri-state col)</td><td>See §6. <code>true</code>/<code>false</code>/<code>NULL</code>(unknown). Recommended over <code>extraData.isVeg</code> for queryable filtering — see the open decision in §6.</td></tr>
+<tr><td>— (derived)</td><td><code>Product.isVeg</code> (new tri-state col)</td><td>See §6. <code>true</code>/<code>false</code>/<code>NULL</code>(unknown). New column added by an additive migration before the load (decided).</td></tr>
 </table>
 <p class="small"><code>StoreProduct</code> fields (price/stock/active) are NOT written — this is catalog only.</p>
 
 <h2 id="veg">6. Veg-derivation rules</h2>
 <p>Blinkit has no veg flag, so the loader derives one. Tri-state: <code>true</code> / <code>false</code> / <code>NULL</code>(unknown).</p>
-<div class="callout"><strong>OPEN DECISION — where to store it.</strong> Recommended: a new <strong><code>Product.isVeg Boolean?</code> column</strong> (added by a small additive migration before the load). Reason: sub-project 3 builds a veg/non-veg <em>filter</em> over 141k rows — a real, indexable column is far better than querying a JSON field. <br><span class="small">Trade-off: the consumer <code>useProducts</code> hook (<code>@lock</code>) currently reads <code>extra_data?.isVeg</code>. Switching it to read the column is part of <strong>sub-project 3</strong> (the veg UI work) — fine, because loaded products aren't customer-visible until a merchant lists them (sub-project 2), so no veg dot renders from this data until then anyway. Alternative: write <code>extraData.isVeg</code> (no migration, matches today's read, but JSON-filtering later). <strong>Pranav to confirm.</strong></span></div>
+<div class="callout ok"><strong>DECIDED (Pranav, 2026-06-16): a new <code>Product.isVeg Boolean?</code> column</strong>, added by a small additive migration before the load. A real, indexable tri-state column — the right foundation for the sub-project-3 veg/non-veg <em>filter</em> over 141k rows (vs querying a JSON field). <br><span class="small">Follow-on: the consumer <code>useProducts</code> hook (<code>@lock</code>) currently reads <code>extra_data?.isVeg</code>; switching it to read the column is part of <strong>sub-project 3</strong> (the veg UI). Fine — loaded products aren't customer-visible until a merchant lists them (sub-project 2), so no veg dot renders from this data until then. A one-time backfill of existing products' <code>extraData.isVeg → Product.isVeg</code> also belongs to sub-project 3.</span></div>
 <pre>is_food   := resolved vertical.requiresFssai == true
              (food verticals: Grocery &amp; Kirana, Fresh Items,
               Bakeries &amp; Desserts, Restaurants &amp; Cafes)
