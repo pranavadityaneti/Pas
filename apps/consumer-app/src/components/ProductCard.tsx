@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Image, TouchableOpacity, Dimensions, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, Dimensions, Alert } from 'react-native';
 import { Plus, Minus, Heart } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { useProductFavorites } from '../hooks/useProductFavorites';
+import SafeImage from './SafeImage';
 import Svg, { Path } from 'react-native-svg';
 
 const { width } = Dimensions.get('window');
@@ -59,9 +60,9 @@ export default function ProductCard({
         >
             {/* 1. UPPER SECTION (Image) */}
             <View className="w-full h-[140px] bg-[#F9FAFB] items-center justify-center p-4 relative">
-                <Image
+                <SafeImage
                     source={typeof item.image === 'string' ? { uri: item.image } : item.image}
-                    className="w-full h-full"
+                    style={{ width: '100%', height: '100%' }}
                     resizeMode="contain"
                 />
 

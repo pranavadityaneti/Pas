@@ -1,8 +1,9 @@
 // SearchResults — Shared tabbed search results (Products | Stores)
 // Used by HomeScreen, HomeFeedScreen, DiningScreen when search is active.
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, Image, FlatList, Dimensions, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, Dimensions, ActivityIndicator } from 'react-native';
 import { Search, MapPin, ShoppingBag } from 'lucide-react-native';
+import SafeImage from './SafeImage';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
@@ -214,9 +215,9 @@ function ProductSearchCard({
             {/* Product Image */}
             <View className="w-[100px] h-full bg-gray-50 items-center justify-center p-2">
                 {product.image ? (
-                    <Image
+                    <SafeImage
                         source={{ uri: product.image }}
-                        className="w-full h-full"
+                        style={{ width: '100%', height: '100%' }}
                         resizeMode="contain"
                     />
                 ) : (
