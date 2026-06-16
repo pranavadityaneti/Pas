@@ -10482,7 +10482,9 @@ app.post('/merchant/products/save', async (req, res) => {
             productId,
             price: Number(sp.price) || 0,
             stock: sp.stock != null ? Number(sp.stock) : 0,
-            active: sp.active != null ? !!sp.active : true,
+            // Phase 3 Item 2 (2026-06-16): a ₹0 listing can never be live. Blinkit is
+            // MRP-only so price coerces to 0; force inactive until a real price is set.
+            active: (Number(sp.price) || 0) > 0 && (sp.active != null ? !!sp.active : true),
             variant: sp.variant ? String(sp.variant) : 'Standard',
             is_best_seller: !!sp.is_best_seller,
             updatedAt: new Date().toISOString(),
@@ -10506,6 +10508,12 @@ app.patch('/merchant/store-products/:id', async (req, res) => {
         if (!auth.ok) return res.status(403).json({ error: 'Not authorized to edit this product' });
         const updates = pick(req.body, STORE_PRODUCT_UPDATE_COLS);
         if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No updatable fields provided' });
+        // Phase 3 Item 2 (2026-06-16): a ₹0 listing can never be live. If this edit
+        // sets price ≤ 0, force the row inactive in the same write. (The activate-an-
+        // existing-₹0-row edge case is caught by the DB CHECK backstop.)
+        if (updates.price != null && (Number(updates.price) || 0) <= 0) {
+            updates.active = false;
+        }
         updates.updatedAt = new Date().toISOString();
         const { error } = await supabaseAdmin.from('StoreProduct').update(updates).eq('id', id);
         if (error) throw new Error(error.message);
@@ -10555,7 +10563,8 @@ app.post('/merchant/store-products/configure', async (req, res) => {
             variant: it.variant ? String(it.variant) : 'Standard',
             price: Number(it.price) || 0,
             stock: it.stock != null ? Number(it.stock) : 0,
-            active: it.active != null ? !!it.active : true,
+            // Phase 3 Item 2 (2026-06-16): a ₹0 listing can never be live.
+            active: (Number(it.price) || 0) > 0 && (it.active != null ? !!it.active : true),
             createdAt: now,
             updatedAt: now,
         }));
