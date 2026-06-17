@@ -395,6 +395,10 @@ model Product {
   // admin/ops flip to false for perishable, prepared, intimate categories.
   // Read by WS2.B rules engine when evaluating return-window eligibility.
   returnable       Boolean           @default(true)
+  // Phase 4 (2026-06-17): tri-state derived dietary flag. true=veg, false=non-veg,
+  // NULL=unknown/non-food. Written by the Blinkit loader; the consumer veg filter
+  // (sub-project 3) reads it. Replaces the older extraData.isVeg convention.
+  isVeg            Boolean?          @map("is_veg")
   category_id      String?           @db.Uuid
   vertical_id      String?           @db.Uuid
   Tier2Category    Tier2Category?    @relation(fields: [category_id], references: [id], onUpdate: NoAction)
