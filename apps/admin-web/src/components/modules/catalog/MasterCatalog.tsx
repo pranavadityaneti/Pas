@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Search,
   Upload,
@@ -63,6 +63,7 @@ import { Label } from '../../ui/label';
 import { ImageWithFallback } from '../../figma/ImageWithFallback';
 import { toast } from 'sonner';
 import api from '@/lib/api';
+import { supabase } from '../../../lib/supabaseClient';
 
 interface ProductImage {
   id: string;
@@ -105,20 +106,10 @@ interface SyncItem {
   createdAt: string;
   metadata?: any;
 }
-// Centralized category list for consistency across all dropdowns
-const VERTICALS = [
-    'Grocery & Kirana', 'Fruits & Vegetables', 'Restaurants & Cafes', 
-    'Bakeries & Desserts', 'Meat & Seafood', 'Pharmacy & Wellness', 
-    'Electronics & Accessories', 'Fashion & Apparel', 'Home & Lifestyle', 
-    'Beauty & Personal Care', 'Pet Care & Supplies'
-];
-
-const PRODUCT_CATEGORIES = [
-    'Dairy & Milk', 'Staples & Pulse', 'Snacks & Munchies', 'Beverages', 
-    'Personal Care', 'Home Essentials', 'Ready-to-Eat', 'Household Supply'
-];
-
-const CATEGORIES = [...VERTICALS, ...PRODUCT_CATEGORIES];
+// Taxonomy is now fetched LIVE from the real tables inside the component (was a
+// hardcoded, stale list that hid correctly-categorized products). Naming aligned
+// to the customer app + ops language: Category = Vertical (15), Subcategory =
+// Tier2Category (136). See verticalRows / tier2Rows + the derived helpers below.
 
 export function MasterCatalog() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -126,7 +117,30 @@ export function MasterCatalog() {
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [catalogType, setCatalogType] = useState<'global' | 'custom' | 'sync_queue'>('global');
-  
+
+  // Live taxonomy (Phase 4, 2026-06-17). Category = Vertical (15); Subcategory =
+  // Tier2Category (136), cascaded by its parent vertical — same source the
+  // customer app reads (Vertical / Tier2Category tables, public-read).
+  const [verticalRows, setVerticalRows] = useState<{ id: string; name: string }[]>([]);
+  const [tier2Rows, setTier2Rows] = useState<{ id: string; name: string; vertical_id: string }[]>([]);
+  useEffect(() => {
+    (async () => {
+      const [{ data: v }, { data: t }] = await Promise.all([
+        supabase.from('Vertical').select('id, name').order('name'),
+        supabase.from('Tier2Category').select('id, name, vertical_id').order('name'),
+      ]);
+      setVerticalRows((v as any[]) || []);
+      setTier2Rows((t as any[]) || []);
+    })();
+  }, []);
+  const categoryNames = useMemo(() => verticalRows.map(v => v.name), [verticalRows]);
+  const subcategoryNames = useMemo(() => tier2Rows.map(t => t.name), [tier2Rows]);
+  // Subcategories valid for a given category (vertical) name — the cascade.
+  const subcatsForCategory = useCallback((categoryName?: string | null) => {
+    const v = verticalRows.find(x => x.name === categoryName);
+    return v ? tier2Rows.filter(t => t.vertical_id === v.id).map(t => t.name) : [];
+  }, [verticalRows, tier2Rows]);
+
   // Live Sync States
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [activeSyncRunId, setActiveSyncRunId] = useState<string | null>(() => {
@@ -587,11 +601,6 @@ export function MasterCatalog() {
 
         {/* Right Actions Toolbar */}
         <div className="flex items-center gap-3 bg-white p-1.5 rounded-xl border border-gray-200 shadow-sm">
-          <Button variant="ghost" size="sm" className="text-gray-600 hover:text-[#B52725]" onClick={() => window.open('http://localhost:3000/products/template', '_blank')}>
-            <FileSpreadsheet className="w-4 h-4 mr-2" /> Template
-          </Button>
-          <div className="w-px h-4 bg-gray-200"></div>
-
           <input
             type="file"
             ref={fileInputRef}
@@ -600,16 +609,6 @@ export function MasterCatalog() {
             accept=".xlsx, .xls, .csv"
             onChange={handleFileUpload}
           />
-          <Button
-            size="sm"
-            variant="outline"
-            className="border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold transition-all"
-            onClick={() => setIsSyncModalOpen(true)}
-          >
-            <Zap className="w-4 h-4 mr-2 fill-amber-500 text-amber-500" />
-            Refresh Import
-          </Button>
-
           <Button
             size="sm"
             className="bg-gray-900 hover:bg-gray-800 text-white shadow-md transition-all hover:shadow-lg"
@@ -705,11 +704,11 @@ export function MasterCatalog() {
                 <div className="flex-1 overflow-y-auto px-6 py-6 scrollbar-hide">
                   <div className="space-y-6">
 
-                    {/* Categories Card */}
+                    {/* Subcategories Card (filters by Tier2Category via the `category` param) */}
                     <div className="space-y-4">
-                      <Label className="text-base font-semibold text-gray-900">Categories</Label>
+                      <Label className="text-base font-semibold text-gray-900">Subcategories</Label>
                       <div className="grid grid-cols-2 gap-3">
-                        {CATEGORIES.map(cat => (
+                        {subcategoryNames.map(cat => (
                           <div key={cat} className="flex items-center space-x-2">
                             <Checkbox
                               id={`cat-${cat}`}
@@ -878,9 +877,9 @@ export function MasterCatalog() {
                     </TableHead>
                     <TableHead className="w-[80px]">Image</TableHead>
                     <TableHead className="w-[300px]">Product Details</TableHead>
-                    <TableHead className="w-[150px]">Vertical</TableHead>
-                    <TableHead className="w-[100px]">UOM</TableHead>
                     <TableHead className="w-[150px]">Category</TableHead>
+                    <TableHead className="w-[100px]">UOM</TableHead>
+                    <TableHead className="w-[150px]">Subcategory</TableHead>
                     <TableHead className="w-[120px]">Global MRP (₹)</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
@@ -940,10 +939,10 @@ export function MasterCatalog() {
                               onValueChange={(value) => handleSyncQueueEdit(item.id, 'vertical', value)}
                             >
                               <SelectTrigger className="w-full h-8 text-xs bg-amber-50 border-amber-200 font-semibold text-amber-900">
-                                <SelectValue placeholder="Vertical" />
+                                <SelectValue placeholder="Category" />
                               </SelectTrigger>
                               <SelectContent>
-                                {VERTICALS.map(v => (
+                                {categoryNames.map(v => (
                                   <SelectItem key={v} value={v}>{v}</SelectItem>
                                 ))}
                               </SelectContent>
@@ -955,10 +954,10 @@ export function MasterCatalog() {
                               onValueChange={(value) => handleSyncQueueEdit(item.id, 'category', value)}
                             >
                               <SelectTrigger className="w-full h-8 text-xs bg-white border-gray-200 shadow-sm">
-                                <SelectValue placeholder="Category" />
+                                <SelectValue placeholder="Subcategory" />
                               </SelectTrigger>
                               <SelectContent>
-                                {PRODUCT_CATEGORIES.map(cat => (
+                                {subcatsForCategory(item.vertical).map(cat => (
                                   <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                                 ))}
                               </SelectContent>
@@ -1024,10 +1023,10 @@ export function MasterCatalog() {
                           onValueChange={(value) => handleUpdateProduct(product.id, 'vertical', value)}
                         >
                           <SelectTrigger className="w-full h-8 text-xs bg-amber-50 border-amber-200 font-semibold text-amber-900">
-                            <SelectValue placeholder="Vertical" />
+                            <SelectValue placeholder="Category" />
                           </SelectTrigger>
                           <SelectContent>
-                            {VERTICALS.map(v => (
+                            {categoryNames.map(v => (
                               <SelectItem key={v} value={v}>{v}</SelectItem>
                             ))}
                           </SelectContent>
@@ -1038,14 +1037,14 @@ export function MasterCatalog() {
                       </TableCell>
                       <TableCell>
                         <Select
-                          value={product.category}
+                          value={product.category || ''}
                           onValueChange={(value) => handleUpdateProduct(product.id, 'category', value)}
                         >
                           <SelectTrigger className="w-full h-8 text-xs">
-                            <SelectValue />
+                            <SelectValue placeholder="Subcategory" />
                           </SelectTrigger>
                           <SelectContent>
-                            {PRODUCT_CATEGORIES.map(cat => (
+                            {subcatsForCategory(product.vertical).map(cat => (
                               <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                             ))}
                           </SelectContent>
@@ -1195,32 +1194,32 @@ export function MasterCatalog() {
                   {/* Vertical & Category Grid */}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <Label className="block text-sm font-medium text-gray-700 mb-1.5">Store Vertical</Label>
+                      <Label className="block text-sm font-medium text-gray-700 mb-1.5">Category</Label>
                       <Select
                         value={editingProduct?.vertical || ''}
                         onValueChange={(v) => setEditingProduct(prev => prev ? { ...prev, vertical: v } : null)}
                       >
                         <SelectTrigger className="h-10 text-sm bg-white border-gray-300 shadow-sm">
-                          <SelectValue placeholder="Select Vertical" />
+                          <SelectValue placeholder="Select Category" />
                         </SelectTrigger>
                         <SelectContent>
-                          {VERTICALS.map(v => (
+                          {categoryNames.map(v => (
                             <SelectItem key={v} value={v}>{v}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </div>
                     <div>
-                      <Label className="block text-sm font-medium text-gray-700 mb-1.5">Product Category</Label>
+                      <Label className="block text-sm font-medium text-gray-700 mb-1.5">Subcategory</Label>
                       <Select
-                        value={editingProduct?.category}
+                        value={editingProduct?.category || ''}
                         onValueChange={(v) => setEditingProduct(prev => prev ? { ...prev, category: v } : null)}
                       >
                         <SelectTrigger className="h-10 text-sm bg-white border-gray-300 shadow-sm">
-                          <SelectValue placeholder="Select Category" />
+                          <SelectValue placeholder="Select Subcategory" />
                         </SelectTrigger>
                         <SelectContent>
-                          {PRODUCT_CATEGORIES.map(cat => (
+                          {subcatsForCategory(editingProduct?.vertical).map(cat => (
                             <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                           ))}
                         </SelectContent>
@@ -1413,14 +1412,14 @@ export function MasterCatalog() {
                       <DropdownMenuTrigger asChild>
                         <Button size="sm" variant="ghost" className="text-white hover:bg-gray-800 gap-2">
                           <FolderTree className="w-4 h-4" />
-                          Category
+                          Subcategory
                           <ChevronDown className="w-3 h-3 opacity-50" />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="center" className="w-48">
-                        <DropdownMenuLabel>Change Category</DropdownMenuLabel>
+                      <DropdownMenuContent align="center" className="w-48 max-h-80 overflow-y-auto">
+                        <DropdownMenuLabel>Change Subcategory</DropdownMenuLabel>
                         <DropdownMenuSeparator />
-                        {CATEGORIES.map(cat => (
+                        {subcategoryNames.map(cat => (
                           <DropdownMenuItem key={cat} onClick={() => handleBulkUpdateCategory(cat)}>
                             {cat}
                           </DropdownMenuItem>
