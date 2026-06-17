@@ -26,3 +26,41 @@ export function safeJson<T = any>(raw: string | null): T | null {
   if (!raw) return null;
   try { return JSON.parse(raw) as T; } catch { return null; }
 }
+
+function numOrNull(v: unknown): number | null {
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? parseFloat(v) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+function intOrNull(v: unknown): number | null {
+  const n = numOrNull(v);
+  return n === null ? null : Math.round(n);
+}
+
+export function mapRowToProduct(row: BlinkitRow, cat: CategoryResolution): ProductUpsert {
+  const mrp = parseFloat(row.mrp);
+  const suggestedPrice = clampSuggestedPrice(parseFloat(row.price), mrp);
+  const { uom, unitValue, unitType } = parseQuantity(row.quantity);
+  const dump = safeJson<Record<string, unknown>>(row.data_dump) ?? {};
+  return {
+    name: (row.name || '').trim(),
+    mrp,
+    brand: row.brand?.trim() || null,
+    image: firstImage(row.images),
+    uom, unitType, unitValue,
+    subcategory: row.subcategory?.trim() || null,
+    source: 'blinkit',
+    sourceProductId: row.product_id,
+    vertical_id: cat.vertical_id,
+    category_id: cat.category_id,
+    isVeg: deriveVeg({ isFood: cat.requiresFssai, name: row.name || '', subcategory: row.subcategory?.trim() || null }),
+    productUrl: row.deeplink?.trim() || null,
+    avgRating: numOrNull(dump.rating),
+    numberOfRatings: intOrNull((dump as any).ratingCount ?? (dump as any).rating_count),
+    extraData: {
+      suggestedPrice,
+      siblings: (dump as any).siblings ?? null,
+      parentIndex: (dump as any).parentIndex ?? null,
+      childIndex: (dump as any).childIndex ?? null,
+    },
+  };
+}
