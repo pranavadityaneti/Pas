@@ -52,35 +52,22 @@ async function preloadExistingIds(): Promise<Set<string>> {
 const stats = { read: 0, loaded: 0, skippedUnmapped: 0, skippedDup: 0, skippedInvalid: 0, errors: 0,
   veg: 0, nonVeg: 0, unknownVeg: 0, perVertical: {} as Record<string, number>, errorSamples: [] as string[] };
 
+// Bulk insert — ONE multi-row INSERT per batch (one DB round-trip), not 500
+// individual upserts (which over remote latency took minutes/batch). skipDuplicates
+// makes it idempotent on the sourceProductId unique key: a re-run skips rows already
+// loaded. This is INSERT-only (no update of existing rows) — correct for the initial
+// fresh load. A future "refresh Blinkit data" that must UPDATE existing rows would
+// need a raw `INSERT ... ON CONFLICT DO UPDATE` path; out of scope for the first load.
 async function flush(batch: ProductUpsert[]) {
   if (DRY_RUN || batch.length === 0) return;
   try {
-    await prisma.$transaction(batch.map((p) => prisma.product.upsert({
-      where: { sourceProductId: p.sourceProductId },
-      create: p as any,
-      update: {
-        name: p.name, mrp: p.mrp, brand: p.brand, image: p.image, uom: p.uom, unitType: p.unitType,
-        unitValue: p.unitValue, subcategory: p.subcategory, vertical_id: p.vertical_id,
-        category_id: p.category_id, isVeg: p.isVeg, productUrl: p.productUrl, avgRating: p.avgRating,
-        numberOfRatings: p.numberOfRatings, extraData: p.extraData as any, updatedAt: new Date(),
-      },
-    })));
+    await prisma.product.createMany({ data: batch as any, skipDuplicates: true });
   } catch (e: any) {
-    // Isolate the offender: retry row-by-row so one bad row doesn't lose the batch.
-    // Same full update payload as the batch path — an existing row updated via the
-    // retry gets identical fields, not a reduced subset.
+    // Batch failed on something other than a duplicate (skipDuplicates handles dups
+    // silently) — isolate the offender row-by-row so one bad row doesn't lose the batch.
     for (const p of batch) {
       try {
-        await prisma.product.upsert({
-          where: { sourceProductId: p.sourceProductId },
-          create: p as any,
-          update: {
-            name: p.name, mrp: p.mrp, brand: p.brand, image: p.image, uom: p.uom, unitType: p.unitType,
-            unitValue: p.unitValue, subcategory: p.subcategory, vertical_id: p.vertical_id,
-            category_id: p.category_id, isVeg: p.isVeg, productUrl: p.productUrl, avgRating: p.avgRating,
-            numberOfRatings: p.numberOfRatings, extraData: p.extraData as any, updatedAt: new Date(),
-          },
-        });
+        await prisma.product.createMany({ data: [p as any], skipDuplicates: true });
       } catch (rowErr: any) {
         stats.errors++;
         if (stats.errorSamples.length < 20) stats.errorSamples.push(`${p.sourceProductId}: ${rowErr?.message?.split('\n')[0]}`);
