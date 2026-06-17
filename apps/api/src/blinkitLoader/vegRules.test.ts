@@ -23,3 +23,18 @@ test('food + plain dal → true (default veg)', () => {
 test('food + fish in name → false', () => {
   assert.strictEqual(deriveVeg({ isFood: true, name: 'Fish Finger Frozen', subcategory: 'Frozen Veg' }), false);
 });
+test('food + "Plant Based Meat" → true (vegan override beats meat keyword)', () => {
+  assert.strictEqual(deriveVeg({ isFood: true, name: 'Plant Based Meat Keema', subcategory: 'Plant Based Meat' }), true);
+});
+test('food + "Vegan Chicken Nuggets" → true (vegan override)', () => {
+  assert.strictEqual(deriveVeg({ isFood: true, name: 'Vegan Chicken Nuggets', subcategory: 'Frozen Veg' }), true);
+});
+test('food + real subcategory "Exotic Meat" → false', () => {
+  assert.strictEqual(deriveVeg({ isFood: true, name: 'Boneless Cut', subcategory: 'Exotic Meat' }), false);
+});
+test('food + real subcategory "Mutton" → false', () => {
+  assert.strictEqual(deriveVeg({ isFood: true, name: 'Curry Cut 500g', subcategory: 'Mutton' }), false);
+});
+test('food + "Frozen Non-Veg" subcategory (no keyword in name) → false (backstop)', () => {
+  assert.strictEqual(deriveVeg({ isFood: true, name: 'Crispy Snack Combo', subcategory: 'Frozen Non-Veg' }), false);
+});
