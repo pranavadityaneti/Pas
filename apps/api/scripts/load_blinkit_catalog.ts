@@ -67,10 +67,20 @@ async function flush(batch: ProductUpsert[]) {
     })));
   } catch (e: any) {
     // Isolate the offender: retry row-by-row so one bad row doesn't lose the batch.
+    // Same full update payload as the batch path — an existing row updated via the
+    // retry gets identical fields, not a reduced subset.
     for (const p of batch) {
       try {
-        await prisma.product.upsert({ where: { sourceProductId: p.sourceProductId }, create: p as any,
-          update: { name: p.name, mrp: p.mrp, isVeg: p.isVeg, extraData: p.extraData as any, updatedAt: new Date() } });
+        await prisma.product.upsert({
+          where: { sourceProductId: p.sourceProductId },
+          create: p as any,
+          update: {
+            name: p.name, mrp: p.mrp, brand: p.brand, image: p.image, uom: p.uom, unitType: p.unitType,
+            unitValue: p.unitValue, subcategory: p.subcategory, vertical_id: p.vertical_id,
+            category_id: p.category_id, isVeg: p.isVeg, productUrl: p.productUrl, avgRating: p.avgRating,
+            numberOfRatings: p.numberOfRatings, extraData: p.extraData as any, updatedAt: new Date(),
+          },
+        });
       } catch (rowErr: any) {
         stats.errors++;
         if (stats.errorSamples.length < 20) stats.errorSamples.push(`${p.sourceProductId}: ${rowErr?.message?.split('\n')[0]}`);
