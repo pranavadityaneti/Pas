@@ -19,6 +19,10 @@ import fs from 'fs';
 // Note: `crypto` is already brought in via `require` at line ~469 (legacy pattern
 // shared with Razorpay). Phase 2 (2E-4) helpers below use that same `crypto`.
 import { createClient } from '@supabase/supabase-js';
+// Phase 4 sub-2 (2026-06-17): merchant catalog picker units.
+import { encodeCursor, decodeCursor } from './merchantCatalog/cursor';
+import { validateMrpCeiling, validateFssaiGate } from './merchantCatalog/validate';
+import { makeRehoster } from './services/imageRehost';
 import { z } from 'zod';
 import { smsService } from './services/sms.service';
 import { watiService } from './services/wati.service';
@@ -10539,6 +10543,68 @@ app.delete('/merchant/store-products/:id', async (req, res) => {
     }
 });
 
+// Phase 4 sub-2 (2026-06-17): paginated catalog picker. Browse the ~140k master
+// catalog to list products. Keyset pagination on (createdAt,id); relation filters;
+// excludes products this branch already lists; search hits the trigram GIN index.
+// query: branchId (req), cursor, q, verticalId, categoryId, brand, isVeg, limit
+app.get('/merchant/catalog', async (req, res) => {
+    try {
+        const user = await requireUser(req, res); if (!user) return;
+        const branchId = String(req.query.branchId || '').trim();
+        if (!branchId) return res.status(400).json({ error: 'branchId is required' });
+        const can = (await userCanManageBranchFull(user.id, branchId)) || (await isPlatformAdmin(user.id));
+        if (!can) return res.status(403).json({ error: 'Not authorized for this branch' });
+
+        const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '30'), 10) || 30, 1), 50);
+        const cursor = decodeCursor(req.query.cursor as string | undefined);
+        const q = (req.query.q as string | undefined)?.trim();
+        const verticalId = (req.query.verticalId as string | undefined) || undefined;
+        const categoryId = (req.query.categoryId as string | undefined) || undefined;
+        const brand = (req.query.brand as string | undefined) || undefined;
+        const isVegRaw = req.query.isVeg as string | undefined;
+
+        const where: any = {
+            source: { in: ['blinkit', 'live_sync', 'purchased_catalog'] },
+            mrp: { gt: 0 },
+            // exclude products this branch already lists (any non-deleted StoreProduct)
+            NOT: { storeProducts: { some: { branch_id: branchId, is_deleted: false } } },
+            ...(q && q.length >= 2 ? { name: { contains: q, mode: 'insensitive' as const } } : {}),
+            ...(verticalId ? { vertical_id: verticalId } : {}),
+            ...(categoryId ? { category_id: categoryId } : {}),
+            ...(brand ? { brand: { equals: brand, mode: 'insensitive' as const } } : {}),
+            ...(isVegRaw === 'true' ? { isVeg: true } : isVegRaw === 'false' ? { isVeg: false } : {}),
+        };
+
+        const rows = await prisma.product.findMany({
+            where,
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            take: limit + 1,
+            ...(cursor.id ? { cursor: { id: cursor.id }, skip: 1 } : {}),
+            include: {
+                Vertical: { select: { id: true, name: true, requiresFssai: true } },
+                Tier2Category: { select: { id: true, name: true } },
+            },
+        });
+
+        const hasMore = rows.length > limit;
+        const page = hasMore ? rows.slice(0, limit) : rows;
+        const last = page[page.length - 1];
+        const nextCursor = hasMore && last ? encodeCursor({ createdAt: last.createdAt, id: last.id }) : null;
+
+        res.json({
+            data: page.map((p: any) => ({
+                id: p.id, name: p.name, brand: p.brand, mrp: p.mrp, image: p.image, uom: p.uom, isVeg: p.isVeg,
+                vertical: p.Vertical ? { id: p.Vertical.id, name: p.Vertical.name, requiresFssai: p.Vertical.requiresFssai } : null,
+                category: p.Tier2Category ? { id: p.Tier2Category.id, name: p.Tier2Category.name } : null,
+            })),
+            nextCursor,
+            hasMore,
+        });
+    } catch (error: any) {
+        return handleApiError(res, error, { area: 'merchant.catalog', userMessage: 'Failed to load catalog' });
+    }
+});
+
 // Bulk-configure existing catalog products for a branch (ConfigureProductsModal).
 // body: { branchId, items: [{ productId, variant, price, stock, active? }] }
 app.post('/merchant/store-products/configure', async (req, res) => {
@@ -10551,6 +10617,23 @@ app.post('/merchant/store-products/configure', async (req, res) => {
         if (items.length === 0) return res.status(400).json({ error: 'items is required' });
         const can = (await userCanManageBranchFull(user.id, branchId)) || (await isPlatformAdmin(user.id));
         if (!can) return res.status(403).json({ error: 'Not authorized to configure products for this branch' });
+
+        // Phase 4 sub-2 (2026-06-17): MRP-ceiling + FSSAI listing guards (spec §7).
+        // The DB trigger backstops MRP; this returns a clean 400/403 with offenders.
+        const itemList = items.map((it) => ({ productId: String(it.productId), price: Number(it.price) || 0, stock: Number(it.stock) || 0 }));
+        const guardProducts = await prisma.product.findMany({
+            where: { id: { in: itemList.map((i) => i.productId) } },
+            select: { id: true, mrp: true, Vertical: { select: { requiresFssai: true } } },
+        });
+        const pmap = new Map(guardProducts.map((p: any) => [p.id, { mrp: p.mrp, requiresFssai: !!p.Vertical?.requiresFssai }]));
+        const mrpCheck = validateMrpCeiling(itemList, pmap);
+        if (!mrpCheck.ok) return res.status(400).json({ error: (mrpCheck as any).code, offenders: (mrpCheck as any).offenders });
+        const guardBranch = await prisma.merchantBranch.findUnique({ where: { id: branchId }, select: { merchantId: true } });
+        const guardMerchant = guardBranch?.merchantId
+            ? await prisma.merchant.findUnique({ where: { id: guardBranch.merchantId }, select: { fssaiNumber: true } })
+            : null;
+        const fssaiCheck = validateFssaiGate(itemList, pmap, { fssaiNumber: guardMerchant?.fssaiNumber ?? null });
+        if (!fssaiCheck.ok) return res.status(403).json({ error: (fssaiCheck as any).code, offenders: (fssaiCheck as any).offenders });
 
         const now = new Date().toISOString();
         // branch_id is the canonical key; parent Store derives via
@@ -10570,7 +10653,34 @@ app.post('/merchant/store-products/configure', async (req, res) => {
         }));
         const { error } = await supabaseAdmin.from('StoreProduct').upsert(rows, { onConflict: 'branch_id,productId,variant' });
         if (error) throw new Error(error.message);
-        res.json({ ok: true, count: rows.length });
+
+        // Lazy image re-host (spec §8, D3): copy grofers.com images into our own bucket
+        // on first listing. Failure-tolerant + bounded to 5s so a storage blip never
+        // blocks the listing; the next listing of the same product retries.
+        const rehoster = makeRehoster({
+            findProduct: (id) => prisma.product.findUnique({ where: { id }, select: { image: true } }),
+            download: async (url) => {
+                const r = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+                if (!r.ok) throw new Error(`download ${r.status}`);
+                return { data: Buffer.from(await r.arrayBuffer()), contentType: r.headers.get('content-type') || 'image/jpeg' };
+            },
+            upload: async (path, body, contentType) => {
+                const up = await supabaseAdmin.storage.from('products').upload(path, body, { contentType, upsert: true });
+                if (up.error) throw up.error;
+                const { data } = supabaseAdmin.storage.from('products').getPublicUrl(path);
+                return { publicUrl: data.publicUrl };
+            },
+            updateImage: async (productId, url) => { await prisma.product.update({ where: { id: productId }, data: { image: url } }); },
+            captureException: (e, ctx) => Sentry.captureException(e, { extra: ctx }),
+        });
+        const rehostIds = itemList.map((i) => i.productId);
+        const rehostTally = await Promise.race([
+            rehoster.rehostMany(rehostIds),
+            new Promise<{ ok: number; skipped: number; failed: number }>((resolve) =>
+                setTimeout(() => resolve({ ok: 0, skipped: 0, failed: 0 }), 5_000)),
+        ]);
+
+        res.json({ ok: true, count: rows.length, rehosted: rehostTally.ok, rehostFailed: rehostTally.failed });
     } catch (error: any) {
         return handleApiError(res, error, { area: 'merchant.storeProducts.configure', userMessage: 'Failed to configure products' });
     }
