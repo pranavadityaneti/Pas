@@ -10558,20 +10558,27 @@ app.get('/merchant/catalog', async (req, res) => {
         const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '30'), 10) || 30, 1), 50);
         const cursor = decodeCursor(req.query.cursor as string | undefined);
         const q = (req.query.q as string | undefined)?.trim();
-        const verticalId = (req.query.verticalId as string | undefined) || undefined;
+        // verticalId + brand accept comma-separated lists (the FilterModal multi-selects)
+        const verticalIds = String(req.query.verticalId || '').split(',').map((s) => s.trim()).filter(Boolean);
         const categoryId = (req.query.categoryId as string | undefined) || undefined;
-        const brand = (req.query.brand as string | undefined) || undefined;
+        const brands = String(req.query.brand || '').split(',').map((s) => s.trim()).filter(Boolean);
         const isVegRaw = req.query.isVeg as string | undefined;
+        const minPrice = req.query.minPrice != null && req.query.minPrice !== '' ? Number(req.query.minPrice) : undefined;
+        const maxPrice = req.query.maxPrice != null && req.query.maxPrice !== '' ? Number(req.query.maxPrice) : undefined;
 
         const where: any = {
             source: { in: ['blinkit', 'live_sync', 'purchased_catalog'] },
-            mrp: { gt: 0 },
+            mrp: {
+                gt: 0,
+                ...(minPrice != null && Number.isFinite(minPrice) ? { gte: minPrice } : {}),
+                ...(maxPrice != null && Number.isFinite(maxPrice) ? { lte: maxPrice } : {}),
+            },
             // exclude products this branch already lists (any non-deleted StoreProduct)
             NOT: { storeProducts: { some: { branch_id: branchId, is_deleted: false } } },
             ...(q && q.length >= 2 ? { name: { contains: q, mode: 'insensitive' as const } } : {}),
-            ...(verticalId ? { vertical_id: verticalId } : {}),
+            ...(verticalIds.length ? { vertical_id: { in: verticalIds } } : {}),
             ...(categoryId ? { category_id: categoryId } : {}),
-            ...(brand ? { brand: { equals: brand, mode: 'insensitive' as const } } : {}),
+            ...(brands.length ? { brand: { in: brands } } : {}),
             ...(isVegRaw === 'true' ? { isVeg: true } : isVegRaw === 'false' ? { isVeg: false } : {}),
         };
 
