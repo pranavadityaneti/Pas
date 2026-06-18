@@ -56,11 +56,81 @@ export async function deleteStoreProduct(id: string): Promise<void> {
 }
 
 /** Bulk-configure existing catalog products for a branch. */
-export async function configureStoreProducts(branchId: string, items: any[]): Promise<{ ok: boolean; count: number }> {
+export async function configureStoreProducts(
+    branchId: string,
+    items: any[],
+): Promise<{ ok: boolean; count: number; rehosted?: number; rehostFailed?: number }> {
     try {
         const res = await axios.post(`${API_URL}/merchant/store-products/configure`, { branchId, items }, { headers: await authHeaders() });
         return res.data;
     } catch (e: any) {
         surface(e, 'Failed to configure products. Please check your connection.');
+    }
+}
+
+// Phase 4 sub-2 (2026-06-18) — server-paginated master catalog picker.
+// GET /merchant/catalog (keyset pagination + server-side filters).
+
+/** A single product row from GET /merchant/catalog. */
+export interface CatalogProduct {
+    id: string;
+    name: string;
+    brand: string | null;
+    mrp: number;
+    image: string | null;
+    uom: string | null;
+    isVeg: boolean | null;
+    vertical: { id: string; name: string; requiresFssai: boolean } | null;
+    category: { id: string; name: string } | null;
+}
+
+export interface CatalogPage {
+    data: CatalogProduct[];
+    nextCursor: string | null;
+    hasMore: boolean;
+}
+
+export interface FetchCatalogParams {
+    branchId: string;
+    cursor?: string | null;
+    q?: string;
+    verticalId?: string;
+    categoryId?: string;
+    brand?: string;
+    isVeg?: 'true' | 'false';
+    minPrice?: number;
+    maxPrice?: number;
+    limit?: number;
+}
+
+/** Fetch a page of the master catalog (server-side filtered + keyset paginated). */
+export async function fetchCatalog(params: FetchCatalogParams): Promise<CatalogPage> {
+    try {
+        // Build query params, omitting empty/undefined ones.
+        const query: Record<string, string> = {};
+        const add = (key: string, value: unknown) => {
+            if (value === undefined || value === null) return;
+            const str = String(value).trim();
+            if (str === '') return;
+            query[key] = str;
+        };
+        add('branchId', params.branchId);
+        add('cursor', params.cursor);
+        add('q', params.q);
+        add('verticalId', params.verticalId);
+        add('categoryId', params.categoryId);
+        add('brand', params.brand);
+        add('isVeg', params.isVeg);
+        add('minPrice', params.minPrice);
+        add('maxPrice', params.maxPrice);
+        add('limit', params.limit);
+
+        const res = await axios.get(`${API_URL}/merchant/catalog`, {
+            headers: await authHeaders(),
+            params: query,
+        });
+        return res.data;
+    } catch (e: any) {
+        surface(e, 'Failed to load catalog');
     }
 }
