@@ -19,6 +19,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { LiveImportModal } from './LiveImportModal';
+import { CategoriesTab } from './CategoriesTab';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Checkbox } from '../../ui/checkbox';
@@ -117,6 +118,8 @@ export function MasterCatalog() {
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [catalogType, setCatalogType] = useState<'global' | 'custom' | 'sync_queue'>('global');
+  // Category-visibility feature · Task 6: swap the catalog view for the Categories manager.
+  const [showCategories, setShowCategories] = useState(false);
 
   // Live taxonomy (Phase 4, 2026-06-17). Category = Vertical (15); Subcategory =
   // Tier2Category (136), cascaded by its parent vertical — same source the
@@ -585,6 +588,31 @@ export function MasterCatalog() {
   // The 'products' state now contains only the relevant items
 
 
+  // Category-visibility feature · Task 6: the Categories manager is its own view inside
+  // this module — opened via the "Categories" tab, with a back link to the catalog. Kept
+  // as an early return so the large products UI below is untouched.
+  if (showCategories) {
+    return (
+      <div className="h-full flex flex-col bg-gray-50 p-6 space-y-6 relative">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-[#B52725] rounded-lg shadow-lg shadow-red-200">
+              <FolderTree className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Category Visibility</h1>
+              <p className="text-sm text-gray-500">Enable or disable categories across the customer and merchant apps</p>
+            </div>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setShowCategories(false)}>
+            ← Back to Catalog
+          </Button>
+        </div>
+        <CategoriesTab />
+      </div>
+    );
+  }
+
   return (
     <div className="h-full flex flex-col bg-gray-50 p-6 space-y-6 relative">
       {/* --- Header --- */}
@@ -661,6 +689,16 @@ export function MasterCatalog() {
                 {syncQueue.length}
               </Badge>
             )}
+          </div>
+        </button>
+        {/* Category-visibility feature · Task 6: opens the Categories manager view. */}
+        <button
+          className="pb-2 px-4 font-medium transition-colors text-gray-500 hover:text-gray-700"
+          onClick={() => setShowCategories(true)}
+        >
+          <div className="flex items-center gap-2">
+            <FolderTree className="w-4 h-4" />
+            Categories
           </div>
         </button>
       </div>
