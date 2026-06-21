@@ -3573,6 +3573,38 @@ app.post('/order-requests', async (req, res) => {
             }
         }
 
+        // ── Category Status Gate: reject items whose vertical/subcategory an admin has
+        // disabled (category-visibility feature, Task 7a). RLS hides these from customers,
+        // but service_role here BYPASSES RLS, so a stale in-flight cart — or an older app
+        // build that never got the consumer prune — could otherwise slip one through. This
+        // is the airtight, OTA-independent backstop. Visibility logic mirrors the RESTRICTIVE
+        // RLS exactly. Pre-transaction + pre-payment, so a rejection never orphans a charge.
+        const reqProductIds = [...new Set(
+            requests.flatMap((r: any) => (Array.isArray(r?.items) ? r.items.map((it: any) => String(it?.id)).filter(Boolean) : [])),
+        )] as string[];
+        if (reqProductIds.length > 0) {
+            const prods = await prisma.product.findMany({
+                where: { id: { in: reqProductIds } },
+                select: {
+                    id: true, name: true, vertical_id: true, category_id: true,
+                    Vertical: { select: { is_active: true } },
+                    Tier2Category: { select: { active: true } },
+                },
+            });
+            const isVisible = (p: any) =>
+                (p.vertical_id == null || p.Vertical?.is_active === true) &&
+                (p.category_id == null || p.Tier2Category?.active === true);
+            const disabled = prods.filter((p) => !isVisible(p));
+            if (disabled.length > 0) {
+                console.warn(`[POST /order-requests] 403 — Category disabled | products=${disabled.map((p) => p.id).join(',')} user=${user.id}`);
+                return res.status(403).json({
+                    error: 'CATEGORY_UNAVAILABLE',
+                    message: `Some items are no longer available: ${disabled.map((p) => p.name).join(', ')}. Please remove them from your cart and try again.`,
+                    offenders: disabled.map((p) => p.id),
+                });
+            }
+        }
+
         // Execute sequentially in a transaction to ensure either all succeed or all fail
         const notificationsToDispatch: any[] = [];
         const createdRequests = await prisma.$transaction(async (tx) => {

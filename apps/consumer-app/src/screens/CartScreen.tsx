@@ -40,7 +40,7 @@ export default function CartScreen() {
     // (addItem/removeItem/updateQuantity/clearCart), so the legacy minOrder
     // watchdog is no longer needed here (server is the authoritative gate at
     // confirmAccepted; client clears on any cart-shape change).
-    const { items, groupedItems, updateQuantity, getItemCount, getTotal, clearCart, appliedCoupon } = useCart();
+    const { items, groupedItems, updateQuantity, getItemCount, getTotal, clearCart, appliedCoupon, revalidateCart } = useCart();
     const { session: currentSession, isLoading: authLoading, user, isProfileLoading } = useAuth();
     const [authModalVisible, setAuthModalVisible] = useState(false);
     const [isWaitingForAuthSync, setIsWaitingForAuthSync] = useState(false);
@@ -52,6 +52,27 @@ export default function CartScreen() {
         getPlatformConfig().then(c => { if (m) setMinOrderValue(c.minOrderValue || 0); }).catch(() => {});
         return () => { m = false; };
     }, []);
+
+    // Category-visibility feature · Task 7b (2026-06-21): on focus, prune any cart item
+    // whose category an admin has disabled (RLS hides it → the re-read drops it) and tell
+    // the customer. The POST /order-requests gate is the airtight backstop at checkout.
+    useEffect(() => {
+        const unsub = navigation.addListener('focus', () => {
+            revalidateCart()
+                .then((removed) => {
+                    if (removed.length > 0) {
+                        Alert.alert(
+                            'Some items were removed',
+                            `${removed.map((r) => r.name).join(', ')} ${removed.length === 1 ? 'is' : 'are'} no longer available and ${removed.length === 1 ? 'has' : 'have'} been removed from your cart.`,
+                        );
+                    }
+                })
+                .catch(() => {});
+        });
+        return unsub;
+        // revalidateCart reads the latest items via a ref, so depending only on [navigation] is safe.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [navigation]);
 
     // Phase 4 fix B2 (2026-06-09): removed local `coupon` state, the
     // route.params.selectedCoupon useEffect, and the minOrder watchdog.
