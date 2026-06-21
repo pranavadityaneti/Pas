@@ -58,6 +58,7 @@ model Vertical {
   id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name            String          @unique
   requiresFssai   Boolean         @default(false)
+  is_active       Boolean         @default(true)
   isPremium       Boolean         @default(false)
   isDining        Boolean         @default(false)
   isGrocery       Boolean         @default(false)
