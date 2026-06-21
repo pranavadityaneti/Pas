@@ -1663,6 +1663,11 @@ async function validateTaxonomy(verticalId: string, category_id: string): Promis
 app.get('/verticals', async (req, res) => {
     try {
         const verticals = await prisma.vertical.findMany({
+            // Category-visibility coupling (D2): the merchant signup vertical picker is the
+            // only caller — hide platform-disabled verticals so a new merchant can't register
+            // in a category that's turned off for customers. (Consumer + existing-merchant
+            // reads go through supabase RLS, which already hides them.)
+            where: { is_active: true },
             select: {
                 id: true,
                 name: true,
