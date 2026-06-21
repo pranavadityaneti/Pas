@@ -185,7 +185,15 @@ export function CategoriesTab() {
                   </div>
                 </div>
                 {saving[vKey] && <Loader2 className="w-4 h-4 animate-spin text-gray-300" />}
-                <Switch checked={c.isActive} disabled={!!saving[vKey]} onCheckedChange={(v) => onVerticalToggle(c, v)} />
+                <Switch
+                  checked={c.isActive}
+                  disabled={!!saving[vKey]}
+                  onCheckedChange={(v) => onVerticalToggle(c, v)}
+                  // OFF state must stay clearly visible (the shared default track is near-white →
+                  // invisible on the greyed disabled row). Force a grey track + border so the
+                  // re-enable toggle is always findable.
+                  className="data-[state=unchecked]:!bg-gray-300 data-[state=unchecked]:!border-gray-400 shrink-0"
+                />
               </div>
 
               <CollapsibleContent>
@@ -205,7 +213,12 @@ export function CategoriesTab() {
                           <div className="text-xs text-gray-400 mt-0.5">{s.productCount.toLocaleString('en-IN')} products</div>
                         </div>
                         {saving[sKey] && <Loader2 className="w-4 h-4 animate-spin text-gray-300" />}
-                        <Switch checked={s.active} disabled={!!saving[sKey]} onCheckedChange={(v) => onSubToggle(c.id, s, v)} />
+                        <Switch
+                          checked={s.active}
+                          disabled={!!saving[sKey]}
+                          onCheckedChange={(v) => onSubToggle(c.id, s, v)}
+                          className="data-[state=unchecked]:!bg-gray-300 data-[state=unchecked]:!border-gray-400 shrink-0"
+                        />
                       </div>
                     );
                   })}
