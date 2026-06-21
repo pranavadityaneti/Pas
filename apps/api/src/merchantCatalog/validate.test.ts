@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { validatePayload, validateMrpCeiling, validateFssaiGate } from './validate';
+import { validatePayload, validateMrpCeiling, validateFssaiGate, validateCategoriesEnabled } from './validate';
 
 test('validatePayload: empty items rejected', () => {
   const r = validatePayload({ items: [] });
@@ -62,4 +62,39 @@ test('validateFssaiGate: food + FSSAI present → ok', () => {
 test('validateFssaiGate: non-food + no FSSAI → ok', () => {
   const r = validateFssaiGate([{ productId: 'a' }], new Map([['a', { requiresFssai: false }]]), { fssaiNumber: null });
   assert.equal(r.ok, true);
+});
+
+test('validateCategoriesEnabled: disabled vertical → CATEGORY_DISABLED', () => {
+  const r = validateCategoriesEnabled([{ productId: 'a' }], new Map([['a', { verticalEnabled: false, subcategoryEnabled: true }]]));
+  assert.equal(r.ok, false);
+  assert.equal((r as any).code, 'CATEGORY_DISABLED');
+  assert.deepEqual((r as any).offenders, [{ productId: 'a' }]);
+});
+
+test('validateCategoriesEnabled: disabled subcategory → CATEGORY_DISABLED', () => {
+  const r = validateCategoriesEnabled([{ productId: 'a' }], new Map([['a', { verticalEnabled: true, subcategoryEnabled: false }]]));
+  assert.equal(r.ok, false);
+  assert.equal((r as any).code, 'CATEGORY_DISABLED');
+});
+
+test('validateCategoriesEnabled: both enabled (incl. null→enabled) → ok', () => {
+  const r = validateCategoriesEnabled([{ productId: 'a' }], new Map([['a', { verticalEnabled: true, subcategoryEnabled: true }]]));
+  assert.equal(r.ok, true);
+});
+
+test('validateCategoriesEnabled: only the disabled item is an offender', () => {
+  const items = [{ productId: 'ok' }, { productId: 'bad' }];
+  const products = new Map([
+    ['ok', { verticalEnabled: true, subcategoryEnabled: true }],
+    ['bad', { verticalEnabled: false, subcategoryEnabled: true }],
+  ]);
+  const r = validateCategoriesEnabled(items, products);
+  assert.equal(r.ok, false);
+  assert.deepEqual((r as any).offenders, [{ productId: 'bad' }]);
+});
+
+test('validateCategoriesEnabled: missing product → PRODUCT_NOT_FOUND', () => {
+  const r = validateCategoriesEnabled([{ productId: 'missing' }], new Map());
+  assert.equal(r.ok, false);
+  assert.equal((r as any).code, 'PRODUCT_NOT_FOUND');
 });

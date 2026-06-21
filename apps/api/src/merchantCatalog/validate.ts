@@ -41,3 +41,23 @@ export function validateFssaiGate(
   if (food.length === 0) return { ok: true };
   return { ok: false, code: 'FSSAI_REQUIRED', offenders: food.map((it) => it.productId) };
 }
+
+// Category-visibility feature · Task 4 (spec D6). Reject new listings whose Product
+// sits in a disabled Vertical or disabled Tier2Category — the instant server-side
+// counterpart to the RESTRICTIVE RLS (which hides existing rows from customers).
+// Null semantics MUST match the RLS/RPC gate: a Product with no vertical (or no
+// subcategory) is "not gated" → enabled. The route computes these booleans from the
+// Product→Vertical/Tier2Category join: verticalEnabled = (vertical_id IS NULL OR
+// Vertical.is_active); subcategoryEnabled = (category_id IS NULL OR Tier2Category.active).
+export function validateCategoriesEnabled(
+  items: { productId: string }[],
+  products: Map<string, { verticalEnabled: boolean; subcategoryEnabled: boolean }>,
+): ValidationResult {
+  const offenders: any[] = [];
+  for (const it of items) {
+    const p = products.get(it.productId);
+    if (!p) return { ok: false, code: 'PRODUCT_NOT_FOUND', offenders: [{ productId: it.productId }] };
+    if (!p.verticalEnabled || !p.subcategoryEnabled) offenders.push({ productId: it.productId });
+  }
+  return offenders.length ? { ok: false, code: 'CATEGORY_DISABLED', offenders } : { ok: true };
+}
