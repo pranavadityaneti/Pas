@@ -21,7 +21,7 @@ import fs from 'fs';
 import { createClient } from '@supabase/supabase-js';
 // Phase 4 sub-2 (2026-06-17): merchant catalog picker units.
 import { encodeCursor, decodeCursor } from './merchantCatalog/cursor';
-import { validateMrpCeiling, validateFssaiGate } from './merchantCatalog/validate';
+import { validateMrpCeiling, validateFssaiGate, validateCategoriesEnabled } from './merchantCatalog/validate';
 import { makeRehoster } from './services/imageRehost';
 import { z } from 'zod';
 import { smsService } from './services/sms.service';
@@ -1179,6 +1179,11 @@ app.get('/products/export', async (req, res) => {
 // rows (bulk-delete cascades into merchant inventory). Require an authenticated
 // admin (any tier) on all of them.
 const CATALOG_ADMIN_ROLES = ['SUPER_ADMIN', 'OPERATIONS', 'FINANCE', 'SUPPORT'] as const;
+// Category-visibility feature · Task 5: disabling a category hides it + all its products
+// platform-wide instantly — high impact, so the toggle is restricted to ops-level roles
+// (SUPER_ADMIN is always implicitly allowed inside requireRole). Viewing stays open to
+// all CATALOG_ADMIN_ROLES.
+const CATEGORY_TOGGLE_ROLES = ['SUPER_ADMIN', 'OPERATIONS'] as const;
 
 // Export Selected Products (Template Format)
 app.post('/products/export-selected', async (req, res) => {
@@ -10612,6 +10617,84 @@ app.get('/merchant/catalog', async (req, res) => {
     }
 });
 
+// ─── Category-visibility feature · Task 5: admin enable/disable endpoints ───
+// GET is open to all catalog-admin roles (read-only); the toggles are restricted to
+// CATEGORY_TOGGLE_ROLES (ops-level) because disabling is platform-wide + high impact.
+// Reads/writes go through prisma (service_role) → unaffected by the RESTRICTIVE RLS,
+// so admin always sees + manages every category, including disabled ones.
+app.get('/admin/categories', async (req, res) => {
+    const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES); if (!caller) return;
+    try {
+        const verticals = await prisma.vertical.findMany({
+            orderBy: { name: 'asc' },
+            select: {
+                id: true, name: true, is_active: true, requiresFssai: true,
+                _count: { select: { Product: true } },
+                tier2Categories: {
+                    orderBy: { name: 'asc' },
+                    select: { id: true, name: true, active: true, _count: { select: { Product: true } } },
+                },
+            },
+        });
+        const categories = verticals.map((v: any) => ({
+            id: v.id,
+            name: v.name,
+            isActive: v.is_active,
+            requiresFssai: v.requiresFssai,
+            productCount: v._count.Product,
+            subcategories: v.tier2Categories.map((t: any) => ({
+                id: t.id, name: t.name, active: t.active, productCount: t._count.Product,
+            })),
+        }));
+        res.json({ categories });
+    } catch (e: any) {
+        Sentry.captureException(e);
+        res.status(500).json({ error: e?.message || 'Failed to load categories' });
+    }
+});
+
+app.patch('/admin/categories/vertical/:id', async (req, res) => {
+    const caller = await requireRole(req, res, CATEGORY_TOGGLE_ROLES); if (!caller) return;
+    try {
+        const id = String(req.params.id);
+        if (typeof req.body?.isActive !== 'boolean') return res.status(400).json({ error: 'isActive (boolean) is required' });
+        const isActive: boolean = req.body.isActive;
+        const before = await prisma.vertical.findUnique({ where: { id }, select: { id: true, name: true, is_active: true } });
+        if (!before) return res.status(404).json({ error: 'Category not found' });
+        const updated = await prisma.vertical.update({
+            where: { id }, data: { is_active: isActive },
+            select: { id: true, name: true, is_active: true },
+        });
+        await writeAuditLog(caller.id, isActive ? 'CATEGORY_ENABLE' : 'CATEGORY_DISABLE', 'Vertical', id,
+            { is_active: before.is_active }, { is_active: updated.is_active });
+        res.json({ id: updated.id, name: updated.name, isActive: updated.is_active });
+    } catch (e: any) {
+        Sentry.captureException(e);
+        res.status(500).json({ error: e?.message || 'Failed to update category' });
+    }
+});
+
+app.patch('/admin/categories/subcategory/:id', async (req, res) => {
+    const caller = await requireRole(req, res, CATEGORY_TOGGLE_ROLES); if (!caller) return;
+    try {
+        const id = String(req.params.id);
+        if (typeof req.body?.active !== 'boolean') return res.status(400).json({ error: 'active (boolean) is required' });
+        const active: boolean = req.body.active;
+        const before = await prisma.tier2Category.findUnique({ where: { id }, select: { id: true, name: true, active: true } });
+        if (!before) return res.status(404).json({ error: 'Subcategory not found' });
+        const updated = await prisma.tier2Category.update({
+            where: { id }, data: { active },
+            select: { id: true, name: true, active: true },
+        });
+        await writeAuditLog(caller.id, active ? 'SUBCATEGORY_ENABLE' : 'SUBCATEGORY_DISABLE', 'Tier2Category', id,
+            { active: before.active }, { active: updated.active });
+        res.json({ id: updated.id, name: updated.name, active: updated.active });
+    } catch (e: any) {
+        Sentry.captureException(e);
+        res.status(500).json({ error: e?.message || 'Failed to update subcategory' });
+    }
+});
+
 // Bulk-configure existing catalog products for a branch (ConfigureProductsModal).
 // body: { branchId, items: [{ productId, variant, price, stock, active? }] }
 app.post('/merchant/store-products/configure', async (req, res) => {
@@ -10630,9 +10713,20 @@ app.post('/merchant/store-products/configure', async (req, res) => {
         const itemList = items.map((it) => ({ productId: String(it.productId), price: Number(it.price) || 0, stock: Number(it.stock) || 0 }));
         const guardProducts = await prisma.product.findMany({
             where: { id: { in: itemList.map((i) => i.productId) } },
-            select: { id: true, mrp: true, Vertical: { select: { requiresFssai: true } } },
+            select: {
+                id: true, mrp: true, vertical_id: true, category_id: true,
+                Vertical: { select: { requiresFssai: true, is_active: true } },
+                Tier2Category: { select: { active: true } },
+            },
         });
-        const pmap = new Map(guardProducts.map((p: any) => [p.id, { mrp: p.mrp, requiresFssai: !!p.Vertical?.requiresFssai }]));
+        const pmap = new Map(guardProducts.map((p: any) => [p.id, {
+            mrp: p.mrp,
+            requiresFssai: !!p.Vertical?.requiresFssai,
+            // Category-visibility Task 5: null vertical/subcategory = not gated = enabled
+            // (matches the RESTRICTIVE RLS + get_nearby_stores gate exactly).
+            verticalEnabled: p.vertical_id == null || !!p.Vertical?.is_active,
+            subcategoryEnabled: p.category_id == null || !!p.Tier2Category?.active,
+        }]));
         const mrpCheck = validateMrpCeiling(itemList, pmap);
         if (!mrpCheck.ok) return res.status(400).json({ error: (mrpCheck as any).code, offenders: (mrpCheck as any).offenders });
         const guardBranch = await prisma.merchantBranch.findUnique({ where: { id: branchId }, select: { merchantId: true } });
@@ -10641,6 +10735,10 @@ app.post('/merchant/store-products/configure', async (req, res) => {
             : null;
         const fssaiCheck = validateFssaiGate(itemList, pmap, { fssaiNumber: guardMerchant?.fssaiNumber ?? null });
         if (!fssaiCheck.ok) return res.status(403).json({ error: (fssaiCheck as any).code, offenders: (fssaiCheck as any).offenders });
+        // Category-visibility Task 5 (spec D6): reject NEW listings in a disabled category.
+        // Existing parked stock is untouched; this only blocks fresh configure writes.
+        const catCheck = validateCategoriesEnabled(itemList, pmap);
+        if (!catCheck.ok) return res.status(403).json({ error: (catCheck as any).code, offenders: (catCheck as any).offenders });
 
         const now = new Date().toISOString();
         // branch_id is the canonical key; parent Store derives via
