@@ -14,6 +14,22 @@
 
 ---
 
+## 🎯 PRIORITY QUEUE — Pranav's directive (2026-06-19)
+> After reviewing `docs/pas-complete-assessment-shipped-and-pending-2026-06-19.html`, Pranav set this exact order to fix immediately, then revisit the rest. Work ONE at a time, approval-gated. Numbers = the assessment doc's Part-4 pending numbering.
+- **NEW FEATURE (captured, slot TBD):** admin needs to **enable/disable which categories show in the customer app** — a provision in the admin dashboard. Connects to the 13 held PENDING_DECISION category mappings + `Vertical`/`Tier2Category` visibility. Likely its own admin item; Pranav to place in the order.
+- **#16 Security & deadlines — FIRST (in progress).**
+  - ✅ **#16a credentials.json untracked + gitignored** (commit `780b024a`; local files kept so eas build works). **PENDING DECISION — keystore ROTATION:** passwords are in git HISTORY, but the `.jks` is NOT in git → not exploitable alone; clean fix = Play Console upload-key reset (NB both apps share ONE keystore — merchant `credentials.json` points at consumer's `.jks`). Rotate now vs accept residual history risk = Pranav's call.
+  - **#16b GRANT migration:** deadline **Oct 30, 2026** — add `GRANT … TO authenticated, anon` to new-table migrations now (PR checklist) + audit existing tables before the date (schedule ~early Oct). (EB slow-deploy reminder below is RESOLVED — deploys are ~1 min now.)
+  - **#16c broad RLS sweep:** separate focused audit — schedule after the queue.
+- **#14** Full notification scenario coverage (customer 14-scenario plan across 4 phases + merchant gaps).
+- **#11** KYC approval UX overhaul (decision audit trail [compliance], view uploaded PDFs, show hidden captured fields, panel redesign, Approve-confirm).
+- **#8** Pack-size / sibling variants (group by sibling; sibling data already in `extraData`).
+- **#7** Delete legacy/test products (`source='zepto'` 134 + null 111 + live_sync 39) — confirm first.
+- **#6** Drop `StoreProduct.storeId` column (B10) — gated on merchant 1.2.6 build live + adopted on BOTH stores.
+- THEN revisit the rest of Part 4 (legal #1-4 [agreements re-draft, Play login fix], payout #5, etc.).
+
+---
+
 ## ⏰ NEXT SESSION REMINDERS (read at start of next session)
 
 1. **Verify B3 (API server-side notification metadata) is actually populating link + metadata.** Yesterday's `eb deploy` officially failed but the new code activated at 17:52 UTC after a 45-minute npm install. No notifications fired between then and end-of-session — so verification was deferred to next morning. **First action of next session:** run this SQL:
