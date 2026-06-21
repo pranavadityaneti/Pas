@@ -1,0 +1,30 @@
+{
+  "when": "2026-06-22",
+  "sub": "Meat & Seafood",
+  "moves": [
+    {
+      "id": "65f20a3c-0a6e-4c4f-adc8-2e71c608e6d5",
+      "name": "Fish bush",
+      "oldV": null,
+      "oldC": null
+    },
+    {
+      "id": "98460978-618c-4214-8bb9-8f9608163a1b",
+      "name": "Lobster",
+      "oldV": null,
+      "oldC": null
+    },
+    {
+      "id": "986253ef-3963-4f92-85ae-8c6a496ca4e3",
+      "name": "Mutton",
+      "oldV": null,
+      "oldC": null
+    },
+    {
+      "id": "dcb4dc9b-18ad-435e-a95d-f32c18923823",
+      "name": "Boneless mutton",
+      "oldV": null,
+      "oldC": null
+    }
+  ]
+}
