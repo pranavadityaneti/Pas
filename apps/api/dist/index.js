@@ -55,6 +55,10 @@ const fs_1 = __importDefault(require("fs"));
 // Note: `crypto` is already brought in via `require` at line ~469 (legacy pattern
 // shared with Razorpay). Phase 2 (2E-4) helpers below use that same `crypto`.
 const supabase_js_1 = require("@supabase/supabase-js");
+// Phase 4 sub-2 (2026-06-17): merchant catalog picker units.
+const cursor_1 = require("./merchantCatalog/cursor");
+const validate_1 = require("./merchantCatalog/validate");
+const imageRehost_1 = require("./services/imageRehost");
 const zod_1 = require("zod");
 const sms_service_1 = require("./services/sms.service");
 const wati_service_1 = require("./services/wati.service");
@@ -1104,6 +1108,11 @@ app.get('/products/export', async (req, res) => {
 // rows (bulk-delete cascades into merchant inventory). Require an authenticated
 // admin (any tier) on all of them.
 const CATALOG_ADMIN_ROLES = ['SUPER_ADMIN', 'OPERATIONS', 'FINANCE', 'SUPPORT'];
+// Category-visibility feature · Task 5: disabling a category hides it + all its products
+// platform-wide instantly — high impact, so the toggle is restricted to ops-level roles
+// (SUPER_ADMIN is always implicitly allowed inside requireRole). Viewing stays open to
+// all CATALOG_ADMIN_ROLES.
+const CATEGORY_TOGGLE_ROLES = ['SUPER_ADMIN', 'OPERATIONS'];
 // Export Selected Products (Template Format)
 app.post('/products/export-selected', async (req, res) => {
     const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
@@ -3390,6 +3399,34 @@ app.post('/order-requests', async (req, res) => {
                 return res.status(403).json({
                     error: 'STORE_OFFLINE',
                     message: `${reqRow.store_name || 'This store'} is currently offline and not accepting orders.`
+                });
+            }
+        }
+        // ── Category Status Gate: reject items whose vertical/subcategory an admin has
+        // disabled (category-visibility feature, Task 7a). RLS hides these from customers,
+        // but service_role here BYPASSES RLS, so a stale in-flight cart — or an older app
+        // build that never got the consumer prune — could otherwise slip one through. This
+        // is the airtight, OTA-independent backstop. Visibility logic mirrors the RESTRICTIVE
+        // RLS exactly. Pre-transaction + pre-payment, so a rejection never orphans a charge.
+        const reqProductIds = [...new Set(requests.flatMap((r) => (Array.isArray(r?.items) ? r.items.map((it) => String(it?.id)).filter(Boolean) : [])))];
+        if (reqProductIds.length > 0) {
+            const prods = await prisma.product.findMany({
+                where: { id: { in: reqProductIds } },
+                select: {
+                    id: true, name: true, vertical_id: true, category_id: true,
+                    Vertical: { select: { is_active: true } },
+                    Tier2Category: { select: { active: true } },
+                },
+            });
+            const isVisible = (p) => (p.vertical_id == null || p.Vertical?.is_active === true) &&
+                (p.category_id == null || p.Tier2Category?.active === true);
+            const disabled = prods.filter((p) => !isVisible(p));
+            if (disabled.length > 0) {
+                console.warn(`[POST /order-requests] 403 — Category disabled | products=${disabled.map((p) => p.id).join(',')} user=${user.id}`);
+                return res.status(403).json({
+                    error: 'CATEGORY_UNAVAILABLE',
+                    message: `Some items are no longer available: ${disabled.map((p) => p.name).join(', ')}. Please remove them from your cart and try again.`,
+                    offenders: disabled.map((p) => p.id),
                 });
             }
         }
@@ -5716,6 +5753,9 @@ app.post('/checkout/validate-coupon', async (req, res) => {
         // the eligibleVerticals check (fixes the latent bug where clients sent
         // branch UUIDs and prisma.store.findMany matched nothing), and (b) the
         // multi-store discount allocation breakdown.
+        // Phase 2 FINAL — B6 (2026-06-16): storeId is now derived via the branch's
+        // merchant_branches.store_id (the canonical link added in B1/B2/B5),
+        // not from the vestigial StoreProduct.storeId (dropped in B10).
         let storeAttribution = null;
         if (hasCartItems) {
             const storeProductIds = [];
@@ -5734,10 +5774,18 @@ app.post('/checkout/validate-coupon', async (req, res) => {
             // the user must refresh.
             const rows = await prisma.storeProduct.findMany({
                 where: { id: { in: storeProductIds }, is_deleted: false, active: true },
-                select: { id: true, price: true, branch_id: true, storeId: true },
+                select: {
+                    id: true,
+                    price: true,
+                    branch_id: true,
+                    merchant_branches: { select: { storeId: true } },
+                },
             });
             trustedPrices = new Map(rows.map((r) => [r.id, Number(r.price) || 0]));
-            storeAttribution = new Map(rows.map((r) => [r.id, { branchId: r.branch_id ?? null, storeId: r.storeId }]));
+            storeAttribution = new Map(rows.map((r) => [
+                r.id,
+                { branchId: r.branch_id ?? null, storeId: r.merchant_branches?.storeId ?? null },
+            ]));
             const missing = storeProductIds.filter((id) => !trustedPrices.has(id));
             if (missing.length > 0) {
                 return res.status(400).json({
@@ -5801,22 +5849,40 @@ app.post('/checkout/validate-coupon', async (req, res) => {
         // and closes the "lie about storeIds to bypass eligibility" hole.
         // Legacy clients (cartTotal-only, no cartItems) keep the old client-supplied
         // path since there's nothing server-side to derive from.
-        const serverStoreIds = storeAttribution
-            ? Array.from(new Set(Array.from(storeAttribution.values()).map((a) => a.storeId)))
+        // Phase 2 FINAL — F3 (2026-06-16): FAIL CLOSED. Compute the unresolvable
+        // flag from the RAW attribution values (before filtering nulls). A null
+        // storeId means the cart item's branch isn't linked to a Store, so we
+        // CANNOT prove it sits in an allowed vertical. The pre-F3 code silently
+        // dropped such items from the check (fail OPEN) — a money-path hole that
+        // activates the moment any branch has a null store_id.
+        const rawServerStoreIds = storeAttribution
+            ? Array.from(storeAttribution.values()).map((a) => a.storeId)
             : [];
+        const hasUnresolvableStore = storeAttribution
+            ? rawServerStoreIds.some((id) => !id)
+            : false;
+        const serverStoreIds = Array.from(new Set(rawServerStoreIds.filter((id) => !!id)));
         const verticalCheckStoreIds = storeAttribution
             ? serverStoreIds
             : (Array.isArray(storeIds) ? storeIds.map((s) => String(s)) : []);
-        if (coupon.eligibleVerticals && coupon.eligibleVerticals.length > 0 && verticalCheckStoreIds.length > 0) {
-            const cartStores = await prisma.store.findMany({
-                where: { id: { in: verticalCheckStoreIds } },
-                select: { id: true, verticalId: true },
-            });
-            const allowedVerticalIds = new Set(coupon.eligibleVerticals);
-            const allMatch = cartStores.length === verticalCheckStoreIds.length
-                && cartStores.every((s) => !!s.verticalId && allowedVerticalIds.has(s.verticalId));
-            if (!allMatch) {
+        if (coupon.eligibleVerticals && coupon.eligibleVerticals.length > 0) {
+            // F3: on the server-derived path, reject if ANY cart item's store is
+            // unresolvable — even when that leaves zero resolvable stores to check
+            // (the all-null case the old `length > 0` guard let slip through).
+            if (hasUnresolvableStore) {
                 return res.status(400).json({ valid: false, error: 'This coupon is not valid for one or more stores in your cart' });
+            }
+            if (verticalCheckStoreIds.length > 0) {
+                const cartStores = await prisma.store.findMany({
+                    where: { id: { in: verticalCheckStoreIds } },
+                    select: { id: true, verticalId: true },
+                });
+                const allowedVerticalIds = new Set(coupon.eligibleVerticals);
+                const allMatch = cartStores.length === verticalCheckStoreIds.length
+                    && cartStores.every((s) => !!s.verticalId && allowedVerticalIds.has(s.verticalId));
+                if (!allMatch) {
+                    return res.status(400).json({ valid: false, error: 'This coupon is not valid for one or more stores in your cart' });
+                }
             }
         }
         // Phase 2 (2E-2) — order type restriction (PICKUP / DINE_IN). Empty = no
@@ -5939,7 +6005,10 @@ app.post('/checkout/validate-coupon', async (req, res) => {
             for (const item of cartItems) {
                 const spid = String(item.storeProductId);
                 const attr = storeAttribution.get(spid); // presence validated in Phase 2L block
-                const key = attr.branchId ?? attr.storeId;
+                // Group key: prefer branchId (NOT NULL after B9), fall back to
+                // storeId, then spid as the ultimate guard so the key is always
+                // a non-null string.
+                const key = attr.branchId ?? attr.storeId ?? spid;
                 let g = groups.get(key);
                 if (!g) {
                     g = { branchId: attr.branchId, storeId: attr.storeId, storeProductIds: [], spidQty: [], subtotal: 0, discount: 0 };
@@ -7389,6 +7458,10 @@ app.patch('/auth/merchant/draft', async (req, res) => {
                 for (const s of payload.stores) {
                     const branchData = {
                         merchantId: userId,
+                        // Phase 2 FINAL — F1 (2026-06-16): parent Store is created at
+                        // id=userId above; set store_id so the branch is reachable to
+                        // its Store (no orphaned inventory). FK rejects a wrong value.
+                        storeId: userId,
                         branchName: s.name || 'Store',
                         managerName: s.manager_name,
                         phone: s.phone,
@@ -7459,6 +7532,8 @@ app.patch('/auth/merchant/draft', async (req, res) => {
                 // merchants are still geo-located and findable. (Fix: stores were invisible because
                 // the old code only created added branches and deleted the main one.)
                 const mainBranchData = {
+                    // Phase 2 FINAL — F1 (2026-06-16): parent Store is at id=userId.
+                    storeId: userId,
                     branchName: payload.storeName || 'Main Branch',
                     managerName: payload.ownerName,
                     phone: payload.phone,
@@ -7487,6 +7562,7 @@ app.patch('/auth/merchant/draft', async (req, res) => {
                             .filter((b) => (b.name || 'Branch') !== (payload.storeName || 'Main Branch'))
                             .map((b) => ({
                             merchantId: userId,
+                            storeId: userId, // Phase 2 FINAL — F1 (2026-06-16): parent Store = userId
                             branchName: b.name || 'Branch',
                             managerName: b.manager_name,
                             phone: b.phone,
@@ -7828,6 +7904,7 @@ app.post('/auth/merchant/signup', async (req, res) => {
                     data: {
                         id: userId, // critical: same UUID as merchant_id
                         merchantId: userId,
+                        storeId: userId, // Phase 2 FINAL — F1 (2026-06-16): parent Store = userId
                         branchName: payload.storeName || 'Main Branch',
                         managerName: payload.ownerName,
                         phone: payload.phone,
@@ -7848,6 +7925,7 @@ app.post('/auth/merchant/signup', async (req, res) => {
                     await tx.merchantBranch.createMany({
                         data: payload.branches.map((b) => ({
                             merchantId: userId,
+                            storeId: userId, // Phase 2 FINAL — F1 (2026-06-16): parent Store = userId
                             branchName: b.name || 'Branch',
                             managerName: b.manager_name,
                             phone: b.phone,
@@ -9559,6 +9637,10 @@ app.post('/merchant/branches', async (req, res) => {
             data: {
                 ...(b.id ? { id: String(b.id) } : {}),
                 merchantId,
+                // Phase 2 FINAL — F1 (2026-06-16): merchantId is the parent Store id
+                // (userCanManageMerchant verifies it against Store). Set store_id so
+                // the new branch is reachable to its Store; FK rejects a wrong value.
+                storeId: merchantId,
                 branchName,
                 address: b.address ?? null,
                 city: b.city ?? null,
@@ -10120,15 +10202,19 @@ app.post('/merchant/products/save', async (req, res) => {
             if (dErr)
                 throw new Error(`StoreProduct clear: ${dErr.message}`);
         }
-        // 4. Upsert StoreProduct rows (branch + store forced server-side).
+        // 4. Upsert StoreProduct rows. branch_id is the canonical key; the parent
+        // Store is derivable via merchant_branches.store_id (Phase 2 FINAL B1-B5,
+        // 2026-06-16). The vestigial StoreProduct.storeId column is dropped at B10
+        // and intentionally NOT written here — new rows leave it NULL.
         const spRows = storeProducts.map((sp) => ({
             id: sp.id ? String(sp.id) : crypto.randomUUID(),
-            storeId: branchId,
             branch_id: branchId,
             productId,
             price: Number(sp.price) || 0,
             stock: sp.stock != null ? Number(sp.stock) : 0,
-            active: sp.active != null ? !!sp.active : true,
+            // Phase 3 Item 2 (2026-06-16): a ₹0 listing can never be live. Blinkit is
+            // MRP-only so price coerces to 0; force inactive until a real price is set.
+            active: (Number(sp.price) || 0) > 0 && (sp.active != null ? !!sp.active : true),
             variant: sp.variant ? String(sp.variant) : 'Standard',
             is_best_seller: !!sp.is_best_seller,
             updatedAt: new Date().toISOString(),
@@ -10157,6 +10243,12 @@ app.patch('/merchant/store-products/:id', async (req, res) => {
         const updates = pick(req.body, STORE_PRODUCT_UPDATE_COLS);
         if (Object.keys(updates).length === 0)
             return res.status(400).json({ error: 'No updatable fields provided' });
+        // Phase 3 Item 2 (2026-06-16): a ₹0 listing can never be live. If this edit
+        // sets price ≤ 0, force the row inactive in the same write. (The activate-an-
+        // existing-₹0-row edge case is caught by the DB CHECK backstop.)
+        if (updates.price != null && (Number(updates.price) || 0) <= 0) {
+            updates.active = false;
+        }
         updates.updatedAt = new Date().toISOString();
         const { error } = await supabaseAdmin.from('StoreProduct').update(updates).eq('id', id);
         if (error)
@@ -10188,6 +10280,160 @@ app.delete('/merchant/store-products/:id', async (req, res) => {
         return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchant.storeProducts.delete', userMessage: 'Failed to delete product' });
     }
 });
+// Phase 4 sub-2 (2026-06-17): paginated catalog picker. Browse the ~140k master
+// catalog to list products. Keyset pagination on (createdAt,id); relation filters;
+// excludes products this branch already lists; search hits the trigram GIN index.
+// query: branchId (req), cursor, q, verticalId, categoryId, brand, isVeg, limit
+app.get('/merchant/catalog', async (req, res) => {
+    try {
+        const user = await requireUser(req, res);
+        if (!user)
+            return;
+        const branchId = String(req.query.branchId || '').trim();
+        if (!branchId)
+            return res.status(400).json({ error: 'branchId is required' });
+        const can = (await userCanManageBranchFull(user.id, branchId)) || (await isPlatformAdmin(user.id));
+        if (!can)
+            return res.status(403).json({ error: 'Not authorized for this branch' });
+        const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '30'), 10) || 30, 1), 50);
+        const cursor = (0, cursor_1.decodeCursor)(req.query.cursor);
+        const q = req.query.q?.trim();
+        // verticalId + brand accept comma-separated lists (the FilterModal multi-selects)
+        const verticalIds = String(req.query.verticalId || '').split(',').map((s) => s.trim()).filter(Boolean);
+        const categoryId = req.query.categoryId || undefined;
+        const brands = String(req.query.brand || '').split(',').map((s) => s.trim()).filter(Boolean);
+        const isVegRaw = req.query.isVeg;
+        const minPrice = req.query.minPrice != null && req.query.minPrice !== '' ? Number(req.query.minPrice) : undefined;
+        const maxPrice = req.query.maxPrice != null && req.query.maxPrice !== '' ? Number(req.query.maxPrice) : undefined;
+        const where = {
+            source: { in: ['blinkit', 'live_sync', 'purchased_catalog'] },
+            mrp: {
+                gt: 0,
+                ...(minPrice != null && Number.isFinite(minPrice) ? { gte: minPrice } : {}),
+                ...(maxPrice != null && Number.isFinite(maxPrice) ? { lte: maxPrice } : {}),
+            },
+            // exclude products this branch already lists (any non-deleted StoreProduct)
+            NOT: { storeProducts: { some: { branch_id: branchId, is_deleted: false } } },
+            ...(q && q.length >= 2 ? { name: { contains: q, mode: 'insensitive' } } : {}),
+            ...(verticalIds.length ? { vertical_id: { in: verticalIds } } : {}),
+            ...(categoryId ? { category_id: categoryId } : {}),
+            ...(brands.length ? { brand: { in: brands } } : {}),
+            ...(isVegRaw === 'true' ? { isVeg: true } : isVegRaw === 'false' ? { isVeg: false } : {}),
+        };
+        const rows = await prisma.product.findMany({
+            where,
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            take: limit + 1,
+            ...(cursor.id ? { cursor: { id: cursor.id }, skip: 1 } : {}),
+            include: {
+                Vertical: { select: { id: true, name: true, requiresFssai: true } },
+                Tier2Category: { select: { id: true, name: true } },
+            },
+        });
+        const hasMore = rows.length > limit;
+        const page = hasMore ? rows.slice(0, limit) : rows;
+        const last = page[page.length - 1];
+        const nextCursor = hasMore && last ? (0, cursor_1.encodeCursor)({ createdAt: last.createdAt, id: last.id }) : null;
+        res.json({
+            data: page.map((p) => ({
+                id: p.id, name: p.name, brand: p.brand, mrp: p.mrp, image: p.image, uom: p.uom, isVeg: p.isVeg,
+                vertical: p.Vertical ? { id: p.Vertical.id, name: p.Vertical.name, requiresFssai: p.Vertical.requiresFssai } : null,
+                category: p.Tier2Category ? { id: p.Tier2Category.id, name: p.Tier2Category.name } : null,
+            })),
+            nextCursor,
+            hasMore,
+        });
+    }
+    catch (error) {
+        return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchant.catalog', userMessage: 'Failed to load catalog' });
+    }
+});
+// ─── Category-visibility feature · Task 5: admin enable/disable endpoints ───
+// GET is open to all catalog-admin roles (read-only); the toggles are restricted to
+// CATEGORY_TOGGLE_ROLES (ops-level) because disabling is platform-wide + high impact.
+// Reads/writes go through prisma (service_role) → unaffected by the RESTRICTIVE RLS,
+// so admin always sees + manages every category, including disabled ones.
+app.get('/admin/categories', async (req, res) => {
+    const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+    if (!caller)
+        return;
+    try {
+        const verticals = await prisma.vertical.findMany({
+            orderBy: { name: 'asc' },
+            select: {
+                id: true, name: true, is_active: true, requiresFssai: true,
+                _count: { select: { Product: true } },
+                tier2Categories: {
+                    orderBy: { name: 'asc' },
+                    select: { id: true, name: true, active: true, _count: { select: { Product: true } } },
+                },
+            },
+        });
+        const categories = verticals.map((v) => ({
+            id: v.id,
+            name: v.name,
+            isActive: v.is_active,
+            requiresFssai: v.requiresFssai,
+            productCount: v._count.Product,
+            subcategories: v.tier2Categories.map((t) => ({
+                id: t.id, name: t.name, active: t.active, productCount: t._count.Product,
+            })),
+        }));
+        res.json({ categories });
+    }
+    catch (e) {
+        Sentry.captureException(e);
+        res.status(500).json({ error: e?.message || 'Failed to load categories' });
+    }
+});
+app.patch('/admin/categories/vertical/:id', async (req, res) => {
+    const caller = await requireRole(req, res, CATEGORY_TOGGLE_ROLES);
+    if (!caller)
+        return;
+    try {
+        const id = String(req.params.id);
+        if (typeof req.body?.isActive !== 'boolean')
+            return res.status(400).json({ error: 'isActive (boolean) is required' });
+        const isActive = req.body.isActive;
+        const before = await prisma.vertical.findUnique({ where: { id }, select: { id: true, name: true, is_active: true } });
+        if (!before)
+            return res.status(404).json({ error: 'Category not found' });
+        const updated = await prisma.vertical.update({
+            where: { id }, data: { is_active: isActive },
+            select: { id: true, name: true, is_active: true },
+        });
+        await writeAuditLog(caller.id, isActive ? 'CATEGORY_ENABLE' : 'CATEGORY_DISABLE', 'Vertical', id, { is_active: before.is_active }, { is_active: updated.is_active });
+        res.json({ id: updated.id, name: updated.name, isActive: updated.is_active });
+    }
+    catch (e) {
+        Sentry.captureException(e);
+        res.status(500).json({ error: e?.message || 'Failed to update category' });
+    }
+});
+app.patch('/admin/categories/subcategory/:id', async (req, res) => {
+    const caller = await requireRole(req, res, CATEGORY_TOGGLE_ROLES);
+    if (!caller)
+        return;
+    try {
+        const id = String(req.params.id);
+        if (typeof req.body?.active !== 'boolean')
+            return res.status(400).json({ error: 'active (boolean) is required' });
+        const active = req.body.active;
+        const before = await prisma.tier2Category.findUnique({ where: { id }, select: { id: true, name: true, active: true } });
+        if (!before)
+            return res.status(404).json({ error: 'Subcategory not found' });
+        const updated = await prisma.tier2Category.update({
+            where: { id }, data: { active },
+            select: { id: true, name: true, active: true },
+        });
+        await writeAuditLog(caller.id, active ? 'SUBCATEGORY_ENABLE' : 'SUBCATEGORY_DISABLE', 'Tier2Category', id, { active: before.active }, { active: updated.active });
+        res.json({ id: updated.id, name: updated.name, active: updated.active });
+    }
+    catch (e) {
+        Sentry.captureException(e);
+        res.status(500).json({ error: e?.message || 'Failed to update subcategory' });
+    }
+});
 // Bulk-configure existing catalog products for a branch (ConfigureProductsModal).
 // body: { branchId, items: [{ productId, variant, price, stock, active? }] }
 app.post('/merchant/store-products/configure', async (req, res) => {
@@ -10205,23 +10451,86 @@ app.post('/merchant/store-products/configure', async (req, res) => {
         const can = (await userCanManageBranchFull(user.id, branchId)) || (await isPlatformAdmin(user.id));
         if (!can)
             return res.status(403).json({ error: 'Not authorized to configure products for this branch' });
+        // Phase 4 sub-2 (2026-06-17): MRP-ceiling + FSSAI listing guards (spec §7).
+        // The DB trigger backstops MRP; this returns a clean 400/403 with offenders.
+        const itemList = items.map((it) => ({ productId: String(it.productId), price: Number(it.price) || 0, stock: Number(it.stock) || 0 }));
+        const guardProducts = await prisma.product.findMany({
+            where: { id: { in: itemList.map((i) => i.productId) } },
+            select: {
+                id: true, mrp: true, vertical_id: true, category_id: true,
+                Vertical: { select: { requiresFssai: true, is_active: true } },
+                Tier2Category: { select: { active: true } },
+            },
+        });
+        const pmap = new Map(guardProducts.map((p) => [p.id, {
+                mrp: p.mrp,
+                requiresFssai: !!p.Vertical?.requiresFssai,
+                // Category-visibility Task 5: null vertical/subcategory = not gated = enabled
+                // (matches the RESTRICTIVE RLS + get_nearby_stores gate exactly).
+                verticalEnabled: p.vertical_id == null || !!p.Vertical?.is_active,
+                subcategoryEnabled: p.category_id == null || !!p.Tier2Category?.active,
+            }]));
+        const mrpCheck = (0, validate_1.validateMrpCeiling)(itemList, pmap);
+        if (!mrpCheck.ok)
+            return res.status(400).json({ error: mrpCheck.code, offenders: mrpCheck.offenders });
+        const guardBranch = await prisma.merchantBranch.findUnique({ where: { id: branchId }, select: { merchantId: true } });
+        const guardMerchant = guardBranch?.merchantId
+            ? await prisma.merchant.findUnique({ where: { id: guardBranch.merchantId }, select: { fssaiNumber: true } })
+            : null;
+        const fssaiCheck = (0, validate_1.validateFssaiGate)(itemList, pmap, { fssaiNumber: guardMerchant?.fssaiNumber ?? null });
+        if (!fssaiCheck.ok)
+            return res.status(403).json({ error: fssaiCheck.code, offenders: fssaiCheck.offenders });
+        // Category-visibility Task 5 (spec D6): reject NEW listings in a disabled category.
+        // Existing parked stock is untouched; this only blocks fresh configure writes.
+        const catCheck = (0, validate_1.validateCategoriesEnabled)(itemList, pmap);
+        if (!catCheck.ok)
+            return res.status(403).json({ error: catCheck.code, offenders: catCheck.offenders });
         const now = new Date().toISOString();
+        // branch_id is the canonical key; parent Store derives via
+        // merchant_branches.store_id (Phase 2 FINAL B1-B5, 2026-06-16). storeId
+        // (dropped at B10) intentionally NOT written — new rows leave it NULL.
         const rows = items.map((it) => ({
             id: it.id ? String(it.id) : crypto.randomUUID(),
-            storeId: branchId,
             branch_id: branchId,
             productId: String(it.productId),
             variant: it.variant ? String(it.variant) : 'Standard',
             price: Number(it.price) || 0,
             stock: it.stock != null ? Number(it.stock) : 0,
-            active: it.active != null ? !!it.active : true,
+            // Phase 3 Item 2 (2026-06-16): a ₹0 listing can never be live.
+            active: (Number(it.price) || 0) > 0 && (it.active != null ? !!it.active : true),
             createdAt: now,
             updatedAt: now,
         }));
         const { error } = await supabaseAdmin.from('StoreProduct').upsert(rows, { onConflict: 'branch_id,productId,variant' });
         if (error)
             throw new Error(error.message);
-        res.json({ ok: true, count: rows.length });
+        // Lazy image re-host (spec §8, D3): copy grofers.com images into our own bucket
+        // on first listing. Failure-tolerant + bounded to 5s so a storage blip never
+        // blocks the listing; the next listing of the same product retries.
+        const rehoster = (0, imageRehost_1.makeRehoster)({
+            findProduct: (id) => prisma.product.findUnique({ where: { id }, select: { image: true } }),
+            download: async (url) => {
+                const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
+                if (!r.ok)
+                    throw new Error(`download ${r.status}`);
+                return { data: Buffer.from(await r.arrayBuffer()), contentType: r.headers.get('content-type') || 'image/jpeg' };
+            },
+            upload: async (path, body, contentType) => {
+                const up = await supabaseAdmin.storage.from('products').upload(path, body, { contentType, upsert: true });
+                if (up.error)
+                    throw up.error;
+                const { data } = supabaseAdmin.storage.from('products').getPublicUrl(path);
+                return { publicUrl: data.publicUrl };
+            },
+            updateImage: async (productId, url) => { await prisma.product.update({ where: { id: productId }, data: { image: url } }); },
+            captureException: (e, ctx) => Sentry.captureException(e, { extra: ctx }),
+        });
+        const rehostIds = itemList.map((i) => i.productId);
+        const rehostTally = await Promise.race([
+            rehoster.rehostMany(rehostIds),
+            new Promise((resolve) => setTimeout(() => resolve({ ok: 0, skipped: 0, failed: 0 }), 5000)),
+        ]);
+        res.json({ ok: true, count: rows.length, rehosted: rehostTally.ok, rehostFailed: rehostTally.failed });
     }
     catch (error) {
         return (0, api_error_handler_1.handleApiError)(res, error, { area: 'merchant.storeProducts.configure', userMessage: 'Failed to configure products' });
