@@ -10,6 +10,14 @@
 
 **Spec:** `docs/category-visibility-toggle-spec-2026-06-19.html` (commit `3e86fd1c`). Tasks reference spec sections.
 
+---
+> ## ✅ SHIPPED — 2026-06-21
+> All 8 tasks complete and live. Commits `39aedd0c` (T1 column) · `03a18f2d` (T2 RLS) · `d0f63da4` (T3 get_nearby_stores) · `0c0765a5` (T4 validate+unit) · `5fdfc981` (T5 admin API + merchant guard) · `bd6836aa` (T6 admin tab) · `ce571deb` (T7 order-gate + cart prune) · `f1cfbc01` (dist).
+> **Deployed:** 3 DB migrations applied to prod; API on EB (`app-260621_224810548610`, verified `/admin/categories`→401, `/health`→200); admin Categories tab on Vercel (`pas-admin-web` build success).
+> **Deferred:** consumer cart-prune (T7b) ships with the next consumer OTA — the server-side `POST /order-requests` gate (T7a) is the airtight backstop, so correctness does not depend on the OTA.
+> **Audit:** no consumer service_role leak path; both toggles bite (139,965/140,174 products categorized); migrations intact (4 policies, column, RPC, 15/136 active). Accepted limitation: merchant can't see parked stock in a disabled category (intended coupling D2; "Paused by platform" badge deferred).
+---
+
 **Pre-flight facts:** 15 Verticals, 136 Tier2Categories, ~140k Products. RLS is ON for Vertical/Tier2Category/Product/StoreProduct with multiple **permissive** public-read SELECT policies (keep them). Consumer product reads use `Product!inner` joins. `service_role` bypasses RLS.
 
 ---
