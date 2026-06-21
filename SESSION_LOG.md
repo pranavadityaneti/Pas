@@ -4,6 +4,33 @@
 
 ---
 
+## Session: June 21, 2026 — Admin Category Enable/Disable (SHIPPED end-to-end)
+
+### What & why
+Built the new feature from the priority queue: admins can toggle any of the 15 Verticals + 136 Tier2Categories on/off. OFF = platform-wide hide (decision D2, single coupled toggle: customer + merchant together). Resumed mid-feature (Task 2 RLS had a `CREATE POLICY` clause-order syntax error from the prior window).
+
+### Done this session (all 8 tasks, approval-gated; 3 deploy decisions via AskUserQuestion)
+- **T1–T3 DB migrations (applied to prod, one-at-a-time gated):** `Vertical.is_active` column (`39aedd0c`); 4 RESTRICTIVE RLS policies on Vertical/Tier2Category/Product/StoreProduct for anon+authenticated, AND'd onto existing permissive reads, service_role bypasses (`03a18f2d`); `get_nearby_stores` made category-aware so empty stores auto-drop (`d0f63da4`). Each verified with a no-role-switch logic check (the `SET ROLE anon`-in-prisma-tx test broke with P2028, replaced).
+- **T4 (`0c0765a5`):** `validateCategoriesEnabled` pure guard + 5 unit tests (16/16 green via `npx tsx --test`).
+- **T5 (`5fdfc981`):** 3 admin endpoints (`GET /admin/categories`, `PATCH .../vertical/:id`, `PATCH .../subcategory/:id`) — GET = CATALOG_ADMIN_ROLES, toggles = SUPER_ADMIN+OPERATIONS (Pranav chose the tighter RBAC), audit-logged; + merchant `CATEGORY_DISABLED` 403 guard in `POST /merchant/store-products/configure`.
+- **T6 (`bd6836aa`):** admin-web Categories tab (`CategoriesTab.tsx` + minimal MasterCatalog wiring via early-return) — toggles, product counts, expandable subcategories, confirm-on-disable, optimistic updates.
+- **T7 (`ce571deb`):** Pranav chose BOTH halves — T7a airtight server gate in `POST /order-requests` (`CATEGORY_UNAVAILABLE`, mirrors STORE_OFFLINE, pre-payment) + T7b consumer `revalidateCart()` prune on CartScreen focus.
+
+### Deployed (Pranav chose "API + admin-web now, defer consumer OTA")
+- **API → EB:** `npm run build` → committed `dist` (`f1cfbc01`) → `eb deploy` (`app-260621_224810548610`). Verified `/health`→200, `/admin/categories`→401 (route live). No `setenv` (no new env vars — per ERRORS.md never run setenv standalone here).
+- **admin-web → Vercel:** pushed branch `feat/consumer-global-config-wiring` (32 commits, fast-forward); Vercel `pas-admin-web` build = **success**. (Confirmed Vercel deploys admin-web from THIS branch, not main — main is 80 commits behind.)
+- **Deferred:** consumer cart-prune (T7b) rides the next consumer OTA; the server gate is the correctness backstop.
+
+### Audit (adversarial, per the rule) — passed
+No consumer service_role product-read leak (all 9 consumer read paths go through RLS-filtered supabase). Both toggles bite (139,965/140,174 products have category_id). Migrations intact (4 policies, column, RPC, 15/136 active). Accepted limitation: merchant can't see parked stock in a disabled category (intended coupling D2; "Paused by platform" badge deferred). Scope clean: my commits one-task-each; pre-existing working-tree noise (docs, index.html/vite.config, deleted script) left untouched.
+
+### Open threads
+- Consumer OTA carrying T7b (cart prune) — bundle into the next planned consumer OTA.
+- "Paused by platform" merchant badge (fast-follow); two-toggle split (customer-hidden vs merchant-allowed) — future.
+- Next priority-queue item after this: #14 Full notification scenario coverage.
+
+---
+
 ## Session: June 16, 2026 — Phase 2 FINAL (StoreProduct.storeId rework, Option B)
 
 ### What & why
