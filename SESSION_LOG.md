@@ -4,6 +4,31 @@
 
 ---
 
+## Session: June 22, 2026 — Category feature go-live, catalog cleanup, OTA, branch scope
+
+### Done (continuation of the category-visibility work)
+- **Admin-web LIVE:** Pranav promoted the `f6fbfc20` preview to Production in Vercel → admin.pickatstore.io now serves the Categories tab + taxonomy/names fix + grey OFF-toggle (was frozen at the June-15 build). Confirmed via Vercel Deployments screenshot ("Production rebuild" row).
+- **Fixed the OFF-toggle invisibility** (`f6fbfc20`): shared Switch's unchecked track was near-white → invisible on the greyed row. Scoped `data-[state=unchecked]:!bg-gray-300 + border` to CategoriesTab only.
+- **`/verticals` coupling fix DEPLOYED** (`3d50ab94` → EB `app-260622_015312842345`): merchant signup picker fetched via `GET /verticals` (service_role, no filter) → showed disabled categories. Added `where:{is_active:true}`. Only caller is signup, so safe. Completes D2 coupling (customer + existing-merchant already RLS-filtered).
+- **Consumer cart-prune (T7b) SHIPPED via OTA** (`eas update --branch production`, runtime 1.1.3, group `79b10cb5`). Verified `.env` has production values (api.pickatstore.io, live Razorpay/Supabase, ANON_KEY present) so the OTA matches the build env. Merchant OTA skipped — 0 merchant-app changes on this branch since the 1.2.6 build.
+
+### Catalog re-categorization (all reversible — rollback JSONs committed)
+Of the original ~176 null-vertical products, **162 fixed**, 1 ambiguous left ("Dark green bel"):
+- **330** electrical/paint/auto → Electricals vertical (was 0 products). Verified 0 hidden by RLS.
+- **13** Freshly produce + **4** Clean cuts meat → Fresh Items. (Investigated "store stays after category off" → root cause: uncategorized products immune to category toggles + store labelled by merchant vertical, not products. Chose product-rule + fix data. Freshly Vadapalli now correctly DROPS when Fresh Items off.)
+- **44** catalog food + **96** non-food → real verticals; **9 deleted** (1 test "Something especially" + 8 gibberish, full-row backups kept).
+- Re-enabled Bakeries & Desserts + Fresh Items (Pranav test-disabled them live).
+
+### Branch divergence — SCOPED (read-only, this session)
+`feat/consumer-global-config-wiring` (live-build branch) vs `origin/main` (Vercel prod branch): main +8 (7 PR merges + OTP fix `c586850f`), feat +77. **`git merge-tree` = 0 conflicts — clean merge.** Recommended: merge main→feat→main + build-verify + push (mutates main + prod deploy = GATED, not yet done). This is the root blocker behind the admin-site staleness + the pending merchant OTA items + post-OTA security flips. **NOT executed — awaiting Pranav's go.**
+
+### Open threads
+- Execute the feat↔main reconciliation (gated — prod deploy).
+- "Dark green bel" (1 ambiguous catalog item — delete or leave).
+- Post-reconciliation: merchant OTA (Phase 9 rewires, OTP fix) + security flips (REQUIRE_ORDERS_AUTH, branch-lockdown migration).
+
+---
+
 ## Session: June 21, 2026 — Admin Category Enable/Disable (SHIPPED end-to-end)
 
 ### What & why
