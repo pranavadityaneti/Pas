@@ -3,6 +3,11 @@
 ## Who is Pranav
 Pranav builds with LLM coding agents. He is NOT a coder — he describes what he wants, the agent writes code. One issue at a time. Never ship code without explicit approval. Never bundle multiple changes.
 
+## No Patches — Solid Fixes Only (PROJECT-WIDE RULE)
+1. **NEVER propose patches.** A patch is a narrow change that closes the symptom without closing the underlying class of failure. If a true full fix is genuinely impossible right now (missing access, blocked on external input, out of scope), and a patch is the only available action, **prefix the suggestion with `[PATCH — NOT A SOLID FIX]`** and explain (a) what the underlying root cause actually is, (b) why the patch doesn't close it, and (c) what a real fix would require. Without that tag, do not present a patch as a fix.
+2. **We never do patches. We always do fully concrete, solid fixes** — find the root cause, trace every call site / table / client / surface where the same class of failure can manifest, and close them all in one change. Don't ship the narrow version and leave the others as "follow-ups".
+3. **After every task implementation, do a detailed code-level, line-by-line audit** of the change. Re-read each edited file with the explicit goal of finding missing gaps, errors, leaks, race conditions, fail-open paths, edge cases, and class-of-failure siblings the implementation didn't catch. Report what the audit checked and what it found before declaring done. Non-negotiable — same priority as `tsc --noEmit`.
+
 ## Project Structure
 Monorepo with 3 apps:
 - `apps/consumer-app` — Expo/React Native (customer-facing, iOS/Android)
