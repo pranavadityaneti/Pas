@@ -3408,6 +3408,28 @@ app.post('/order-requests', async (req, res) => {
             console.warn(`[POST /order-requests] 400 — Missing/empty requests array | user=${user.id}`);
             return res.status(400).json({ error: 'Missing or empty requests array' });
         }
+        // ── H-3 solid fix (2026-06-23): reject the whole request if ANY item is malformed.
+        // Prior behaviour silently filtered out items lacking `id` via `.filter(Boolean)`,
+        // which let unknown/malformed cart items flow past trust-sensitive gates (Category
+        // Status Gate, downstream order creation). Fail-closed at the front door so every
+        // gate downstream can trust that every item has a usable id.
+        for (let ri = 0; ri < requests.length; ri++) {
+            const r = requests[ri];
+            if (!Array.isArray(r?.items) || r.items.length === 0) {
+                console.warn(`[POST /order-requests] 400 — Request ${ri} has empty/missing items | user=${user.id}`);
+                return res.status(400).json({ error: 'INVALID_ORDER_REQUEST', message: `Request ${ri} has no items.` });
+            }
+            for (let ii = 0; ii < r.items.length; ii++) {
+                const it = r.items[ii];
+                if (!it || typeof it.id !== 'string' || it.id.length === 0) {
+                    console.warn(`[POST /order-requests] 400 — Item ${ri}.${ii} missing id | user=${user.id}`);
+                    return res.status(400).json({
+                        error: 'INVALID_ORDER_ITEM',
+                        message: `Item ${ri}.${ii} is missing a product id. Please remove the affected item and retry.`,
+                    });
+                }
+            }
+        }
         // ── Minimum-order floor (server-side, un-bypassable mirror of the cart gate) ──
         // requests[] is the whole cart split per store, so the sum of subtotals
         // equals the cart subtotal the consumer cart checks before checkout. This
@@ -3443,7 +3465,9 @@ app.post('/order-requests', async (req, res) => {
         // build that never got the consumer prune — could otherwise slip one through. This
         // is the airtight, OTA-independent backstop. Visibility logic mirrors the RESTRICTIVE
         // RLS exactly. Pre-transaction + pre-payment, so a rejection never orphans a charge.
-        const reqProductIds = [...new Set(requests.flatMap((r) => (Array.isArray(r?.items) ? r.items.map((it) => String(it?.id)).filter(Boolean) : [])))];
+        // H-3: front-door validation above guarantees every item.id is a non-empty string.
+        // No silent filtering — every product id must resolve, or the gate has failed.
+        const reqProductIds = [...new Set(requests.flatMap((r) => r.items.map((it) => String(it.id))))];
         if (reqProductIds.length > 0) {
             const prods = await prisma.product.findMany({
                 where: { id: { in: reqProductIds } },
@@ -3453,6 +3477,19 @@ app.post('/order-requests', async (req, res) => {
                     Tier2Category: { select: { active: true } },
                 },
             });
+            // H-3: every requested id MUST resolve to a real Product. Prisma's `in` silently
+            // returns fewer rows for unknown ids — same fail-open class as the prior `.filter(Boolean)`.
+            // Reject unknown ids before they can flow into the order transaction.
+            if (prods.length !== reqProductIds.length) {
+                const foundIds = new Set(prods.map((p) => p.id));
+                const missing = reqProductIds.filter((id) => !foundIds.has(id));
+                console.warn(`[POST /order-requests] 400 — Unknown product ids | missing=${missing.join(',')} user=${user.id}`);
+                return res.status(400).json({
+                    error: 'UNKNOWN_PRODUCT',
+                    message: `Some items reference products that no longer exist. Please refresh your cart.`,
+                    offenders: missing,
+                });
+            }
             const isVisible = (p) => (p.vertical_id == null || p.Vertical?.is_active === true) &&
                 (p.category_id == null || p.Tier2Category?.active === true);
             const disabled = prods.filter((p) => !isVisible(p));
