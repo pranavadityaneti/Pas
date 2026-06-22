@@ -459,31 +459,50 @@ export function CartProvider({ children }: { children: ReactNode }) {
     };
 
     /**
-     * Category-visibility feature · Task 7b. Re-read the cart's product ids through the
-     * customer's RLS-filtered supabase client: products in an admin-disabled category are
-     * hidden, so they no longer come back → prune them. setItems triggers the existing
-     * cloud-sync effect, so the removal persists for signed-in users. Fail-open on a read
-     * error so a transient blip never wipes the cart. The server-side Category Status Gate
-     * in POST /order-requests is the airtight backstop for a disable that lands mid-checkout.
+     * Category-visibility feature · Task 7b — re-read the cart's product ids through the
+     * customer's RLS-filtered supabase client. Products in an admin-disabled category are
+     * hidden by RLS → they no longer come back → we prune them.
+     *
+     * H-5 solid fix (2026-06-23): defensive against silent partial responses. Three guards:
+     *   (1) any throw or supabase error → bail (no prune) — covered before, kept.
+     *   (2) response must be a real array — null/undefined data is bail-worthy (the prior
+     *       `data ?? []` quietly treated null as "all hidden" and would have wiped the cart).
+     *   (3) NEVER let an auto-revalidate empty a previously-non-empty cart. Wiping every
+     *       item in one go is overwhelmingly a transient blip (network clamp, momentary RLS
+     *       race) — explicit user actions (removeItem/clearCart) still work; this is the
+     *       background-prune safety net only. The server-side Category Status Gate in
+     *       POST /order-requests is the airtight backstop for any escape.
      */
     const revalidateCart = async (): Promise<CartItem[]> => {
         const current = itemsRef.current;
         const ids = [...new Set(current.map(i => String(i.id)))];
         if (ids.length === 0) return [];
-        let visible: Set<string>;
+        let data: { id: string }[] | null = null;
         try {
-            const { data, error } = await supabase.from('Product').select('id').in('id', ids);
-            if (error) { console.warn('[CartContext] revalidateCart read failed:', error.message); return []; }
-            visible = new Set((data ?? []).map((r: any) => String(r.id)));
+            const res = await supabase.from('Product').select('id').in('id', ids);
+            if (res.error) { console.warn('[CartContext] revalidateCart supabase error:', res.error.message); return []; }
+            data = res.data as { id: string }[] | null;
         } catch (e: any) {
             console.warn('[CartContext] revalidateCart threw:', e?.message);
             return [];
         }
-        const removed = current.filter(i => !visible.has(String(i.id)));
-        if (removed.length > 0) {
-            clearAppliedCoupon();
-            setItems(current.filter(i => visible.has(String(i.id))));
+        // Guard 2: response must be a real array. A null/undefined response with no error is
+        // anomalous (older supabase-js + edge timeouts can do this) — treat as a blip, don't prune.
+        if (!Array.isArray(data)) {
+            console.warn('[CartContext] revalidateCart got non-array response, skipping prune');
+            return [];
         }
+        const visible = new Set(data.map(r => String(r.id)));
+        const removed = current.filter(i => !visible.has(String(i.id)));
+        if (removed.length === 0) return [];
+        // Guard 3: never auto-wipe a non-empty cart. A full prune is overwhelmingly a transient
+        // failure mode, not a legitimate "admin disabled every category in your cart at once".
+        if (removed.length === current.length) {
+            console.warn(`[CartContext] revalidateCart would wipe entire cart (${current.length} items) — treating as blip, skipping prune`);
+            return [];
+        }
+        clearAppliedCoupon();
+        setItems(current.filter(i => visible.has(String(i.id))));
         return removed;
     };
 
