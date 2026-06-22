@@ -20,7 +20,7 @@ Of the original ~176 null-vertical products, **162 fixed**, 1 ambiguous left ("D
 - Re-enabled Bakeries & Desserts + Fresh Items (Pranav test-disabled them live).
 
 ### Branch divergence — SCOPED (read-only, this session)
-`feat/consumer-global-config-wiring` (live-build branch) vs `origin/main` (Vercel prod branch): main +8 (7 PR merges + OTP fix `c586850f`), feat +77. **`git merge-tree` = 0 conflicts — clean merge.** Recommended: merge main→feat→main + build-verify + push (mutates main + prod deploy = GATED, not yet done). This is the root blocker behind the admin-site staleness + the pending merchant OTA items + post-OTA security flips. **NOT executed — awaiting Pranav's go.**
+`feat/consumer-global-config-wiring` (live-build branch) vs `origin/main` (Vercel prod branch): main +8 (7 PR merges + OTP fix), feat +77. **`git merge-tree` = 0 conflicts.** Foolproof execution (Pranav approved): backup tag `backup/main-pre-reconcile-2026-06-22` → isolated reconcile worktree → **merge main→feat added only 1 file (the OTP fix) → no duplication risk** → pushed reconcile branch → **Vercel PREVIEW build SUCCESS** → PR #12 → merged → **`main` Production build GREEN (`40fa0fbe`)** → FF `feat` to match. **✅ RECONCILED: feat == main == 40fa0fbe, 0/0 divergence. Vercel prod pipeline restored (no more manual promotes). OTP fix now on the canonical line.** Unblocks: future merchant build/OTA (Phase 9 rewires + OTP) from `main`; the post-OTA security flips (`REQUIRE_ORDERS_AUTH`, `merchant_branches` lockdown migration) remain independent gated actions in forlater.
 
 ### Open threads
 - Execute the feat↔main reconciliation (gated — prod deploy).
