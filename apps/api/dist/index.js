@@ -908,6 +908,13 @@ app.get('/health', (req, res) => {
 // Get Products (with Filtering & Pagination)
 app.get('/products', async (req, res) => {
     try {
+        // H-1 solid fix (2026-06-23): admin-only catalog browse. Previously unauthenticated
+        // (display-audit CRIT 4): anyone could scrape the 140k catalog including internal
+        // importer fields (source, sourceProductId, productUrl, extraData). Caller is the
+        // admin MasterCatalog grid only.
+        const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+        if (!caller)
+            return;
         const { page = 1, limit = 50, search, category, vertical, brand, minPrice, maxPrice, gstRate, missingData, type = 'global' // 'global' | 'custom' | 'all'
          } = req.query;
         const skip = (Number(page) - 1) * Number(limit);
@@ -965,7 +972,9 @@ app.get('/products', async (req, res) => {
                 skip,
                 take,
                 orderBy: { createdAt: 'desc' },
-                include: { images: true, Vertical: { select: { name: true } }, Tier2Category: { select: { name: true } } }
+                // H-1: PRODUCT_PUBLIC_SELECT strips internal-only fields (source, sourceProductId,
+                // productUrl, extraData, createdByStoreId, countryCode) by construction.
+                select: PRODUCT_PUBLIC_SELECT,
             }),
             prisma.product.count({ where })
         ]);
@@ -1080,7 +1089,12 @@ app.get('/products/template', async (req, res) => {
 // Export Products
 app.get('/products/export', async (req, res) => {
     try {
-        const products = await prisma.product.findMany();
+        // H-1 solid fix (2026-06-23): admin-only. Was unauthenticated → exposed the whole
+        // 140k catalog as a downloadable Excel to anyone with the URL.
+        const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+        if (!caller)
+            return;
+        const products = await prisma.product.findMany({ select: PRODUCT_PUBLIC_SELECT });
         const data = products.map(p => ({
             name: p.name,
             mrp: p.mrp,
@@ -1108,6 +1122,22 @@ app.get('/products/export', async (req, res) => {
 // rows (bulk-delete cascades into merchant inventory). Require an authenticated
 // admin (any tier) on all of them.
 const CATALOG_ADMIN_ROLES = ['SUPER_ADMIN', 'OPERATIONS', 'FINANCE', 'SUPPORT'];
+// H-1 solid fix (2026-06-23): explicit field whitelist for Product rows returned to ANY
+// admin/merchant-facing surface. Strips internal-only fields (importer lineage + supplier
+// URLs) so even if a future endpoint forgets a field map, callers cannot exfiltrate them.
+// Use via `select: PRODUCT_PUBLIC_SELECT` on prisma.product / prisma.storeProduct.product.
+const PRODUCT_PUBLIC_SELECT = {
+    id: true, name: true, description: true, image: true, mrp: true, brand: true, ean: true,
+    createdAt: true, updatedAt: true, unitType: true, unitValue: true, hsnCode: true,
+    gstRate: true, subcategory: true, unitPrice: true, uom: true, avgRating: true,
+    numberOfRatings: true, isSoldOut: true, catalogName: true, shippingCharges: true,
+    returnable: true, isVeg: true, category_id: true, vertical_id: true,
+    Vertical: { select: { id: true, name: true, is_active: true, requiresFssai: true } },
+    Tier2Category: { select: { id: true, name: true, active: true } },
+    images: true,
+    // Deliberately omitted (H-1): source, sourceProductId, productUrl, extraData,
+    // createdByStoreId, countryCode — internal lineage/supplier fields not for client surfaces.
+};
 // Category-visibility feature · Task 5: disabling a category hides it + all its products
 // platform-wide instantly — high impact, so the toggle is restricted to ops-level roles
 // (SUPER_ADMIN is always implicitly allowed inside requireRole). Viewing stays open to
@@ -2465,7 +2495,7 @@ app.get('/consumer/products/search', async (req, res) => {
                 }
             },
             include: {
-                product: true,
+                product: { select: PRODUCT_PUBLIC_SELECT },
                 store: { select: { id: true, name: true, address: true, image: true } }
             },
             take: Number(limit),
@@ -2740,7 +2770,7 @@ app.post('/orders', async (req, res) => {
                         ...(orderRequestId ? [{ metadata: { path: ['orderRequestId'], equals: orderRequestId } }] : [])
                     ]
                 },
-                include: { items: { include: { storeProduct: { include: { product: true } } } }, store: true },
+                include: { items: { include: { storeProduct: { include: { product: { select: PRODUCT_PUBLIC_SELECT } } } } }, store: true },
             });
             if (existingForPayment) {
                 console.log(`[POST /orders] Idempotent hit — order already exists for payment ${paymentId}`);
@@ -2908,7 +2938,7 @@ app.post('/orders', async (req, res) => {
                     }
                 },
                 include: {
-                    items: { include: { storeProduct: { include: { product: true } } } },
+                    items: { include: { storeProduct: { include: { product: { select: PRODUCT_PUBLIC_SELECT } } } } },
                     store: true
                 }
             });
@@ -3139,7 +3169,7 @@ app.post('/orders', async (req, res) => {
                     const sp = await tx.storeProduct.update({
                         where: { id: item.storeProductId },
                         data: { stock: { decrement: item.quantity } },
-                        include: { product: true }
+                        include: { product: { select: PRODUCT_PUBLIC_SELECT } }
                     });
                     if (sp.stock === 0) {
                         lowStockAlerts.push({
@@ -3650,7 +3680,7 @@ app.patch('/orders/:id/status', async (req, res) => {
         // 1. Fetch current order to validate transition
         const currentOrder = await prisma.order.findUnique({
             where: { id },
-            include: { user: true, items: { include: { storeProduct: { include: { product: true } } } }, store: { include: { manager: true } } }
+            include: { user: true, items: { include: { storeProduct: { include: { product: { select: PRODUCT_PUBLIC_SELECT } } } } }, store: { include: { manager: true } } }
         });
         if (!currentOrder) {
             return res.status(404).json({ error: 'Order not found' });
@@ -3722,7 +3752,7 @@ app.patch('/orders/:id/status', async (req, res) => {
         const order = await prisma.order.update({
             where: { id },
             data,
-            include: { user: true, items: { include: { storeProduct: { include: { product: true } } } }, store: { include: { manager: true } } }
+            include: { user: true, items: { include: { storeProduct: { include: { product: { select: PRODUCT_PUBLIC_SELECT } } } } }, store: { include: { manager: true } } }
         });
         if (status === 'READY' && order.user?.phone && order.otp) {
             sms_service_1.smsService.sendOtp(order.user.phone, order.otp).catch(err => console.error('OTP SMS Failed:', err));
@@ -3991,7 +4021,7 @@ app.post('/webhooks/payment', async (req, res) => {
             const order = await prisma.order.update({
                 where: { id: orderId },
                 data: { isPaid: true },
-                include: { user: true, items: { include: { storeProduct: { include: { product: true } } } } }
+                include: { user: true, items: { include: { storeProduct: { include: { product: { select: PRODUCT_PUBLIC_SELECT } } } } } }
             });
             io.emit('order_updated', order);
             return res.json({ message: 'Payment captured' });
@@ -4038,7 +4068,7 @@ app.post('/orders/:id/verify-otp', async (req, res) => {
         }
         const updatedOrder = await prisma.order.findUnique({
             where: { id },
-            include: { user: true, items: { include: { storeProduct: { include: { product: true } } } } }
+            include: { user: true, items: { include: { storeProduct: { include: { product: { select: PRODUCT_PUBLIC_SELECT } } } } } }
         });
         if (!updatedOrder) {
             return res.status(500).json({ error: 'Verify-OTP committed but order vanished — please refresh.' });
@@ -4838,7 +4868,7 @@ app.post('/orders/:id/return', async (req, res) => {
         const photoList = Array.isArray(photos) ? photos.filter(p => typeof p === 'string') : [];
         const order = await prisma.order.findUnique({
             where: { id },
-            include: { user: true, items: { include: { storeProduct: { include: { product: true } } } } },
+            include: { user: true, items: { include: { storeProduct: { include: { product: { select: PRODUCT_PUBLIC_SELECT } } } } } },
         });
         if (!order)
             return res.status(404).json({ error: 'Order not found.' });
@@ -5307,26 +5337,35 @@ startAutoRejectTimer();
 // Get Merchant Inventory (Specific Store)
 app.get('/merchants/:id/inventory', async (req, res) => {
     try {
+        // H-1 solid fix (2026-06-23): admin-only. Three problems closed in one fix —
+        // (a) was unauthenticated (display-audit CRIT 4 leak), (b) filtered on the
+        // dead pre-Phase-2-FINAL `StoreProduct.storeId` column → always wrong rows,
+        // (c) `category` filter referenced a non-existent scalar (`Product.category`)
+        // so any caller passing ?category=... got a 500. Caller: admin MerchantInventoryModal
+        // which already passes a BRANCH id (selectedBranchId), so route name `:id` =
+        // branch_id. Field whitelist via PRODUCT_PUBLIC_SELECT.
+        const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+        if (!caller)
+            return;
         const { id } = req.params;
         const { search, category } = req.query;
-        const where = { storeId: id };
+        const where = { branch_id: id };
         if (search) {
             where.product = {
                 name: { contains: String(search), mode: 'insensitive' }
             };
         }
         if (category) {
+            // FK relation, not a scalar. `category` query param matches Tier2Category.name.
             where.product = {
                 ...where.product,
-                category: { in: String(category).split(',') }
+                Tier2Category: { name: { in: String(category).split(',') } },
             };
         }
         const inventory = await prisma.storeProduct.findMany({
             where,
-            include: {
-                product: true
-            },
-            orderBy: { updatedAt: 'desc' }
+            include: { product: { select: PRODUCT_PUBLIC_SELECT } },
+            orderBy: { updatedAt: 'desc' },
         });
         res.json(inventory);
     }
