@@ -1,0 +1,109 @@
+{
+  "when": "2026-06-22",
+  "moves": [
+    {
+      "id": "1ef4429e-8b14-4a13-95df-e656437e6584",
+      "name": "Carrot Local",
+      "oldV": null,
+      "oldC": null,
+      "subId": "8ef1e4a1-2f01-473c-bbc3-ac318847ea90",
+      "sub": "Fresh Vegetables"
+    },
+    {
+      "id": "1fae8fdd-9085-4895-ae24-3b11c7f546e0",
+      "name": "Coriander Leaves",
+      "oldV": null,
+      "oldC": "66e8a5e6-b68d-4993-a85b-b310c1ec61ab",
+      "subId": "8ef1e4a1-2f01-473c-bbc3-ac318847ea90",
+      "sub": "Fresh Vegetables"
+    },
+    {
+      "id": "20598e78-471e-4cc4-af89-071401316193",
+      "name": "Mosambi",
+      "oldV": null,
+      "oldC": null,
+      "subId": "74cd2266-7790-4d2c-9c7b-cac305e5e20d",
+      "sub": "Fresh Fruits"
+    },
+    {
+      "id": "250bb4af-8b4e-47ed-abf9-d148abac8a35",
+      "name": "Sapota",
+      "oldV": null,
+      "oldC": null,
+      "subId": "74cd2266-7790-4d2c-9c7b-cac305e5e20d",
+      "sub": "Fresh Fruits"
+    },
+    {
+      "id": "4ec464c5-da65-4e43-98b4-da202d9f4264",
+      "name": "Organically Grown Spinach",
+      "oldV": null,
+      "oldC": null,
+      "subId": "8ef1e4a1-2f01-473c-bbc3-ac318847ea90",
+      "sub": "Fresh Vegetables"
+    },
+    {
+      "id": "58b83d14-ef11-40aa-87f1-67ddfcf3748a",
+      "name": "Coccinia",
+      "oldV": null,
+      "oldC": null,
+      "subId": "8ef1e4a1-2f01-473c-bbc3-ac318847ea90",
+      "sub": "Fresh Vegetables"
+    },
+    {
+      "id": "64336fa0-0a2a-40c4-9eb1-1ca609b4a90c",
+      "name": "Cabbage",
+      "oldV": null,
+      "oldC": null,
+      "subId": "8ef1e4a1-2f01-473c-bbc3-ac318847ea90",
+      "sub": "Fresh Vegetables"
+    },
+    {
+      "id": "6892221e-b17f-455e-9b54-ea141852e990",
+      "name": "Beetroot",
+      "oldV": null,
+      "oldC": null,
+      "subId": "8ef1e4a1-2f01-473c-bbc3-ac318847ea90",
+      "sub": "Fresh Vegetables"
+    },
+    {
+      "id": "7dae194b-d579-4dd8-9d75-f32f3d818590",
+      "name": "Cucumber Green",
+      "oldV": null,
+      "oldC": null,
+      "subId": "8ef1e4a1-2f01-473c-bbc3-ac318847ea90",
+      "sub": "Fresh Vegetables"
+    },
+    {
+      "id": "d694a020-da3d-4c93-88be-f1a0b4046ff7",
+      "name": "Tomato Local",
+      "oldV": null,
+      "oldC": null,
+      "subId": "8ef1e4a1-2f01-473c-bbc3-ac318847ea90",
+      "sub": "Fresh Vegetables"
+    },
+    {
+      "id": "df3fc5f2-2b6a-4ce0-aefe-874d70a1b5e0",
+      "name": "Beans Broad",
+      "oldV": null,
+      "oldC": null,
+      "subId": "8ef1e4a1-2f01-473c-bbc3-ac318847ea90",
+      "sub": "Fresh Vegetables"
+    },
+    {
+      "id": "e091ea7b-41b2-48c6-889f-8ed8a50f3b68",
+      "name": "Capsicum Green",
+      "oldV": null,
+      "oldC": null,
+      "subId": "8ef1e4a1-2f01-473c-bbc3-ac318847ea90",
+      "sub": "Fresh Vegetables"
+    },
+    {
+      "id": "f98f271a-abf3-454e-bbf7-5e91b81e3d3e",
+      "name": "Chilli Green",
+      "oldV": null,
+      "oldC": "66e8a5e6-b68d-4993-a85b-b310c1ec61ab",
+      "subId": "8ef1e4a1-2f01-473c-bbc3-ac318847ea90",
+      "sub": "Fresh Vegetables"
+    }
+  ]
+}

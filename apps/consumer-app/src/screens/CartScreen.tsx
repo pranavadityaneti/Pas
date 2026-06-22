@@ -11,9 +11,13 @@
 //      unlock. Wire everything properly."). Add-only: reads platform minOrderValue
 //      from /config/public and blocks checkout below it (button greyed + tap
 //      Alert + a note). Inert while minOrderValue=0. Does NOT touch layers 1-2.
+//   4. Phase 3 Item 3 approved 2026-06-16 (Option B): the cart item thumbnail now
+//      uses <SafeImage> (broken-image → placeholder) instead of <Image>. Pure
+//      swap of one image render; does NOT touch layout, sync, coupon, or min-order.
 import React, { useState, useMemo, useEffect } from 'react';
 import { getPlatformConfig } from '../lib/platformConfig';
-import { View, Text, TouchableOpacity, ScrollView, Image, Alert, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal } from 'react-native';
+import SafeImage from '../components/SafeImage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ShoppingBag, ArrowLeftCircle, Minus, Plus, ChevronRight, ChevronDown, Ticket, CheckCircle, Clock } from 'lucide-react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -36,7 +40,7 @@ export default function CartScreen() {
     // (addItem/removeItem/updateQuantity/clearCart), so the legacy minOrder
     // watchdog is no longer needed here (server is the authoritative gate at
     // confirmAccepted; client clears on any cart-shape change).
-    const { items, groupedItems, updateQuantity, getItemCount, getTotal, clearCart, appliedCoupon } = useCart();
+    const { items, groupedItems, updateQuantity, getItemCount, getTotal, clearCart, appliedCoupon, revalidateCart } = useCart();
     const { session: currentSession, isLoading: authLoading, user, isProfileLoading } = useAuth();
     const [authModalVisible, setAuthModalVisible] = useState(false);
     const [isWaitingForAuthSync, setIsWaitingForAuthSync] = useState(false);
@@ -48,6 +52,27 @@ export default function CartScreen() {
         getPlatformConfig().then(c => { if (m) setMinOrderValue(c.minOrderValue || 0); }).catch(() => {});
         return () => { m = false; };
     }, []);
+
+    // Category-visibility feature · Task 7b (2026-06-21): on focus, prune any cart item
+    // whose category an admin has disabled (RLS hides it → the re-read drops it) and tell
+    // the customer. The POST /order-requests gate is the airtight backstop at checkout.
+    useEffect(() => {
+        const unsub = navigation.addListener('focus', () => {
+            revalidateCart()
+                .then((removed) => {
+                    if (removed.length > 0) {
+                        Alert.alert(
+                            'Some items were removed',
+                            `${removed.map((r) => r.name).join(', ')} ${removed.length === 1 ? 'is' : 'are'} no longer available and ${removed.length === 1 ? 'has' : 'have'} been removed from your cart.`,
+                        );
+                    }
+                })
+                .catch(() => {});
+        });
+        return unsub;
+        // revalidateCart reads the latest items via a ref, so depending only on [navigation] is safe.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [navigation]);
 
     // Phase 4 fix B2 (2026-06-09): removed local `coupon` state, the
     // route.params.selectedCoupon useEffect, and the minOrder watchdog.
@@ -191,7 +216,7 @@ export default function CartScreen() {
                                 {storeItems.map((item: any, index: number) => (
                                     <View key={item.id} className={`flex-row items-center py-3 ${index < storeItems.length - 1 ? 'border-b border-gray-50' : ''}`}>
                                         <View className="relative border border-gray-100 rounded-[14px] bg-gray-50">
-                                            <Image source={typeof item.image === 'string' ? { uri: item.image } : item.image} className="w-[60px] h-[60px] rounded-[14px]" />
+                                            <SafeImage source={typeof item.image === 'string' ? { uri: item.image } : item.image} style={{ width: 60, height: 60, borderRadius: 14 }} />
                                         </View>
                                         <View className="flex-1 ml-4 justify-center py-1 pr-2">
                                             <Text className="text-[15px] font-semibold text-gray-900 mb-0.5" numberOfLines={2}>{item.name}</Text>

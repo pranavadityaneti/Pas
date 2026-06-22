@@ -98,6 +98,12 @@ interface CartContextType {
     setAppliedCoupon: (c: AppliedCoupon | null) => void;
     /** Phase 4 — explicit clear (called automatically on cart mutations). */
     clearAppliedCoupon: () => void;
+    /**
+     * Category-visibility feature · Task 7b (2026-06-21) — drop cart items whose
+     * product an admin has disabled (vertical/subcategory). Returns the removed items
+     * so the caller can notify the user. Fail-open on a read error.
+     */
+    revalidateCart: () => Promise<CartItem[]>;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
@@ -452,12 +458,43 @@ export function CartProvider({ children }: { children: ReactNode }) {
         return item ? item.quantity : 0;
     };
 
+    /**
+     * Category-visibility feature · Task 7b. Re-read the cart's product ids through the
+     * customer's RLS-filtered supabase client: products in an admin-disabled category are
+     * hidden, so they no longer come back → prune them. setItems triggers the existing
+     * cloud-sync effect, so the removal persists for signed-in users. Fail-open on a read
+     * error so a transient blip never wipes the cart. The server-side Category Status Gate
+     * in POST /order-requests is the airtight backstop for a disable that lands mid-checkout.
+     */
+    const revalidateCart = async (): Promise<CartItem[]> => {
+        const current = itemsRef.current;
+        const ids = [...new Set(current.map(i => String(i.id)))];
+        if (ids.length === 0) return [];
+        let visible: Set<string>;
+        try {
+            const { data, error } = await supabase.from('Product').select('id').in('id', ids);
+            if (error) { console.warn('[CartContext] revalidateCart read failed:', error.message); return []; }
+            visible = new Set((data ?? []).map((r: any) => String(r.id)));
+        } catch (e: any) {
+            console.warn('[CartContext] revalidateCart threw:', e?.message);
+            return [];
+        }
+        const removed = current.filter(i => !visible.has(String(i.id)));
+        if (removed.length > 0) {
+            clearAppliedCoupon();
+            setItems(current.filter(i => visible.has(String(i.id))));
+        }
+        return removed;
+    };
+
     return (
         <CartContext.Provider value={{
             items, groupedItems, addItem, removeItem, updateQuantity, clearCart,
             getItemCount, getTotal, getItemQuantity,
             // Phase 4 (2026-06-09) — coupon state plumbing
             appliedCoupon, setAppliedCoupon, clearAppliedCoupon,
+            // Category-visibility feature · Task 7b
+            revalidateCart,
         }}>
             {children}
         </CartContext.Provider>

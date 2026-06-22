@@ -113,7 +113,10 @@ export default function AddMenuProductModal({ visible, onClose, onSuccess, store
 
     const fetchVariants = async (productId: string) => {
         try {
-            const { data } = await supabase.from('StoreProduct').select('variant, price').eq('productId', productId).eq('storeId', storeId);
+            // Phase 2 FINAL — B7 (2026-06-16): filter by branch_id (canonical key);
+            // StoreProduct.storeId is dropped at B10. `storeId` here is the active
+            // branch id (see branchId = activeRole?.id || storeId elsewhere).
+            const { data } = await supabase.from('StoreProduct').select('variant, price').eq('productId', productId).eq('branch_id', storeId);
             if (data && data.length > 1) { 
                 const allVariants = data.map(d => ({ variant: d.variant, price: d.price.toString() }));
                 setVariants(allVariants);

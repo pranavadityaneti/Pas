@@ -46,7 +46,8 @@ export function useCategoryItems(storeIds: string[], verticalId: string) {
         .select('id, store_id:branch_id, product_id:productId, price, stock, active, product:Product!inner(id, name, image, vertical_id, category_id, mrp, brand), store:merchant_branches(id, name:branch_name)')
         .in('branch_id', storeIds)
         .eq('product.vertical_id', verticalId)
-        .eq('active', true);
+        .eq('active', true)
+        .eq('is_deleted', false); // Phase 3 Item 1 (2026-06-16): exclude soft-deleted listings
 
       if (supabaseError) throw supabaseError;
 

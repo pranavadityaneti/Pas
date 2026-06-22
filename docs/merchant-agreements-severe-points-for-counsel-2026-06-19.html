@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAS Merchant Agreements — Severe Points for CA / Legal Re-edit (2026-06-19)</title>
+<style>
+  :root{--ink:#1a2233;--mut:#5b6676;--line:#e3e8ef;--accent:#B52725;--crit:#b91c1c;--high:#b45309;--med:#3f6212;--code:#f6f8fa;--bg:#fff}
+  *{box-sizing:border-box} body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg);line-height:1.5;margin:0;padding:0 22px 90px}
+  .wrap{max-width:1000px;margin:0 auto}
+  h1{font-size:24px;margin:22px 0 4px} h2{font-size:18px;margin:30px 0 6px;padding-top:9px;border-top:3px solid var(--accent)}
+  .mut{color:var(--mut)} .sm{font-size:12px;color:var(--mut)}
+  p,li,td{font-size:13.5px} code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:12px}
+  .item{border:1px solid var(--line);border-radius:8px;padding:11px 14px;margin:11px 0}
+  .item.crit{border-left:4px solid var(--crit)} .item.high{border-left:4px solid var(--high)} .item.med{border-left:4px solid var(--med)}
+  .item h3{margin:0 0 5px;font-size:14.5px}
+  .badge{display:inline-block;font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:8px;margin-right:5px;vertical-align:middle}
+  .b-crit{background:#fde7e7;color:var(--crit)} .b-high{background:#fdf0dc;color:var(--high)} .b-med{background:#eef6e3;color:var(--med)}
+  .who{background:#eef2f7;color:#475569}
+  .row{margin:5px 0} .row b{color:#111}
+  .clause{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:11.5px;background:var(--code);border:1px solid var(--line);border-radius:6px;padding:6px 9px;margin:5px 0;color:#334155}
+  .callout{border-left:4px solid var(--accent);background:#fdf3f3;padding:9px 14px;margin:12px 0;border-radius:0 6px 6px 0}
+  @media print{body{padding:0}.item{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Merchant Agreements — Severe Points for CA / Legal Re-edit</h1>
+<div class="mut">2026-06-19 · Reviewed: the 3 in-app vendor agreements (Grocery 2% · Other Stores/Meat 5% · Restaurant 5%/7%) as ingested into merchant signup · Standard body 35 sections, Restaurant body 35 sections</div>
+
+<div class="callout">
+<b>How to read this:</b> each point cites the exact clause (Standard body §, and the Restaurant body's different § where it differs), states the problem and the risk, and flags whether a <b>CA</b> or <b>LAWYER</b> (or both) must re-edit it. <b>This is a flag-list for your professionals, not legal/tax advice.</b> Severity: <span class="badge b-crit">CRITICAL</span> <span class="badge b-high">HIGH</span> <span class="badge b-med">MEDIUM</span>.
+</div>
+
+<h2>A. Financial structure &amp; tax — re-draft before going live (CA + Lawyer)</h2>
+
+<div class="item crit">
+<h3><span class="badge b-crit">CRITICAL</span><span class="badge who">LAWYER + CA</span>1. The agreement puts PAS in the flow of funds → unlicensed payment aggregation (RBI)</h3>
+<div class="clause">Std §3.5 / Rest §3.7 (Settlement): "PAS shall remit payments to the Merchant after deducting applicable commissions… taxes, government deductions…" · §23 Payment Services · §29 Chargeback ("PAS may recover… from future Merchant settlements")</div>
+<div class="row"><b>Problem:</b> the wording has PAS <i>collecting the customer's money and settling it onward to the merchant</i>. Collecting + settling funds on behalf of third-party merchants is <b>payment aggregation</b>, which under the RBI Payment Aggregator Guidelines may be done only by an RBI-authorised PA, through a bank-held escrow/nodal account.</div>
+<div class="row"><b>Fix:</b> re-draft so an <b>RBI-authorised payment aggregator settles funds directly to the merchant</b> and PAS only invoices its commission separately (PAS never holds/settles merchant funds) — OR PAS obtains PA authorisation + escrow. The settlement clause must describe the <i>actual licensed fund-flow</i>. (CA: escrow/split-settlement + reconciliation.)</div>
+</div>
+
+<div class="item crit">
+<h3><span class="badge b-crit">CRITICAL</span><span class="badge who">CA</span>2. PAS's own e-commerce-operator (ECO) GST/TDS duties are missing; "government deductions" is too vague to authorise TCS/TDS</h3>
+<div class="clause">Std §3.4 / Rest §3.6 (Taxes) · §25 (Tax Responsibility — dumps ALL tax on the Merchant) · Std §3.5 / Rest §3.7 ("government deductions")</div>
+<div class="row"><b>Problem:</b> as an e-commerce operator, PAS is itself statutorily required (no turnover threshold) to register for GST as an ECO, <b>collect TCS under CGST §52</b>, <b>deduct TDS under Income-Tax §194-O</b>, and file <b>GSTR-8</b>. The agreement is silent on PAS's ECO duties, pushes 100% of tax onto the merchant (§25), and only vaguely references "government deductions" — which is not specific enough to lawfully authorise withholding TCS/TDS from settlements or to handle merchant consent + invoicing.</div>
+<div class="row"><b>Fix:</b> add an ECO tax clause that (a) records PAS as ECO, (b) authorises the TCS/TDS deduction with the rates + the merchant's consent, (c) allocates GST-invoicing responsibility, and (d) cross-references GSTR-8 / TCS-credit to the merchant.</div>
+</div>
+
+<div class="item high">
+<h3><span class="badge b-high">HIGH</span><span class="badge who">CA</span>3. Commission is charged on "gross order value" — ambiguous, likely tax-inclusive</h3>
+<div class="clause">Std §3.3 · Rest §3.3 (pickup 5%) / §3.4 (dining 7%)</div>
+<div class="row"><b>Problem:</b> "commission of X% of the <b>gross</b> order value" — if "gross" includes GST/packaging, PAS is taking commission on the customer's tax, inflating PAS's take and complicating the merchant's GST/ITC.</div>
+<div class="row"><b>Fix:</b> define the commission base precisely — e.g. "<i>net order value, exclusive of GST and any delivery/packaging charges</i>."</div>
+</div>
+
+<h2>B. The paid fee vs the "Lifetime Access" promise — contract does not match what's charged (Lawyer + CA)</h2>
+
+<div class="item crit">
+<h3><span class="badge b-crit">CRITICAL</span><span class="badge who">LAWYER</span>4. The agreement says "one-time onboarding fee"; the app charges "LIFETIME ACCESS" — with a premium tier the agreement never mentions, and PAS can still terminate at will with no refund</h3>
+<div class="clause">Std §3.1 ("one-time onboarding fee of INR 999… per branch") / Rest §3.1 (INR 2,999) — vs the in-app StepSubscription screen ("LIFETIME ACCESS", "Pay &amp; Unlock", ₹999 / ₹2,999 × stores). Conflict with Std §18 / Rest §19 (terminable by PAS at any time).</div>
+<div class="row"><b>Problem:</b> three mismatches: (i) the contract calls it an "onboarding fee" but the product sells "Lifetime Access" — there is <b>no "lifetime listing right" clause</b> anywhere; (ii) the Standard agreement has <b>no ₹2,999 "premium tier"</b> the app charges; (iii) the agreement lets PAS suspend/terminate at will (§18.3/§19.3) with <b>no refund</b> — so a merchant pays for "lifetime" access PAS can revoke tomorrow. This is a deceptive/unfair-term + mis-selling exposure, and the contract doesn't actually authorise the amount charged.</div>
+<div class="row"><b>Fix:</b> add the real pricing (incl. premium tier) and an explicit <b>"Lifetime Listing Right"</b> definition; reconcile "lifetime" with the termination clause (what survives, what's refunded on PAS-initiated termination); see Point 5.</div>
+</div>
+
+<div class="item crit">
+<h3><span class="badge b-crit">CRITICAL</span><span class="badge who">LAWYER</span>5. No refund / cancellation clause for the paid fee at all</h3>
+<div class="clause">Entire §3 (Commercial Terms) — silent on refundability</div>
+<div class="row"><b>Problem:</b> merchants pay ₹999–₹2,999+ but there is <b>no clause</b> covering refunds — cooling-off, merchant never goes live, or PAS terminates the account. Combined with the "Lifetime Access" wording this is a clear consumer-protection / unfair-term risk.</div>
+<div class="row"><b>Fix:</b> add an explicit refund &amp; cancellation policy (e.g. cooling-off window; pro-rata or no-refund stated clearly; refund treatment when PAS terminates without merchant fault).</div>
+</div>
+
+<h2>C. One-sided / potentially unenforceable terms (Lawyer)</h2>
+
+<div class="item crit">
+<h3><span class="badge b-crit">CRITICAL</span><span class="badge who">LAWYER</span>6. PAS may unilaterally change commissions &amp; commercial terms</h3>
+<div class="clause">Std §3.6 / Rest §3.8 ("PAS may revise commissions, onboarding fees, settlement schedules, or other commercial terms by providing reasonable prior notice") · §20.3 / §33.3 (revise policies)</div>
+<div class="row"><b>Problem:</b> a unilateral right to change the merchant's core economics (incl. commission) is a classic <b>unfair contract term</b> and may be unenforceable; the Consumer Protection (E-Commerce) Rules also constrain one-sided changes.</div>
+<div class="row"><b>Fix:</b> give the merchant a right to <b>reject a material change and exit without penalty</b> within a defined notice window (e.g. 30 days); "reasonable prior notice" → a fixed period.</div>
+</div>
+
+<div class="item high">
+<h3><span class="badge b-high">HIGH</span><span class="badge who">LAWYER</span>7. Liability cap = "3 months of PAS's commissions"; indemnity is one-sided &amp; uncapped</h3>
+<div class="clause">Std §17.2 / Rest §18.2 (cap) · Std §17.1 / Rest §18.1 (no consequential damages) · Std §16 / Rest §17 (Merchant-only indemnity, uncapped, no PAS reciprocal)</div>
+<div class="row"><b>Problem:</b> the cap is PAS's <i>commission</i> (a tiny number), not the merchant's loss — likely unconscionable, and unenforceable for non-excludable liabilities (gross negligence, wilful default, statutory/DPDP data-breach liability, death/injury). The merchant indemnifies PAS broadly and without cap, while PAS gives no indemnity back (e.g. for PAS's platform/IP/data breach).</div>
+<div class="row"><b>Fix:</b> carve out non-excludable liabilities from the cap; make the indemnity <b>mutual</b>, add a cap + a standard indemnity procedure (notice, defence control, mitigation).</div>
+</div>
+
+<div class="item high">
+<h3><span class="badge b-high">HIGH</span><span class="badge who">LAWYER</span>8. Very broad, subjective immediate-termination grounds; no cure period</h3>
+<div class="clause">Std §13.5 / Rest §14.5 · Std §18.3 / Rest §19.3 · §26 · §28 — "reputational risk to PAS", "reasonable suspicion", "any circumstance that may adversely affect… the Platform"</div>
+<div class="row"><b>Problem:</b> these subjective grounds let PAS terminate immediately and swallow the ordinary notice (Rest §19.2's 30-day notice). With a paid "lifetime" fee and no refund (Points 4–5), abrupt termination on vague grounds is a strong unfairness + dispute risk.</div>
+<div class="row"><b>Fix:</b> narrow the immediate-termination grounds, add cure periods for curable breaches, and tie any termination to the refund clause.</div>
+</div>
+
+<h2>D. Execution &amp; enforceability (Lawyer)</h2>
+
+<div class="item crit">
+<h3><span class="badge b-crit">CRITICAL</span><span class="badge who">LAWYER</span>9. Electronic-signature validity (IT Act) + stamp duty</h3>
+<div class="clause">§24 Electronic Execution ("acceptance… equivalent to a physical signature") · in-app method = a finger-drawn signature image</div>
+<div class="row"><b>Problem:</b> (a) under the IT Act 2000 a legally recognised "electronic signature" is an <b>Aadhaar eSign or a DSC</b>; a drawn-signature image may not meet the statutory test, weakening enforceability. (b) <b>Stamp duty</b> — the agreement appears unstamped; an unstamped/under-stamped commercial agreement is <b>inadmissible as evidence</b> under the Indian Stamp Act / Telangana stamp law.</div>
+<div class="row"><b>Fix:</b> confirm/upgrade the execution method (Aadhaar eSign / DSC, or robust audited click-wrap), and arrange <b>e-stamping</b> for each executed agreement.</div>
+</div>
+
+<h2>E. Regulated goods, data &amp; grievance compliance (Lawyer)</h2>
+
+<div class="item high">
+<h3><span class="badge b-high">HIGH</span><span class="badge who">LAWYER</span>10. No obligation to provide/display FSSAI &amp; drug licences; PAS's own platform licences not addressed</h3>
+<div class="clause">Std/Rest §4.3 + §5.1 (merchant must "hold" licences) — but nothing requiring the licence number to be <b>collected, verified, and displayed</b>, and nothing on PAS's own FSSAI e-commerce / drug-licence obligations</div>
+<div class="row"><b>Problem:</b> the platform lists food (restaurants, grocery, meat, bakeries) and <b>Pharmacy &amp; Wellness</b> (medicines). FSSAI e-commerce rules require display of each food seller's FSSAI licence + the platform's own licence; online medicine sale needs drug-licence/e-pharmacy compliance. The agreements only say the merchant must "hold" licences — not provide/display them.</div>
+<div class="row"><b>Fix:</b> add mandatory licence-submission + display + verification obligations (FSSAI no., drug licence), and a clause on PAS's own platform licences; consider restricting pharmacy until cleared.</div>
+</div>
+
+<div class="item high">
+<h3><span class="badge b-high">HIGH</span><span class="badge who">LAWYER</span>11. Data-protection roles undefined (DPDP Act 2023)</h3>
+<div class="clause">§22 Data Protection — references DPDP 2023 but does not define Data Fiduciary vs Processor, consent, breach-notification to the Data Protection Board, or a DPA</div>
+<div class="row"><b>Problem:</b> the platform handles customer + merchant personal &amp; financial data, but the clause never says <b>who is the Data Fiduciary/Processor</b>, the consent mechanism, or breach-notification to the <i>Board</i> (it only says notify "PAS"). No Data Processing Agreement.</div>
+<div class="row"><b>Fix:</b> define data roles, add a DPA + consent + Board-notification obligations under DPDP 2023.</div>
+</div>
+
+<div class="item med">
+<h3><span class="badge b-med">MEDIUM</span><span class="badge who">LAWYER</span>12. Grievance clause uses a person's personal mobile/email; verify CPECR / IT-Rules completeness</h3>
+<div class="clause">§32 Grievance Redressal — "Grievance Officer: Krishna Onguru, Email: krishna@pickatstore.io, Contact: 7842287373"</div>
+<div class="row"><b>Problem:</b> a personal individual's mobile/email is published in every signed merchant contract (privacy/operational risk), and the clause should be checked against the Consumer Protection (E-Commerce) Rules 2020 + IT Rules 2021 (whether a <b>Nodal Officer</b> is also required, and exact timelines).</div>
+<div class="row"><b>Fix:</b> use a role-based address (e.g. grievance@pickatstore.io) and confirm the full officer set + statutory timelines.</div>
+</div>
+
+<h2>F. IP &amp; drafting defects (Lawyer)</h2>
+
+<div class="item high">
+<h3><span class="badge b-high">HIGH</span><span class="badge who">LAWYER</span>13. PAS's licence to the merchant's brand/menus "survives termination"</h3>
+<div class="clause">Std §10 / Rest §11 (revocable licence to use name, logos, images, menus) — but §27 Survival lists "intellectual property rights" as surviving termination</div>
+<div class="row"><b>Problem:</b> §27 makes the IP licence survive termination — so PAS could keep using a departed merchant's brand/logos/menus indefinitely, contradicting the "revocable" licence.</div>
+<div class="row"><b>Fix:</b> the merchant IP licence should <b>end on termination</b> (with a short wind-down to remove listings/marketing); remove "intellectual property rights" from the merchant-side survival list.</div>
+</div>
+
+<div class="item med">
+<h3><span class="badge b-med">MEDIUM</span><span class="badge who">LAWYER</span>14. Structural defects — numbering jumps 33 → 35, and a duplicated "POLICY FRAMEWORK" section</h3>
+<div class="clause">Both bodies skip §34 (33 → 35). Standard body has TWO "POLICY FRAMEWORK" sections (§20 and §33) with near-identical text.</div>
+<div class="row"><b>Problem:</b> mis-numbering + duplicate sections undermine clarity and look unprofessional to any reviewer or court. (These were transcribed verbatim from the source PDFs — i.e. the defect is in the founder PDFs.)</div>
+<div class="row"><b>Fix:</b> renumber cleanly and merge the duplicate Policy Framework sections.</div>
+</div>
+
+<div class="item med">
+<h3><span class="badge b-med">MEDIUM</span><span class="badge who">LAWYER</span>15. Restaurant dining — alcohol &amp; no-show handling not addressed</h3>
+<div class="clause">Rest §6 Dining Services · §7 Prohibited Products (generic) · §6.4 (no-shows "governed by Platform policies")</div>
+<div class="row"><b>Problem:</b> if any restaurant pre-orders/serves alcohol via the platform, that needs excise-licence treatment the agreement doesn't mention; dining no-show / cancellation terms are deferred entirely to unspecified "Platform policies" (consumer-protection alignment needed).</div>
+<div class="row"><b>Fix:</b> add an explicit alcohol/excise carve-out (or prohibition), and define the dining cancellation/no-show terms.</div>
+</div>
+
+<p class="sm">— 15 severe points across the 3 vendor agreements, all clause-referenced. Priority order for re-drafting: <b>1, 2, 4, 5, 6, 9</b> (critical) before any new merchant signs. Not legal/tax advice — hand to your CA (Points 2, 3) and lawyer (the rest).</p>
+
+</div>
+</body>
+</html>

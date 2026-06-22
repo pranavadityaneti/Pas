@@ -1,140 +1,102 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, ScrollView, Image, Dimensions, Platform, Alert } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, Image, Dimensions, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { supabase } from '../lib/supabase';
-import { configureStoreProducts } from '../services/catalog';
+import { configureStoreProducts, CatalogProduct } from '../services/catalog';
 import { Colors } from '../../constants/Colors';
 import { useStore } from '../hooks/useStore';
 
 const { height } = Dimensions.get('window');
 
-// Simple UUID generator to avoid dependency issues
-const generateUUID = () => {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-    });
-};
-
 interface ConfigureProductsModalProps {
     visible: boolean;
-    storeId: string;
-    products: any[];
+    storeId: string; // branchId — passed as `storeId` by the picker
+    products: CatalogProduct[];
     onClose: () => void;
     onSuccess: () => void;
 }
 
-// Mock Variant Logic with Smart Ratios
-// ratio: 1.0 = 100% of Base MRP
-const getVariantsForCategory = (category?: string) => {
-    if (!category) return [{ label: 'Standard', ratio: 1.0 }];
-    const cat = category.toLowerCase();
-    if (cat.includes('dairy') || cat.includes('beverage')) {
-        return [
-            { label: '250ml', ratio: 0.3 },
-            { label: '500ml', ratio: 0.55 },
-            { label: '1L', ratio: 1.0 }
-        ];
-    }
-    if (cat.includes('fashion') || cat.includes('cloth')) {
-        return [
-            { label: 'S', ratio: 1.0 },
-            { label: 'M', ratio: 1.0 },
-            { label: 'L', ratio: 1.0 },
-            { label: 'XL', ratio: 1.0 }
-        ];
-    }
-    if (cat.includes('footwear')) {
-        return [
-            { label: 'UK 7', ratio: 1.0 },
-            { label: 'UK 8', ratio: 1.0 },
-            { label: 'UK 9', ratio: 1.0 },
-            { label: 'UK 10', ratio: 1.0 }
-        ];
-    }
-    return [{ label: 'Standard', ratio: 1.0 }];
-};
+interface RowConfig {
+    price: string;
+    stock: string;
+}
 
 export default function ConfigureProductsModal({ visible, storeId, products, onClose, onSuccess }: ConfigureProductsModalProps) {
-    const { activeRole, hasRealBranch } = useStore();
+    const router = useRouter();
+    const { hasRealBranch } = useStore();
     const insets = useSafeAreaInsets();
-    // Config Structure: { [productId]: { [variantLabel]: { price, stock, active } } }
-    const [config, setConfig] = useState<Record<string, Record<string, { price: string; stock: string; active: boolean }>>>({});
+
+    // One row of inputs per product.
+    const [config, setConfig] = useState<Record<string, RowConfig>>({});
     const [isSubmitting, setIsSubmitting] = useState(false);
+    // Server-side guards surfaced reactively after a Save attempt.
+    const [fssaiBlocked, setFssaiBlocked] = useState(false);
+    const [mrpOffenders, setMrpOffenders] = useState<Set<string>>(new Set());
 
+    // Whether any selected product belongs to an FSSAI-gated vertical.
+    const hasFood = products.some(p => p.vertical?.requiresFssai);
+
+    // Initialise a blank input row for each product when the selection changes.
     useEffect(() => {
-        let mounted = true;
-
-        const loadExistingConfig = async () => {
-            const productIds = products.map(p => p.id);
-            if (productIds.length === 0) return;
-
-            const { data: existingData } = await supabase
-                .from('StoreProduct')
-                .select('productId, variant, price, stock, active')
-                .eq('branch_id', activeRole?.id || storeId)
-                .in('productId', productIds);
-
-            const initialConfig: any = {};
-
-            // Initialize base config structure
+        setConfig(prev => {
+            const next: Record<string, RowConfig> = {};
             products.forEach(p => {
-                const variants = getVariantsForCategory(p.category);
-                initialConfig[p.id] = {};
-                variants.forEach(v => {
-                    const calculatedDefaultPrice = Math.round((p.mrp || 0) * v.ratio);
-                    initialConfig[p.id][v.label] = {
-                        price: calculatedDefaultPrice.toString(),
-                        stock: v.label === 'Standard' ? '10' : '0',
-                        active: v.label === 'Standard'
-                    };
-                });
+                next[p.id] = prev[p.id] || { price: '', stock: '' };
             });
+            return next;
+        });
+        // Clear stale server-error state when the selection changes.
+        setFssaiBlocked(false);
+        setMrpOffenders(new Set());
+    }, [products]);
 
-            // Overlay existing data
-            if (existingData) {
-                existingData.forEach((row: any) => {
-                    const vLabel = row.variant || 'Standard';
-                    if (initialConfig[row.productId] && initialConfig[row.productId][vLabel]) {
-                        initialConfig[row.productId][vLabel] = {
-                            price: row.price.toString(),
-                            stock: row.stock.toString(),
-                            active: row.active
-                        };
-                    }
-                });
-            }
-
-            if (mounted) setConfig(initialConfig);
-        };
-
-        loadExistingConfig();
-
-        return () => { mounted = false; };
-    }, [products, storeId]);
-
-    const handleChange = (prodId: string, variantLabel: string, field: string, value: any) => {
+    const handleChange = (productId: string, field: keyof RowConfig, value: string) => {
         setConfig(prev => ({
             ...prev,
-            [prodId]: {
-                ...prev[prodId],
-                [variantLabel]: { ...prev[prodId][variantLabel], [field]: value }
-            }
+            [productId]: { ...(prev[productId] || { price: '', stock: '' }), [field]: value },
         }));
+        // Editing an offender clears its highlight.
+        if (field === 'price' && mrpOffenders.has(productId)) {
+            setMrpOffenders(prev => {
+                const next = new Set(prev);
+                next.delete(productId);
+                return next;
+            });
+        }
     };
 
+    // Client-side validation mirroring the server contract.
+    // price: required, number, > 0, <= mrp. stock: required, integer >= 0.
+    const priceError = (p: CatalogProduct): string | null => {
+        const raw = config[p.id]?.price ?? '';
+        if (raw.trim() === '') return 'Required';
+        const n = Number(raw);
+        if (!Number.isFinite(n) || n <= 0) return 'Enter a valid price';
+        if (n > p.mrp) return `Max ₹${p.mrp}`;
+        return null;
+    };
+
+    const stockError = (p: CatalogProduct): string | null => {
+        const raw = config[p.id]?.stock ?? '';
+        if (raw.trim() === '') return 'Required';
+        const n = Number(raw);
+        if (!Number.isInteger(n) || n < 0) return 'Whole number ≥ 0';
+        return null;
+    };
+
+    const anyInvalid = products.some(p => priceError(p) !== null || stockError(p) !== null);
+    const canSave = products.length > 0 && !anyInvalid && !isSubmitting;
+
     const handleSave = async () => {
-        const targetBranchId = activeRole?.id;
-        if (!targetBranchId) {
-            console.error('[ConfigureProductsModal] handleSave aborted: targetBranchId is null');
-            Alert.alert("Error", "No active store or branch selected. Please try switching stores.");
+        if (!storeId) {
+            Alert.alert('Error', 'No active store or branch selected. Please try switching stores.');
             return;
         }
         // Layer 3 defense (May 20, 2026): refuse to write StoreProduct rows when
-        // no real merchant_branches row exists for this merchant. Without this guard
-        // the FK fk_storeproduct_branch will violate and the user sees a raw DB error.
+        // no real merchant_branches row exists — otherwise the FK
+        // fk_storeproduct_branch violates and the user sees a raw DB error.
         if (!hasRealBranch) {
             Alert.alert(
                 'Set up your branch first',
@@ -142,92 +104,43 @@ export default function ConfigureProductsModal({ visible, storeId, products, onC
             );
             return;
         }
-
-        // 1. Validation: Price > MRP Check
-        let priceError = '';
-        products.forEach(p => {
-            Object.entries(config[p.id] || {}).forEach(([variantLabel, data]: [string, any]) => {
-                if (data.active) {
-                    // Calculate Variant MRP again to match render logic
-                    const variantDefs = getVariantsForCategory(p.category);
-                    const def = variantDefs.find(v => v.label === variantLabel);
-                    if (def) {
-                        const variantMrp = Math.round((p.mrp || 0) * def.ratio);
-                        const sellingPrice = parseFloat(data.price || '0');
-                        if (sellingPrice > variantMrp) {
-                            priceError = `Selling price for ${p.name} (${variantLabel}) cannot exceed MRP ₹${variantMrp}`;
-                        }
-                    }
-                }
-            });
-        });
-
-        if (priceError) {
-            Alert.alert("Invalid Price", priceError);
-            return;
-        }
+        if (anyInvalid) return;
 
         setIsSubmitting(true);
+        setFssaiBlocked(false);
+        setMrpOffenders(new Set());
+
+        const items = products.map(p => ({
+            productId: p.id,
+            price: Number(config[p.id]?.price ?? '0'),
+            stock: Number(config[p.id]?.stock ?? '0'),
+        }));
 
         try {
-            // 2. Fetch Existing Items to Handle Upsert
-            const productIds = products.map(p => p.id);
-            const { data: existingData } = await supabase
-                .from('StoreProduct')
-                .select('id, productId, variant') // Added variant
-                .eq('branch_id', targetBranchId)
-                .in('productId', productIds);
-
-            // Map using composite key: productId_variant
-            const existingIdMap = new Map();
-            existingData?.forEach(row => existingIdMap.set(`${row.productId}_${row.variant || 'Standard'}`, row.id));
-
-            const updates: any[] = [];
-
-            products.forEach(p => {
-                Object.entries(config[p.id] || {}).forEach(([variantLabel, data]: [string, any]) => {
-                    if (data.active) {
-                        const compositeKey = `${p.id}_${variantLabel}`;
-                        const existingId = existingIdMap.get(compositeKey);
-
-                        updates.push({
-                            id: existingId || generateUUID(),
-                            storeId: targetBranchId,
-                            branch_id: targetBranchId, // Explicitly map to new Postgres architecture
-                            productId: p.id,
-                            variant: variantLabel, // Save variant
-                            price: parseFloat(data.price || '0'),
-                            stock: parseInt(data.stock || '0'),
-                            active: true,
-                            createdAt: new Date().toISOString(),
-                            updatedAt: new Date().toISOString()
-                        });
-                    }
-                });
-            });
-
-            if (updates.length > 0) {
-                // 3. Phase 9b (2026-06-13): bulk-configure via the API (forces
-                // branch/store server-side; existing ids passed above preserve
-                // PKs). Throws on error → caught by the outer catch.
-                await configureStoreProducts(targetBranchId, updates);
-                Alert.alert(
-                    'Success',
-                    'Products saved successfully!',
-                    [{ text: 'OK', onPress: onSuccess }]
-                );
-            } else {
-                onSuccess();
-            }
+            await configureStoreProducts(storeId, items);
+            onSuccess();
         } catch (err: any) {
-            console.error(err);
-            Alert.alert('Error', err?.message || 'An unexpected error occurred.');
+            // surface() throws an Error whose message is the API error code.
+            const code = err?.message;
+            if (code === 'FSSAI_REQUIRED') {
+                // Keep the modal open + show the banner.
+                setFssaiBlocked(true);
+            } else if (code === 'MRP_CEILING_VIOLATED') {
+                // Mark every row whose price still exceeds MRP.
+                const offenders = new Set<string>();
+                products.forEach(p => {
+                    const n = Number(config[p.id]?.price ?? '0');
+                    if (Number.isFinite(n) && n > p.mrp) offenders.add(p.id);
+                });
+                setMrpOffenders(offenders);
+                Alert.alert('Price too high', 'Some prices exceed the product MRP. Please fix the highlighted rows.');
+            } else {
+                Alert.alert('Error', code || 'An unexpected error occurred.');
+            }
         } finally {
             setIsSubmitting(false);
         }
     };
-
-    const cleanName = (name: string) => name.replace(/\s*\([^)]+\)/g, '').trim();
 
     return (
         <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
@@ -241,83 +154,75 @@ export default function ConfigureProductsModal({ visible, storeId, products, onC
                     <View style={{ width: 40 }} />
                 </View>
 
+                {/* FSSAI banner — shown only after a 403 FSSAI_REQUIRED */}
+                {hasFood && fssaiBlocked && (
+                    <View style={styles.fssaiBanner}>
+                        <Ionicons name="warning" size={20} color="#92400E" style={{ marginRight: 8 }} />
+                        <Text style={styles.fssaiText}>Add an FSSAI licence to list food products</Text>
+                        <TouchableOpacity
+                            style={styles.fssaiBtn}
+                            onPress={() => { onClose(); router.push('/(main)/settings'); }}
+                        >
+                            <Text style={styles.fssaiBtnText}>Go to Settings</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+
                 {/* @ts-ignore */}
                 <KeyboardAwareScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" enableOnAndroid={true} extraScrollHeight={80} style={{ flex: 1 }}>
                     {products.map(product => {
-                        const variantDefs = getVariantsForCategory(product.category);
-                        const productConfig = config[product.id] || {};
-                        const displayName = cleanName(product.name);
+                        const pErr = priceError(product);
+                        const sErr = stockError(product);
+                        const isOffender = mrpOffenders.has(product.id);
+                        const metaLine = [product.brand, product.uom, `MRP ₹${product.mrp}`].filter(Boolean).join(' · ');
 
                         return (
-                            <View key={product.id} style={styles.card}>
+                            <View key={product.id} style={[styles.card, isOffender && styles.cardOffender]}>
                                 {/* Product Header */}
                                 <View style={styles.productHeader}>
                                     <Image source={{ uri: product.image || 'https://placehold.co/100x100' }} style={styles.image} />
                                     <View style={styles.info}>
-                                        <Text style={styles.name}>{displayName}</Text>
-                                        <Text style={styles.category}>{product.category}</Text>
-                                        {/* Global MRP Removed - Contextual MRP used below */}
+                                        <Text style={styles.name} numberOfLines={2}>{product.name}</Text>
+                                        <Text style={styles.meta} numberOfLines={1}>{metaLine}</Text>
                                     </View>
                                 </View>
 
                                 <View style={styles.divider} />
 
-                                {/* Variants */}
-                                <View style={styles.variantsContainer}>
-                                    {variantDefs.map((def) => {
-                                        const data = productConfig[def.label];
-                                        if (!data) return null; // Should not happen
+                                {/* Inputs */}
+                                <View style={styles.inputsRow}>
+                                    <View style={styles.inputGroup}>
+                                        <Text style={styles.label}>Your price</Text>
+                                        <View style={[styles.inputWrapper, (pErr || isOffender) && styles.inputWrapperError]}>
+                                            <Text style={styles.currencyPrefix}>₹</Text>
+                                            <TextInput
+                                                style={styles.input}
+                                                value={config[product.id]?.price ?? ''}
+                                                placeholder="Your price"
+                                                placeholderTextColor="#9CA3AF"
+                                                keyboardType="numeric"
+                                                onChangeText={t => handleChange(product.id, 'price', t)}
+                                            />
+                                        </View>
+                                        {(pErr || isOffender) && (
+                                            <Text style={styles.helperError}>{pErr || `Max ₹${product.mrp}`}</Text>
+                                        )}
+                                    </View>
 
-                                        const variantMrp = Math.round((product.mrp || 0) * def.ratio);
-
-                                        return (
-                                            <View key={def.label} style={styles.variantBlock}>
-                                                {/* Variant Checkbox Row */}
-                                                <TouchableOpacity
-                                                    style={styles.checkboxRow}
-                                                    activeOpacity={0.7}
-                                                    onPress={() => handleChange(product.id, def.label, 'active', !data.active)}
-                                                >
-                                                    <View style={[styles.checkbox, data.active && styles.checkboxActive]}>
-                                                        {data.active && <Ionicons name="checkmark" size={14} color="#fff" />}
-                                                    </View>
-                                                    <Text style={styles.variantName}>
-                                                        {def.label} <Text style={styles.inlineMrp}>(MRP: ₹{variantMrp})</Text>
-                                                    </Text>
-                                                </TouchableOpacity>
-
-                                                {/* Inputs (Only if Active) */}
-                                                {data.active && (
-                                                    <View style={styles.inputsRow}>
-                                                        <View style={styles.inputGroup}>
-                                                            <Text style={styles.label}>Your Selling Price</Text>
-                                                            <View style={styles.inputWrapper}>
-                                                                <Text style={styles.currencyPrefix}>₹</Text>
-                                                                <TextInput
-                                                                    style={styles.input}
-                                                                    value={data.price}
-                                                                    keyboardType="numeric"
-                                                                    onChangeText={t => handleChange(product.id, def.label, 'price', t)}
-                                                                />
-                                                            </View>
-                                                        </View>
-
-                                                        <View style={styles.inputGroup}>
-                                                            <Text style={styles.label}>Initial Stock</Text>
-                                                            <View style={styles.inputWrapper}>
-                                                                <TextInput
-                                                                    style={styles.input}
-                                                                    value={data.stock}
-                                                                    keyboardType="numeric"
-                                                                    onChangeText={t => handleChange(product.id, def.label, 'stock', t)}
-                                                                />
-                                                            </View>
-                                                        </View>
-                                                    </View>
-                                                )}
-                                            </View>
-                                        );
-                                    })}
+                                    <View style={styles.inputGroup}>
+                                        <Text style={styles.label}>Stock</Text>
+                                        <View style={[styles.inputWrapper, sErr && styles.inputWrapperError]}>
+                                            <TextInput
+                                                style={styles.input}
+                                                value={config[product.id]?.stock ?? ''}
+                                                placeholder="0"
+                                                placeholderTextColor="#9CA3AF"
+                                                keyboardType="numeric"
+                                                onChangeText={t => handleChange(product.id, 'stock', t)}
+                                            />
+                                        </View>
+                                        {sErr && <Text style={styles.helperError}>{sErr}</Text>}
+                                    </View>
                                 </View>
                             </View>
                         );
@@ -327,15 +232,11 @@ export default function ConfigureProductsModal({ visible, storeId, products, onC
                 {/* Footer */}
                 <View style={[styles.footer, { paddingBottom: Math.max(16, insets.bottom + 8) }]}>
                     <TouchableOpacity
-                        style={[styles.saveBtn, isSubmitting && styles.saveBtnDisabled]}
+                        style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
                         onPress={handleSave}
-                        disabled={isSubmitting}
+                        disabled={!canSave}
                     >
-                        {isSubmitting ? (
-                            <Text style={styles.saveText}>Saving...</Text>
-                        ) : (
-                            <Text style={styles.saveText}>Save Products</Text>
-                        )}
+                        <Text style={styles.saveText}>{isSubmitting ? 'Saving...' : 'Save Products'}</Text>
                     </TouchableOpacity>
                 </View>
             </View>
@@ -360,6 +261,20 @@ const styles = StyleSheet.create({
     backButton: { padding: 4 },
     title: { fontSize: 18, fontWeight: '700', color: '#111827' },
 
+    // FSSAI banner
+    fssaiBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FEF3C7',
+        borderBottomWidth: 1,
+        borderBottomColor: '#FDE68A',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+    },
+    fssaiText: { flex: 1, fontSize: 13, fontWeight: '600', color: '#92400E' },
+    fssaiBtn: { backgroundColor: '#92400E', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginLeft: 8 },
+    fssaiBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+
     // Content
     scrollContent: { padding: 16, paddingBottom: 100 },
 
@@ -375,35 +290,16 @@ const styles = StyleSheet.create({
         shadowRadius: 2,
         elevation: 2
     },
+    cardOffender: { borderWidth: 1.5, borderColor: '#DC2626' },
 
     // Product Header
     productHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
     image: { width: 60, height: 60, borderRadius: 12, backgroundColor: '#F3F4F6' },
     info: { marginLeft: 16, flex: 1 },
     name: { fontSize: 16, fontWeight: '700', color: '#111827', marginBottom: 2 },
-    category: { fontSize: 13, color: '#6B7280', marginBottom: 4 },
+    meta: { fontSize: 13, color: '#6B7280' },
 
     divider: { height: 1, backgroundColor: '#E5E7EB', marginBottom: 16 },
-
-    // Variants
-    variantsContainer: { gap: 16 },
-    variantBlock: { flexDirection: 'column' },
-
-    checkboxRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-    checkbox: {
-        width: 24,
-        height: 24,
-        borderRadius: 6,
-        borderWidth: 2,
-        borderColor: Colors.primary,
-        marginRight: 12,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: '#fff'
-    },
-    checkboxActive: { backgroundColor: Colors.primary },
-    variantName: { fontSize: 16, fontWeight: '600', color: '#111827' },
-    inlineMrp: { fontSize: 14, fontWeight: '400', color: '#6B7280' },
 
     // Inputs
     inputsRow: { flexDirection: 'row', gap: 12 },
@@ -416,13 +312,15 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         backgroundColor: '#fff',
         borderWidth: 1,
-        borderColor: '#E5E7EB', // Grey border
+        borderColor: '#E5E7EB',
         borderRadius: 12,
         height: 50,
         paddingHorizontal: 12
     },
+    inputWrapperError: { borderColor: '#DC2626' },
     currencyPrefix: { fontSize: 16, fontWeight: '600', color: '#111827', marginRight: 4 },
     input: { flex: 1, fontSize: 16, fontWeight: '600', color: '#111827', height: '100%' },
+    helperError: { fontSize: 12, color: '#DC2626', marginTop: 6, fontWeight: '600' },
 
     // Footer
     footer: {

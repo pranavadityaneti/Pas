@@ -72,7 +72,9 @@ export function useInventory() {
                         extra_data
                     )
                 `)
-                .eq('storeId', branchId)
+                // Phase 2 FINAL — B7 (2026-06-16): filter by branch_id (canonical
+                // key); StoreProduct.storeId is dropped at B10.
+                .eq('branch_id', branchId)
                 .eq('is_deleted', false)
                 .order('updatedAt', { ascending: false })
                 .limit(50);
@@ -111,7 +113,9 @@ export function useInventory() {
                     event: '*',
                     schema: 'public',
                     table: 'StoreProduct',
-                    filter: `storeId=eq.${branchId}`
+                    // Phase 2 FINAL — B7 (2026-06-16): branch_id is the canonical
+                    // key; StoreProduct.storeId is dropped at B10.
+                    filter: `branch_id=eq.${branchId}`
                 }, () => {
                     // Refetch to get the latest data including joined Product details
                     fetchInventory();

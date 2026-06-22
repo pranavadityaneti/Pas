@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAS — Catalog Picker Spec (Phase 4, sub-project 2) · 2026-06-17</title>
+<style>
+  :root{--ink:#1a2233;--mut:#5b6676;--line:#e3e8ef;--accent:#B52725;--ok:#166534;--warn:#9a6700;--code:#f6f8fa;--bg:#fff}
+  *{box-sizing:border-box} body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg);line-height:1.55;margin:0;padding:0 22px 90px}
+  .wrap{max-width:1000px;margin:0 auto}
+  h1{font-size:27px;margin:26px 0 4px}
+  h2{font-size:21px;margin:38px 0 8px;padding-top:10px;border-top:3px solid var(--accent)}
+  h3{font-size:16.5px;margin:22px 0 6px}
+  h4{font-size:14px;margin:14px 0 4px;color:var(--mut);text-transform:uppercase;letter-spacing:.03em}
+  .mut{color:var(--mut)} .sm{font-size:12.5px;color:var(--mut)}
+  p,li{font-size:14.5px} code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:12.8px}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12.4px;line-height:1.5}
+  table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13px}
+  th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+  th{background:#f3f6fa;font-weight:600}
+  .toc{background:#fafbfc;border:1px solid var(--line);border-radius:8px;padding:14px 20px;margin:18px 0;columns:2;column-gap:30px}
+  .toc a{color:var(--accent);text-decoration:none;font-size:13.5px} .toc li{margin:3px 0}
+  .callout{border-left:4px solid var(--accent);background:#fdf3f3;padding:9px 14px;margin:12px 0;border-radius:0 6px 6px 0}
+  .callout.ok{border-color:var(--ok);background:#f1f9f3} .callout.warn{border-color:var(--warn);background:#fdf8ec}
+  .tag{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:9px;background:#eef2f7;color:var(--mut);margin-right:5px}
+  .tag.done{background:#e7f6ec;color:var(--ok)} .tag.gate{background:#fdecec;color:var(--accent)} .tag.pend{background:#fdf6e3;color:var(--warn)}
+  @media print{body{padding:0}.toc{columns:2}h2{break-after:avoid}pre,table{break-inside:avoid}a{color:var(--ink);text-decoration:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Catalog Picker — Design Spec</h1>
+<div class="mut">Phase 4, sub-project 2 · Branch <code>feat/consumer-global-config-wiring</code> · 2026-06-17 · Status: <b>design locked, awaiting user review before plan</b></div>
+
+<h2 id="english">In plain English</h2>
+<p>Today you have 140,000 Blinkit products sitting invisibly in the database. <b>No merchant can sell them, no customer can see them.</b> This sub-project builds the screen that turns those products into things merchants can actually list in their shops:</p>
+<ol>
+<li>A merchant taps "Add products" in the merchant app.</li>
+<li>They browse a fast, searchable, filterable list of the 140k products (image, name, brand, pack size, MRP).</li>
+<li>They tap to select the products they want to sell ("12 selected").</li>
+<li>They tap "Configure" → a single screen lets them set their selling price and stock for each.</li>
+<li>They save. Those products now appear in their store; customers can browse and buy them.</li>
+</ol>
+<p>Three safety nets are wired in at every layer (app, server, database) so misuse is impossible: <b>(a)</b> a merchant cannot charge more than the printed MRP; <b>(b)</b> a merchant cannot list food products without a valid FSSAI licence on file; <b>(c)</b> product images get silently copied off the competitor's CDN (cdn.grofers.com) onto your own Supabase bucket the first time a merchant lists a product.</p>
+
+<div class="toc"><b>Contents</b>
+<ol>
+<li><a href="#scope">1. Scope</a></li>
+<li><a href="#decisions">2. Decisions locked</a></li>
+<li><a href="#arch">3. Architecture overview</a></li>
+<li><a href="#api">4. New API endpoint — GET /merchant/catalog</a></li>
+<li><a href="#picker">5. The picker UI</a></li>
+<li><a href="#modal">6. The bulk-configure modal</a></li>
+<li><a href="#save">7. Save endpoint — POST /merchant/store-products/configure</a></li>
+<li><a href="#rehost">8. The lazy image re-host service</a></li>
+<li><a href="#db">9. DB changes (trigger + index)</a></li>
+<li><a href="#errors">10. Error handling + edge cases</a></li>
+<li><a href="#tests">11. Testing strategy</a></li>
+<li><a href="#rollback">12. Rollback</a></li>
+<li><a href="#files">13. Files reference</a></li>
+<li><a href="#oos">14. Out of scope</a></li>
+</ol>
+</div>
+
+<h2 id="scope">1. Scope</h2>
+<h4>In</h4>
+<ul>
+<li>Paginated, searchable, filterable catalog picker that scales to 140k Products.</li>
+<li>Multi-select → bulk-configure UX (set selling price + stock per Product → save in one API call).</li>
+<li>Three listing guards baked in at all three layers:
+  <ul>
+  <li><b>MRP ceiling</b> (StoreProduct.price ≤ Product.mrp): app validation + API 400 + DB trigger.</li>
+  <li><b>FSSAI gate</b> for food verticals (<code>Vertical.requiresFssai = true</code>): UI banner + Save disabled + API 403.</li>
+  <li><b>Lazy image re-host</b> grofers.com → Supabase <code>products</code> bucket on first listing.</li>
+  </ul>
+</li>
+<li>Rewrite of <code>catalog-picker.tsx</code> (screen body — the <code>@lock</code>'d FilterModal invocation and <code>DEFAULT_FILTERS</code> stay untouched).</li>
+<li>Rebuild of <code>ConfigureProductsModal</code> (drop fabricated variants, drop direct Supabase reads).</li>
+<li>Extend <code>POST /merchant/store-products/configure</code> with the guards.</li>
+<li>New service <code>apps/api/src/services/imageRehost.ts</code>.</li>
+<li>One DB trigger + one trigram index.</li>
+</ul>
+<h4>Out (deferred to later sub-projects)</h4>
+<ul>
+<li>Consumer veg/non-veg filter + dots (= sub-project 3).</li>
+<li>Backfill veg flag for the 294 legacy products (= sub-project 3).</li>
+<li>Sibling / variant grouping (UI shows one Product per row; <code>StoreProduct.variant</code> stays <code>'Standard'</code>).</li>
+<li>Background job queue / async re-host worker (synchronous-but-failure-tolerant re-host on the save path is sufficient).</li>
+</ul>
+
+<h2 id="decisions">2. Decisions locked (this session)</h2>
+<table>
+<tr><th>#</th><th>Decision</th><th>Choice</th></tr>
+<tr><td>D1</td><td>MRP-ceiling DB layer</td><td><b>BEFORE INSERT/UPDATE trigger on StoreProduct</b> that joins Product and raises on violation. Mirrors the spirit of the ₹0 CHECK (defense-in-depth), even though a same-row CHECK can't reference Product.mrp.</td></tr>
+<tr><td>D2</td><td>FSSAI strictness</td><td><b>Soft warning + hard server block.</b> The picker shows a banner; the bulk-configure modal disables Save with an "Add FSSAI" CTA; the API returns 403 with <code>{error:'FSSAI_REQUIRED'}</code>.</td></tr>
+<tr><td>D3</td><td>Re-host failure mode</td><td><b>Keep grofers URL, log to Sentry, save the listing anyway.</b> The next merchant listing the same product retries. SafeImage (Phase 3) covers any genuine 404.</td></tr>
+<tr><td>D4</td><td>Listing UX flow</td><td><b>Multi-select picker → bulk-configure modal.</b> One API transaction per save. Drops the fabricated-variants modal entirely.</td></tr>
+<tr><td>D5</td><td>Variant story</td><td><b>One Product = one StoreProduct row.</b> <code>variant='Standard'</code>. Siblings/pack-size grouping is a future sub-project.</td></tr>
+<tr><td>D6</td><td>Pagination strategy</td><td><b>Keyset</b> on <code>(createdAt DESC, id DESC)</code>. Stable under ingest, scales to 140k.</td></tr>
+<tr><td>D7</td><td>Search</td><td><b>Trigram GIN</b> on <code>Product.name</code> + ILIKE in the API. Debounced 300ms on the client.</td></tr>
+<tr><td>D8</td><td>Re-host trigger location</td><td><b>Server-side, on the save endpoint</b>, in-process (no queue). Tolerant of failure per D3.</td></tr>
+</table>
+
+<h2 id="arch">3. Architecture overview</h2>
+<pre>┌──────────────────────────────────── merchant app ────────────────────────────────────┐
+│                                                                                      │
+│  catalog-picker.tsx           ConfigureProductsModal (rebuilt)                       │
+│  ┌─────────────────────┐      ┌─────────────────────────────────────┐                │
+│  │ FlatList            │ tap  │ Selected rows                       │                │
+│  │  ─ row (Product)    ├─────►│  ─ price input (MRP-ceiling valid.) │                │
+│  │  ─ row (Product)    │      │  ─ stock input                      │                │
+│  │  ─ search + filters │      │  ─ FSSAI banner (if food + no cert) │                │
+│  │  ─ onEndReached     │      │  ─ [ Save N items ]                 │                │
+│  └─────────┬───────────┘      └─────────────────┬───────────────────┘                │
+│            │ GET /merchant/catalog                │ POST /merchant/store-products/    │
+│            │ ?cursor&q&filters                     │      configure                   │
+└────────────┼───────────────────────────────────────┼──────────────────────────────────┘
+             ▼                                       ▼
+┌────────────────────────────── pas-api (Express + Prisma) ────────────────────────────┐
+│                                                                                      │
+│  GET  /merchant/catalog                 POST /merchant/store-products/configure      │
+│    requireUser                            requireUser → resolve merchant + branch    │
+│    resolve branch                         validate: price≤mrp · FSSAI · price>0      │
+│    keyset paginate Product where {        createMany StoreProduct {variant:Standard, │
+│      excludes-already-listed,                            branch_id, active:price>0}  │
+│      filters, search                      ── (parallel) ──► imageRehost.tryAll(ids)  │
+│    } + relations Vertical+Tier2Category   audit, respond                             │
+│                                                                                      │
+│  src/services/imageRehost.ts                                                         │
+│    for each productId:                                                               │
+│      if Product.image NOT grofers OR already Supabase → return ok                    │
+│      download grofers (axios, 10s timeout, 5MB cap) → upload Supabase                │
+│      UPDATE Product SET image = new URL                                              │
+│      on any failure: Sentry.captureException; return ok (listing stays)              │
+└────────────────────────────┬─────────────────────────────────────────────────────────┘
+                             ▼
+┌────────────────────────────── Postgres (Supabase) ───────────────────────────────────┐
+│                                                                                      │
+│  Trigger: trg_storeproduct_mrp_ceiling  (BEFORE INSERT OR UPDATE on StoreProduct)    │
+│    if NEW.price > Product.mrp → RAISE EXCEPTION 'MRP_CEILING_VIOLATED'               │
+│                                                                                      │
+│  Index:   idx_product_name_trgm    (GIN, gin_trgm_ops on Product.name)               │
+│                                                                                      │
+│  Existing guards still in place:                                                     │
+│    - StoreProduct.branch_id NOT NULL (Phase 2 FINAL B9)                              │
+│    - storeproduct_active_price_check  (Phase 3 Item 2: NOT (active AND price≤0))     │
+└──────────────────────────────────────────────────────────────────────────────────────┘</pre>
+
+<h2 id="api">4. New API endpoint — <code>GET /merchant/catalog</code></h2>
+<h4>Request</h4>
+<pre>GET /merchant/catalog
+Authorization: Bearer &lt;merchant JWT&gt;
+?cursor=&lt;opaque cursor base64({createdAt, id})&gt;
+?q=&lt;debounced search 2+ chars&gt;
+?verticalId=&lt;uuid&gt;            ← user-facing "Category"
+?categoryId=&lt;uuid&gt;            ← user-facing "Subcategory" (Tier2Category)
+?brand=&lt;string&gt;
+?isVeg=true|false|all
+?limit=30                       (server clamps 1..50, default 30)</pre>
+<h4>Response</h4>
+<pre>{
+  data: [
+    {
+      id, name, brand, mrp,
+      image,                      ← may be grofers URL (will be re-hosted on first list)
+      uom,                        ← pack size, e.g. "500 g", "1 pack (15 pcs)"
+      isVeg,                      ← true | false | null (non-food = null = no dot)
+      vertical: { id, name, requiresFssai },  ← drives the FSSAI banner
+      category: { id, name }      ← subcategory
+    },
+    …
+  ],
+  nextCursor: &lt;opaque base64&gt; | null,   ← null = end of results
+  hasMore: boolean
+}</pre>
+<h4>Logic</h4>
+<ul>
+<li><b>Auth:</b> <code>requireUser</code>. Resolve the merchant's branch (the active branch for this user).</li>
+<li><b>Where clause:</b>
+<pre>where: {
+  source: { in: ['blinkit','live_sync','purchased_catalog'] }, // exclude null + 'zepto' (legacy)
+  mrp: { gt: 0 },                       // no-MRP products can't be listed (can't ceiling-check)
+  NOT: { storeProducts: { some: {       // exclude products this merchant's branch already lists
+    branch_id: &lt;merchant's branch&gt;,
+    is_deleted: false
+  }}},
+  ...(q ? { name: { contains: q, mode: 'insensitive' } } : {}),  // trigram-indexed
+  ...(verticalId ? { vertical_id: verticalId } : {}),
+  ...(categoryId ? { category_id: categoryId } : {}),
+  ...(brand ? { brand: { equals: brand, mode: 'insensitive' } } : {}),
+  ...(isVeg === 'true' ? { isVeg: true } : isVeg === 'false' ? { isVeg: false } : {})
+}</pre>
+</li>
+<li><b>Order:</b> <code>orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]</code> (matches the cursor).</li>
+<li><b>Pagination:</b> Decode cursor → add <code>cursor: { createdAt_id }</code> + <code>skip: 1</code>. Take <code>limit + 1</code>, then trim last and set <code>nextCursor</code>.</li>
+<li><b>Include:</b> <code>Vertical: { select: { id, name, requiresFssai } }, Tier2Category: { select: { id, name } }</code>.</li>
+<li><b>Map</b> to the response shape above.</li>
+</ul>
+
+<h2 id="picker">5. The picker UI</h2>
+<p>Rewrite the screen body of <code>apps/merchant-app/app/(main)/catalog-picker.tsx</code>. The <code>@lock</code>'d sections (the <code>FilterModal</code> invocation and <code>DEFAULT_FILTERS</code>) stay untouched.</p>
+<h4>Components</h4>
+<ul>
+<li><b>Search bar</b> (debounced 300ms).</li>
+<li><b>Filter pills</b> (Category / Subcategory / Brand) — opens existing <code>FilterModal</code>.</li>
+<li><b>Veg / Non-veg toggle</b> when the active vertical (or any in scope) is food (<code>requiresFssai</code>).</li>
+<li><b>FlatList</b> with <code>onEndReached</code> calling next page via <code>nextCursor</code>.
+  <ul>
+  <li>Row: <code>SafeImage</code> · name (2 lines max) · brand · uom badge · MRP (₹XX) · veg dot (only when <code>isVeg !== null</code>).</li>
+  <li>Tap to select → row gets a checkmark + accent border. Selection state lives in the screen (Set&lt;productId&gt;).</li>
+  <li><b>Drop the <code>cleanName</code> dedup</b> — every Product appears as its own row.</li>
+  </ul>
+</li>
+<li><b>Sticky bottom bar:</b> "<b>N selected</b> · [ Configure ]" — disabled when N=0.</li>
+<li><b>FSSAI banner</b> at the top of the screen if <code>merchant.fssaiNumber</code> is null AND any food vertical is reachable. Tap → navigates to settings.</li>
+</ul>
+<h4>Data hook</h4>
+<p>New <code>apps/merchant-app/src/hooks/useCatalogPicker.ts</code>: keeps <code>{rows, hasMore, isLoading, error}</code>; exposes <code>loadMore()</code>, <code>setFilters(...)</code>, <code>setQuery(...)</code>. Internally calls <code>GET /merchant/catalog</code> via the existing api client. Cancels in-flight requests on filter/query change.</p>
+
+<h2 id="modal">6. The bulk-configure modal</h2>
+<p>Rebuild <code>apps/merchant-app/src/components/ConfigureProductsModal.tsx</code>. <b>Drop</b>: <code>getVariantsForCategory</code>, the fabricated 250/500/1L variants, the direct <code>supabase.from('StoreProduct')</code> read at line 75–76. <b>Add</b>: API-only data flow; MRP-ceiling validation; FSSAI banner.</p>
+<h4>Layout</h4>
+<pre>┌─ Configure 12 items ────────────────────────────────────────┐
+│                                                              │
+│ ⚠ Add an FSSAI licence to list food products (3 of 12)       │   ← only if blocking
+│   [ Go to Settings → ]                                       │
+│                                                              │
+│ ┌─ row per selected Product ────────────────────────────────┐│
+│ │ [img] Cadbury Bournville Orange Dark 70%                  ││
+│ │       Cadbury · 80 g · MRP ₹100                            ││
+│ │       Your price (₹) [____]  ⓘ max ₹100                    ││
+│ │       Stock          [____]                                ││
+│ └────────────────────────────────────────────────────────────┘│
+│ (… N more …)                                                 │
+│                                                              │
+│ [ Cancel ]                            [ Save 12 items ▶ ]    │   ← disabled if any blocker
+└──────────────────────────────────────────────────────────────┘</pre>
+<h4>Validation rules (client-side; mirrored server-side)</h4>
+<ul>
+<li><b>price</b> required, number, > 0, ≤ <code>product.mrp</code>. Red border + helper text "Max ₹{mrp}" on violation.</li>
+<li><b>stock</b> required, integer ≥ 0.</li>
+<li><b>FSSAI banner</b> shows if <code>merchant.fssaiNumber == null</code> AND any selected product has <code>vertical.requiresFssai</code>. Save is disabled. Banner CTA navigates to <code>/(main)/settings/kyc</code> (or wherever FSSAI upload lives — confirmed at build time).</li>
+<li><b>Save</b> button disabled until every row is valid AND no FSSAI block.</li>
+</ul>
+
+<h2 id="save">7. Save endpoint — <code>POST /merchant/store-products/configure</code></h2>
+<p>Extend the existing endpoint (<code>apps/api/src/index.ts:10544</code>). Body becomes:</p>
+<pre>{
+  items: [
+    { productId: uuid, price: number, stock: number }, …
+  ]
+}</pre>
+<h4>Server logic (in a transaction)</h4>
+<ol>
+<li><code>requireUser</code> → resolve merchant + active branch. If no branch → 400. <code>items</code> must be a non-empty array (≤ 200) → else 400.</li>
+<li>Fetch all Products in <code>items</code> with their <code>Vertical.requiresFssai</code> + <code>mrp</code>. Any missing id → 400 with the offenders.</li>
+<li><b>MRP-ceiling check:</b> any <code>price &gt; product.mrp</code> → 400 with <code>{error:'MRP_CEILING_VIOLATED', offenders:[{productId, price, mrp}]}</code>.</li>
+<li><b>FSSAI check:</b> if any selected product is food (<code>requiresFssai</code>) and <code>merchant.fssaiNumber == null</code> → 403 with <code>{error:'FSSAI_REQUIRED'}</code>.</li>
+<li><b>Write</b> via <code>createMany</code>: <code>{productId, branch_id, variant:'Standard', price, stock, active: price&gt;0, is_deleted:false}</code>. Conflict on the existing unique key (per branch + product + variant) → skip (idempotent re-listing).</li>
+<li><b>Trigger re-host</b> with a bounded budget: <code>Promise.race([imageRehost.rehostMany(productIds), sleep(5000)])</code>. Whatever finishes within 5s is reported; outstanding ones are abandoned (the listing succeeds either way). Failures are logged to Sentry, do not roll back the listing.</li>
+<li>Audit-log the listing event (existing pattern). Respond <code>{ok:true, listed:N, rehosted:M, rehostFailed:K}</code>.</li>
+</ol>
+
+<h2 id="rehost">8. The lazy image re-host service</h2>
+<p>New file <code>apps/api/src/services/imageRehost.ts</code>.</p>
+<pre>export async function rehostOne(productId: string): Promise&lt;'ok' | 'skipped' | 'failed'&gt; {
+  const p = await prisma.product.findUnique({ where: { id: productId }, select: { id:true, image:true }});
+  if (!p?.image) return 'skipped';
+  if (!p.image.includes('cdn.grofers.com')) return 'skipped';
+
+  try {
+    const res = await axios.get(p.image, { responseType: 'arraybuffer', timeout: 10_000, maxContentLength: 5 * 1024 * 1024 });
+    const ext = inferExt(res.headers['content-type'] || '', p.image); // jpg|png|webp
+    const path = `catalog/${productId}.${ext}`;
+
+    const up = await supabase.storage.from('products').upload(path, res.data, {
+      contentType: res.headers['content-type'] || 'image/jpeg',
+      upsert: true,
+    });
+    if (up.error) throw up.error;
+
+    const { data: pub } = supabase.storage.from('products').getPublicUrl(path);
+    await prisma.product.update({ where: { id: productId }, data: { image: pub.publicUrl }});
+    return 'ok';
+  } catch (e) {
+    Sentry.captureException(e, { tags: { area: 'imageRehost' }, extra: { productId, src: p.image }});
+    return 'failed';
+  }
+}
+
+export async function rehostMany(productIds: string[]): Promise&lt;{ok:number; skipped:number; failed:number}&gt; {
+  // Limit concurrency to 4 to avoid overwhelming Supabase / our server
+  const results = await pLimit(4, productIds.map(id =&gt; () =&gt; rehostOne(id)));
+  return tally(results);
+}</pre>
+<p class="sm">No new dependencies needed: axios is already a transitive dep; <code>p-limit</code> is small or we use a tiny inline limiter. The Supabase storage client is already imported (per existing upload code at <code>index.ts:1257</code>).</p>
+
+<h2 id="db">9. DB changes (trigger + index)</h2>
+<h4>Trigger — <code>trg_storeproduct_mrp_ceiling</code></h4>
+<pre>CREATE OR REPLACE FUNCTION public.enforce_mrp_ceiling()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+  product_mrp double precision;
+BEGIN
+  SELECT mrp INTO product_mrp FROM public."Product" WHERE id = NEW."productId";
+  IF product_mrp IS NULL THEN
+    RAISE EXCEPTION 'Product % not found for StoreProduct write', NEW."productId";
+  END IF;
+  IF NEW.price &gt; product_mrp THEN
+    RAISE EXCEPTION 'MRP_CEILING_VIOLATED: price % exceeds Product.mrp %', NEW.price, product_mrp;
+  END IF;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS trg_storeproduct_mrp_ceiling ON public."StoreProduct";
+CREATE TRIGGER trg_storeproduct_mrp_ceiling
+  BEFORE INSERT OR UPDATE OF price, "productId" ON public."StoreProduct"
+  FOR EACH ROW EXECUTE FUNCTION public.enforce_mrp_ceiling();</pre>
+<h4>Index — trigram GIN on <code>Product.name</code></h4>
+<pre>CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX IF NOT EXISTS idx_product_name_trgm
+  ON public."Product" USING gin (name gin_trgm_ops);</pre>
+<p>Both applied via a <code>tsx</code> script using <code>$executeRawUnsafe</code> (matches the existing migration pattern). Verified with rolled-back transactions: positive (price ≤ mrp → row inserts) + negative (price &gt; mrp → exception raised) on the trigger; <code>EXPLAIN ANALYZE</code> for an ILIKE before/after the index.</p>
+<div class="callout"><b>Live-data pre-flight:</b> already verified — <b>0 existing StoreProduct rows violate the new trigger</b> (<code>SELECT count(*) FROM "StoreProduct" sp JOIN "Product" pr ON pr.id=sp."productId" WHERE sp.price &gt; pr.mrp</code> → 0). The trigger can be added without breaking any existing row.</div>
+
+<h2 id="errors">10. Error handling + edge cases</h2>
+<table>
+<tr><th>Scenario</th><th>Behaviour</th></tr>
+<tr><td>Merchant filters by a vertical with no products → empty list</td><td>Empty-state card: "No products match these filters."</td></tr>
+<tr><td>Merchant taps "Configure" with 0 selected</td><td>Button is disabled.</td></tr>
+<tr><td>Merchant types price &gt; MRP</td><td>Inline red border + helper "Max ₹{mrp}". Save disabled.</td></tr>
+<tr><td>Merchant types price = 0 (or empty)</td><td>Helper "Enter your selling price". Save disabled. Server also enforces (Phase 3 Item 2 CHECK).</td></tr>
+<tr><td>Merchant has no FSSAI + selected ≥1 food product</td><td>Banner shows; Save disabled; "Go to Settings" CTA.</td></tr>
+<tr><td>Merchant has FSSAI but it's expired</td><td>Out of scope for v1 — FSSAI presence only. Expiry check = own ticket.</td></tr>
+<tr><td>Product was already listed by this merchant (race)</td><td>Server <code>createMany</code> with conflict → skip silently; response notes <code>listed: N - duplicates</code>.</td></tr>
+<tr><td>Re-host fails for 1 of 12 products</td><td>Listing saves; response notes <code>rehostFailed: 1</code>; Sentry logs the productId + error.</td></tr>
+<tr><td>Re-host budget (5s) exceeded</td><td>Outstanding re-hosts are abandoned; listing saves. Next listing of those products retries.</td></tr>
+<tr><td>DB trigger fires (a code path missed the check)</td><td>Save endpoint catches the Prisma exception → 500 with <code>{error:'MRP_CEILING_VIOLATED'}</code>. Sentry logs (this should never happen — indicates a code bug).</td></tr>
+<tr><td>Search returns &gt; 30 results</td><td>FlatList loads more on scroll via <code>nextCursor</code>.</td></tr>
+<tr><td>Two filter changes within 300ms</td><td>In-flight request cancelled, latest filter wins.</td></tr>
+</table>
+
+<h2 id="tests">11. Testing strategy</h2>
+<h4>Unit (node:test via <code>npx tsx --test</code>) — same pattern as the Blinkit loader</h4>
+<ul>
+<li><code>src/services/imageRehost.test.ts</code> — mocked axios + Supabase: ok / skipped (non-grofers) / failed; never throws.</li>
+<li><code>src/merchantCatalog/cursor.test.ts</code> — encode/decode round-trip; invalid cursor → null.</li>
+<li><code>src/merchantCatalog/validate.test.ts</code> — price ≤ mrp; price &gt; 0; stock ≥ 0; FSSAI required when any item is food.</li>
+</ul>
+<h4>Integration / adversarial audit (read-mostly script, like the loader's audit)</h4>
+<ul>
+<li><code>scripts/audit_catalog_picker.ts</code> — hits prod API with a test merchant: happy path, MRP violation, FSSAI missing, already-listed exclusion, cursor pagination round-trip, filter combinations, large search.</li>
+</ul>
+<h4>DB trigger</h4>
+<ul>
+<li>Rolled-back tx: positive (insert with price=mrp → ok); negative (insert with price=mrp+1 → exception). Both before deploy.</li>
+</ul>
+
+<h2 id="rollback">12. Rollback</h2>
+<table>
+<tr><th>Layer</th><th>Rollback</th></tr>
+<tr><td>DB trigger</td><td><code>DROP TRIGGER trg_storeproduct_mrp_ceiling; DROP FUNCTION enforce_mrp_ceiling;</code> Existing data preserved; guard removed.</td></tr>
+<tr><td>Trigram index</td><td><code>DROP INDEX idx_product_name_trgm;</code> Search slows but still works.</td></tr>
+<tr><td>API</td><td>Revert commit, <code>eb deploy</code>. Picker falls back to the prior endpoint (which was capped at ~1000 rows but functional).</td></tr>
+<tr><td>Merchant app</td><td>Held OTAs are merchant-batched per Pranav's protocol; if the merchant build ships and breaks, revert + push.</td></tr>
+<tr><td>Re-hosted images</td><td>Re-hosted URLs are stable Supabase URLs; reverting the code doesn't break them. To restore grofers URLs: nothing to do (they were already replaced; both work).</td></tr>
+</table>
+
+<h2 id="files">13. Files reference</h2>
+<pre>NEW
+  apps/api/src/services/imageRehost.ts
+  apps/api/src/services/imageRehost.test.ts
+  apps/api/src/merchantCatalog/cursor.ts                  (keyset cursor encode/decode)
+  apps/api/src/merchantCatalog/cursor.test.ts
+  apps/api/src/merchantCatalog/validate.ts                (MRP, FSSAI, price/stock rules)
+  apps/api/src/merchantCatalog/validate.test.ts
+  apps/api/scripts/migrate_add_mrp_ceiling_trigger.ts     (raw SQL via $executeRawUnsafe)
+  apps/api/scripts/migrate_add_product_name_trgm.ts
+  apps/api/scripts/audit_catalog_picker.ts                (read-mostly adversarial audit)
+  apps/merchant-app/src/hooks/useCatalogPicker.ts
+
+EDIT
+  apps/api/src/index.ts
+    - new handler: GET /merchant/catalog
+    - extend POST /merchant/store-products/configure with the three guards + rehost
+  apps/merchant-app/app/(main)/catalog-picker.tsx          (screen body; @lock'd sections untouched)
+  apps/merchant-app/src/components/ConfigureProductsModal.tsx  (rebuild — drop fabricated variants)
+
+UNCHANGED (intentionally)
+  FilterModal.tsx                                          (@lock'd contract preserved)
+  Phase 3 SafeImage component                              (covers genuine image 404s)
+  Vertical / Tier2Category data (Phase 2)
+  StoreProduct.branch_id / Phase 2 FINAL B9 (NOT NULL)
+  Phase 3 Item 2 ₹0 CHECK constraint</pre>
+
+<h2 id="oos">14. Out of scope (will be tackled later)</h2>
+<ul>
+<li><b>Sub-project 3</b> — consumer veg/non-veg filter + food-only dots; backfill veg for the 294 legacy products; switch consumer <code>useProducts</code> off <code>extraData.isVeg</code> onto the new <code>Product.isVeg</code> column.</li>
+<li><b>Sub-project 4 (future)</b> — sibling/variant grouping (one product card with a pack-size selector).</li>
+<li><b>Own ticket</b> — FSSAI expiry checks (not just presence).</li>
+<li><b>Own ticket</b> — background job queue / worker for re-host retries beyond the in-process budget.</li>
+<li><b>Own ticket</b> — admin UI to view rehost failure log + manually retry.</li>
+</ul>
+
+<p class="sm">— End of spec. The next step (per the brainstorming → writing-plans → TDD pattern) is to invoke writing-plans to produce a numbered, step-by-step implementation plan against this spec. <b>No code is written until you approve this spec.</b></p>
+
+</div>
+</body>
+</html>

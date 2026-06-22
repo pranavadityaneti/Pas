@@ -4,6 +4,89 @@
 
 ---
 
+## Session: June 22, 2026 — Category feature go-live, catalog cleanup, OTA, branch scope
+
+### Done (continuation of the category-visibility work)
+- **Admin-web LIVE:** Pranav promoted the `f6fbfc20` preview to Production in Vercel → admin.pickatstore.io now serves the Categories tab + taxonomy/names fix + grey OFF-toggle (was frozen at the June-15 build). Confirmed via Vercel Deployments screenshot ("Production rebuild" row).
+- **Fixed the OFF-toggle invisibility** (`f6fbfc20`): shared Switch's unchecked track was near-white → invisible on the greyed row. Scoped `data-[state=unchecked]:!bg-gray-300 + border` to CategoriesTab only.
+- **`/verticals` coupling fix DEPLOYED** (`3d50ab94` → EB `app-260622_015312842345`): merchant signup picker fetched via `GET /verticals` (service_role, no filter) → showed disabled categories. Added `where:{is_active:true}`. Only caller is signup, so safe. Completes D2 coupling (customer + existing-merchant already RLS-filtered).
+- **Consumer cart-prune (T7b) SHIPPED via OTA** (`eas update --branch production`, runtime 1.1.3, group `79b10cb5`). Verified `.env` has production values (api.pickatstore.io, live Razorpay/Supabase, ANON_KEY present) so the OTA matches the build env. Merchant OTA skipped — 0 merchant-app changes on this branch since the 1.2.6 build.
+
+### Catalog re-categorization (all reversible — rollback JSONs committed)
+Of the original ~176 null-vertical products, **162 fixed**, 1 ambiguous left ("Dark green bel"):
+- **330** electrical/paint/auto → Electricals vertical (was 0 products). Verified 0 hidden by RLS.
+- **13** Freshly produce + **4** Clean cuts meat → Fresh Items. (Investigated "store stays after category off" → root cause: uncategorized products immune to category toggles + store labelled by merchant vertical, not products. Chose product-rule + fix data. Freshly Vadapalli now correctly DROPS when Fresh Items off.)
+- **44** catalog food + **96** non-food → real verticals; **9 deleted** (1 test "Something especially" + 8 gibberish, full-row backups kept).
+- Re-enabled Bakeries & Desserts + Fresh Items (Pranav test-disabled them live).
+
+### Branch divergence — SCOPED (read-only, this session)
+`feat/consumer-global-config-wiring` (live-build branch) vs `origin/main` (Vercel prod branch): main +8 (7 PR merges + OTP fix `c586850f`), feat +77. **`git merge-tree` = 0 conflicts — clean merge.** Recommended: merge main→feat→main + build-verify + push (mutates main + prod deploy = GATED, not yet done). This is the root blocker behind the admin-site staleness + the pending merchant OTA items + post-OTA security flips. **NOT executed — awaiting Pranav's go.**
+
+### Open threads
+- Execute the feat↔main reconciliation (gated — prod deploy).
+- "Dark green bel" (1 ambiguous catalog item — delete or leave).
+- Post-reconciliation: merchant OTA (Phase 9 rewires, OTP fix) + security flips (REQUIRE_ORDERS_AUTH, branch-lockdown migration).
+
+---
+
+## Session: June 21, 2026 — Admin Category Enable/Disable (SHIPPED end-to-end)
+
+### What & why
+Built the new feature from the priority queue: admins can toggle any of the 15 Verticals + 136 Tier2Categories on/off. OFF = platform-wide hide (decision D2, single coupled toggle: customer + merchant together). Resumed mid-feature (Task 2 RLS had a `CREATE POLICY` clause-order syntax error from the prior window).
+
+### Done this session (all 8 tasks, approval-gated; 3 deploy decisions via AskUserQuestion)
+- **T1–T3 DB migrations (applied to prod, one-at-a-time gated):** `Vertical.is_active` column (`39aedd0c`); 4 RESTRICTIVE RLS policies on Vertical/Tier2Category/Product/StoreProduct for anon+authenticated, AND'd onto existing permissive reads, service_role bypasses (`03a18f2d`); `get_nearby_stores` made category-aware so empty stores auto-drop (`d0f63da4`). Each verified with a no-role-switch logic check (the `SET ROLE anon`-in-prisma-tx test broke with P2028, replaced).
+- **T4 (`0c0765a5`):** `validateCategoriesEnabled` pure guard + 5 unit tests (16/16 green via `npx tsx --test`).
+- **T5 (`5fdfc981`):** 3 admin endpoints (`GET /admin/categories`, `PATCH .../vertical/:id`, `PATCH .../subcategory/:id`) — GET = CATALOG_ADMIN_ROLES, toggles = SUPER_ADMIN+OPERATIONS (Pranav chose the tighter RBAC), audit-logged; + merchant `CATEGORY_DISABLED` 403 guard in `POST /merchant/store-products/configure`.
+- **T6 (`bd6836aa`):** admin-web Categories tab (`CategoriesTab.tsx` + minimal MasterCatalog wiring via early-return) — toggles, product counts, expandable subcategories, confirm-on-disable, optimistic updates.
+- **T7 (`ce571deb`):** Pranav chose BOTH halves — T7a airtight server gate in `POST /order-requests` (`CATEGORY_UNAVAILABLE`, mirrors STORE_OFFLINE, pre-payment) + T7b consumer `revalidateCart()` prune on CartScreen focus.
+
+### Deployed (Pranav chose "API + admin-web now, defer consumer OTA")
+- **API → EB:** `npm run build` → committed `dist` (`f1cfbc01`) → `eb deploy` (`app-260621_224810548610`). Verified `/health`→200, `/admin/categories`→401 (route live). No `setenv` (no new env vars — per ERRORS.md never run setenv standalone here).
+- **admin-web → Vercel: ❌ NOT on production (my error — corrected post-session).** Pushed branch `feat/consumer-global-config-wiring` (32 commits); Vercel built it but as **Preview only** (`pas-admin-hkt6v8hrp-ideaye.vercel.app`). I wrongly reported it as a production deploy. **Vercel's deployment history shows the last `Production – pas-admin-web` deploy was June 15 (`e4aa9ebc0`); everything since = Preview.** admin.pickatstore.io serves `main`; all admin work since June 15 (incl. the June-17 taxonomy/names fix `6773db05` AND the new Categories tab) sits on `feat` → never promoted. So on prod the tab is missing AND Category/Vertical render blank (build predates the taxonomy fix). **Data is correct** (139,965/140,174 categorized, 0 RLS-hidden — verified). FIX pending: Pranav promotes the `f1cfbc01` preview to Production (chose this), or reconcile feat→main (diverged: main has Phase 8/9).
+- **Deferred:** consumer cart-prune (T7b) rides the next consumer OTA; the server gate is the correctness backstop.
+
+### ⚠️ Operational finding (bigger than this feature)
+admin-web **production has been frozen at the June-15 build for ~5 weeks** — the git→Vercel auto-deploy stopped reaching prod because active admin work is on `feat/consumer-global-config-wiring` while Vercel's production branch is `main`, and they've diverged. Everything built since June 15 is preview-only. Needs a branch-strategy decision to restore the pipeline (see forlater).
+
+### Audit (adversarial, per the rule) — passed
+No consumer service_role product-read leak (all 9 consumer read paths go through RLS-filtered supabase). Both toggles bite (139,965/140,174 products have category_id). Migrations intact (4 policies, column, RPC, 15/136 active). Accepted limitation: merchant can't see parked stock in a disabled category (intended coupling D2; "Paused by platform" badge deferred). Scope clean: my commits one-task-each; pre-existing working-tree noise (docs, index.html/vite.config, deleted script) left untouched.
+
+### Open threads
+- Consumer OTA carrying T7b (cart prune) — bundle into the next planned consumer OTA.
+- "Paused by platform" merchant badge (fast-follow); two-toggle split (customer-hidden vs merchant-allowed) — future.
+- Next priority-queue item after this: #14 Full notification scenario coverage.
+
+---
+
+## Session: June 16, 2026 — Phase 2 FINAL (StoreProduct.storeId rework, Option B)
+
+### What & why
+Picked up the inventory error-hunt's "Phase 2 FINAL" item: `StoreProduct.storeId` held a *branch* id with no real FK (the Prisma schema declared a `storeId→Store` FK that did NOT exist in the DB) → 26/44 listings orphaned, Freshly silently lost 67% of its catalog. Pranav directed a *solidified* fix ("no leaks, no gaps, no errors") rather than a patch → **Option B: relocate the Store↔branch link to `merchant_branches.store_id` with a real FK, decouple all code from `StoreProduct.storeId`, then drop the column.**
+
+### Done this session (approval-gated until Pranav said "execute all")
+- **DB (prod, via `$executeRawUnsafe` scripts in `apps/api/scripts/phase2final_b*.ts`):** B1 add `merchant_branches.store_id`; B2 backfill 5 branches (21 test/orphan stay NULL by design); B3 hard-delete 4 mystery StoreProduct rows (0 order history, Pranav-approved); B4 repair 22 Freshly orphans; B5 add `fk_merchant_branches_store` FK (negative+positive tested, rolled back); B6.0 storeId DROP NOT NULL; B9 branch_id SET NOT NULL.
+- **Code (committed):** B6.1 coupon path derives storeId via `merchant_branches` include; B6.2/6.3 both StoreProduct upserts stop writing storeId; B7 3 client reads → branch_id (admin StoreProductTable, merchant AddMenuProductModal + useInventory). API tsc 0 / build 0; admin-web build 0; merchant-app tsc 0.
+- **Caught a sequencing bug mid-flight:** removing the storeId write would have violated the column's NOT NULL — inserted B6.0 (DROP NOT NULL) as a prerequisite before the write-site edits. No prod incident.
+
+### Adversarial audit of B1-B9 (Pranav-requested) — found 3 real bugs → B11 remediation (Full DB-enforced cert)
+- Certified clean: 0 leaks in existing data, FK works, B10 won't be blocked, all-8-apps reader sweep complete.
+- **F1 CRITICAL (fixed, code):** branch creation never set store_id → new merchants would re-orphan. Fixed 6 creation sites.
+- **F2 HIGH (fixed, DB):** `delete_merchants_cascaded` referenced StoreProduct.storeId (B10-breaking) — missed in B7 (app-only sweep). Rewrote to branch_id; bonus: old fn only caught 7/40 rows.
+- **F3 HIGH (fixed, code):** my B6.1 null-filter made coupon vertical-eligibility fail-OPEN. Restored fail-closed.
+- **F5 LOW (fixed, DB):** indexed merchant_branches.store_id.
+- **F4 MEDIUM (gated):** delete 21 verified-safe orphan branches (0 refs) → store_id NOT NULL (after F1 deploys). Awaiting delete confirm + deploy.
+
+### Deferred (documented in forlater.md)
+- **⛔ B10 (drop the column) — GATED** on admin-web Vercel deploy + merchant OTA propagating (shipped bundles read the column directly via Supabase).
+- Order.storeId/branchId same bug class; Store.merchant_id missing FK; Folli Medicals branch-less store. All own tickets, untouched.
+
+### Files changed
+- `apps/api/src/index.ts` (B6.1/6.2/6.3), `apps/api/prisma/schema.prisma` (B1/B6.0/B9), `apps/api/scripts/phase2final_*.ts` + `investigate_storeid_fk*.ts` (new), `apps/api/dist/index.js` (rebuilt).
+- `apps/admin-web/src/components/modules/merchants/StoreProductTable.tsx`, `apps/merchant-app/src/components/AddMenuProductModal.tsx`, `apps/merchant-app/src/hooks/useInventory.ts` (B7).
+
+---
+
 ## Session: May 18, 2026
 
 ### Timeline
@@ -569,3 +652,31 @@ Audit workflow `wf_b259e841-f0e` (27 agents): 49 confirmed findings (3 blockers,
 
 #### 2026-06-13 — item #11 OTP modal reset (PR #4)
 Merchant OTPVerificationModal stays mounted in orders.tsx (toggled via `visible`), so otp/error state leaked across orders — the previous order's PIN pre-filled the next, a safety risk (Verify against wrong order). Fixed with a useEffect keyed on (visible, orderId) that clears otp/error/loading on each open. Self-contained, tsc 0. Branch fix/merchant-otp-modal-reset → PR #4 (off main). Rides next merchant OTA (batched with pending bills/OTAs). bookings.tsx OTP input already resets correctly (not affected).
+
+#### 2026-06-14 — Merchant e-Sign V1 (drawn signature) — BUILT + ROLLED OUT
+Replaced the stubbed Aadhaar/Digio eSign with a free on-screen **drawn signature** + personalized signed PDF + server-side consent record. Phases 0.4/0.2/0.3/1/2/3/4 built; merchant-app + api tsc clean, admin-web vite build clean.
+- **merchant-app:** new `src/screens/signup/agreements/` (content types + standardBody + restaurantBody [verbatim from founder PDFs via pdftotext] + registry/`verticalToAgreement` + `buildAgreementHtml` + RN `AgreementDocumentView` + `SignaturePad` [PanResponder→react-native-svg] + `services/signAgreement`). Rebuilt `steps/StepAgreements.tsx`: scroll-to-end gate → 3 checkboxes → draw signature → expo-print PDF → upload to `merchant-docs` → POST consent. Added `react-native-svg@15.12.1` (native → build). Version 1.2.4→1.2.5.
+- **api:** `MerchantConsent` model + `POST /merchant-signup/consent` (requireUser, stamps IP+SHA-256) + `GET /admin/merchants/:id/consent` (requireAdmin).
+- **admin-web:** `KYCQueue.tsx` "Legal & Signature" panel (fetches consent via API; signed-PDF link via createSignedUrl on merchant-docs).
+- **Routing (locked w/ Pranav):** Restaurants & Cafes + Bakeries → restaurant; Grocery → grocery; Meat & Seafood + retail → other-stores. **Bakery → premium (₹2,999)** so the Restaurant agreement fee matches.
+- **ROLLOUT (all 2026-06-14):** (1) DB — applied `merchant_consents` + `Vertical.isPremium=true` (Bakeries) to PROD via `prisma db execute` (verified: table exists, 0 rows, anon SELECT=false, bakery premium live). (2) API — `npm run build` + `eb deploy` → `app-260614_143955354510`, Ready/Green; `https://api.pickatstore.io/health`=200, both endpoints 401-gated, `/verticals` bakery isPremium=true. (3) Native — merchant 1.2.5 queued on EAS (Android c3c10c0e, iOS 8dde3396). (4) Admin-web — committed `196e425e`, pushed to **PR #5** (preview auto-builds; **prod deploy on merging PR #5**).
+- **Notes:** signup.tsx (@locked) NOT touched — consent persists at sign-time via the dedicated endpoint. IP+docHash server-authoritative (consent record + admin, not client PDF). Privacy/Terms remain external links. Re-sign creates a new consent row. Deferred (forlater): agreement-vs-admin commission alignment ("leave independent"); Aadhaar eSign = future upgrade (#33). Step order confirmed Identity→Stores→KYC→**Agreements**→Subscription→Review (KYC before signing ✓).
+
+#### 2026-06-14 (cont.) — Admin login 500 fix + KYC display fixes (Bucket 1 LIVE)
+- **Login 500 ("Send Code") — ROOT CAUSE was the LOCAL dev proxy, not prod.** Systematic debug ruled out prod: /auth/send-otp fine (adminAllowlist→403, otpVerification.create works, Wati failures →502 not 500). User was on localhost:3001 dev server whose `/api` proxy targets `http://localhost:3000` (no API running there) → Vite proxy ECONNREFUSED → 500. Fix: made vite.config.mts proxy target env-overridable (`VITE_API_PROXY`); restarted dev server with `VITE_API_PROXY=https://api.pickatstore.io`. Verified localhost:3001/api/health=200. **Production login was never broken.** (vite.config.mts change is LOCAL/uncommitted.)
+- **Bucket 1 — merchant-signup display fixes — BUILT + DEPLOYED + LIVE:**
+  - API `GET /admin/merchants/:id` (Prisma + Vertical join) → verticalName, designation, bankAccounts, branches, operatingHours/hasBranches. Deployed `app-260614_153739609407`. (First `eb deploy` hit "Must be Ready" — env was mid managed-platform-update; auto-recovered via a wait-then-redeploy background job per ERRORS.md.) Verified: endpoint 401-gated, /health 200.
+  - admin-web KYCQueue: phantom `category` → real vertical name; new "Signup Details" panel (designation, store hours, branches, bank accounts); needs_info merchants surfaced in queue + added to TS type. **PR #6 merged → main** → Vercel prod.
+- **Bucket 2 (partial):** coupon brand fonts (Hanken Grotesk + Space Mono) added to admin index.html — UNCOMMITTED, ships in next admin merge.
+- **Bucket 4 scoped:** `docs/admin-founder-gated-features-2026-06-14.html` (payout vendor+formula, Global Config, dispute queue, Wati inbox, wallet/tags, analytics depth) — decisions needed.
+- **PAUSED by Pranav (to review):** Bucket 2 rest (?phone= filter, customers load-more, audit-log coverage) + Bucket 3 (home KPI endpoints `/admin/stats/*`). Tasks #64, #65 pending. Changelog: `docs/admin-dashboard-changes-and-pending-2026-06-14.html`. Dev server still running at localhost:3001 → prod API.
+- **HOTFIX — admin login "infinite recursion detected in policy for relation User" (42P17).** Two `public."User"` RLS policies ("Super Admins can read all profiles" SELECT + "Super Admins manage all" ALL) ran `EXISTS (SELECT 1 FROM "User" WHERE id=auth.uid() AND role='SUPER_ADMIN')` — a self-subquery inside a User policy → recursion on every User read (admin login profile fetch). Was present since Phase-8 RLS lockdown, masked until the dev-proxy 500 was fixed. **Fix (applied to PROD via `prisma db execute`):** added `SECURITY DEFINER` `public.is_super_admin()` (bypasses RLS), recreated both policies to `USING (is_super_admin())`. Verified: policies now reference `is_super_admin()`; an authenticated-role self-read of `User` returns a row with no recursion error. Pure DB change, live immediately, no deploy. SQL: `docs/migrations-pending-2026-06-14-user-rls-recursion-fix.sql`.
+
+#### 2026-06-14 (cont.) — Founder-gated admin features (4) — BUILT + DEPLOYED LIVE
+One feature at a time, commit + deploy each (Pranav: "deploy each feature as we go"). All API endpoints verified 401-gated / public JSON ok; all admin PRs merged → Vercel.
+1. **Analytics depth** — PR #7, api `app-260614_170922101267`. Compare-vs-previous ▲/▼ delta tiles + Top Products + Sales by Category + Sales by City. `GET /admin/analytics/breakdowns` (Prisma raw aggregations, tested on prod). Branch feat/admin-analytics-depth (f455f616).
+2. **Refund/dispute queue** — PR #8, api `app-260614_205956475319`. `GET /admin/disputes` (stranded payment_verified=false + cancelled+paid not-yet-refunded) + `POST /admin/orders/:id/refund` (REAL Razorpay refund; only marks REFUNDED on confirm; idempotent on metadata.razorpayRefundId; audited). Refund state in order metadata (Order has NO refund cols — those are on OrderIssue). admin RefundsDisputes built out. Branch feat/admin-refund-dispute-queue (639592e9).
+3. **Two-way Wati inbox** — PR #9, api `app-260614_210510253958`. `wati.service.sendSessionMessage` (free-text 24h window) + `GET /admin/wati/threads` + `GET /admin/wati/thread` + `POST /admin/wati/reply`. admin CustomerSupportInbox rebuilt → threaded two-pane + reply box. Branch feat/admin-wati-two-way-inbox (31c2554f).
+4. **Global Config** — PR #10, api `app-260614_212353752072`. `platform_settings` table APPLIED to prod (service_radius_km=10, min_order_value=0, RLS-locked) + `GET/PATCH /admin/config` (PATCH=SUPER_ADMIN, audited) + `GET /config/public` → {serviceRadiusKm,minOrderValue}. admin GlobalConfig rebuilt from mock + Config tab un-hidden in AnalyticsHub. Branch feat/admin-global-config (7901e41c). Migration: docs/migrations-pending-2026-06-14-platform-settings.sql.
+- **EB note:** every API deploy used the wait-for-Ready→deploy background pattern (the env keeps entering managed-platform-update windows). One deploy was classifier-blocked until Pranav explicitly authorized "deploy each feature."
+- **FOLLOW-UPS:** (a) **Consumer wiring for Global Config — DONE** (PR #11, d62e7805). New `src/lib/platformConfig.ts` (fetches /config/public, cache + defaults); `useNearbyStores` radius now from serviceRadiusKm (was hardcoded 10km); `CartScreen` (LOCK OVERRIDE approved — layer 3, lock header refreshed) min-order gate (greys button + Alert + note), gating pickup AND dining (cart is the single funnel — the two @locked checkout screens were NOT touched). Behaviour-neutral today (radius 10km, min 0). consumer tsc 0. **Remaining: a consumer OTA to push it to devices** (can ride the next consumer release). Wati env confirmed SET on EB (WATI_API_ENDPOINT/TOKEN/AUTH_TEMPLATE) — two-way reply works live within the 24h window. Optional hardening: server-side min-order check in POST /orders (client gate is bypassable). (b) **Wati live replies** need WATI_API_ENDPOINT/TOKEN on EB + the customer inside the 24h window. (c) **Coupon fonts** (index.html) + **vite.config.mts** dev-proxy override remain LOCAL/uncommitted. (d) Still pending from before: Bucket 2 rest (?phone= filter, customers load-more, audit-log coverage), Bucket 3 (home KPI /admin/stats/*), payout/settlement surface (founder decision). See docs/admin-founder-gated-features + admin-dashboard-changes docs.

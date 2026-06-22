@@ -1,0 +1,68 @@
+{
+  "when": "2026-06-22",
+  "moves": [
+    {
+      "id": "86a4d59c-f34a-48ff-8229-7a2668ec161a",
+      "name": "2 Quinoa",
+      "oldV": null,
+      "oldC": null,
+      "to": "Grocery & Kirana/Rice & Grains"
+    },
+    {
+      "id": "550348e1-eed4-4d36-842d-d535b69bc722",
+      "name": "Caffè Americano",
+      "oldV": null,
+      "oldC": null,
+      "to": "Grocery & Kirana/Beverages"
+    },
+    {
+      "id": "1d2ada98-20f1-4e62-a181-9f9a3d6c3357",
+      "name": "Caffè Mocha",
+      "oldV": null,
+      "oldC": null,
+      "to": "Grocery & Kirana/Beverages"
+    },
+    {
+      "id": "75f2e417-e9ba-46d0-9550-87ab86e42c62",
+      "name": "Lee",
+      "oldV": null,
+      "oldC": null,
+      "to": "Fashion & Apparel/Men's Clothing"
+    },
+    {
+      "id": "4821f71d-f012-419d-9565-0e1fe93b0f72",
+      "name": "Mango Dal",
+      "oldV": null,
+      "oldC": null,
+      "to": "Grocery & Kirana/Dal & Pulses"
+    },
+    {
+      "id": "b342712b-0f2b-48c5-99b8-bce336e755b7",
+      "name": "Mango Dal rice",
+      "oldV": null,
+      "oldC": null,
+      "to": "Grocery & Kirana/Dal & Pulses"
+    },
+    {
+      "id": "6dcbd543-0969-415e-9a52-f0fb8bbfe28e",
+      "name": "Plant",
+      "oldV": null,
+      "oldC": null,
+      "to": "Home & Lifestyle/Gardening Essentials"
+    },
+    {
+      "id": "9ec9aa2f-a956-4714-9743-9fe489b8b818",
+      "name": "Scissors",
+      "oldV": null,
+      "oldC": null,
+      "to": "Stationery, Gifting & Toys/Office Supplies"
+    },
+    {
+      "id": "2eb2c365-cc44-4737-8523-b2dac4f3eec9",
+      "name": "Brushes",
+      "oldV": null,
+      "oldC": null,
+      "to": "Home & Lifestyle/Cleaning Supplies"
+    }
+  ]
+}

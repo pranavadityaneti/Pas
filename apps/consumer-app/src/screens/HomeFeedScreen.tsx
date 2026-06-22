@@ -1,4 +1,6 @@
 // @lock — Do NOT overwrite.
+//   2026-06-16 (approved, Phase 3 Item 1): added .eq('is_deleted', false) to the
+//     brands StoreProduct query — soft-deleted listings must not feed discovery.
 // Pickup Discovery Screen (UX Overhauled): Hyper-local venue discovery, distance badges, curated sections.
 import React, { useEffect, useState, useMemo } from 'react';
 import { View, Text, ScrollView, Image, TouchableOpacity, TextInput, Dimensions, FlatList } from 'react-native';
@@ -55,6 +57,7 @@ export default function HomeFeedScreen() {
             .select('product:Product!inner(brand)')
             .in('branch_id', nearbyStoreIds.slice(0, 50))
             .eq('active', true)
+            .eq('is_deleted', false)
             .not('product.brand', 'is', null)
             .then(({ data }) => {
                 if (data) {

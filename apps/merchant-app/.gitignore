@@ -40,3 +40,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Secrets — keystore credentials (never commit; passwords live here)
+credentials.json
+credentials/

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Image, TouchableOpacity, Dimensions, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, Dimensions, Alert } from 'react-native';
 import { Plus, Minus, Heart } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { useProductFavorites } from '../hooks/useProductFavorites';
+import SafeImage from './SafeImage';
 import Svg, { Path } from 'react-native-svg';
 
 const { width } = Dimensions.get('window');
@@ -21,7 +22,7 @@ interface ProductCardProps {
         storeName?: string;
         distance?: string;
         rating?: string | number;
-        isVeg?: boolean;
+        isVeg?: boolean | null;
         stock?: number;
     };
     quantity: number;
@@ -59,14 +60,14 @@ export default function ProductCard({
         >
             {/* 1. UPPER SECTION (Image) */}
             <View className="w-full h-[140px] bg-[#F9FAFB] items-center justify-center p-4 relative">
-                <Image
+                <SafeImage
                     source={typeof item.image === 'string' ? { uri: item.image } : item.image}
-                    className="w-full h-full"
+                    style={{ width: '100%', height: '100%' }}
                     resizeMode="contain"
                 />
 
-                {/* Veg / Non-Veg Indicator */}
-                {item.isVeg !== undefined && (
+                {/* Veg / Non-Veg Indicator — only for food products (isVeg true/false); null/undefined = non-food, no dot */}
+                {(item.isVeg === true || item.isVeg === false) && (
                     <View className={`absolute top-2 left-2 w-3.5 h-3.5 border items-center justify-center bg-white/80 ${item.isVeg ? 'border-green-600' : 'border-red-600'}`} style={{ borderWidth: 1.5, borderRadius: 2 }}>
                         <View className={`w-1.5 h-1.5 rounded-full ${item.isVeg ? 'bg-green-600' : 'bg-red-600'}`} />
                     </View>

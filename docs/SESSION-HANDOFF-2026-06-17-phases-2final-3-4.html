@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAS Session Handoff — Phase 2 FINAL · Phase 3 · Phase 4 (2026-06-16/17)</title>
+<style>
+  :root{--ink:#1a2233;--mut:#5b6676;--line:#e3e8ef;--accent:#B52725;--ok:#166534;--warn:#9a6700;--code:#f6f8fa;--bg:#fff}
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg);line-height:1.55;margin:0;padding:0 22px 90px}
+  .wrap{max-width:1000px;margin:0 auto}
+  h1{font-size:27px;margin:26px 0 4px}
+  h2{font-size:21px;margin:38px 0 8px;padding-top:10px;border-top:3px solid var(--accent)}
+  h3{font-size:16.5px;margin:22px 0 6px}
+  h4{font-size:14px;margin:14px 0 4px;color:var(--mut);text-transform:uppercase;letter-spacing:.03em}
+  .mut{color:var(--mut)} .sm{font-size:12.5px;color:var(--mut)}
+  p,li{font-size:14.5px} code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:12.8px}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12.4px;line-height:1.5}
+  table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13px}
+  th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+  th{background:#f3f6fa;font-weight:600}
+  .toc{background:#fafbfc;border:1px solid var(--line);border-radius:8px;padding:14px 20px;margin:18px 0;columns:2;column-gap:30px}
+  .toc a{color:var(--accent);text-decoration:none;font-size:13.5px} .toc li{margin:3px 0}
+  .callout{border-left:4px solid var(--accent);background:#fdf3f3;padding:9px 14px;margin:12px 0;border-radius:0 6px 6px 0}
+  .callout.ok{border-color:var(--ok);background:#f1f9f3} .callout.warn{border-color:var(--warn);background:#fdf8ec}
+  .tag{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:9px;background:#eef2f7;color:var(--mut);margin-right:5px}
+  .tag.done{background:#e7f6ec;color:var(--ok)} .tag.gate{background:#fdecec;color:var(--accent)} .tag.pend{background:#fdf6e3;color:var(--warn)}
+  @media print{body{padding:0}.toc{columns:2}h2{break-after:avoid}pre,table{break-inside:avoid}a{color:var(--ink);text-decoration:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>PAS — Engineering Session Handoff</h1>
+<div class="mut">Window: 2026-06-16 → 2026-06-17 · Branch <code>feat/consumer-global-config-wiring</code> · API deployed <code>app-260616_182606893154</code> (EB <code>pas-api-prod-v2</code>, ap-south-1)</div>
+<p class="sm">Covers everything done in this session: <b>Phase 2 FINAL</b> (StoreProduct.storeId rework), <b>Phase 3</b> (customer-safety), <b>Phase 4 sub-project 1</b> (the 141k Blinkit master-catalog loader), and the <b>admin catalog taxonomy fix</b>. Written for a fresh Claude Code session to pick up with full context. 24 commits; details below.</p>
+
+<div class="callout warn">
+<b>⚠️ FIRST ACTION on the new account — push + pull, or the code won't be there.</b> The remote branch <code>origin/feat/consumer-global-config-wiring</code> is at <code>7a79c39a</code>. There are <b>~18 newer commits committed locally but NOT pushed</b> (everything from Phase 3 Item 1 <code>e00cdb29</code> through the admin fix <code>6773db05</code>). Before/at handoff: <code>git push origin feat/consumer-global-config-wiring</code> from this machine, then <code>git pull</code> on the new one. <b>The production DB is shared</b> (Supabase/EB prod), so all DB changes (139,880 products, every migration) are already visible to the new account — only the code commits need pushing.
+</div>
+
+<div class="toc"><b>Contents</b>
+<ol>
+<li><a href="#state">1. Current-state snapshot</a></li>
+<li><a href="#commits">2. Commit map (24)</a></li>
+<li><a href="#p2">3. Phase 2 FINAL — storeId rework</a></li>
+<li><a href="#p2audit">4. Phase 2 FINAL — adversarial audit (F1–F5)</a></li>
+<li><a href="#p3">5. Phase 3 — customer safety</a></li>
+<li><a href="#p4">6. Phase 4 — Blinkit bulk-loader</a></li>
+<li><a href="#admin">7. Admin catalog taxonomy fix</a></li>
+<li><a href="#files">8. Key files reference</a></li>
+<li><a href="#ops">9. Operational know-how + gotchas</a></li>
+<li><a href="#next">10. Gated / pending / next steps</a></li>
+<li><a href="#naming">11. Taxonomy + naming convention</a></li>
+</ol>
+</div>
+
+<h2 id="state">1. Current-state snapshot</h2>
+<table>
+<tr><th>Surface</th><th>State</th></tr>
+<tr><td><b>Prod DB</b> (Supabase Postgres)</td><td>Fully current. All migrations applied directly via <code>$executeRawUnsafe</code> node scripts. <b>140,174 Product rows</b> (139,880 <code>source='blinkit'</code> + 134 zepto + 111 null + 39 live_sync + 10 purchased_catalog).</td></tr>
+<tr><td><b>API code (EB)</b></td><td>Deployed <code>app-260616_182606893154</code> (Ready/Green) — ships B6.x + B11 F1/F3. <span class="tag pend">PENDING DEPLOY</span> Phase 3 Item 2 ₹0 app-guard (<code>c0f8b977</code>) — non-urgent, the DB CHECK already enforces it.</td></tr>
+<tr><td><b>Consumer app</b></td><td>Phase 3 Items 1 + 3 committed; <span class="tag gate">HELD</span> ride the batched consumer OTA (Pranav holding all OTAs for a sequential verify-then-push pass after phases 3/4/5).</td></tr>
+<tr><td><b>Merchant app</b></td><td>B7 read-fix committed; <span class="tag gate">HELD</span> rides the batched merchant OTA. <b>Gates B10</b> (see §10).</td></tr>
+<tr><td><b>Admin web</b></td><td>Taxonomy fix (<code>6773db05</code>) + B7 StoreProductTable fix committed. Ships via Vercel on a <b>main merge</b> (feature-branch push = preview only). Currently runnable locally (see §9).</td></tr>
+<tr><td><b>Local dev server</b></td><td>admin-web was running at <code>http://localhost:3001</code> (Vite, proxied to prod API). Will not survive the account move — restart per §9.</td></tr>
+</table>
+
+<h2 id="commits">2. Commit map (24, oldest → newest)</h2>
+<pre>7eb29e24  feat(api): Phase 2 FINAL — StoreProduct.storeId rework (server+DB, B1-B9)
+00872d09  fix(clients): Phase 2 FINAL B7 — read StoreProduct inventory via branch_id
+f80b99a4  fix(api): Phase 2 FINAL B11 — audit remediation (F1/F2/F3/F5)
+f4210e39  chore(api): Phase 2 FINAL F4a — delete 21 orphan branches; API deployed
+e60d91fe  feat(api): Phase 2 FINAL F4b — store_id NOT NULL (DB-enforced no-leak)
+7a79c39a  docs: record B10 deferred to batched merchant OTA; branch pushed   ← origin HEAD
+e00cdb29  fix(consumer): Phase 3 Item 1 — is_deleted:false on all consumer StoreProduct reads
+c0f8b977  fix(api): Phase 3 Item 2 — a ₹0 listing can never be live
+db25c0c2  fix(consumer): Phase 3 Item 3 — SafeImage fallback for broken product images
+77c10f60  fix(db): Phase 3 Item 4 — hide empty stores from discovery (Option B)
+be9c2605  docs: Phase 4 bulk-loader design spec (sub-project 1)
+d0072de6  docs: finalize bulk-loader spec — Product.isVeg column decided
+dc39e462  docs: Blinkit bulk-loader implementation plan (Phase 4 sub-project 1)
+2a2733e9  chore(api): add csv-parse for the Blinkit bulk loader
+d5c74028  feat(api): Phase 4 — add Product.isVeg tri-state column (additive)
+0909bda4  feat(api): Blinkit loader veg derivation (default-veg, word-boundary keywords)
+08efa6db  feat(api): Blinkit loader transform helpers (quantity, price clamp, image, json)
+e29f40f6  feat(api): Blinkit loader mapRowToProduct (full Blinkit->Product mapping)
+1789b9c6  feat(api): Blinkit bulk-loader CLI (streaming, batched upsert, dry-run)
+59998aed  fix(api): tune Blinkit veg rules from dry-run (real subcats + vegan override)
+99d6e63d  test(api): adversarial audit of Blinkit loader + unify retry update payload
+18e86439  perf(api): Blinkit loader — bulk createMany instead of per-row upserts
+2a16c040  docs: record Blinkit full-load outcome — 139,880 products, 0 errors
+6773db05  fix(admin): catalog taxonomy — live data + Category/Subcategory naming   ← local HEAD</pre>
+
+<h2 id="p2">3. Phase 2 FINAL — StoreProduct.storeId rework</h2>
+<h4>The problem</h4>
+<p>The Prisma schema <i>declared</i> a <code>StoreProduct.storeId → Store(id)</code> foreign key that <b>did not exist in the database</b>. <code>storeId</code> was being written with a <i>branch</i> id by the merchant write paths. Result: <b>26 of 44 listings orphaned</b>; only 2 of 4 stores returned inventory; <b>Freshly silently lost 67% of its catalog</b> (33 real listings, only 11 visible). Zero <code>order_items</code> referenced any orphan.</p>
+<h4>The decision (Pranav): Option B — eliminate, don't patch</h4>
+<p>Rather than add the missing FK to a vestigial column, we relocated the canonical Store↔branch link to <code>merchant_branches.store_id</code> (the correct domain location) with a real FK, decoupled all code from <code>StoreProduct.storeId</code>, and set up to drop it. "No leaks, no gaps, no errors."</p>
+<h4>Steps B1–B11 (all applied to prod DB unless noted)</h4>
+<table>
+<tr><th>Step</th><th>What</th></tr>
+<tr><td>B1</td><td>Added <code>merchant_branches.store_id uuid</code> (nullable) + Prisma <code>store</code>/<code>branches</code> relations.</td></tr>
+<tr><td>B2</td><td>Backfilled <code>store_id</code> for the 5 real branches (rule: <code>branch.merchant_id == Store.id</code>). 21 test/orphan branches kept NULL by design.</td></tr>
+<tr><td>B3</td><td>Hard-deleted the 4 "mystery" StoreProduct rows (Broccoli/Amla/Grapes/Papaya — phantom storeId, NULL branch_id, 0 order history). Pranav-approved.</td></tr>
+<tr><td>B4</td><td>Repaired the 22 Freshly orphans (storeId → Freshly Store <code>9143278d</code>).</td></tr>
+<tr><td>B5</td><td>Added <code>fk_merchant_branches_store</code> (ON DELETE/UPDATE NO ACTION). <b>Negative-tested live</b> (DB rejects a fake store_id) + positive-tested, both rolled back.</td></tr>
+<tr><td>B6.0</td><td><code>StoreProduct.storeId</code> DROP NOT NULL (prereq so write sites can stop populating it).</td></tr>
+<tr><td>B6.1</td><td>Coupon path <code>/checkout/validate-coupon</code> now derives storeId via <code>merchant_branches.store_id</code> include (not StoreProduct.storeId).</td></tr>
+<tr><td>B6.2 / B6.3</td><td>The two StoreProduct upserts (<code>POST /merchant/products/save</code>, <code>POST /merchant/store-products/configure</code>) stop writing <code>storeId</code>.</td></tr>
+<tr><td>B7</td><td>Client reads swapped to <code>branch_id</code>: admin <code>StoreProductTable.tsx</code>, merchant <code>AddMenuProductModal.tsx</code> + <code>useInventory.ts</code>. Consumer already used branch_id.</td></tr>
+<tr><td>B9</td><td><code>StoreProduct.branch_id</code> SET NOT NULL + Prisma relation required.</td></tr>
+<tr><td>B11 (F1–F5)</td><td>Audit remediation — see §4.</td></tr>
+<tr><td><b>B10</b></td><td><span class="tag gate">GATED — NOT DONE</span> Drop <code>StoreProduct.storeId</code> column. See §10.</td></tr>
+</table>
+<p class="sm">DB-migration pattern used throughout: raw SQL via the Prisma client <code>$executeRawUnsafe</code> in a <code>tsx</code> node script run from <code>apps/api</code> — NOT <code>prisma db execute</code>. Verifications use rolled-back transactions. Scripts: <code>apps/api/scripts/phase2final_b*.ts</code>.</p>
+
+<h2 id="p2audit">4. Phase 2 FINAL — adversarial audit (Pranav-requested)</h2>
+<p>After B1–B9, Pranav asked for a line-by-line audit. It verified the historical data was clean (0 leaks, FK works, all 8 apps' readers swept) but found the structure was <b>not self-sustaining</b>. Findings + fixes (B11):</p>
+<table>
+<tr><th>ID</th><th>Severity</th><th>Finding → Fix</th></tr>
+<tr><td>F1</td><td>CRITICAL</td><td>Branch-creation code never set <code>store_id</code> → every NEW merchant/branch would re-orphan its inventory. <b>Fixed</b> at all 6 creation sites (signup ×5 + <code>POST /merchant/branches</code>): set <code>storeId = userId</code>/<code>merchantId</code> (= the parent Store id).</td></tr>
+<tr><td>F2</td><td>HIGH (B10-breaking)</td><td>DB function <code>delete_merchants_cascaded</code> (live admin "delete merchant") referenced <code>StoreProduct.storeId</code> → breaks when the column is dropped. <b>Missed in B7 because only app code was swept, not DB functions.</b> Rewrote to key off <code>merchant_branches.merchant_id</code>. Bonus: the old fn only matched 7/40 rows (missed Freshly's 33).</td></tr>
+<tr><td>F3</td><td>HIGH (money path)</td><td>B6.1's null-filter regressed the coupon vertical-eligibility check from fail-CLOSED to fail-OPEN. <b>Restored fail-closed</b>: any unresolvable store → reject.</td></tr>
+<tr><td>F4</td><td>MEDIUM (structural)</td><td>Made <code>merchant_branches.store_id</code> NOT NULL (DB-enforced). <b>F4a</b>: deleted the 21 orphan/test branches (verified 0 orders/StoreProducts/bookings/staff). <b>F4b</b>: <code>ALTER ... SET NOT NULL</code> — negative-tested (DB rejects NULL insert). The Store↔branch↔StoreProduct chain is now enforced end-to-end at the DB level.</td></tr>
+<tr><td>F5</td><td>LOW</td><td>Added <code>idx_merchant_branches_store_id</code> (FK column was unindexed).</td></tr>
+</table>
+<div class="callout">Adjacent bug-class findings (NOT touched — own tickets, see §10): <b>(a)</b> <code>Order.storeId</code>/<code>Order.branchId</code> is the same dual-column class (notification payloads do <code>storeId: updated.branch_id</code> at index.ts:3721/3748/3763). <b>(b)</b> <code>Store.merchant_id</code> has no DB FK. <b>(c)</b> Folli Medicals is a branchless Store; Wakey Owl is inactive.</div>
+
+<h2 id="p3">5. Phase 3 — customer safety (before any Blinkit row reaches customers)</h2>
+<table>
+<tr><th>Item</th><th>Status</th><th>Detail</th></tr>
+<tr><td>1 — <code>is_deleted:false</code></td><td><span class="tag done">DONE</span> <code>e00cdb29</code></td><td>Added <code>.eq('is_deleted', false)</code> to all 5 consumer StoreProduct reads: useProducts, HomeFeedScreen, CheckoutScreen (hard-lock — layer 8 note), FavoritesScreen, useCategoryItems. Ships via consumer OTA.</td></tr>
+<tr><td>2 — ₹0 can't be live</td><td><span class="tag done">DONE</span> <code>c0f8b977</code></td><td>App guard at all 3 write paths (active requires price&gt;0) <b>+ DB CHECK</b> <code>NOT (active AND price&lt;=0)</code> (<code>scripts/phase3_item2_check_active_price.ts</code>, negative-tested). App guard rides next EB deploy; CHECK is live.</td></tr>
+<tr><td>3 — SafeImage fallback</td><td><span class="tag done">DONE</span> <code>db25c0c2</code></td><td>New <code>SafeImage</code> component (onError→placeholder, per-instance state, <b>style-based</b> because NativeWind v2 transforms className at compile time). Used in ProductCard, SearchResults, CartScreen. Root fix = Phase 5 re-host. Ships via consumer OTA.</td></tr>
+<tr><td>4 — hide empty stores</td><td><span class="tag done">DONE</span> <code>77c10f60</code></td><td><code>get_nearby_stores</code> now requires <code>EXISTS(active, non-deleted StoreProduct)</code> + modernized join to <code>s.id = mb.store_id</code> (Option B). Applied directly to DB; 0 stores hidden today (forward guard).</td></tr>
+<tr><td>5 — FSSAI gate</td><td><span class="tag pend">DEFERRED</span></td><td>Listing-time gate (StoreProduct write path) — not an ingest rule. Design pass.</td></tr>
+<tr><td>6+7 — veg tri-state + filter</td><td><span class="tag pend">DEFERRED</span></td><td>Coupled "veg design pass." Customer veg = derive from subcategory; dots only on food; store-aware filter. Sub-project 3 of Phase 4 (the loader already writes <code>Product.isVeg</code>).</td></tr>
+</table>
+
+<h2 id="p4">6. Phase 4 — Blinkit bulk-loader (sub-project 1 of 3)</h2>
+<p>Decomposed (Pranav-confirmed order): <b>(1) bulk-loader</b> → (2) paginated catalog picker → (3) consumer veg/non-veg filter+dots. Designed via the brainstorming workflow → spec → plan → TDD build → audit → load.</p>
+<h4>Spec + plan</h4>
+<p>Spec: <code>docs/blinkit-bulk-loader-spec-2026-06-16.html</code>. Plan: <code>docs/superpowers/plans/2026-06-17-blinkit-bulk-loader.md</code>.</p>
+<h4>Brainstorm decisions (all verified against the real 165MB / 141,405-row CSV)</h4>
+<ul>
+<li><b>Image re-host:</b> lazy / on-list — store the grofers URL; re-host to Supabase only when a merchant lists a product. Load stays metadata-only.</li>
+<li><b>Siblings:</b> deferred — load flat; sibling fields (<code>siblings/parentIndex/childIndex</code>) preserved in <code>extraData</code>; <code>variantGroupId</code> linkage is a later sub-project.</li>
+<li><b>Veg:</b> default-VEG for unsignalled food; non-food → NULL (no dot). Stored in a new <code>Product.isVeg</code> tri-state column.</li>
+<li><b>Unmapped category:</b> SKIP (don't load). All 1,505 skipped rows are intentional exclusions (Digital Goods/E-Cards 629, NULL/NULL 325, Paan Corner/tobacco 507, Specials/services 43).</li>
+<li><b>Architecture:</b> local streaming Node CLI (<code>npx tsx</code>), <code>csv-parse</code> stream, batched writes, idempotent/resumable via <code>sourceProductId @unique</code>.</li>
+<li><b>Pricing:</b> <code>mrp</code> = ceiling; Blinkit <code>price</code> = suggested selling price → <code>extraData.suggestedPrice</code> (clamped ≤ mrp). Verified on 20k rows: <code>price ≤ mrp</code> always (1 anomaly clamped). <b>No MRP÷100 heuristic.</b></li>
+</ul>
+<h4>Build (TDD, <code>node:test</code> via <code>npx tsx --test</code>) — files under <code>apps/api/src/blinkitLoader/</code></h4>
+<pre>src/blinkitLoader/types.ts        BlinkitRow, CategoryResolution, ProductUpsert
+src/blinkitLoader/vegRules.ts     deriveVeg + non-veg keyword/subcat lists + vegan override
+src/blinkitLoader/transform.ts    parseQuantity, clampSuggestedPrice, firstImage, safeJson, mapRowToProduct
+scripts/migrate_add_product_isveg.ts   additive Product.is_veg column
+scripts/load_blinkit_catalog.ts        the streaming CLI</pre>
+<h4>Field mapping (Blinkit CSV → Product)</h4>
+<pre>product_id  → sourceProductId (@unique, idempotency key)   mrp → mrp (ceiling)
+name        → name                                          price → extraData.suggestedPrice (clamped ≤ mrp)
+brand       → brand        images[0] → image (grofers URL, lazy re-host later)
+quantity    → uom (+ best-effort unitValue/unitType)        deeplink → productUrl
+category/subcategory → resolved via CategoryMapping → vertical_id + category_id; raw → subcategory
+data_dump   → extraData.{siblings,parentIndex,childIndex} ; rating→avgRating ; ratingCount→numberOfRatings
+source = 'blinkit' (constant)   isVeg → derived (Product.isVeg column)</pre>
+<h4>Adversarial audit (read-only, <code>scripts/audit_blinkit_loader.ts</code>) — 0 data-path bugs</h4>
+<p>Verified: requiresFssai flags exactly the 4 food verticals (veg derivation sound); header/field map exact; <b>0 numeric (comma/NaN) corruption</b>; data_dump <b>100% valid JSON</b>; images 100% extract; category resolution <b>0 false-unmapped</b>; <b>0 sourceProductId collisions</b> (existing are UUIDs, Blinkit are numerics). Dry-run tuning fixed the non-veg subcategory names (real: Chicken/Eggs/Fish &amp; Seafood/Sausage, Salami &amp; Ham/Exotic Meat/Mutton/Frozen Non-Veg) + added a plant-based/vegan override.</p>
+<div class="callout warn"><b>⚠️ PERF BUG caught + fixed mid-load (lesson for the picker + any future bulk write):</b> the first full run used <code>prisma.$transaction([500 individual upserts])</code> = 500 sequential round-trips per batch → at remote-DB latency the load would take <b>~4–5 hours</b> (it stalled at 596 rows). Fixed by switching to a single bulk <code>prisma.product.createMany({ skipDuplicates: true })</code> per batch (one round-trip) → <b>4,358 rows in 14s</b>. INSERT-only + idempotent via the unique key; a future "refresh existing Blinkit rows" path would need raw <code>INSERT ... ON CONFLICT DO UPDATE</code>.</div>
+<h4>Load outcome (T9) — matches the dry-run prediction exactly</h4>
+<pre>rows read 141,405 · loaded 139,880 · skipped-unmapped 1,505 · skipped-invalid 20 · ERRORS 0
+veg 41,826 / non-veg 1,920 / unknown(non-food) 96,134 · 13 verticals
+Integrity (all 139,880): null_vert=0 · null_cat=0 · null_sub=0 · suggestedPrice>mrp=0 · image-null=0</pre>
+<p class="sm">Rollback (safe pre-listing): <code>DELETE FROM "Product" WHERE source='blinkit';</code></p>
+
+<h2 id="admin">7. Admin catalog taxonomy fix</h2>
+<p>Founder observation: most products in the admin Global Catalog showed blank Vertical/Category. <b>Root cause (a display bug, NOT missing data — all 139,880 rows have vertical+category+subcategory in the DB):</b> the admin dropdowns were populated from <b>hardcoded, stale arrays</b> (11 verticals / 8 categories) predating the Phase 2 taxonomy (15 verticals / 136 Tier2Categories). A dropdown can't display a value not in its option list → correctly-filed products rendered blank.</p>
+<p><b>Fix (<code>6773db05</code>, admin-web — <code>MasterCatalog.tsx</code>):</b> replaced the hardcoded lists with <b>live data</b> fetched from the <code>Vertical</code> + <code>Tier2Category</code> tables (public-read, same source the customer app uses); relabelled columns to match the customer app + ops language — <b>"Category" (= Vertical, 15)</b> and <b>"Subcategory" (= Tier2Category, 136)</b>; Subcategory options <b>cascade</b> by the selected Category. Applied at all 8 sites (catalog table, sync-queue table, edit-product modal, bulk menu, filter). Verified with the real <code>tsc</code> + <code>vite build</code>.</p>
+
+<h2 id="files">8. Key files reference</h2>
+<pre>apps/api/src/index.ts                         coupon path, write sites, signup branch-creation (F1), GET/PATCH /products
+apps/api/prisma/schema.prisma                 MerchantBranch.storeId, StoreProduct (storeId nullable→to-drop), Product.isVeg
+apps/api/src/blinkitLoader/*                   loader pure logic + tests
+apps/api/scripts/phase2final_b*.ts            storeId rework migrations (B1–B9)
+apps/api/scripts/phase2final_F*.ts            audit remediation (F2 fn rewrite, F4a/F4b, F5)
+apps/api/scripts/phase3_item2_check_active_price.ts   ₹0 CHECK constraint
+apps/api/scripts/phase3_item4_hide_empty_stores.ts    get_nearby_stores rewrite
+apps/api/scripts/load_blinkit_catalog.ts      the loader CLI
+apps/api/scripts/audit_blinkit_loader.ts      the read-only loader audit
+apps/admin-web/src/components/modules/catalog/MasterCatalog.tsx   taxonomy fix
+apps/consumer-app/src/hooks/useProducts.ts, useCategoryItems.ts ; screens/{HomeFeedScreen,CheckoutScreen,FavoritesScreen}.tsx ; components/{ProductCard,SearchResults,SafeImage}.tsx
+docs/blinkit-bulk-loader-spec-2026-06-16.html ; docs/superpowers/plans/2026-06-17-blinkit-bulk-loader.md</pre>
+
+<h2 id="ops">9. Operational know-how + gotchas</h2>
+<ul>
+<li><b>DB migrations:</b> raw SQL via Prisma <code>$executeRawUnsafe</code> in a <code>tsx</code> script run from <code>apps/api</code> (NOT <code>prisma db execute</code> — it chokes on big inserts). Verify with rolled-back transactions.</li>
+<li><b>Run scripts:</b> <code>cd apps/api &amp;&amp; npx tsx scripts/&lt;x&gt;.ts</code>. Unit tests: <code>npx tsx --test src/&lt;x&gt;.test.ts</code> (built-in <code>node:test</code>; no jest/vitest).</li>
+<li><b>⚠️ admin-web type-check:</b> <code>npx tsc</code> in admin-web runs a <b>stub package</b>, not the real compiler (silently reports "no errors"). Use <code>node_modules/.bin/tsc --noEmit</code> or <code>npm run build</code> (<code>vite build</code>).</li>
+<li><b>API deploy:</b> <code>cd apps/api &amp;&amp; npm run build &amp;&amp; eb deploy</code> — confirm <code>eb status</code> Ready/Green first; commit <code>src/index.ts</code> (dist is gitignored; <code>.ebignore</code> bundles the working dir). Verify with <code>curl https://api.pickatstore.io/health</code>. <b>Every deploy + every migration needs Pranav's explicit per-action "yes"</b> (the auto-mode classifier enforces this).</li>
+<li><b>Bulk DB writes:</b> use <code>createMany</code> (one round-trip/batch), never per-row <code>upsert</code> in a loop over the remote DB (see the perf bug, §6).</li>
+<li><b>Loader is resumable:</b> re-run <code>load_blinkit_catalog.ts --skip-existing</code>; idempotent on <code>sourceProductId</code>. Flags: <code>--file --dry-run --limit N --batch-size N --skip-existing</code>.</li>
+<li><b>Admin dev server:</b> <code>cd apps/admin-web &amp;&amp; VITE_API_PROXY=https://api.pickatstore.io npm run dev</code> → <code>http://localhost:3001</code>.</li>
+<li><b>Package managers:</b> api/admin-web/merchant = npm; consumer = yarn.</li>
+<li><b>Pre-OTA <code>.env</code> protocol</b> (CRITICAL, in CLAUDE.md): flip <code>EXPO_PUBLIC_API_URL</code> to <code>https://api.pickatstore.io</code>, push with <code>--clear-cache</code>, grep the bundle, then revert. Both consumer + merchant <code>.env</code> sit on the local dev IP for day-to-day work.</li>
+</ul>
+
+<h2 id="next">10. Gated / pending / next steps</h2>
+<ol>
+<li><span class="tag gate">DO FIRST</span> <b>Push the branch</b> (18 unpushed commits) so the new account can pull. DB is shared (already current).</li>
+<li><span class="tag gate">GATED</span> <b>B10 — drop <code>StoreProduct.storeId</code> column.</b> Shipped admin-web + merchant-app bundles read the column directly via Supabase (<code>useInventory.ts:75</code>+realtime, <code>AddMenuProductModal.tsx</code>). Rollout: (a) merge branch → main → Vercel (admin-web on branch_id live); (b) ship merchant OTA (B7 fixes); (c) <b>after the OTA propagates</b>: <code>ALTER TABLE "Product"… ; ALTER TABLE "StoreProduct" DROP COLUMN "storeId";</code> + drop the Prisma <code>store</code> relation on StoreProduct + the <code>Store.products</code> inverse. F2 already removed the only DB-function dependency; no DB object blocks the drop.</li>
+<li><span class="tag pend">PENDING</span> <b>API deploy</b> to ship Phase 3 Item 2 ₹0 app-guard (<code>c0f8b977</code>) — non-urgent (DB CHECK live).</li>
+<li><span class="tag pend">HELD (batched)</span> <b>Consumer OTA</b> (Phase 3 Items 1+3) and <b>merchant OTA</b> (B7) — Pranav is holding ALL OTAs for a sequential verify-then-push pass after phases 3/4/5. Verify each bundle before pushing.</li>
+<li><span class="tag pend">NEXT BUILD</span> <b>Phase 4 sub-project 2 — paginated catalog picker</b> (so merchants can list the 139,880). Must carry: the <b>MRP-ceiling listing guard</b> (Pranav: "must enforce" <code>StoreProduct.price ≤ Product.mrp</code> at listing — picker + a StoreProduct CHECK like the ₹0 one); the <b>lazy image re-host mechanism</b> (download grofers→Supabase→swap URL on first listing); the <b>FSSAI listing gate</b>.</li>
+<li><span class="tag pend">NEXT BUILD</span> <b>Phase 4 sub-project 3 — consumer veg/non-veg filter + dots</b> (reads <code>Product.isVeg</code>). Includes: switch <code>useProducts</code> off <code>extraData.isVeg</code> → the column; backfill existing 294 products' veg into the column; dots only on food; store-aware filter.</li>
+<li><span class="tag pend">UNBLOCKED</span> <b>Delete legacy/test products</b>: <code>source='zepto'</code> (134) + null-source (111) + live_sync (39) — the Blinkit catalog is loaded + verified. Confirm with Pranav first.</li>
+<li><span class="tag pend">OWN TICKETS</span> <code>Order.storeId/branchId</code> same bug class; <code>Store.merchant_id</code> missing FK; Folli Medicals branchless store; veg false-negative human review of food subcats.</li>
+</ol>
+
+<h2 id="naming">11. Taxonomy + naming convention (use everywhere)</h2>
+<table>
+<tr><th>Ops / customer term</th><th>DB table/field</th><th>Count</th><th>Examples</th></tr>
+<tr><td><b>Category</b></td><td><code>Vertical</code></td><td>15</td><td>Grocery &amp; Kirana, Fresh Items, Bakeries &amp; Desserts, Pooja &amp; Festive Needs, Stationery/Gifting/Toys</td></tr>
+<tr><td><b>Subcategory</b></td><td><code>Tier2Category</code> (<code>category_id</code>)</td><td>136</td><td>Dairy &amp; Milk, Toys &amp; Games, Cleaning Supplies, Artisanal Sweets, Pooja Essentials</td></tr>
+<tr><td>(raw source label — internal only, not customer-facing)</td><td><code>Product.subcategory</code> (string)</td><td>~560</td><td>"Cars &amp; Vehicles", "Curd &amp; Yogurt", "Liquid Detergents"</td></tr>
+</table>
+<p>The customer app navigates Categories via <code>useCategories()</code> (Vertical) and shows Subcategories via <code>useSubCategories(verticalId)</code> (Tier2Category, filtered by <code>category_id</code>). The admin now matches. <code>Vertical.requiresFssai = true</code> marks the 4 food verticals (Grocery &amp; Kirana, Fresh Items, Bakeries &amp; Desserts, Restaurants &amp; Cafes) — this drives veg derivation.</p>
+
+<p class="sm">— End of handoff. Key prod IDs: Freshly Store/main-branch <code>9143278d-444e-4ee9-b836-f31d5de62e41</code>; API <code>https://api.pickatstore.io</code> (EB <code>pas-api-prod-v2</code>, ap-south-1). The master log <code>forlater.md</code> in the repo root has the running queue with deeper notes.</p>
+
+</div>
+</body>
+</html>

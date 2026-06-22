@@ -38,13 +38,21 @@ export function StoreProductTable({ storeId }: StoreProductTableProps) {
 
     const fetchInventory = async () => {
         setLoading(true);
+        // Phase 2 FINAL — B7 (2026-06-16): filter by branch_id (canonical key);
+        // StoreProduct.storeId is being dropped at B10. The `storeId` prop is a
+        // branch/merchant id (passed as merchant.id from MerchantDetailsSheet),
+        // which equals the main branch's id under the UUID-share pattern.
+        // NOTE (pre-existing, NOT fixed here — separate ticket): the embedded
+        // `category` scalar no longer exists on Product (category_id FK now), so
+        // this query still errors until that is addressed; and multi-branch
+        // merchants only surface their main branch here.
         const { data, error } = await supabase
             .from('StoreProduct')
             .select(`
                 id, stock, price, active, is_best_seller,
                 product:productId (name, image, mrp, category, brand)
             `)
-            .eq('storeId', storeId)
+            .eq('branch_id', storeId)
             .order('active', { ascending: false });
 
         if (error) {

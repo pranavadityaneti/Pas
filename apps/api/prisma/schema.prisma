@@ -58,6 +58,7 @@ model Vertical {
   id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name            String          @unique
   requiresFssai   Boolean         @default(false)
+  is_active       Boolean         @default(true)
   isPremium       Boolean         @default(false)
   isDining        Boolean         @default(false)
   isGrocery       Boolean         @default(false)
@@ -94,6 +95,32 @@ model Tier2Category {
   @@unique([verticalId, name])
   @@index([verticalId])
   @@map("Tier2Category")
+  @@schema("public")
+}
+
+/// Phase 2 (2026-06-15): maps a purchased-catalog source taxonomy
+/// (e.g. BLINKIT's 47 categories / 643 category-subcategory pairs) onto PAS's
+/// finalized 15 verticals + Tier2Categories. The bulk-load importer looks up
+/// (sourcePlatform, sourceCategory, sourceSubcategory); an empty sourceSubcategory
+/// ('') is the category-wide default. status (plain text, validated app-side,
+/// coupon-theme precedent): ACTIVE = assign vertical+category; PENDING_DECISION /
+/// EXCLUDED = route to a review queue, never to the live storefront.
+/// vertical_id/category_id are nullable (PENDING/EXCLUDED rows have none) and
+/// FK-constrained in SQL (ON DELETE SET NULL) — no Prisma back-relations needed.
+model CategoryMapping {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sourcePlatform    String   @map("source_platform")
+  sourceCategory    String   @map("source_category")
+  sourceSubcategory String   @default("") @map("source_subcategory")
+  verticalId        String?  @map("vertical_id") @db.Uuid
+  categoryId        String?  @map("category_id") @db.Uuid
+  status            String   @default("ACTIVE")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @default(now())
+
+  @@unique([sourcePlatform, sourceCategory, sourceSubcategory])
+  @@index([sourcePlatform])
+  @@map("CategoryMapping")
   @@schema("public")
 }
 
@@ -203,6 +230,11 @@ model Store {
   vertical       Vertical? @relation(fields: [verticalId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   orders         Order[]
   products       StoreProduct[]
+  // Phase 2 FINAL — B1 (2026-06-16): inverse for MerchantBranch.store. Required by
+  // Prisma because the relation is declared on MerchantBranch. Backfilled in B2,
+  // FK enforced in B5; becomes the SOLE Store↔branch link after B10 drops
+  // StoreProduct.storeId.
+  branches       MerchantBranch[] @relation("StoreBranches")
 
   @@index([merchantId])
   @@index([verticalId])
@@ -364,6 +396,10 @@ model Product {
   // admin/ops flip to false for perishable, prepared, intimate categories.
   // Read by WS2.B rules engine when evaluating return-window eligibility.
   returnable       Boolean           @default(true)
+  // Phase 4 (2026-06-17): tri-state derived dietary flag. true=veg, false=non-veg,
+  // NULL=unknown/non-food. Written by the Blinkit loader; the consumer veg filter
+  // (sub-project 3) reads it. Replaces the older extraData.isVeg convention.
+  isVeg            Boolean?          @map("is_veg")
   category_id      String?           @db.Uuid
   vertical_id      String?           @db.Uuid
   Tier2Category    Tier2Category?    @relation(fields: [category_id], references: [id], onUpdate: NoAction)
@@ -407,7 +443,9 @@ model ProductAuditLog {
 
 model StoreProduct {
   id                String          @id @default(uuid())
-  storeId           String          @db.Uuid
+  // Phase 2 FINAL — B6.0 (2026-06-16): made nullable in preparation for B10 (drop).
+  // Source of truth for store↔branch link is now merchant_branches.store_id.
+  storeId           String?         @db.Uuid
   productId         String
   price             Float
   stock             Int             @default(0)
@@ -417,10 +455,14 @@ model StoreProduct {
   variant           String          @default("Standard")
   is_best_seller    Boolean         @default(false)
   is_deleted        Boolean         @default(false)
-  branch_id         String?
+  // Phase 2 FINAL — B9 (2026-06-16): branch_id is now NOT NULL (every listing
+  // belongs to a branch; the 4 NULL-branch mystery rows were deleted in B3).
+  // This is the canonical store↔listing link; parent Store derives via
+  // merchant_branches.store_id.
+  branch_id         String
   product           Product         @relation(fields: [productId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  store             Store           @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  merchant_branches MerchantBranch? @relation(fields: [branch_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_storeproduct_branch")
+  store             Store?          @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  merchant_branches MerchantBranch  @relation(fields: [branch_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_storeproduct_branch")
   orderItems        OrderItem[]
 
   @@unique([branch_id, productId, variant], map: "storeproduct_branch_product_variant_key")
@@ -712,6 +754,12 @@ model MerchantBranch {
   serviceDinein       Boolean        @default(true) @map("service_dinein")
   serviceTableBooking Boolean        @default(false) @map("service_table_booking")
   slotConfig          Json?          @default("[]") @map("slot_config")
+  // Phase 2 FINAL (2026-06-16): store_id is the canonical Store↔branch link
+  // (moved off the vestigial StoreProduct.storeId). B5 added the FK; F4b made it
+  // NOT NULL — the DB now forbids a store-less branch. Every creation path (F1)
+  // sets it; B10 drops StoreProduct.storeId.
+  storeId             String         @map("store_id") @db.Uuid
+  store               Store          @relation("StoreBranches", fields: [storeId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   StoreProduct        StoreProduct[]
   merchant            Merchant?      @relation(fields: [merchantId], references: [id])
   orders              Order[]

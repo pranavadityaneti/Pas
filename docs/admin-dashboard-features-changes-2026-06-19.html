@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAS Admin Dashboard — Features &amp; Changes (2026-06-19)</title>
+<style>
+  :root{--ink:#1a2233;--mut:#5b6676;--line:#e3e8ef;--accent:#B52725;--ok:#166534;--new:#166534;--imp:#1d4ed8;--fix:#9a3412;--code:#f6f8fa;--bg:#fff}
+  *{box-sizing:border-box} body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg);line-height:1.5;margin:0;padding:0 22px 90px}
+  .wrap{max-width:1040px;margin:0 auto}
+  h1{font-size:25px;margin:24px 0 4px} h2{font-size:19px;margin:30px 0 6px;padding-top:9px;border-top:3px solid var(--accent)} h3{font-size:15px;margin:16px 0 4px;color:#111}
+  .mut{color:var(--mut)} .sm{font-size:12px;color:var(--mut)}
+  p,li,td{font-size:13.5px} code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:12px}
+  ol.feat{margin:4px 0;padding-left:20px} ol.feat li{margin:3px 0}
+  .callout{border-left:4px solid var(--accent);background:#fdf3f3;padding:9px 14px;margin:12px 0;border-radius:0 6px 6px 0}
+  .callout.ok{border-color:var(--ok);background:#f1f9f3}
+  .tag{display:inline-block;font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:8px;margin-right:4px;vertical-align:middle}
+  .new{background:#e7f6ec;color:var(--new)} .imp{background:#e6effe;color:var(--imp)} .fix{background:#fdecdc;color:var(--fix)}
+  .toc{columns:2;column-gap:30px;background:#fafbfc;border:1px solid var(--line);border-radius:8px;padding:12px 18px;margin:14px 0}
+  .toc a{color:var(--accent);text-decoration:none;font-size:13px} .toc li{margin:2px 0}
+  table{border-collapse:collapse;width:100%;margin:8px 0;font-size:12.5px} th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top} th{background:#f3f6fa}
+  @media print{body{padding:0}h2{break-after:avoid}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>PAS Admin Dashboard — Features &amp; Changes</h1>
+<div class="mut">2026-06-19 · <code>apps/admin-web</code> (Vite + React, Vercel) · branch <code>feat/consumer-global-config-wiring</code> · 36 commits / 50 files since 6891da46 (≈late May → now)</div>
+
+<div class="callout">
+<b>How the admin dashboard ships (important):</b> unlike the mobile apps, admin-web has <b>no build/OTA cycle</b> — it deploys to Vercel from git. <b>A push to the feature branch = a Vercel <i>preview</i> only; production updates on a merge to <code>main</code>.</b> So the items below are <b>built + committed</b>; each is live in production once its commit is on <code>main</code>. Confirm against your Vercel "Production" deployment which commits are already merged.
+</div>
+
+<div class="legend sm" style="margin:8px 0">
+<span class="tag new">NEW</span> new feature &nbsp; <span class="tag imp">IMPROVED</span> reworked/expanded &nbsp; <span class="tag fix">FIX</span> correctness/data fix
+</div>
+
+<div class="toc"><b>Modules</b>
+<ol>
+<li><a href="#auth">1. Login &amp; Auth</a></li>
+<li><a href="#rbac">2. RBAC, Roles &amp; Admin Invites</a></li>
+<li><a href="#home">3. Role-aware Home Dashboards</a></li>
+<li><a href="#analytics">4. Analytics / Reports</a></li>
+<li><a href="#customers">5. Customers</a></li>
+<li><a href="#orders">6. Orders</a></li>
+<li><a href="#merchants">7. Merchants &amp; KYC</a></li>
+<li><a href="#catalog">8. Master Catalog</a></li>
+<li><a href="#marketing">9. Marketing &amp; Coupons</a></li>
+<li><a href="#finance">10. Finance / Settlements</a></li>
+<li><a href="#ops">11. Operations (Support inbox, Refunds)</a></li>
+<li><a href="#config">12. Global Config</a></li>
+<li><a href="#design">13. Design system, Monitoring, Architecture</a></li>
+</ol>
+</div>
+
+<h2 id="auth">1. Login &amp; Auth</h2>
+<ol class="feat">
+<li><span class="tag new">NEW</span> <b>WhatsApp OTP login</b> as the primary sign-in, with email/password as a fallback (<code>Login.tsx</code>, <code>AuthContext.tsx</code>).</li>
+<li><span class="tag imp">IMPROVED</span> Login <b>redesign</b> — frosted photo backdrop, phone-OTP-first flow.</li>
+<li><span class="tag new">NEW</span> <b>Role assigned on OTP login</b> — the admin's role resolves at sign-in and drives the whole UI.</li>
+</ol>
+
+<h2 id="rbac">2. RBAC, Roles &amp; Admin Invites</h2>
+<ol class="feat">
+<li><span class="tag new">NEW</span> <b>RBAC v1</b> — role model + <b>role-aware sidebar</b> (each role sees only its modules) (<code>lib/rbac.ts</code>, <code>Sidebar.tsx</code>).</li>
+<li><span class="tag new">NEW</span> <b>Roles &amp; Permissions</b> module (<code>RolesPermissions.tsx</code>).</li>
+<li><span class="tag new">NEW</span> <b>Invite Admin</b> flow — phone + email invites (<code>AddAdminDialog.tsx</code>).</li>
+<li><span class="tag new">NEW</span> <b>Inline role/status edit</b> for existing admins.</li>
+</ol>
+
+<h2 id="home">3. Role-aware Home Dashboards</h2>
+<ol class="feat">
+<li><span class="tag new">NEW</span> <b>Per-role home pages</b> — Super-Admin, Finance, Operations, Support each get a tailored dashboard (<code>home/SuperAdminHome.tsx</code>, <code>FinanceHome.tsx</code>, <code>OperationsHome.tsx</code>, <code>SupportHome.tsx</code>, <code>_shared.tsx</code>).</li>
+<li><span class="tag new">NEW</span> <b>Home KPI stat endpoints</b> wired to real data.</li>
+<li><span class="tag imp">IMPROVED</span> <b>Quick Actions</b> moved to the header (beside the date chips) instead of the page bottom.</li>
+</ol>
+
+<h2 id="analytics">4. Analytics / Reports</h2>
+<ol class="feat">
+<li><span class="tag new">NEW</span> <b>Real analytics charts</b> (replaced demo data) (<code>analytics/AnalyticsDashboard.tsx</code>, <code>AnalyticsHub.tsx</code>).</li>
+<li><span class="tag new">NEW</span> <b>Analytics v1</b> — date filters, KPI strip, <b>CSV export</b>, sortable stores.</li>
+<li><span class="tag imp">IMPROVED</span> <b>Analytics depth</b> — compare-vs-previous-period, top products, by-category, by-city breakdowns.</li>
+<li><span class="tag new">NEW</span> <b>Audit log</b> view + helper (admin action history) (<code>analytics/AuditLog.tsx</code>).</li>
+<li><span class="tag fix">FIX</span> Renamed <code>/analytics → /reports</code>; removed the cyan→blue gradient for design consistency.</li>
+</ol>
+
+<h2 id="customers">5. Customers</h2>
+<ol class="feat">
+<li><span class="tag new">NEW</span> <b>Customers database</b> on real data with <b>Block / Unblock</b> (<code>customers/CustomerDatabase.tsx</code>, <code>useCustomers.ts</code>).</li>
+<li><span class="tag new">NEW</span> <b>Customer detail drawer</b> — real addresses (drawer + hover), order history (<code>CustomerDetailsSheet.tsx</code>).</li>
+<li><span class="tag new">NEW</span> <b>Edit customer name</b>, <b>incomplete-signup toggle</b>, <b>duplicate-account hint</b>.</li>
+<li><span class="tag new">NEW</span> <b>Deep link</b> <code>/customers?id=&lt;userId&gt;</code> opens the detail drawer directly.</li>
+<li><span class="tag fix">FIX</span> Expanded filters; clean name/email display; <code>full_name</code> read-fallback + name backfill.</li>
+<li><span class="tag fix">FIX</span> Reads routed through the admin API (Prisma) instead of direct Supabase (fixed PostgREST schema-cache misses) + pagination.</li>
+</ol>
+
+<h2 id="orders">6. Orders</h2>
+<ol class="feat">
+<li><span class="tag new">NEW</span> <b>Order Manager</b> on the real Order table with the real status enum (dropped demo dressing) (<code>orders/OrderManager.tsx</code>, <code>useOrders.ts</code>).</li>
+<li><span class="tag fix">FIX</span> Covers all <b>10 OrderStatus values</b> + restored <b>realtime subscription</b> (orders update live).</li>
+<li><span class="tag fix">FIX</span> Order reads routed through the admin API (Prisma).</li>
+</ol>
+
+<h2 id="merchants">7. Merchants &amp; KYC</h2>
+<ol class="feat">
+<li><span class="tag new">NEW</span> <b>KYC review queue</b> — shows the real vertical name + full signup details; <b>"Needs info"</b> status to bounce incomplete applications back (<code>merchants/KYCQueue.tsx</code>).</li>
+<li><span class="tag new">NEW</span> <b>Merchant directory</b> + <b>detail sheet</b> (<code>MerchantDirectory.tsx</code>, <code>MerchantDetailsSheet.tsx</code>).</li>
+<li><span class="tag new">NEW</span> <b>Add / Edit merchant</b>, <b>Export merchants</b>, <b>Merchant report</b> dialogs (<code>AddMerchantSheet.tsx</code>, <code>EditMerchantDialog.tsx</code>, <code>ExportMerchantsDialog.tsx</code>, <code>MerchantReportDialog.tsx</code>).</li>
+<li><span class="tag new">NEW</span> <b>Store product table</b> — view a merchant's listed inventory (<code>StoreProductTable.tsx</code>).</li>
+<li><span class="tag fix">FIX</span> Phase 2 FINAL B7 — store inventory read via <code>branch_id</code> (the corrected key).</li>
+<li><span class="tag fix">FIX</span> All merchant_branches writes routed through the API (Phase 8) (<code>useMerchants.ts</code>).</li>
+</ol>
+
+<h2 id="catalog">8. Master Catalog</h2>
+<ol class="feat">
+<li><span class="tag new">NEW</span> <b>Master Catalog</b> module — Global catalog, Merchant Requests, Sync Queue tabs (<code>catalog/MasterCatalog.tsx</code>).</li>
+<li><span class="tag fix">FIX</span> <b>Taxonomy fix (the blank-columns bug you spotted)</b> — the Category/Vertical dropdowns now load <b>live</b> data (15 Verticals / 136 Tier2Categories) instead of stale hardcoded lists, so correctly-filed products no longer render blank. Columns relabelled <b>Category (= Vertical)</b> and <b>Subcategory (= Tier2Category)</b> to match the customer app; subcategory cascades by category.</li>
+</ol>
+
+<h2 id="marketing">9. Marketing &amp; Coupons</h2>
+<ol class="feat">
+<li><span class="tag new">NEW</span> <b>Coupon engine UI</b> — full <b>Coupon Builder</b> with live preview, brand theming, preset theme picker (<code>marketing/CouponBuilder.tsx</code>, <code>CouponCard.tsx</code>).</li>
+<li><span class="tag new">NEW</span> <b>Coupon detail page</b> + <b>Coupon analytics hub</b> (redemptions, performance) (<code>CouponDetailPage.tsx</code>, <code>CouponAnalyticsHub.tsx</code>, <code>MarketingHub.tsx</code>).</li>
+<li><span class="tag new">NEW</span> <b>Merchant-signup coupons CRUD</b> — manage partner coupons (<code>MerchantSignupCoupons.tsx</code>, <code>lib/merchantSignupCouponService.ts</code>).</li>
+<li><span class="tag imp">IMPROVED</span> <b>Coupon foolproof Phases 1–3</b> — schema + server hardening + admin analytics/audit wiring (<code>lib/couponService.ts</code>).</li>
+</ol>
+
+<h2 id="finance">10. Finance / Settlements</h2>
+<ol class="feat">
+<li><span class="tag new">NEW</span> <b>Settlements Manager</b> — merchant payout/settlement view (<code>finance/SettlementsManager.tsx</code>, <code>lib/settlementService.ts</code>).</li>
+</ol>
+
+<h2 id="ops">11. Operations</h2>
+<ol class="feat">
+<li><span class="tag new">NEW</span> <b>Two-way Wati support inbox</b> — threaded WhatsApp conversations with customers + reply from the dashboard (<code>operations/CustomerSupportInbox.tsx</code>).</li>
+<li><span class="tag new">NEW</span> <b>Refunds &amp; Disputes queue</b> — surfaces stranded/pending payments + guarded (controlled) refunds (<code>operations/RefundsDisputes.tsx</code>).</li>
+</ol>
+
+<h2 id="config">12. Global Config</h2>
+<ol class="feat">
+<li><span class="tag new">NEW</span> <b>Global Config panel</b> — edit platform settings (service radius, minimum-order value) that the customer app reads live (<code>analytics/GlobalConfig.tsx</code> → <code>platform_settings</code>).</li>
+</ol>
+
+<h2 id="design">13. Design system, Monitoring &amp; Architecture</h2>
+<ol class="feat">
+<li><span class="tag imp">IMPROVED</span> <b>Admin design system</b> — cross-module UI alignment to a shared design language (<code>docs/admin-design-system.md</code>); refreshed logos/login background.</li>
+<li><span class="tag new">NEW</span> <b>Sentry monitoring</b> wired into admin-web (error tracking).</li>
+<li><span class="tag fix">FIX</span> <b>Architecture shift</b> — Customers/Orders/Merchants reads + all branch/Store/catalog/inventory writes routed through the <b>admin API (Prisma)</b> instead of direct Supabase (Phases 8/9), fixing schema-cache misses + centralising auth.</li>
+<li><span class="tag fix">FIX</span> Secured API auth interceptor; Vercel production proxy config; <code>.map</code> crash patch.</li>
+</ol>
+
+<h2>Module map (all 13 areas present in the codebase)</h2>
+<table>
+<tr><th>Module dir</th><th>Status</th></tr>
+<tr><td><code>analytics</code></td><td>AnalyticsDashboard, AnalyticsHub, AuditLog, GlobalConfig — active</td></tr>
+<tr><td><code>marketing</code></td><td>CouponBuilder, CouponCard, CouponDetailPage, CouponAnalyticsHub, MerchantSignupCoupons — active</td></tr>
+<tr><td><code>merchants</code></td><td>KYCQueue, MerchantDirectory/DetailsSheet, Add/Edit/Export/Report, StoreProductTable — active</td></tr>
+<tr><td><code>customers</code></td><td>CustomerDatabase, CustomerDetailsSheet — active</td></tr>
+<tr><td><code>orders</code></td><td>OrderManager — active</td></tr>
+<tr><td><code>operations</code></td><td>CustomerSupportInbox, RefundsDisputes — active</td></tr>
+<tr><td><code>finance</code></td><td>SettlementsManager — active</td></tr>
+<tr><td><code>catalog</code></td><td>MasterCatalog — active</td></tr>
+<tr><td><code>roles</code></td><td>RolesPermissions — active</td></tr>
+<tr><td><code>settings</code></td><td>AddAdminDialog — active</td></tr>
+<tr><td><code>consumers</code>, <code>engagement</code>, <code>geography</code></td><td>module folders present (earlier scaffolding / lighter use)</td></tr>
+</table>
+
+<p class="sm">— Compiled from 36 admin-web commits (50 files) since baseline <code>6891da46</code>. Source of truth = git log on <code>feat/consumer-global-config-wiring</code>. Production-live status depends on which commits are merged to <code>main</code> (Vercel deploys main); confirm against your Vercel Production deployment.</p>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAS — Admin Category Enable/Disable — Spec (2026-06-19)</title>
+<style>
+  :root{--ink:#1a2233;--mut:#5b6676;--line:#e3e8ef;--accent:#B52725;--ok:#166534;--code:#f6f8fa}
+  *{box-sizing:border-box} body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);line-height:1.55;margin:0;padding:0 22px 90px}
+  .wrap{max-width:960px;margin:0 auto} h1{font-size:24px;margin:24px 0 4px} h2{font-size:18px;margin:28px 0 6px;padding-top:9px;border-top:3px solid var(--accent)} h3{font-size:15px;margin:16px 0 4px}
+  .mut{color:var(--mut)} .sm{font-size:12.5px;color:var(--mut)} p,li,td{font-size:14px} code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:12.5px}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12.3px;line-height:1.5}
+  table{border-collapse:collapse;width:100%;margin:8px 0;font-size:13px} th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top} th{background:#f3f6fa}
+  .callout{border-left:4px solid var(--accent);background:#fdf3f3;padding:9px 14px;margin:12px 0;border-radius:0 6px 6px 0} .callout.ok{border-color:var(--ok);background:#f1f9f3}
+</style>
+</head>
+<body><div class="wrap">
+
+<h1>Admin Category Enable/Disable — Design Spec</h1>
+<div class="mut">2026-06-19 · branch <code>feat/consumer-global-config-wiring</code> · status: design approved, awaiting spec sign-off</div>
+
+<h2>In plain English</h2>
+<p>Admins get a <b>Categories</b> tab in the dashboard where each category (and its subcategories) has a single on/off toggle. Flipping one <b>off</b> disables it <b>platform-wide</b>: customers stop seeing the category and all its products everywhere (instantly, even on installed apps), merchants can't list new stock in it (and see it as "paused"), and any store left with nothing to sell quietly drops off discovery. Nothing is deleted — turning it back on reverses everything.</p>
+
+<h2>Locked decisions</h2>
+<table>
+<tr><th>#</th><th>Decision</th></tr>
+<tr><td>D1</td><td><b>Scope:</b> toggle both Categories (15 Verticals) and Subcategories (136 Tier2Categories).</td></tr>
+<tr><td>D2</td><td><b>Single coupled toggle</b> per category/subcategory — disable = platform-wide (customer + merchant together). No separate customer/merchant toggles in v1.</td></tr>
+<tr><td>D3</td><td><b>Customer side takes effect immediately on live apps</b> via RESTRICTIVE Postgres RLS (no app update).</td></tr>
+<tr><td>D4</td><td><b>Full hide:</b> the category AND all its products vanish from customer browse, search, and store pages.</td></tr>
+<tr><td>D5</td><td><b>Admin home:</b> a new "Categories" tab inside the existing Master Catalog module.</td></tr>
+<tr><td>D6</td><td><b>Merchant coupling:</b> listing API rejects new listings in a disabled category (instant); existing listings parked + "Paused by platform" UX (rides next merchant app update).</td></tr>
+<tr><td>D7</td><td><b>Stores:</b> no "offline" switch — the existing hide-empty-stores discovery rule is made category-aware, so stores with nothing visible auto-drop and auto-return.</td></tr>
+</table>
+
+<h2>Architecture</h2>
+<h3>1. Data model</h3>
+<p>Add <code>Vertical.is_active Boolean @default(true)</code> (migration, additive). <code>Tier2Category.active Boolean @default(true)</code> already exists. Index <code>Vertical(is_active)</code>.</p>
+
+<h3>2. Customer side — RESTRICTIVE RLS (the "instant on live apps" engine)</h3>
+<p>Existing permissive public-read SELECT policies stay (they're OR'd, can't restrict). Add <b>RESTRICTIVE</b> SELECT policies for <code>anon</code> + <code>authenticated</code> (AND'd onto the permissive ones). <code>service_role</code> (admin API) bypasses RLS entirely → admin still sees/manages everything.</p>
+<pre>-- Vertical: visible only if active
+CREATE POLICY cat_vis_vertical AS RESTRICTIVE FOR SELECT TO anon, authenticated
+  USING (is_active = true);
+
+-- Tier2Category: active AND parent vertical active
+CREATE POLICY cat_vis_tier2 AS RESTRICTIVE FOR SELECT TO anon, authenticated
+  USING (active = true AND EXISTS (SELECT 1 FROM "Vertical" v WHERE v.id = vertical_id AND v.is_active));
+
+-- Product: vertical active AND (no subcategory OR subcategory active)
+CREATE POLICY cat_vis_product AS RESTRICTIVE FOR SELECT TO anon, authenticated
+  USING (
+    (vertical_id IS NULL OR EXISTS (SELECT 1 FROM "Vertical" v WHERE v.id = vertical_id AND v.is_active))
+    AND (category_id IS NULL OR EXISTS (SELECT 1 FROM "Tier2Category" t WHERE t.id = category_id AND t.active))
+  );
+
+-- StoreProduct: its Product must be visible (airtight regardless of join style)
+CREATE POLICY cat_vis_storeproduct AS RESTRICTIVE FOR SELECT TO anon, authenticated
+  USING (EXISTS (SELECT 1 FROM "Product" pr
+                 WHERE pr.id = "StoreProduct"."productId"
+                   AND (pr.vertical_id IS NULL OR EXISTS (SELECT 1 FROM "Vertical" v WHERE v.id = pr.vertical_id AND v.is_active))
+                   AND (pr.category_id IS NULL OR EXISTS (SELECT 1 FROM "Tier2Category" t WHERE t.id = pr.category_id AND t.active))));</pre>
+<p class="sm">Verified: customer product reads use <code>Product!inner</code> joins, so these cascade. <code>service_role</code> is unaffected (bypasses RLS), so admin + the merchant API (which reads via service-role per Phase 8/9) keep full access. Apply via <code>$executeRawUnsafe</code> tsx scripts; verify with rolled-back tests (disable → anon hides it + products + listings; re-enable → reappears; service-role unaffected). <code>EXPLAIN ANALYZE</code> a product read before/after.</p>
+
+<h3>3. API — admin (role-gated) + merchant guard</h3>
+<pre>GET   /admin/categories                  → all Verticals + nested Tier2Categories
+                                            with active flags + product counts (service-role).
+PATCH /admin/categories/vertical/:id     { isActive }   → toggle a Vertical (audit-logged).
+PATCH /admin/categories/subcategory/:id  { active }     → toggle a Tier2Category (audit-logged).</pre>
+<p><b>Merchant guard (D6):</b> in <code>POST /merchant/store-products/configure</code>, before writing, reject any item whose Product's vertical (or subcategory) is disabled → <code>403 { error: 'CATEGORY_DISABLED', offenders:[…] }</code> (same shape as the FSSAI/MRP guards). Instant; no merchant app update needed for the block.</p>
+
+<h3>4. Discovery — category-aware empty-store hiding (D7)</h3>
+<p>Update <code>get_nearby_stores</code> (the RPC from Phase 3 Item 4): its <code>EXISTS(active, non-deleted StoreProduct)</code> check additionally requires the product's vertical + subcategory to be active. A store with no visible products auto-drops; multi-category stores stay. Applied via a tsx migration script; verify with a rolled-back disable.</p>
+
+<h3>5. Admin UI — "Categories" tab in Master Catalog</h3>
+<p>New tab listing the 15 Verticals as rows, each with a toggle + a product count, expandable to its Tier2Categories (each a toggle + count). Disable shows a confirm dialog ("This hides the category and all its products from customers and blocks new merchant listings."). Calls the PATCH endpoints; optimistic update + refetch. Reads via the admin API (service-role → sees all incl. disabled).</p>
+
+<h3>6. Customer app — cart guard (small)</h3>
+<p>RLS does the hiding with no app change. One defensive guard: if a cart item's category is disabled mid-session, drop/flag it at cart load + block its checkout (a small consumer change; rides the next OTA — RLS already prevents NEW additions, so this only covers the rare in-flight cart).</p>
+
+<h2>Edge cases</h2>
+<table>
+<tr><th>Case</th><th>Behaviour</th></tr>
+<tr><td>Multi-category store, one category disabled</td><td>Only that category's products hide; store stays live for the rest.</td></tr>
+<tr><td>Single-category store, its category disabled</td><td>Store has nothing visible → auto-dropped from discovery → auto-returns on re-enable.</td></tr>
+<tr><td>Merchant tries to list in a disabled category</td><td>API 403 <code>CATEGORY_DISABLED</code>; existing stock parked, not deleted.</td></tr>
+<tr><td>Customer has a disabled-category item in cart</td><td>Dropped/flagged at cart load; checkout blocked (consumer guard).</td></tr>
+<tr><td>Admin / merchant management of a disabled category</td><td>Unaffected — both read via service-role; admin manages, merchant sees their parked stock.</td></tr>
+<tr><td>Disable a subcategory but not its parent</td><td>Only that subcategory's products hide; the parent category + other subcategories stay live.</td></tr>
+</table>
+
+<h2>Testing</h2>
+<ul>
+<li>RLS rolled-back tests: disable a vertical → anon SELECT on Vertical/Tier2Category/Product/StoreProduct hides it + its products + listings; service-role still sees all; re-enable → reappears. Same for a single subcategory.</li>
+<li>API: GET returns all (incl. disabled); PATCH toggles + audit-logs; merchant configure → 403 on a disabled category.</li>
+<li>Discovery: a single-category store with its category disabled drops from <code>get_nearby_stores</code>; a multi-category store stays.</li>
+<li><code>EXPLAIN ANALYZE</code> a representative product read with the restrictive policies (perf at 140k).</li>
+<li>Admin UI: toggle round-trip + confirm dialog.</li>
+</ul>
+
+<h2>Rollback</h2>
+<p>Drop the 4 RESTRICTIVE policies + revert <code>get_nearby_stores</code> + remove the merchant guard + revert the admin tab. <code>Vertical.is_active</code> column is additive (harmless if left). No data loss at any point.</p>
+
+<h2>Out of scope (later)</h2>
+<ul>
+<li>Two-toggle split (customer-hidden vs merchant-allowed) for the "merchants prep inventory before customers see it" case (e.g. pharmacy pre-licence).</li>
+<li>The "Paused by platform" badge styling in the merchant app is best-effort UX (the *block* is server-side; the badge rides the next merchant build).</li>
+<li>Category reordering / icon / banner management in the same tab.</li>
+</ul>
+
+<p class="sm">— Next: writing-plans → TDD build (DB RLS → API → discovery → admin tab → merchant guard → consumer cart guard), same pattern as the catalog picker.</p>
+
+</div></body></html>

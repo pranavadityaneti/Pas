@@ -1,4 +1,6 @@
 // @lock — Do NOT overwrite.
+//   2026-06-16 (approved, Phase 3 Item 1): added .eq('is_deleted', false) to the
+//     StoreProduct fetch — soft-deleted listings must never reach customers.
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -12,7 +14,7 @@ export interface ProductItem {
   stock: number;
   uom: string;
   subCategory: string;
-  isVeg: boolean;
+  isVeg: boolean | null;
   isBestseller: boolean;
   rating?: string | null;
   discount: number;
@@ -53,12 +55,14 @@ export const useProducts = (storeId: string | null) => {
                         mrp,
                         uom,
                         subcategory,
+                        is_veg,
                         avg_rating,
                         extra_data
                     )
                 `)
                 .eq('branch_id', storeId)
-                .eq('active', true);
+                .eq('active', true)
+                .eq('is_deleted', false);
 
             if (fetchError) throw fetchError;
 
@@ -79,7 +83,7 @@ export const useProducts = (storeId: string | null) => {
                         uom: p.uom || '1 Pc',
                         subCategory: p.subcategory || 'Other',
                         // Logic for dietary/metadata from extra_data if needed, or defaults
-                        isVeg: p.extra_data?.isVeg ?? true, 
+                        isVeg: p.is_veg ?? null,
                         isBestseller: item.is_best_seller || false,
                         rating: p.avg_rating ? String(p.avg_rating) : null,
                         discount: discount

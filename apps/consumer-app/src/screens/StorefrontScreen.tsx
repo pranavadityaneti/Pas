@@ -3,6 +3,11 @@
 //   2. Audit fix N1 approved by Pranav 2026-06-10 ("let's fix N1"): handleAdd
 //      passes storeProductId into addItem (single additive property; nothing
 //      else touched). Without it the Phase 4/5 coupon flow is inert.
+//   3. Phase 4 sub-3 approved by Pranav 2026-06-17 ("finish sub three, do not ask
+//      for extra permissions"): the VegToggle visibility gate (2 sites) changed from
+//      dining-only (`isDining && veg>0 && nonVeg>0`) to any-food-store
+//      (`veg>0 || nonVeg>0`), so non-dining stores that sell food also show the
+//      veg/non-veg filter. Filter now reads the real Product.isVeg tri-state.
 import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import {
     View, Text, ScrollView, Image, TouchableOpacity,
@@ -537,7 +542,7 @@ export default function StorefrontScreen({ route }: any) {
 
                     {/* Quick Filters in Sticky Header — smart-hide: only show pills with ≥1 match */}
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} className="px-4 pb-3" contentContainerStyle={{ alignItems: 'center' }} style={{ flexGrow: 0, flexShrink: 0 }}>
-                        {displayRestaurant.isDining && filterCounts.veg > 0 && filterCounts.nonVeg > 0 && <VegToggle value={vegFilter} onChange={setVegFilter} />}
+                        {(filterCounts.veg > 0 || filterCounts.nonVeg > 0) && <VegToggle value={vegFilter} onChange={setVegFilter} />}
                         {filterCounts.bestseller > 0 && <FilterPill label="Bestsellers" active={bestSellerOnly} onPress={() => setBestSellerOnly(!bestSellerOnly)} icon={Check} colorClass="red" />}
                         {filterCounts.offers > 0 && <FilterPill label="Offers" active={offersOnly} onPress={() => setOffersOnly(!offersOnly)} icon={Filter} colorClass="red" />}
                         {filterCounts.under300 > 0 && filterCounts.under300 < filterCounts.total && <FilterPill label="Under ₹300" active={under300Only} onPress={() => setUnder300Only(!under300Only)} colorClass="blue" />}
@@ -807,7 +812,7 @@ export default function StorefrontScreen({ route }: any) {
                                 style={{ marginHorizontal: -20, paddingHorizontal: 20, flexGrow: 0, flexShrink: 0 }}
                                 contentContainerStyle={{ paddingBottom: 14, alignItems: 'center' }}
                             >
-                                {displayRestaurant.isDining && filterCounts.veg > 0 && filterCounts.nonVeg > 0 && <VegToggle value={vegFilter} onChange={setVegFilter} />}
+                                {(filterCounts.veg > 0 || filterCounts.nonVeg > 0) && <VegToggle value={vegFilter} onChange={setVegFilter} />}
                                 {filterCounts.bestseller > 0 && <FilterPill label="Bestsellers" active={bestSellerOnly} onPress={() => setBestSellerOnly(!bestSellerOnly)} icon={Check} colorClass="red" />}
                                 {filterCounts.offers > 0 && <FilterPill label="Offers" active={offersOnly} onPress={() => setOffersOnly(!offersOnly)} icon={Filter} colorClass="red" />}
                                 {filterCounts.under300 > 0 && filterCounts.under300 < filterCounts.total && <FilterPill label="Under ₹300" active={under300Only} onPress={() => setUnder300Only(!under300Only)} colorClass="blue" />}

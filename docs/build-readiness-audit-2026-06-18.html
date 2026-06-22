@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAS — Build Readiness Audit (2026-06-18)</title>
+<style>
+  :root{--ink:#1a2233;--mut:#5b6676;--line:#e3e8ef;--accent:#B52725;--ok:#166534;--warn:#9a6700;--code:#f6f8fa;--bg:#fff}
+  *{box-sizing:border-box} body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg);line-height:1.55;margin:0;padding:0 22px 90px}
+  .wrap{max-width:1000px;margin:0 auto}
+  h1{font-size:26px;margin:26px 0 4px} h2{font-size:20px;margin:34px 0 8px;padding-top:10px;border-top:3px solid var(--accent)} h3{font-size:16px;margin:18px 0 6px}
+  .mut{color:var(--mut)} .sm{font-size:12.5px;color:var(--mut)}
+  p,li,td{font-size:14px} code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:12.5px}
+  table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13px} th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top} th{background:#f3f6fa}
+  .verdict{border:2px solid var(--accent);background:#fdf3f3;border-radius:10px;padding:14px 18px;margin:16px 0}
+  .verdict b{color:var(--accent)}
+  .callout{border-left:4px solid var(--accent);background:#fdf3f3;padding:9px 14px;margin:12px 0;border-radius:0 6px 6px 0}
+  .callout.ok{border-color:var(--ok);background:#f1f9f3} .callout.warn{border-color:var(--warn);background:#fdf8ec}
+  .tag{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:9px;margin-right:5px}
+  .tag.build{background:#fdecec;color:var(--accent)} .tag.ota{background:#eaf3fb;color:#2c5f8a} .tag.ok{background:#e7f6ec;color:var(--ok)} .tag.warn{background:#fdf6e3;color:var(--warn)}
+  @media print{body{padding:0}h2{break-after:avoid}table{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Build Readiness Audit</h1>
+<div class="mut">2026-06-18 · branch <code>feat/consumer-global-config-wiring</code> @ <code>c27cf617</code> · API live <code>app-260618_205151010488</code></div>
+
+<div class="verdict">
+<b>VERDICT: New native builds are REQUIRED. The previous (June-6, 1.1.1 / 1.2.3) builds are NOT sufficient.</b><br>
+Native modules <i>and</i> native config were added since those builds — these cannot be delivered by OTA. Cut fresh builds at the current commit (Consumer <b>1.1.2</b>, Merchant <b>1.2.5</b>); they will contain everything done so far, so there is <b>no OTA backlog</b> immediately after.
+</div>
+
+<h2>Why a build is required (not OTA-able)</h2>
+<p>An over-the-air update can only ship JavaScript. It physically cannot add native modules or change native entitlements/permissions — those live in the compiled binary. Since the last submitted build, both apps gained native-level changes:</p>
+<table>
+<tr><th>App</th><th>New native module(s)</th><th>New native config (app.json)</th><th>Breaks on old build</th></tr>
+<tr><td><b>Consumer</b> 1.1.1→1.1.2</td><td><code>expo-notifications</code>, <code>expo-device</code>, <code>expo-updates</code></td><td>iOS <code>UIBackgroundModes: remote-notification</code>; Android <code>POST_NOTIFICATIONS</code>; <code>expo-notifications</code> plugin; <code>updates</code> block + <code>runtimeVersion: appVersion</code></td><td>Push notifications dead; OTA engine absent</td></tr>
+<tr><td><b>Merchant</b> 1.2.3→1.2.5</td><td><code>react-native-svg</code>, <code>expo-updates</code></td><td>Android <code>POST_NOTIFICATIONS</code> + <code>RECORD_AUDIO</code>; iOS <code>UIBackgroundModes: remote-notification</code></td><td>eSign signature pad crashes; OTA engine absent</td></tr>
+</table>
+<div class="callout"><b>The decisive one — <code>expo-updates</code> itself was added.</b> That's the OTA runtime. Any build that predates it <b>cannot receive OTAs at all</b>. So a fresh build carrying <code>expo-updates</code> is the <b>prerequisite for every future OTA</b>. Combined with <code>runtimeVersion: "appVersion"</code> (an OTA only reaches a build of the same version string), the 1.1.2 / 1.2.5 binaries must exist before any 1.1.2 / 1.2.5 OTA can land.</div>
+
+<h2>Build-readiness checklist</h2>
+<table>
+<tr><th>Item</th><th>Status</th></tr>
+<tr><td><b>Prod API URL baked in</b></td><td><span class="tag ok">GREEN</span> Both <code>eas.json → build.production.env</code> AND <code>.env</code> pin <code>https://api.pickatstore.io</code>. The build profile pins it regardless of local <code>.env</code>.</td></tr>
+<tr><td><b>Native config will ship</b></td><td><span class="tag ok">GREEN</span> <code>ios/</code> + <code>android/</code> are <b>gitignored/untracked</b> → EAS uses CNG (prebuild from <code>app.json</code> at build time). The new notification entitlements/permissions WILL be generated. No stale-native-dir risk.</td></tr>
+<tr><td><b>Versions + build numbers</b></td><td><span class="tag ok">GREEN</span> Consumer 1.1.2 (iOS build 4 / Android vc 8); Merchant 1.2.5 (iOS 14 / Android vc 16). <code>appVersionSource: remote</code> + <code>autoIncrement: true</code> → EAS auto-bumps the build/version codes server-side (no collisions).</td></tr>
+<tr><td><b>Source state</b></td><td><span class="tag ok">GREEN</span> Mobile trees fully committed; tsc clean across api / consumer / merchant.</td></tr>
+<tr><td><b>Live payments</b></td><td><span class="tag ok">GREEN</span> Consumer build carries the live Razorpay key (<code>rzp_live_…</code>).</td></tr>
+<tr><td><b>Android keystore</b> (<code>credentialsSource: local</code>, both apps)</td><td><span class="tag warn">VERIFY</span> No local keystore file visible at common paths. June builds shipped, so it's likely configured in EAS or a gitignored <code>credentials.json</code>. <b>Confirm with <code>eas credentials</code> before the Android build.</b></td></tr>
+<tr><td><b>What's live in the stores now</b></td><td><span class="tag warn">YOU KNOW</span> I can't query App Store Connect / Play Console from here. Confirm current live versions are <b>below</b> 1.1.2 / 1.2.5 (they almost certainly are). Doesn't change the verdict.</td></tr>
+</table>
+
+<h2>What each fresh build ships (the value — this is the "list", absorbed into the binary)</h2>
+<p>A build cut at <code>c27cf617</code> contains <b>all committed work</b> since June 6 — so the items you were holding as "OTAs to push" are simply <i>in the build</i> (and some, like push notifications, can <i>only</i> ship this way).</p>
+<h3>Consumer 1.1.2 — 17 commits</h3>
+<ul>
+<li>Push notifications (expo-notifications/device) · OTA engine (expo-updates)</li>
+<li>Global Config consumption (service radius + min order)</li>
+<li>Coupons end-to-end (apply screen + checkout redemption)</li>
+<li>Order actions sheet (cancel / reschedule / return / exchange)</li>
+<li><b>Phase 3 safety:</b> is_deleted filter · SafeImage broken-image fallback</li>
+<li><b>Phase 4 sub-3:</b> veg/non-veg dots (food-only) + store-aware filter</li>
+<li>Option-A auth hardening · keyboard fixes · ProfileSetup mirror</li>
+</ul>
+<h3>Merchant 1.2.5 — 43 commits</h3>
+<ul>
+<li>OTA engine (expo-updates) · eSign signature pad (react-native-svg)</li>
+<li>Full signup rewrite (Phase 1.x componentisation + Phase 2.x StepStores / agreements / review / per-store pricing)</li>
+<li>eSign V1 (drawn signature + signed PDF + consent)</li>
+<li>Phase 8/9 — all branch/catalog/inventory writes routed through the API</li>
+<li>Coupon validation + returns/exchanges inbox</li>
+<li><b>Phase 2 FINAL B7:</b> inventory reads via branch_id (also unblocks B10)</li>
+<li><b>Phase 4 sub-2:</b> the new catalog picker (browse + list the 140k, MRP/FSSAI guards)</li>
+</ul>
+
+<h2>The OTA plan (after builds are live)</h2>
+<div class="callout ok"><b>Key point:</b> if you build at HEAD, there is <b>nothing to OTA right away</b> — the binary is current. The OTA queue is for changes made <i>after</i> the build is cut.</div>
+<ol>
+<li><b>Cut + submit both builds</b> (Consumer 1.1.2, Merchant 1.2.5) at <code>c27cf617</code>.</li>
+<li>Once they're live (or in TestFlight/internal track), <b>any further JS-only fix</b> becomes an OTA candidate. We'll list them as they arise and push <code>eas update --branch production</code> <b>one app at a time, verifying each</b>.</li>
+<li><b>Pre-OTA <code>.env</code> protocol (CLAUDE.md):</b> OTAs (<code>eas update</code>) read the local <code>.env</code> (unlike builds, which use the eas.json profile env). Before each OTA: confirm <code>EXPO_PUBLIC_API_URL=https://api.pickatstore.io</code>, push with <code>--clear-cache</code>, grep the bundle to confirm the prod URL baked in. (Both <code>.env</code> are currently on prod — verified — but follow the step regardless.)</li>
+<li><b>runtimeVersion gotcha:</b> an OTA only reaches builds of the <i>same</i> app version. After shipping 1.1.2/1.2.5, OTAs target those versions; users on older versions must update via the store.</li>
+</ol>
+
+<h2>Recommended sequence</h2>
+<ol>
+<li><code>eas credentials</code> (merchant + consumer) → confirm Android keystore present.</li>
+<li>Confirm store-live versions are &lt; 1.1.2 / 1.2.5.</li>
+<li><b>Build:</b> <code>eas build --profile production --platform all</code> in each app dir (this is your action — it needs your Apple/EAS auth).</li>
+<li><b>Submit:</b> <code>eas submit --profile production --platform all</code> (or via the EAS dashboard).</li>
+<li>After live: OTA only future changes, one app at a time, with the <code>.env</code> protocol + per-push verification.</li>
+</ol>
+
+<p class="sm">— Audit complete. Bottom line: previous builds are insufficient (native deps + config + the OTA engine itself were added); cut fresh 1.1.2 / 1.2.5 builds at HEAD, which carry everything; the only pre-build verification is the Android keystore. No immediate OTA backlog after a HEAD build.</p>
+
+</div>
+</body>
+</html>

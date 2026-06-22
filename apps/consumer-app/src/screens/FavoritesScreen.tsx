@@ -68,7 +68,9 @@ export default function FavoritesScreen() {
                 const { data, error } = await supabase
                     .from('StoreProduct')
                     .select('*, product:Product(*), store:merchant_branches(branch_name)')
-                    .in('id', productFavorites);
+                    .in('id', productFavorites)
+                    // Phase 3 Item 1 (2026-06-16): never hydrate a soft-deleted favorite.
+                    .eq('is_deleted', false);
 
                 if (error) throw error;
 

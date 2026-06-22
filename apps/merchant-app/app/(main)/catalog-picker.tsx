@@ -13,6 +13,8 @@ import { useRouter } from 'expo-router';
 import { Colors } from '../../constants/Colors';
 import { supabase } from '../../src/lib/supabase';
 import { useInventory } from '../../src/hooks/useInventory';
+import { useCatalogPicker } from '../../src/hooks/useCatalogPicker';
+import { CatalogProduct } from '../../src/services/catalog';
 import ConfigureProductsModal from '../../src/components/ConfigureProductsModal';
 import FilterModal, { FilterState } from '../../src/components/FilterModal';
 import AddCustomProductModal from '../../src/components/AddCustomProductModal';
@@ -38,9 +40,14 @@ export default function CatalogPicker() {
     const { branchId, refetch: refetchInventory, loading: inventoryLoading } = useInventory();
     const { store } = useStore();
 
-    const [products, setProducts] = useState<any[]>([]);
     const [search, setSearch] = useState('');
-    const [loading, setLoading] = useState(true);
+
+    // Server-paginated master catalog (keyset cursor + server-side filters).
+    const { rows, hasMore, isLoading, setFilters, loadMore, reload } = useCatalogPicker(branchId);
+    const loading = isLoading;
+    // Locked <FilterModal> below reads `products` (for its Brand-tab cascade);
+    // feed it the current catalog page. FilterModal is shape-tolerant.
+    const products = rows;
 
     // Multi-Select State
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -63,61 +70,30 @@ export default function CatalogPicker() {
         });
     }, []);
 
+    // Debounced search → server query (≥2 chars per API; <2 chars clears `q`).
+    const [debouncedSearch, setDebouncedSearch] = useState('');
     useEffect(() => {
-        fetchGlobalCatalog();
-    }, [branchId]);
+        const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+        return () => clearTimeout(t);
+    }, [search]);
 
-    const fetchGlobalCatalog = async () => {
-        setLoading(true);
-        try {
-            // Attempt to fetch Global (null) OR Store Specific (storeId)
-            let query = supabase
-                .from('Product')
-                .select('*');
+    // Translate the UI filter state (appliedFilters + category pills) into
+    // server-side query params, and push them to the hook. Runs whenever the
+    // applied filters or the debounced search change.
+    useEffect(() => {
+        const q = debouncedSearch.length >= 2 ? debouncedSearch : undefined;
+        const verticalId = appliedFilters && appliedFilters.categories.length > 0
+            ? appliedFilters.categories.join(',')
+            : undefined;
+        const brand = appliedFilters && appliedFilters.brands.length > 0
+            ? appliedFilters.brands.join(',')
+            : undefined;
+        const minPrice = appliedFilters ? appliedFilters.priceRange[0] : undefined;
+        const maxPrice = appliedFilters ? appliedFilters.priceRange[1] : undefined;
 
-            if (branchId) {
-                query = query.or(`createdByStoreId.is.null,createdByStoreId.eq.${branchId}`);
-            } else {
-                query = query.is('createdByStoreId', null);
-            }
-
-            const { data, error } = await query;
-
-            if (error) {
-                console.error("Advanced fetch failed (column might be missing), falling back:", error);
-                throw error;
-            }
-
-            if (data) {
-                console.log("Fetched products:", data.length);
-                const uniqueMap = new Map();
-                data.forEach(p => {
-                    const cleanName = p.name.replace(/\s*\([^)]+\)/g, '').trim();
-                    if (!uniqueMap.has(cleanName)) {
-                        uniqueMap.set(cleanName, { ...p, name: cleanName });
-                    }
-                });
-                setProducts(Array.from(uniqueMap.values()));
-            }
-        } catch (e) {
-            console.warn("Falling back to basic fetch all");
-            // Fallback: Fetch EVERYTHING (if the column filter fails)
-            // This ensures the screen isn't empty while the notification propagates
-            const { data } = await supabase.from('Product').select('*');
-            if (data) {
-                const uniqueMap = new Map();
-                data.forEach(p => {
-                    const cleanName = p.name.replace(/\s*\([^)]+\)/g, '').trim();
-                    if (!uniqueMap.has(cleanName)) {
-                        uniqueMap.set(cleanName, { ...p, name: cleanName });
-                    }
-                });
-                setProducts(Array.from(uniqueMap.values()));
-            }
-        } finally {
-            setLoading(false);
-        }
-    };
+        setFilters({ q, verticalId, brand, minPrice, maxPrice });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [debouncedSearch, appliedFilters]);
 
     const toggleSelection = (id: string) => {
         setSelectedIds(prev =>
@@ -141,12 +117,13 @@ export default function CatalogPicker() {
         setShowConfigModal(false);
         setSelectedIds([]);
         refetchInventory();
+        reload(); // drop the just-listed items off the picker
         router.push('/(main)/inventory');
     };
 
     const handleCustomSuccess = () => {
         setShowCustomModal(false);
-        fetchGlobalCatalog(); // Refresh list to see new item
+        reload(); // Refresh list to see new item
         refetchInventory(); // Also refresh inventory
         // router.push('/(main)/inventory'); // Optional: redirect immediate
         Alert.alert("Success", "Product Created", [
@@ -155,50 +132,16 @@ export default function CatalogPicker() {
         ]);
     };
 
-    // Filter Logic
-    const filteredProducts = products.filter(p => {
-        const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
-
-        let matchesFilter = true;
-
-        if (appliedFilters) {
-            if (appliedFilters.categories.length > 0) {
-                if (!appliedFilters.categories.includes(p.vertical_id)) matchesFilter = false;
-            }
-            if (appliedFilters.brands.length > 0 && !appliedFilters.brands.includes(p.brand)) matchesFilter = false;
-            if (p.mrp < appliedFilters.priceRange[0] || p.mrp > appliedFilters.priceRange[1]) matchesFilter = false;
-            
-            // Hero Picks (Simulate premium/fast-moving brands in master catalog)
-            if (appliedFilters.isBestSeller) {
-                const premiumBrands = ['amul', 'haldirams', 'aashirvaad', 'ashirvaad', 'lays', 'britannia', 'nestle', 'cadbury', 'tata', 'parle', 'maggi'];
-                if (!p.brand || !premiumBrands.includes(p.brand.toLowerCase())) matchesFilter = false;
-            }
-        }
-
-        return matchesSearch && matchesFilter;
-    }).sort((a, b) => {
-        if (!appliedFilters?.sortBy) return 0;
-
-        switch (appliedFilters.sortBy) {
-            case 'price_low': return a.mrp - b.mrp;
-            case 'price_high': return b.mrp - a.mrp;
-            case 'name_asc': return a.name.localeCompare(b.name);
-            case 'newest': return 0;
-            default: return 0;
-        }
-    });
-
-    const renderItem = ({ item }: { item: any }) => {
+    const renderItem = ({ item }: { item: CatalogProduct }) => {
         const isSelected = selectedIds.includes(item.id);
         const isDark = isSelected;
-        // Highlight custom products
-        const isCustom = item.createdByStoreId === branchId;
+        const metaLine = [item.brand, item.uom].filter(Boolean).join(' · ');
 
         return (
             <TouchableOpacity
                 activeOpacity={0.9}
                 onPress={() => toggleSelection(item.id)}
-                style={[styles.card, isDark && styles.cardDark, isCustom && styles.cardCustom]}
+                style={[styles.card, isDark && styles.cardDark]}
             >
                 {/* Checkbox */}
                 <View style={[styles.checkbox, isDark && styles.checkboxSelected]}>
@@ -217,14 +160,18 @@ export default function CatalogPicker() {
                         >
                             {item.name}
                         </Text>
-                        {isCustom && (
-                            <View style={styles.customBadge}>
-                                <Text style={styles.customText}>MY PRODUCT</Text>
-                            </View>
+                        {item.isVeg !== null && (
+                            <View style={[styles.vegDot, item.isVeg ? styles.vegDotVeg : styles.vegDotNonVeg]} />
                         )}
                     </View>
 
-                    <Text style={[styles.details, isDark && { color: '#aaa' }]}>{item.category}</Text>
+                    {metaLine ? (
+                        <Text style={[styles.details, isDark && { color: '#aaa' }]} numberOfLines={1}>{metaLine}</Text>
+                    ) : null}
+
+                    {item.category?.name ? (
+                        <Text style={[styles.details, isDark && { color: '#aaa' }]} numberOfLines={1}>{item.category.name}</Text>
+                    ) : null}
 
                     <View style={styles.rowBetween}>
                         <Text style={[styles.price, isDark && styles.textWhite]}>
@@ -270,14 +217,6 @@ export default function CatalogPicker() {
                 >
                     <Ionicons name="filter" size={16} color={filterVisible ? Colors.primary : "#000"} />
                     <Text style={[styles.chipText, filterVisible && { color: Colors.primary }]}>Filter</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    style={[styles.filterChip, appliedFilters?.isBestSeller && { borderColor: Colors.primary, backgroundColor: '#FEF2F2' }]}
-                    onPress={() => setAppliedFilters(prev => ({ ...(prev || DEFAULT_FILTERS), isBestSeller: !prev?.isBestSeller }))}
-                >
-                    <Ionicons name="star" size={16} color={appliedFilters?.isBestSeller ? Colors.primary : "#000"} />
-                    <Text style={[styles.chipText, appliedFilters?.isBestSeller && { color: Colors.primary }]}>Hero Picks</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity style={[styles.filterChip, { borderColor: Colors.primary, backgroundColor: '#fff' }]} onPress={() => setShowCustomModal(true)}>
@@ -329,10 +268,19 @@ export default function CatalogPicker() {
             </View>
 
             <FlatList
-                data={filteredProducts}
+                data={rows}
                 renderItem={renderItem}
                 keyExtractor={i => i.id}
                 contentContainerStyle={styles.list}
+                onEndReached={loadMore}
+                onEndReachedThreshold={0.5}
+                ListFooterComponent={
+                    isLoading && rows.length > 0 ? (
+                        <View style={styles.footerLoader}>
+                            <ActivityIndicator size="small" color={Colors.primary} />
+                        </View>
+                    ) : null
+                }
                 ListEmptyComponent={
                     !loading ? (
                         <View style={styles.emptyContainer}>
@@ -362,7 +310,7 @@ export default function CatalogPicker() {
                 onClose={() => setShowConfigModal(false)}
                 onSuccess={handleSuccess}
                 storeId={branchId!}
-                products={products.filter(p => selectedIds.includes(p.id))}
+                products={rows.filter(p => selectedIds.includes(p.id))}
             />
 
             {/* Custom Product Modal */}
@@ -440,6 +388,14 @@ const styles = StyleSheet.create({
     details: { fontSize: 12, color: '#666', marginBottom: 6 },
 
     price: { fontSize: 13, color: '#000' },
+
+    // Veg / Non-veg indicator dot
+    vegDot: { width: 12, height: 12, borderRadius: 3, marginTop: 4 },
+    vegDotVeg: { backgroundColor: '#16A34A' },
+    vegDotNonVeg: { backgroundColor: '#92400E' },
+
+    // Pagination footer spinner
+    footerLoader: { paddingVertical: 16, alignItems: 'center' },
 
     // Footer
     footer: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 20, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#eee' },

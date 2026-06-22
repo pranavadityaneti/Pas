@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAS — Complete Assessment: Shipped + Pending (2026-06-19)</title>
+<style>
+  :root{--ink:#1a2233;--mut:#5b6676;--line:#e3e8ef;--accent:#B52725;--ok:#166534;--new:#166534;--imp:#1d4ed8;--fix:#9a3412;--crit:#b91c1c;--high:#b45309;--med:#3f6212;--code:#f6f8fa;--bg:#fff}
+  *{box-sizing:border-box} body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg);line-height:1.5;margin:0;padding:0 22px 90px}
+  .wrap{max-width:1040px;margin:0 auto}
+  h1{font-size:25px;margin:22px 0 4px} h2{font-size:20px;margin:32px 0 6px;padding-top:10px;border-top:3px solid var(--accent)} h3{font-size:15px;margin:16px 0 4px;color:#111}
+  .mut{color:var(--mut)} .sm{font-size:12px;color:var(--mut)}
+  p,li,td{font-size:13.5px} code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:12px}
+  ul.feat{margin:3px 0 8px;padding-left:20px} ul.feat li{margin:2px 0}
+  .tag{display:inline-block;font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:8px;margin-right:4px;vertical-align:middle}
+  .new{background:#e7f6ec;color:var(--new)} .imp{background:#e6effe;color:var(--imp)} .fix{background:#fdecdc;color:var(--fix)}
+  .p-crit{background:#fde7e7;color:var(--crit)} .p-high{background:#fdf0dc;color:var(--high)} .p-med{background:#eef6e3;color:var(--med)} .p-low{background:#eef2f7;color:#475569}
+  .toc{columns:2;column-gap:30px;background:#fafbfc;border:1px solid var(--line);border-radius:8px;padding:12px 18px;margin:14px 0}
+  .toc a{color:var(--accent);text-decoration:none;font-size:13px} .toc li{margin:2px 0}
+  .callout{border-left:4px solid var(--accent);background:#fdf3f3;padding:9px 14px;margin:12px 0;border-radius:0 6px 6px 0}
+  .pend{border:1px solid var(--line);border-radius:8px;padding:9px 13px;margin:9px 0}
+  .pend.crit{border-left:4px solid var(--crit)} .pend.high{border-left:4px solid var(--high)} .pend.med{border-left:4px solid var(--med)} .pend.low{border-left:4px solid #94a3b8}
+  .pend h4{margin:0 0 4px;font-size:13.5px}
+  @media print{body{padding:0}h2{break-after:avoid}.pend{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>PAS — Complete Assessment: Shipped &amp; Pending</h1>
+<div class="mut">2026-06-19 · Customer app 1.1.3 · Merchant app 1.2.6 · Admin dashboard (Vercel) · branch <code>feat/consumer-global-config-wiring</code></div>
+
+<div class="callout">
+<b>What this is:</b> one place that lists (1) every feature/change shipped in the <b>Customer app</b>, <b>Merchant app</b>, and <b>Admin dashboard</b>, and (2) everything <b>saved for later / pending</b>, so you have a complete picture. Shipped items are tagged <span class="tag new">NEW</span> <span class="tag imp">IMPROVED</span> <span class="tag fix">FIX</span>. Pending items are tagged <span class="tag p-crit">CRITICAL</span> <span class="tag p-high">HIGH</span> <span class="tag p-med">MEDIUM</span> <span class="tag p-low">LATER</span>.
+<br><br><b>Status note:</b> all shipped items are in the live iOS builds (1.1.3 / 1.2.6) and the in-review Android builds; admin items are live once merged to <code>main</code> (Vercel). Detailed companions: <code>ota-pending-inventory-2026-06-18.html</code> (apps) and <code>admin-dashboard-features-changes-2026-06-19.html</code> (admin).
+</div>
+
+<div class="toc"><b>Contents</b>
+<ol>
+<li><a href="#cust">PART 1 — Customer App (shipped)</a></li>
+<li><a href="#merch">PART 2 — Merchant App (shipped)</a></li>
+<li><a href="#admin">PART 3 — Admin Dashboard (shipped)</a></li>
+<li><a href="#pending">PART 4 — Saved for Later / Pending</a>
+  <ul>
+  <li><a href="#p-legal">A. Legal &amp; compliance</a></li>
+  <li><a href="#p-finance">B. Finance / payouts</a></li>
+  <li><a href="#p-catalog">C. Catalog &amp; inventory cleanup</a></li>
+  <li><a href="#p-kyc">D. KYC &amp; e-Sign</a></li>
+  <li><a href="#p-admin">E. Admin dashboard polish</a></li>
+  <li><a href="#p-notif">F. Notifications</a></li>
+  <li><a href="#p-product">G. Product features (future)</a></li>
+  <li><a href="#p-infra">H. Infra, security &amp; data hygiene</a></li>
+  </ul>
+</li>
+</ol>
+</div>
+
+<h2 id="cust">PART 1 — Customer App ("Pick At Store" 1.1.3) — shipped</h2>
+<h3>Push notifications <span class="tag new">NEW</span></h3>
+<ul class="feat"><li>Order-status push notifications (accepted / ready), in-app toast banners, a notifications inbox, and tap-to-deep-link routing.</li></ul>
+<h3>Coupons &amp; offers <span class="tag new">NEW</span></h3>
+<ul class="feat"><li>Coupon ticket cards, an "available coupons" section, a Swiggy-style Apply-coupon screen, redemption wired into both checkouts, multi-store discount allocation, an Offers screen.</li></ul>
+<h3>Veg/non-veg + customer safety <span class="tag new">NEW</span> <span class="tag fix">FIX</span></h3>
+<ul class="feat"><li>Correct veg/non-veg dots (real data, food-only — fixed "everything shows veg"); a veg/non-veg filter on food stores; broken-image fallback; deleted listings no longer shown; empty stores hidden from discovery.</li></ul>
+<h3>Search, discovery, cart &amp; checkout</h3>
+<ul class="feat"><li>Global search, nearby-store discovery + filters/sort, category browse; floating cart band, pickup + dining checkouts, invoice modal; idempotency/retry + timezone fixes.</li></ul>
+<h3>Orders, dining, location, auth, support</h3>
+<ul class="feat"><li>Order actions sheet (cancel/reschedule/return/exchange), "Your orders"; dining slot booking; Global Config (service radius + min order); auth + profile fixes; Wati "chat with us".</li></ul>
+
+<h2 id="merch">PART 2 — Merchant App ("PAS Partner" 1.2.6) — shipped</h2>
+<h3>Catalog picker (the 140k catalogue) <span class="tag new">NEW</span></h3>
+<ul class="feat"><li>Browse/search/filter the full master catalogue, multi-select → bulk set price + stock, with the MRP-ceiling guard, FSSAI banner, and lazy image re-host.</li></ul>
+<h3>Signup rewrite + e-Signature <span class="tag new">NEW</span></h3>
+<ul class="feat"><li>Componentised multi-step signup (identity, stores, KYC, subscription, review); in-app drawn e-signature + signed-PDF agreement flow.</li></ul>
+<h3>Notifications, inventory, orders, returns <span class="tag new">NEW</span></h3>
+<ul class="feat"><li>New-order push notifications; inventory screen (branch_id reads — Phase 2 FINAL B7); orders + receipts; returns/exchanges inbox.</li></ul>
+<h3>Earnings, coupons, settings, architecture</h3>
+<ul class="feat"><li>Earnings/payouts/settlements screens; per-store pricing + partner coupons; all settings; all branch/Store/catalog/inventory writes routed through the API (Phases 8/9).</li></ul>
+
+<h2 id="admin">PART 3 — Admin Dashboard — shipped</h2>
+<ul class="feat">
+<li><span class="tag new">NEW</span> <b>Login &amp; RBAC:</b> WhatsApp-OTP login, role-aware sidebar, Roles &amp; Permissions, Invite-Admin, inline role/status edit.</li>
+<li><span class="tag new">NEW</span> <b>Role-aware home dashboards</b> (Super-Admin / Finance / Operations / Support) with real KPIs.</li>
+<li><span class="tag new">NEW</span> <b>Analytics / Reports:</b> real charts, date filters, CSV export, compare-vs-previous, top products/category/city, audit log.</li>
+<li><span class="tag new">NEW</span> <b>Customers:</b> real database, Block/Unblock, detail drawer + addresses, edit-name, deep-links, pagination.</li>
+<li><span class="tag new">NEW</span> <b>Orders:</b> real Order table, all 10 statuses, realtime.</li>
+<li><span class="tag new">NEW</span> <b>Merchants &amp; KYC:</b> KYC review queue + "Needs info", directory + detail sheets, add/edit/export/report, store-product table.</li>
+<li><span class="tag fix">FIX</span> <b>Master Catalog:</b> the taxonomy fix (live Vertical/Tier2Category — fixes the blank Category/Subcategory columns).</li>
+<li><span class="tag new">NEW</span> <b>Marketing &amp; Coupons:</b> Coupon Builder + live preview + themes, detail page, analytics hub, merchant-signup coupons.</li>
+<li><span class="tag new">NEW</span> <b>Finance:</b> Settlements Manager. <b>Operations:</b> Wati support inbox + Refunds/Disputes queue. <b>Global Config</b> panel.</li>
+<li><span class="tag new">NEW</span> <b>Sentry monitoring</b> + the API-routing architecture shift + admin design system.</li>
+</ul>
+
+<h2 id="pending">PART 4 — Saved for Later / Pending</h2>
+
+<h3 id="p-legal">A. Legal &amp; compliance <span class="sm">(needs CA / lawyer — highest priority)</span></h3>
+<div class="pend crit"><h4><span class="tag p-crit">CRITICAL</span>1. Re-draft the 3 merchant agreements</h4>The in-app vendor agreements need a CA/lawyer pass on ~15 severe points — RBI payment-aggregation (flow of funds), the ECO GST/TCS/TDS framework, the "Lifetime Access" vs "onboarding fee" mismatch + no refund clause, unilateral commission changes, the 3-month-commission liability cap, one-sided indemnity, e-signature validity + Telangana stamp duty, FSSAI/drug-licence display, DPDP data-processing addendum, IP-licence-survives-termination, the 33→35 numbering gap + missing arbitration clause. <span class="sm">(See <code>merchant-agreements-severe-points-for-counsel-2026-06-19.html</code>.)</span></div>
+<div class="pend crit"><h4><span class="tag p-crit">CRITICAL</span>2. Google Play rejection — login credentials</h4>The current Play rejection (version code 15) is the App Access declaration: reviewers' test login didn't work. Add a working test merchant login + reviewer instructions in Play Console → App access, then re-submit. <span class="sm">(Separate from the legal points; a quick fix.)</span></div>
+<div class="pend high"><h4><span class="tag p-high">HIGH</span>3. Commission &amp; settlement mismatches (must fix before first real settlement)</h4>(a) Agreements state a fixed % but admin sets <code>commission_rate</code> independently; (b) the commission engine's NULL-tier default (8%/10%) exceeds the signed restaurant/bakery rate (5%/7%); (c) Bakeries signed ₹2,999 but charged ₹999; (d) contract promises T+2 settlement but the system settles weekly. <span class="sm">(Settlements are in dry-run — latent, not yet charged.)</span></div>
+<div class="pend high"><h4><span class="tag p-high">HIGH</span>4. Pharmacy &amp; food licensing before those verticals go live</h4>Pharmacy is currently routed to the generic template with zero drug controls (block or build an e-pharmacy schedule); FSSAI licence capture/display is optional today and PAS's own e-commerce FBO registration isn't addressed.</div>
+
+<h3 id="p-finance">B. Finance / payouts</h3>
+<div class="pend high"><h4><span class="tag p-high">HIGH</span>5. Real merchant payout formula (replace the ₹×0.98 placeholder)</h4>Build the real settlement math — 1.9% payment-gateway fee + 18% GST on commission + 0.1% TDS (§194-O) + TCS — and a real "today's payout" endpoint. <b>Gated:</b> the 1.9% gateway fee is not authorised in the signed agreement text, so it can't be deducted until the charge is papered + re-consented (ties to A.1), and the math needs CA sign-off.</div>
+
+<h3 id="p-catalog">C. Catalog &amp; inventory cleanup <span class="sm">(post-Blinkit load)</span></h3>
+<div class="pend high"><h4><span class="tag p-high">HIGH</span>6. Drop the dead <code>StoreProduct.storeId</code> column (B10)</h4>Gated until the new merchant build (1.2.6, with the branch_id reads) is live + adopted on both stores — then drop the column. Everything else for it is done.</div>
+<div class="pend med"><h4><span class="tag p-med">MEDIUM</span>7. Delete legacy/test products</h4>Old <code>source='zepto'</code> (134) + null-source (111) + live_sync (39) rows — now unblocked (Blinkit catalogue loaded + verified); needs your go.</div>
+<div class="pend med"><h4><span class="tag p-med">MEDIUM</span>8. Pack-size / sibling variants</h4>Products loaded flat; the Blinkit sibling data is preserved in <code>extraData</code> but not yet grouped into one card with a pack-size selector (merchant grouping + consumer selector deferred).</div>
+<div class="pend med"><h4><span class="tag p-med">MEDIUM</span>9. Held taxonomy categories + 294 legacy data cleanup</h4>13 "PENDING_DECISION" category mappings held for founders (Digital Goods/E-Cards, NULL, Specials, Seasonal, tobacco/Paan) — enable if wanted. Plus re-categorising the ~294 legacy products (176 null vertical / 209 null category) + finishing the legacy veg backfill.</div>
+<div class="pend med"><h4><span class="tag p-med">MEDIUM</span>10. Admin catalogue review screen + adjacent FK tickets</h4>The admin "review before promote" screen (Phase 2 Step 6); and the same-bug-class tickets found during the storeId rework — <code>Order.storeId/branchId</code>, missing <code>Store.merchant_id</code> FK, the branchless Folli Medicals store, inactive Wakey Owl store.</div>
+
+<h3 id="p-kyc">D. KYC &amp; e-Sign</h3>
+<div class="pend high"><h4><span class="tag p-high">HIGH</span>11. KYC approval UX overhaul (the "UA" you flagged)</h4>The KYC review works but: keeps <b>no decision audit trail</b> (who approved/rejected — compliance-critical), can't view the uploaded PDF documents, hides captured fields (veg/cuisines/bank/signature), has a cramped 340px decision panel, and an irreversible Approve with no confirm step.</div>
+<div class="pend high"><h4><span class="tag p-high">HIGH</span>12. Legally-valid e-Signature (Aadhaar eSign / Digio)</h4>Today's drawn-signature is a valid e-contract via the audit trail but doesn't get the strongest legal presumption. Scaffold an Aadhaar-eSign vendor (Digio recommended) for the upgrade (ties to A.1).</div>
+
+<h3 id="p-admin">E. Admin dashboard polish</h3>
+<div class="pend med"><h4><span class="tag p-med">MEDIUM</span>13. Admin quick-wins + KPI wiring + production deploy</h4>Fonts, ?phone= filter, load-more, wider audit-log coverage; home-dashboard KPI endpoints; the CouponBuilder refactor for the new coupon fields; Coupon "Phase 8" verification/tests/rollout + the Phase-8 RLS lockdown. <b>Note:</b> recent admin work is on the feature branch — needs a <code>main</code> merge to reach Vercel production.</div>
+
+<h3 id="p-notif">F. Notifications</h3>
+<div class="pend med"><h4><span class="tag p-med">MEDIUM</span>14. Full notification scenario coverage</h4>Push infrastructure is shipped, but the full customer plan (14 scenarios across 4 phases) and the merchant-side gap fixes are not all wired (e.g. status-change, reschedule, refund notifications).</div>
+
+<h3 id="p-product">G. Product features (future)</h3>
+<div class="pend low"><h4><span class="tag p-low">LATER</span>15. Bigger product bets</h4>Reschedule + Reorder for pickup &amp; dining; Instagram tagging &amp; hashtag campaign integration; Razorpay webhook → server-side order creation (the proper long-term order-reliability fix); server-side order-request expiry.</div>
+
+<h3 id="p-infra">H. Infra, security &amp; data hygiene</h3>
+<div class="pend high"><h4><span class="tag p-high">HIGH</span>16. Security &amp; deadlines</h4><code>credentials.json</code> (keystore secrets) committed to git → gitignore + rotate; the Supabase public-schema GRANT migration (hard deadline <b>Oct 30, 2026</b>); a broader RLS sweep across all tables.</div>
+<div class="pend low"><h4><span class="tag p-low">LATER</span>17. Backend hardening follow-ups</h4>Deferred medium/low items from the order-pipeline audits (concurrency hardening, observability/polish), legacy refund/status endpoints, and minor data cleanups (phone-format normalisation).</div>
+
+<p class="sm">— Complete assessment. Shipped: Customer (12 areas), Merchant (11 areas), Admin (13 modules). Pending: 17 items across 8 themes, priority-ranked. Source of truth = git + <code>forlater.md</code>. The CRITICAL legal items (A.1, A.2) are the real launch gates; everything in Part 4 is captured so nothing is lost.</p>
+
+</div>
+</body>
+</html>
