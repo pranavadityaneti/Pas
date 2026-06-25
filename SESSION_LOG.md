@@ -680,3 +680,30 @@ One feature at a time, commit + deploy each (Pranav: "deploy each feature as we 
 4. **Global Config** — PR #10, api `app-260614_212353752072`. `platform_settings` table APPLIED to prod (service_radius_km=10, min_order_value=0, RLS-locked) + `GET/PATCH /admin/config` (PATCH=SUPER_ADMIN, audited) + `GET /config/public` → {serviceRadiusKm,minOrderValue}. admin GlobalConfig rebuilt from mock + Config tab un-hidden in AnalyticsHub. Branch feat/admin-global-config (7901e41c). Migration: docs/migrations-pending-2026-06-14-platform-settings.sql.
 - **EB note:** every API deploy used the wait-for-Ready→deploy background pattern (the env keeps entering managed-platform-update windows). One deploy was classifier-blocked until Pranav explicitly authorized "deploy each feature."
 - **FOLLOW-UPS:** (a) **Consumer wiring for Global Config — DONE** (PR #11, d62e7805). New `src/lib/platformConfig.ts` (fetches /config/public, cache + defaults); `useNearbyStores` radius now from serviceRadiusKm (was hardcoded 10km); `CartScreen` (LOCK OVERRIDE approved — layer 3, lock header refreshed) min-order gate (greys button + Alert + note), gating pickup AND dining (cart is the single funnel — the two @locked checkout screens were NOT touched). Behaviour-neutral today (radius 10km, min 0). consumer tsc 0. **Remaining: a consumer OTA to push it to devices** (can ride the next consumer release). Wati env confirmed SET on EB (WATI_API_ENDPOINT/TOKEN/AUTH_TEMPLATE) — two-way reply works live within the 24h window. Optional hardening: server-side min-order check in POST /orders (client gate is bypassable). (b) **Wati live replies** need WATI_API_ENDPOINT/TOKEN on EB + the customer inside the 24h window. (c) **Coupon fonts** (index.html) + **vite.config.mts** dev-proxy override remain LOCAL/uncommitted. (d) Still pending from before: Bucket 2 rest (?phone= filter, customers load-more, audit-log coverage), Bucket 3 (home KPI /admin/stats/*), payout/settlement surface (founder decision). See docs/admin-founder-gated-features + admin-dashboard-changes docs.
+
+---
+
+## Session: June 25, 2026 — Notifications #14 Phase 1 (recipient_role cutover + low-stock server-move) — BUILT, AUDITED, DEPLOYED LIVE
+
+Branch `feat/consumer-global-config-wiring`. Spec written first (`docs/notifications-coverage-spec-2026-06-23.html`, scope = order-lifecycle only). Pranav approved per-step, then authorized full execution of the gated deploy.
+
+### Code (4 commits, each tsc-clean + line-by-line audited)
+- **`55082b58` — recipient_role read cutover (both inboxes).** Consumer hook: replaced the hardcoded `CONSUMER_NOTIFICATION_TYPES` allowlist with `.eq('recipient_role','consumer')` on fetch + realtime guard + markAllAsRead; added the interface field. Merchant hook: added `.eq('recipient_role','merchant')` on fetch + realtime guard + markAllAsRead (was store_id-only — leaked for a dual-role account that ordered from its own store). Fail-closed on NULL. 9 spots total. Also fixed a latent dual-role "mark all read" bleed in both apps.
+- **`8ebe590f` — manual low-stock alert moved server-side.** `PATCH /merchant/store-products/:id` now dispatches `LOW_STOCK` via NotificationService (Expo push + recipient_role='merchant') on a downward threshold crossing (===0 / ≤5), mirroring the order-decrement path (index.ts:3339). Removed the merchant app's client-side `notifications` insert (useInventory.ts) which bypassed push + recipient_role → would have vanished after the cutover. Also corrected type INVENTORY→LOW_STOCK + link /inventory→/(main)/inventory. Best-effort pre-fetch (never blocks the edit); floating+caught dispatch.
+- **`6ffd68bb` — backfill script** (`scripts/backfill_notification_recipient_role.ts`). Dry-run default; `--apply` gated; abort-and-report guard (only backfills NULL→merchant if every NULL row is an unambiguous merchant-only type); writes a rollback JSON before mutating.
+- **`6492e450` — rebuilt dist + rollback snapshot.**
+
+### Deploy (executed + verified)
+1. **Backfill `--apply`:** 12 NULL rows (all NEW_ORDER_REQUEST/NEW_ORDER/ORDER_UPDATE/COMPLETED ×3) → 'merchant'. **0 NULL remaining.** Dist now 82 consumer / 307 merchant. Rollback: `scripts/_notif_recipient_role_backfill_rollback_2026-06-25.json`.
+2. **EB deploy:** `app-260625_105637612928` (pas-api-prod-v2, ap-south-1). Ready/Green, live `GET /` → HTTP 200.
+3. **Merchant OTA:** branch production, runtime 1.2.6, group `f8eed436` (android+ios).
+4. **Consumer OTA:** branch production, runtime 1.1.3, group `2951458e` — **also shipped the held H-5 cart-prune fix (`00615139`).**
+
+### Audit (no misses / no leaks confirmed)
+- **Only 2 notification-write paths exist** repo-wide (sendMerchant/sendConsumer in notification.service.ts) — **both unconditionally set recipientRole**. No raw inserts, no createMany/upsert/updateMany, no bypass. Class fully closed (past = backfill, future = no-bypass service).
+- admin-web touches the notifications table **nowhere**. Both apps read it **only** via the two hooks (all cutover-applied; markAsRead-by-id intentionally unscoped). Order-path LOW_STOCK still routes through the service → still tagged merchant.
+
+### Open threads
+- **Phase 2 (next):** API-only lifecycle gaps — PAYMENT_FAILED, ORDER_REQUEST_EXPIRED, REFUND_INITIATED, (REFUND_CREDITED pending the refund.processed webhook — decision D5). These show by role automatically now that the cutover is live.
+- Deploy-window note: a manual stock-out during the EB↔OTA gap could transiently double-alert or briefly not alert — harmless, self-healing.
+- Rollback if ever needed: restore the 12 ids in the rollback JSON to NULL; re-OTA the prior bundles.
