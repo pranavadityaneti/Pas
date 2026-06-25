@@ -35,6 +35,7 @@ export interface Notification {
     link?: string;
     reference_id?: string;
     metadata?: any;
+    recipient_role?: string | null;  // server-set role tag; this inbox is scoped to 'merchant'
 }
 
 export function useNotifications(user: any) {
@@ -56,6 +57,7 @@ export function useNotifications(user: any) {
                 .select('*')
                 .eq('user_id', user.id)
                 .eq('store_id', activeStoreId)
+                .eq('recipient_role', 'merchant')
                 .order('created_at', { ascending: false })
                 .limit(50);
 
@@ -107,6 +109,10 @@ export function useNotifications(user: any) {
                     const newNotif = payload.new as Notification;
                     // Narrow to the currently-active store (the store_id half of the old filter).
                     if (newNotif.store_id !== activeStoreId) return;
+                    // Role guard: only merchant-role rows belong here. A dual-role account's
+                    // consumer rows can share user_id + store_id; recipient_role disambiguates.
+                    // NULL/missing fails closed (treated as not-merchant).
+                    if ((newNotif.recipient_role || '') !== 'merchant') return;
                     const notifType = (newNotif.type || '').toUpperCase();
 
                     // --- Preference-Gated Alerting ---
@@ -187,6 +193,7 @@ export function useNotifications(user: any) {
             .update({ is_read: true })
             .eq('user_id', user.id)
             .eq('store_id', activeStoreId)
+            .eq('recipient_role', 'merchant')
             .eq('is_read', false);
 
         if (!error) {
