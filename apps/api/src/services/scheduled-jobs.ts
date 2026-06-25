@@ -75,7 +75,7 @@ export function initScheduledJobs(
                 Sentry.captureException(e, { tags: { area: 'cron.diningReminders30' } });
             }
             try {
-                await expireStaleOrderRequests(prisma);
+                await expireStaleOrderRequests(prisma, notificationService);
             } catch (e) {
                 console.error('[cron] expireStaleOrderRequests error:', e);
                 Sentry.captureException(e, { tags: { area: 'cron.expireStaleOrderRequests' } });
@@ -568,19 +568,50 @@ async function fireDiningReminders30Min(
  * failure, the timer never fires and the row stays ACCEPTED forever in the DB.
  * Closes forlater #17.
  */
-async function expireStaleOrderRequests(prisma: PrismaClient): Promise<void> {
-    const result = await prisma.order_requests.updateMany({
+async function expireStaleOrderRequests(prisma: PrismaClient, notificationService: NotificationService): Promise<void> {
+    // Snapshot the rows about to expire so we can notify each consumer.
+    // (updateMany returns only a count, so it can't drive per-row notifications.)
+    const candidates = await prisma.order_requests.findMany({
         where: {
             status: { in: ['PENDING', 'ACCEPTED'] },
             expires_at: { lt: new Date() },
         },
-        data: {
-            status: 'EXPIRED',
-            updated_at: new Date(),
-        },
+        select: { id: true, consumer_user_id: true, store_name: true, order_type: true, status: true },
     });
-    if (result.count > 0) {
-        console.log(`[cron] Expired ${result.count} stale order_requests`);
+    if (candidates.length === 0) return;
+
+    let expired = 0;
+    for (const r of candidates) {
+        // Per-row compare-and-set: ONLY the cron tick that actually flips the row
+        // (count === 1) notifies. A re-tick, or a concurrent accept/cancel, yields
+        // count 0 → no duplicate notification. Mirrors the SLA-cron idempotency.
+        const upd = await prisma.order_requests.updateMany({
+            where: { id: r.id, status: { in: ['PENDING', 'ACCEPTED'] }, expires_at: { lt: new Date() } },
+            data: { status: 'EXPIRED', updated_at: new Date() },
+        });
+        if (upd.count !== 1) continue;
+        expired++;
+
+        // PENDING → no merchant ever accepted; ACCEPTED → a store accepted but the
+        // consumer didn't pay before the window closed. Both are pre-payment, so the
+        // customer was never charged. recipient_role='consumer' is set by the service,
+        // so this appears in the consumer inbox automatically (Phase 1 cutover is live).
+        const wasPending = r.status === 'PENDING';
+        notificationService.sendConsumerNotification({
+            userId: r.consumer_user_id,
+            title: wasPending ? 'No store accepted your order' : 'Order request expired',
+            body: wasPending
+                ? `No nearby store accepted your order in time. You haven't been charged — please try again.`
+                : `Your order request${r.store_name ? ` to ${r.store_name}` : ''} expired before payment. You haven't been charged — please try again.`,
+            type: 'ORDER_REQUEST_EXPIRED',
+            referenceId: r.id,
+            link: '/(main)/orders',
+            metadata: { orderRequestId: r.id, storeName: r.store_name ?? null, orderType: r.order_type ?? null, previousStatus: r.status },
+        }).catch((e: any) => console.error('[cron] ORDER_REQUEST_EXPIRED notif failed:', e));
+    }
+
+    if (expired > 0) {
+        console.log(`[cron] Expired ${expired} stale order_requests (consumers notified)`);
     }
 }
 
