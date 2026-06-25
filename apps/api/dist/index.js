@@ -757,7 +757,7 @@ app.post('/webhooks/razorpay', async (req, res) => {
         }
         else if (event === 'payment.failed' && payment) {
             console.warn('[razorpay-webhook] payment.failed for paymentId=', payment.id, 'orderId=', payment.order_id, 'reason=', payment.error_description);
-            // Currently log-only. Future: notify the merchant + mark draft to retry.
+            await handlePaymentFailed(payment);
         }
         else {
             console.log('[razorpay-webhook] event ignored (no handler):', event);
@@ -827,6 +827,54 @@ async function handlePaymentCaptured(payment) {
     // row will be missing. That's an admin-reconciliation case — too risky
     // to auto-increment used_count from a webhook without the merchant
     // confirming via the app.
+}
+/**
+ * Handler for Razorpay `payment.failed` events. Notifies the consumer that their
+ * payment didn't complete (they were NOT charged). Idempotent: a webhook
+ * re-delivery is a no-op because we first check for an existing PAYMENT_FAILED
+ * notification keyed by the payment id. Only consumer-order payments (tagged with
+ * consumerUserId in the Razorpay order notes at create-order time) are notified;
+ * merchant-signup / untagged failures are skipped.
+ */
+async function handlePaymentFailed(payment) {
+    const paymentId = payment.id;
+    const orderId = payment.order_id;
+    if (!paymentId || !orderId || !razorpayInstance)
+        return;
+    // Resolve the consumer from the Razorpay order notes (stamped at create-order time).
+    let consumerUserId;
+    try {
+        const order = await razorpayInstance.orders.fetch(orderId);
+        const notes = (order?.notes || {});
+        if (notes.paymentType === 'consumer_order' && notes.consumerUserId) {
+            consumerUserId = String(notes.consumerUserId);
+        }
+    }
+    catch (e) {
+        console.warn('[razorpay-webhook] payment.failed: could not fetch order notes for', orderId, '-', e?.message || e);
+        return;
+    }
+    if (!consumerUserId)
+        return; // not an attributable consumer payment — nothing to notify
+    // Idempotency: Razorpay retries webhooks — notify at most once per failed payment.
+    const already = await prisma.notification.findFirst({
+        where: { userId: consumerUserId, type: 'PAYMENT_FAILED', referenceId: paymentId },
+        select: { id: true },
+    });
+    if (already) {
+        console.log('[razorpay-webhook] payment.failed already notified for', paymentId, '— idempotent no-op');
+        return;
+    }
+    const reason = payment.error_description || '';
+    await notificationService.sendConsumerNotification({
+        userId: consumerUserId,
+        title: "Payment didn't go through",
+        body: `Your payment couldn't be completed${reason ? ` (${reason})` : ''}. You haven't been charged — please try again.`,
+        type: 'PAYMENT_FAILED',
+        referenceId: paymentId,
+        link: '/(main)/orders',
+        metadata: { paymentId, orderId, reason: reason || null },
+    });
 }
 /**
  * GET /payments/methods
@@ -10046,6 +10094,21 @@ app.post('/admin/orders/:id/refund', async (req, res) => {
             after: { status: 'REFUNDED', refundRazorpayId: refund.id, refundAmountInr: amountInr },
             reason,
         });
+        // REFUND_INITIATED → tell the consumer their money is on the way. This admin
+        // path issues a REAL Razorpay refund and (unlike the cancel / return / SLA
+        // refund paths, which already notify via their decision messages) had no
+        // consumer notification. Fail-soft: a notify failure never fails the refund.
+        // recipient_role='consumer' is set by the service → shows in the consumer inbox.
+        notificationService.sendConsumerNotification({
+            userId: order.userId,
+            title: 'Refund on the way',
+            body: `We've started a refund of ₹${amountInr} for order #${order.orderNumber}. It'll reach your account in 5–7 business days.`,
+            type: 'REFUND_INITIATED',
+            referenceId: id,
+            link: '/(main)/orders',
+            storeId: order.storeId,
+            metadata: { orderNumber: order.orderNumber, refundInr: amountInr, razorpayRefundId: refund.id, source: 'admin' },
+        }).catch((e) => console.error('[admin refund] REFUND_INITIATED notif failed:', e));
         return res.json({ ok: true, refundId: refund.id, amountInr, order: { id: updated.id, status: updated.status } });
     }
     catch (err) {
