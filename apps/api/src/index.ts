@@ -781,7 +781,7 @@ app.post('/webhooks/razorpay', async (req, res) => {
         } else if (event === 'payment.failed' && payment) {
             console.warn('[razorpay-webhook] payment.failed for paymentId=', payment.id,
                 'orderId=', payment.order_id, 'reason=', payment.error_description);
-            // Currently log-only. Future: notify the merchant + mark draft to retry.
+            await handlePaymentFailed(payment);
         } else {
             console.log('[razorpay-webhook] event ignored (no handler):', event);
         }
@@ -863,6 +863,55 @@ async function handlePaymentCaptured(payment: any) {
     // row will be missing. That's an admin-reconciliation case — too risky
     // to auto-increment used_count from a webhook without the merchant
     // confirming via the app.
+}
+
+/**
+ * Handler for Razorpay `payment.failed` events. Notifies the consumer that their
+ * payment didn't complete (they were NOT charged). Idempotent: a webhook
+ * re-delivery is a no-op because we first check for an existing PAYMENT_FAILED
+ * notification keyed by the payment id. Only consumer-order payments (tagged with
+ * consumerUserId in the Razorpay order notes at create-order time) are notified;
+ * merchant-signup / untagged failures are skipped.
+ */
+async function handlePaymentFailed(payment: any) {
+    const paymentId = payment.id as string;
+    const orderId = payment.order_id as string | undefined;
+    if (!paymentId || !orderId || !razorpayInstance) return;
+
+    // Resolve the consumer from the Razorpay order notes (stamped at create-order time).
+    let consumerUserId: string | undefined;
+    try {
+        const order = await razorpayInstance.orders.fetch(orderId);
+        const notes = (order?.notes || {}) as Record<string, any>;
+        if (notes.paymentType === 'consumer_order' && notes.consumerUserId) {
+            consumerUserId = String(notes.consumerUserId);
+        }
+    } catch (e: any) {
+        console.warn('[razorpay-webhook] payment.failed: could not fetch order notes for', orderId, '-', e?.message || e);
+        return;
+    }
+    if (!consumerUserId) return; // not an attributable consumer payment — nothing to notify
+
+    // Idempotency: Razorpay retries webhooks — notify at most once per failed payment.
+    const already = await prisma.notification.findFirst({
+        where: { userId: consumerUserId, type: 'PAYMENT_FAILED', referenceId: paymentId },
+        select: { id: true },
+    });
+    if (already) {
+        console.log('[razorpay-webhook] payment.failed already notified for', paymentId, '— idempotent no-op');
+        return;
+    }
+
+    const reason = (payment.error_description as string) || '';
+    await notificationService.sendConsumerNotification({
+        userId: consumerUserId,
+        title: "Payment didn't go through",
+        body: `Your payment couldn't be completed${reason ? ` (${reason})` : ''}. You haven't been charged — please try again.`,
+        type: 'PAYMENT_FAILED',
+        referenceId: paymentId,
+        link: '/(main)/orders',
+        metadata: { paymentId, orderId, reason: reason || null },
+    });
 }
 
 /**
