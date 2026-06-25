@@ -10625,6 +10625,27 @@ app.patch('/merchant/store-products/:id', async (req, res) => {
         if (!auth.ok) return res.status(403).json({ error: 'Not authorized to edit this product' });
         const updates = pick(req.body, STORE_PRODUCT_UPDATE_COLS);
         if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No updatable fields provided' });
+
+        // Low-stock alerting (server-side). Capture the pre-edit stock so we can detect a
+        // DOWNWARD threshold crossing after the write — only when this edit changes stock.
+        // This replaces the merchant app's old client-side notifications insert
+        // (useInventory.ts), which bypassed NotificationService → no push, no
+        // recipient_role (invisible after the role cutover). Best-effort: a failure to
+        // read the pre-edit row just skips the alert; it never blocks the inventory edit.
+        const stockIsChanging = updates.stock != null;
+        let preEdit: { stock: number; branchId: string; name: string } | null = null;
+        if (stockIsChanging) {
+            try {
+                const spBefore = await prisma.storeProduct.findUnique({
+                    where: { id },
+                    select: { stock: true, branch_id: true, product: { select: { name: true } } },
+                });
+                if (spBefore) preEdit = { stock: Number(spBefore.stock ?? 0), branchId: spBefore.branch_id, name: spBefore.product?.name || 'Item' };
+            } catch (e) {
+                console.error('[PATCH /merchant/store-products] pre-edit stock fetch failed (alert skipped):', e);
+            }
+        }
+
         // Phase 3 Item 2 (2026-06-16): a ₹0 listing can never be live. If this edit
         // sets price ≤ 0, force the row inactive in the same write. (The activate-an-
         // existing-₹0-row edge case is caught by the DB CHECK backstop.)
@@ -10634,6 +10655,34 @@ app.patch('/merchant/store-products/:id', async (req, res) => {
         updates.updatedAt = new Date().toISOString();
         const { error } = await supabaseAdmin.from('StoreProduct').update(updates).eq('id', id);
         if (error) throw new Error(error.message);
+
+        // Fire a low-stock / out-of-stock alert ONLY on a downward threshold crossing,
+        // mirroring the order-decrement path (~index.ts:3339). Routes through
+        // NotificationService → Expo push + recipient_role='merchant'. Floating + caught:
+        // an alert failure must never fail the inventory edit.
+        if (preEdit && stockIsChanging) {
+            const newStock = Number(updates.stock);
+            const oldStock = preEdit.stock;
+            if (Number.isFinite(newStock) && newStock !== oldStock) {
+                let alert: { title: string; body: string } | null = null;
+                if (newStock === 0 && oldStock > 0) {
+                    alert = { title: 'Out of Stock Alert', body: `${preEdit.name} is completely out of stock.` };
+                } else if (newStock > 0 && newStock <= 5 && oldStock > 5) {
+                    alert = { title: 'Low Stock Warning', body: `Action Required: Only ${newStock} left of ${preEdit.name}.` };
+                }
+                if (alert) {
+                    notificationService.sendMerchantNotification({
+                        storeId: preEdit.branchId,
+                        title: alert.title,
+                        body: alert.body,
+                        type: 'LOW_STOCK',
+                        link: '/(main)/inventory',
+                        metadata: { storeProductId: id, productName: preEdit.name, stock: newStock, source: 'manual-edit' },
+                    }).catch(e => console.error('[PATCH /merchant/store-products] Low stock notif failed:', e));
+                }
+            }
+        }
+
         res.json({ ok: true });
     } catch (error: any) {
         return handleApiError(res, error, { area: 'merchant.storeProducts.update', userMessage: 'Failed to update product' });
