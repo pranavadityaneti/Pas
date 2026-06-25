@@ -707,3 +707,26 @@ Branch `feat/consumer-global-config-wiring`. Spec written first (`docs/notificat
 - **Phase 2 (next):** API-only lifecycle gaps — PAYMENT_FAILED, ORDER_REQUEST_EXPIRED, REFUND_INITIATED, (REFUND_CREDITED pending the refund.processed webhook — decision D5). These show by role automatically now that the cutover is live.
 - Deploy-window note: a manual stock-out during the EB↔OTA gap could transiently double-alert or briefly not alert — harmless, self-healing.
 - Rollback if ever needed: restore the 12 ids in the rollback JSON to NULL; re-OTA the prior bundles.
+
+---
+
+## Session: June 25, 2026 (cont.) — Notifications #14 Phase 2 (lifecycle gaps) — BUILT, AUDITED, DEPLOYED LIVE (API-only)
+
+Investigated all 4 spec'd scenarios in-code first; the code reality refined the plan (flagged before writing). API-only → EB `app-260625_143131848924` (Ready/Green, live 200). No OTA: all are `sendConsumerNotification` → recipient_role='consumer' → show in the already-cutover consumer inbox automatically.
+
+### Shipped (3 commits, each tsc-clean + audited)
+- **`1e9b975a` — ORDER_REQUEST_EXPIRED.** Refactored `expireStaleOrderRequests` (scheduled-jobs.ts): blind bulk updateMany → select candidates + per-row compare-and-set + notify. Only the tick that flips a row (count===1) notifies → idempotent across cron retries. PENDING = "no store accepted"; ACCEPTED = "expired before payment". Pre-payment, never charged. Threaded `notificationService` param into the function + call site.
+- **`e26334a8` — PAYMENT_FAILED.** New `handlePaymentFailed` in the razorpay webhook (`payment.failed` was log-only). Resolves consumer from order notes (`consumerUserId`/`paymentType='consumer_order'`, stamped at create-order); idempotent on payment id (webhook retries no-op); merchant-signup/untagged skipped.
+- **`7b4d2f7a` — REFUND_INITIATED.** Added to `POST /admin/orders/:id/refund` (the only REAL refund that didn't notify). NOT added to cancel/return/SLA paths — they already notify with refund info (would double). `1a33832f` = rebuilt dist.
+- **DEFERRED — REFUND_CREDITED (D5):** needs Razorpay `refund.processed` dashboard subscription + handler. In forlater.md.
+
+### Audit (no misses / no leaks)
+- Idempotency per-scenario (CAS / existing-notif check / endpoint already-refunded guard). No backlog blast on EXPIRED (old cron kept rows flipped → ~0 stale at deploy). Fail-soft everywhere. No duplicate refund notifications. Consumer app falls back to TYPE_CONFIG.DEFAULT for the new types (no crash; dedicated icons = minor future-OTA polish).
+
+### ⚠️ Flagged (out of scope, in forlater.md) — possible money bug
+- **Legacy `POST /orders/:id/refund` SIMULATES refunds** — real Razorpay call is commented out (index.ts:~4234-4240); fabricates `rfnd_test_` id, flips REFUNDED, sends "Refund Processed" SMS, but no money moves. Merchant app calls it (useOrders.ts:482). Needs verification whether merchants rely on it for real refunds.
+
+### Open threads
+- REFUND_CREDITED (Razorpay dashboard subscription, then handler).
+- Verify/fix the simulated legacy refund endpoint.
+- Add icons for ORDER_REQUEST_EXPIRED / PAYMENT_FAILED / REFUND_INITIATED in the next consumer OTA.
