@@ -10420,6 +10420,23 @@ app.post('/admin/orders/:id/refund', async (req, res) => {
             after: { status: 'REFUNDED', refundRazorpayId: refund.id, refundAmountInr: amountInr },
             reason,
         });
+
+        // REFUND_INITIATED → tell the consumer their money is on the way. This admin
+        // path issues a REAL Razorpay refund and (unlike the cancel / return / SLA
+        // refund paths, which already notify via their decision messages) had no
+        // consumer notification. Fail-soft: a notify failure never fails the refund.
+        // recipient_role='consumer' is set by the service → shows in the consumer inbox.
+        notificationService.sendConsumerNotification({
+            userId: order.userId,
+            title: 'Refund on the way',
+            body: `We've started a refund of ₹${amountInr} for order #${order.orderNumber}. It'll reach your account in 5–7 business days.`,
+            type: 'REFUND_INITIATED',
+            referenceId: id,
+            link: '/(main)/orders',
+            storeId: order.storeId,
+            metadata: { orderNumber: order.orderNumber, refundInr: amountInr, razorpayRefundId: refund.id, source: 'admin' },
+        }).catch((e: any) => console.error('[admin refund] REFUND_INITIATED notif failed:', e));
+
         return res.json({ ok: true, refundId: refund.id, amountInr, order: { id: updated.id, status: updated.status } });
     } catch (err: any) {
         console.error('[admin/orders/:id/refund] error:', err?.message || err);
