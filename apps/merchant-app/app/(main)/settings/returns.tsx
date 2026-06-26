@@ -108,7 +108,6 @@ export default function ReturnsScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [activeTab, setActiveTab] = useState<TabKey>('PENDING');
     const [activeType, setActiveType] = useState<'ALL' | 'return' | 'exchange'>('ALL');
-    const [processingId, setProcessingId] = useState<string | null>(null);
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
     const fetchInbox = useCallback(async () => {
@@ -148,73 +147,10 @@ export default function ReturnsScreen() {
 
     const onRefresh = () => { setRefreshing(true); fetchInbox(); };
 
-    const handleDecision = async (issue: InboxIssue, decision: 'APPROVED' | 'REJECTED') => {
-        if (issue.type === 'return' && decision === 'APPROVED' && (issue.refundAmountInr ?? 0) > 0) {
-            const confirmed = await new Promise<boolean>(resolve => {
-                Alert.alert(
-                    'Approve return + refund?',
-                    `This will issue a Razorpay refund of ₹${issue.refundAmountInr} to the customer.`,
-                    [
-                        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-                        { text: 'Approve', style: 'default', onPress: () => resolve(true) },
-                    ],
-                );
-            });
-            if (!confirmed) return;
-        }
-        let rejectionReason: string | undefined;
-        if (decision === 'REJECTED') {
-            rejectionReason = await new Promise<string>(resolve => {
-                // RN Alert doesn't ship with text input on iOS by default — for v0, just
-                // approve/reject with a generic reason. Inline form is a v0.1 follow-up.
-                Alert.alert(
-                    'Reject this request?',
-                    'The customer will be notified. Optionally edit the reason in v0.1.',
-                    [
-                        { text: 'Cancel', style: 'cancel', onPress: () => resolve('') },
-                        { text: 'Reject', style: 'destructive', onPress: () => resolve('Not eligible per merchant policy.') },
-                    ],
-                );
-            });
-            if (!rejectionReason) return;
-        }
-
-        setProcessingId(issue.id);
-        try {
-            const { data: sess } = await supabase.auth.getSession();
-            const token = sess?.session?.access_token;
-            if (!token) throw new Error('Not authenticated.');
-            const res = await fetch(
-                `${API_URL}/orders/${issue.orderId}/issue/${issue.id}`,
-                {
-                    method: 'PATCH',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        Authorization: `Bearer ${token}`,
-                    },
-                    body: JSON.stringify({
-                        decision,
-                        merchantDecisionReason: rejectionReason ?? undefined,
-                    }),
-                },
-            );
-            const body = await res.json();
-            if (!res.ok) throw new Error(body?.error || 'Decision failed.');
-
-            // Remove from pending list immediately; refetch in background to also load resolved.
-            setIssues(prev => prev.filter(i => i.id !== issue.id));
-            const decisionVerb = decision === 'APPROVED' ? 'approved' : 'rejected';
-            const refundMsg = body?.refund?.razorpayRefundId
-                ? `\nRefund ID: ${body.refund.razorpayRefundId}${body.refund.simulated ? ' (simulated)' : ''}`
-                : '';
-            Alert.alert(`${issue.type} ${decisionVerb}`, `Customer has been notified.${refundMsg}`);
-        } catch (err: any) {
-            console.error('[returns inbox] decision failed:', err);
-            Alert.alert('Could not save decision', err?.message || 'Unknown error.');
-        } finally {
-            setProcessingId(null);
-        }
-    };
+    // Phase 3d (2026-06-26): returns/exchanges are now decided by the PAS team (admin),
+    // not merchants. This screen is DISPLAY-ONLY — the approve/reject action was removed
+    // and the merchant decision API returns 403. Merchants track status here; admins
+    // decide in the dashboard's Returns & Exchanges queue.
 
     const filteredIssues = useMemo(() => {
         if (activeType === 'ALL') return issues;
@@ -308,27 +244,9 @@ export default function ReturnsScreen() {
                 )}
 
                 {item.status === 'PENDING' && (
-                    <View style={styles.actions}>
-                        <TouchableOpacity
-                            style={[styles.btn, styles.rejectBtn]}
-                            onPress={() => handleDecision(item, 'REJECTED')}
-                            disabled={!!processingId}
-                        >
-                            {processingId === item.id ? <ActivityIndicator color="#EF4444" /> : <Text style={styles.rejectText}>Reject</Text>}
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={[styles.btn, styles.approveBtn]}
-                            onPress={() => handleDecision(item, 'APPROVED')}
-                            disabled={!!processingId}
-                        >
-                            {processingId === item.id ? <ActivityIndicator color="#FFFFFF" /> : (
-                                <Text style={styles.approveText}>
-                                    {item.type === 'return' && (item.refundAmountInr ?? 0) > 0
-                                        ? `Approve + refund ₹${item.refundAmountInr}`
-                                        : 'Approve'}
-                                </Text>
-                            )}
-                        </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F3F4F6' }}>
+                        <Ionicons name="hourglass-outline" size={15} color="#6B7280" />
+                        <Text style={{ fontSize: 12.5, color: '#6B7280', flex: 1 }}>Under review by the PAS team — you'll see the outcome here.</Text>
                     </View>
                 )}
             </View>

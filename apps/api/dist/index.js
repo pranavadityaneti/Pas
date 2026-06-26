@@ -5276,31 +5276,16 @@ async function decideOrderIssue(params) {
     };
 }
 app.patch('/orders/:id/issue/:issueId', async (req, res) => {
+    // Phase 3d (2026-06-26): returns/exchanges are now decided by the PLATFORM (admin),
+    // never by merchants — the merchant app is display-only. This merchant decision
+    // route is retired and returns 403 so any stale merchant build can't slip a decision
+    // through. Admins decide via PATCH /admin/orders/:id/issue/:issueId; merchants still
+    // READ their returns via GET /orders/issues/inbox (display-only). The shared
+    // decideOrderIssue() engine is unchanged and used by the admin route.
     const user = await requireUser(req, res);
     if (!user)
         return;
-    try {
-        const { id, issueId } = req.params;
-        const { decision, merchantDecisionReason } = req.body || {};
-        // Merchant authorization (store-scoped). The decision itself runs through the
-        // shared decideOrderIssue() so merchant + admin behave identically.
-        const ord = await prisma.order.findUnique({ where: { id }, select: { storeId: true } });
-        if (!ord)
-            return res.status(404).json({ error: 'Order not found.' });
-        const canManage = await userCanManageOrderStore(user.id, ord.storeId);
-        if (!canManage)
-            return res.status(403).json({ error: 'You do not have merchant access to this order.' });
-        const r = await decideOrderIssue({ orderId: id, issueId, decision, decisionReason: merchantDecisionReason, resolvedById: user.id });
-        if (!r.ok)
-            return res.status(r.status).json({ error: r.error });
-        return res.json({ success: true, issue: r.issue, order: r.order, refund: r.refund });
-    }
-    catch (err) {
-        console.error('[issue PATCH] error:', err);
-        Sentry.captureException(err, { tags: { area: 'ws2.merchantPatch' }, extra: { orderId: req.params.id, issueId: req.params.issueId, userId: user.id } });
-        (0, api_error_handler_1.markResponseAsReported)(res);
-        return res.status(500).json({ error: 'Failed to update issue.', details: err?.message });
-    }
+    return res.status(403).json({ error: 'Returns and exchanges are now handled by the PAS team. You can view their status, but the decision is made by the platform.' });
 });
 // =====================================================================
 // --- Push Token Routes ---
