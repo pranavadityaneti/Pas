@@ -278,6 +278,41 @@ class NotificationService {
      * Deactivates push tokens that Expo reports as no longer registered
      * (e.g., the user uninstalled the app or the token expired).
      */
+    /**
+     * Push-only consumer dispatch — sends the Expo push to all of a consumer's active
+     * devices WITHOUT writing an in-app row. Pair with a caller that has already written
+     * the in-app notification row (e.g. atomically inside its own transaction), so the
+     * durable in-app message and the best-effort push are decoupled. Never throws.
+     */
+    async sendConsumerPush(userId: string, p: { title: string; body: string; type: string; referenceId?: string; link?: string }): Promise<void> {
+        try {
+            const tokens = await (this.prisma as any).merchantPushToken.findMany({ where: { userId, isActive: true } });
+            if (!tokens || tokens.length === 0) return;
+            const messages: ExpoPushMessage[] = tokens
+                .filter((t: any) => Expo.isExpoPushToken(t.expoPushToken))
+                .map((t: any) => ({
+                    to: t.expoPushToken,
+                    sound: 'default' as const,
+                    title: p.title,
+                    body: p.body,
+                    data: { type: p.type, referenceId: p.referenceId, link: p.link },
+                    priority: 'high' as const,
+                }));
+            if (messages.length === 0) return;
+            const chunks = expo.chunkPushNotifications(messages);
+            for (const chunk of chunks) {
+                try {
+                    const tickets = await expo.sendPushNotificationsAsync(chunk);
+                    await this.deactivateStaleTokens(tickets, tokens);
+                } catch (pushError) {
+                    console.error('[NotificationService] sendConsumerPush dispatch failed:', pushError);
+                }
+            }
+        } catch (error) {
+            console.error('[NotificationService] Fatal error in sendConsumerPush:', error);
+        }
+    }
+
     private async deactivateStaleTokens(tickets: ExpoPushTicket[], tokens: any[]): Promise<void> {
         for (let i = 0; i < tickets.length; i++) {
             const ticket = tickets[i];

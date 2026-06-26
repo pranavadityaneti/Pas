@@ -582,32 +582,49 @@ async function expireStaleOrderRequests(prisma: PrismaClient, notificationServic
 
     let expired = 0;
     for (const r of candidates) {
-        // Per-row compare-and-set: ONLY the cron tick that actually flips the row
-        // (count === 1) notifies. A re-tick, or a concurrent accept/cancel, yields
-        // count 0 → no duplicate notification. Mirrors the SLA-cron idempotency.
-        const upd = await prisma.order_requests.updateMany({
-            where: { id: r.id, status: { in: ['PENDING', 'ACCEPTED'] }, expires_at: { lt: new Date() } },
-            data: { status: 'EXPIRED', updated_at: new Date() },
-        });
-        if (upd.count !== 1) continue;
-        expired++;
-
-        // PENDING → no merchant ever accepted; ACCEPTED → a store accepted but the
-        // consumer didn't pay before the window closed. Both are pre-payment, so the
-        // customer was never charged. recipient_role='consumer' is set by the service,
-        // so this appears in the consumer inbox automatically (Phase 1 cutover is live).
         const wasPending = r.status === 'PENDING';
-        notificationService.sendConsumerNotification({
-            userId: r.consumer_user_id,
-            title: wasPending ? 'No store accepted your order' : 'Order request expired',
-            body: wasPending
-                ? `No nearby store accepted your order in time. You haven't been charged — please try again.`
-                : `Your order request${r.store_name ? ` to ${r.store_name}` : ''} expired before payment. You haven't been charged — please try again.`,
-            type: 'ORDER_REQUEST_EXPIRED',
-            referenceId: r.id,
-            link: '/(main)/orders',
-            metadata: { orderRequestId: r.id, storeName: r.store_name ?? null, orderType: r.order_type ?? null, previousStatus: r.status },
-        }).catch((e: any) => console.error('[cron] ORDER_REQUEST_EXPIRED notif failed:', e));
+        const title = wasPending ? 'No store accepted your order' : 'Order request expired';
+        const body = wasPending
+            ? `No nearby store accepted your order in time. You haven't been charged — please try again.`
+            : `Your order request${r.store_name ? ` to ${r.store_name}` : ''} expired before payment. You haven't been charged — please try again.`;
+
+        // B1 (audit hardening): flip the row to EXPIRED AND write the in-app notification
+        // in ONE transaction. If the in-app write fails, the whole tx rolls back → the row
+        // stays PENDING/ACCEPTED → the NEXT cron tick retries (no silent message drop).
+        // The per-row compare-and-set (count===1 inside the tx) keeps it exactly-once across
+        // ticks / a concurrent accept-cancel. The push is sent OUTSIDE the tx (network I/O
+        // must never hold a DB transaction open). recipient_role='consumer' → consumer inbox.
+        let flipped = false;
+        try {
+            await prisma.$transaction(async (tx) => {
+                const upd = await tx.order_requests.updateMany({
+                    where: { id: r.id, status: { in: ['PENDING', 'ACCEPTED'] }, expires_at: { lt: new Date() } },
+                    data: { status: 'EXPIRED', updated_at: new Date() },
+                });
+                if (upd.count !== 1) return; // lost the race / already expired — commit the no-op
+                await (tx as any).notification.create({
+                    data: {
+                        userId: r.consumer_user_id,
+                        type: 'ORDER_REQUEST_EXPIRED',
+                        title,
+                        message: body,
+                        link: '/(main)/orders',
+                        referenceId: r.id,
+                        metadata: { orderRequestId: r.id, storeName: r.store_name ?? null, orderType: r.order_type ?? null, previousStatus: r.status },
+                        isRead: false,
+                        recipientRole: 'consumer',
+                    },
+                });
+                flipped = true;
+            });
+        } catch (e: any) {
+            console.error('[cron] ORDER_REQUEST_EXPIRED tx rolled back (will retry next tick):', e?.message || e);
+            continue;
+        }
+        if (!flipped) continue;
+        expired++;
+        notificationService.sendConsumerPush(r.consumer_user_id, { title, body, type: 'ORDER_REQUEST_EXPIRED', referenceId: r.id, link: '/(main)/orders' })
+            .catch((e: any) => console.error('[cron] ORDER_REQUEST_EXPIRED push failed:', e));
     }
 
     if (expired > 0) {

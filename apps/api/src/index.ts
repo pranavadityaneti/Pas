@@ -10664,11 +10664,19 @@ app.patch('/merchant/store-products/:id', async (req, res) => {
         if (error) throw new Error(error.message);
 
         // Fire a low-stock / out-of-stock alert ONLY on a downward threshold crossing,
-        // mirroring the order-decrement path (~index.ts:3339). Routes through
-        // NotificationService → Expo push + recipient_role='merchant'. Floating + caught:
-        // an alert failure must never fail the inventory edit.
+        // mirroring the order-decrement path. Routes through NotificationService → Expo
+        // push + recipient_role='merchant'. Floating + caught: an alert failure must never
+        // fail the inventory edit.
         if (preEdit && stockIsChanging) {
-            const newStock = Number(updates.stock);
+            // B2 (audit hardening): base the crossing on the COMMITTED stock (re-read after
+            // the write), not the requested value, so a concurrent order-decrement landing
+            // after this edit is reflected. Best-effort — falls back to the requested value.
+            let committedStock = Number(updates.stock);
+            try {
+                const after = await prisma.storeProduct.findUnique({ where: { id }, select: { stock: true } });
+                if (after && after.stock != null) committedStock = Number(after.stock);
+            } catch (e) { console.error('[PATCH /merchant/store-products] post-edit stock re-read failed:', e); }
+            const newStock = committedStock;
             const oldStock = preEdit.stock;
             if (Number.isFinite(newStock) && newStock !== oldStock) {
                 let alert: { title: string; body: string } | null = null;
