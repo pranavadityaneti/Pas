@@ -9,6 +9,7 @@ import {
   FileBarChart2,
   Inbox,
   RefreshCcw,
+  Undo2,
   ShieldCheck,
 } from "lucide-react"
 import { NavLink, useLocation } from "react-router-dom"
@@ -52,6 +53,7 @@ const PLATFORM_ITEMS: NavItem[] = [
 
 const OPERATIONS_ITEMS: NavItem[] = [
   { to: "/refunds-disputes", label: "Refunds & Disputes", icon: RefreshCcw, requires: "disputes.standard.resolve" },
+  { to: "/returns",          label: "Returns & Exchanges", icon: Undo2,    requires: "disputes.standard.resolve" },
   { to: "/customer-support", label: "Customer Support",   icon: Inbox,      requires: "tickets.respond" },
 ];
 

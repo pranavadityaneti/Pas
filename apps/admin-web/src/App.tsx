@@ -22,6 +22,7 @@ import { AnalyticsHub } from './components/modules/analytics/AnalyticsHub';
 import { SettingsHub } from './components/modules/settings/SettingsHub';
 import { RolesPermissions } from './components/modules/roles/RolesPermissions';
 import { RefundsDisputes } from './components/modules/operations/RefundsDisputes';
+import { ReturnsExchanges } from './components/modules/operations/ReturnsExchanges';
 import { CustomerSupportInbox } from './components/modules/operations/CustomerSupportInbox';
 
 export default function App() {
@@ -91,6 +92,7 @@ export default function App() {
         {/* Added 2026-06-02 per RBAC doc */}
         <Route path="roles" element={<RolesPermissions />} />
         <Route path="refunds-disputes" element={<RefundsDisputes />} />
+        <Route path="returns" element={<ReturnsExchanges />} />
         <Route path="customer-support" element={<CustomerSupportInbox />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
