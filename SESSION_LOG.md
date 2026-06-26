@@ -20,7 +20,7 @@ Of the original ~176 null-vertical products, **162 fixed**, 1 ambiguous left ("D
 - Re-enabled Bakeries & Desserts + Fresh Items (Pranav test-disabled them live).
 
 ### Branch divergence — SCOPED (read-only, this session)
-`feat/consumer-global-config-wiring` (live-build branch) vs `origin/main` (Vercel prod branch): main +8 (7 PR merges + OTP fix `c586850f`), feat +77. **`git merge-tree` = 0 conflicts — clean merge.** Recommended: merge main→feat→main + build-verify + push (mutates main + prod deploy = GATED, not yet done). This is the root blocker behind the admin-site staleness + the pending merchant OTA items + post-OTA security flips. **NOT executed — awaiting Pranav's go.**
+`feat/consumer-global-config-wiring` (live-build branch) vs `origin/main` (Vercel prod branch): main +8 (7 PR merges + OTP fix), feat +77. **`git merge-tree` = 0 conflicts.** Foolproof execution (Pranav approved): backup tag `backup/main-pre-reconcile-2026-06-22` → isolated reconcile worktree → **merge main→feat added only 1 file (the OTP fix) → no duplication risk** → pushed reconcile branch → **Vercel PREVIEW build SUCCESS** → PR #12 → merged → **`main` Production build GREEN (`40fa0fbe`)** → FF `feat` to match. **✅ RECONCILED: feat == main == 40fa0fbe, 0/0 divergence. Vercel prod pipeline restored (no more manual promotes). OTP fix now on the canonical line.** Unblocks: future merchant build/OTA (Phase 9 rewires + OTP) from `main`; the post-OTA security flips (`REQUIRE_ORDERS_AUTH`, `merchant_branches` lockdown migration) remain independent gated actions in forlater.
 
 ### Open threads
 - Execute the feat↔main reconciliation (gated — prod deploy).
@@ -680,3 +680,53 @@ One feature at a time, commit + deploy each (Pranav: "deploy each feature as we 
 4. **Global Config** — PR #10, api `app-260614_212353752072`. `platform_settings` table APPLIED to prod (service_radius_km=10, min_order_value=0, RLS-locked) + `GET/PATCH /admin/config` (PATCH=SUPER_ADMIN, audited) + `GET /config/public` → {serviceRadiusKm,minOrderValue}. admin GlobalConfig rebuilt from mock + Config tab un-hidden in AnalyticsHub. Branch feat/admin-global-config (7901e41c). Migration: docs/migrations-pending-2026-06-14-platform-settings.sql.
 - **EB note:** every API deploy used the wait-for-Ready→deploy background pattern (the env keeps entering managed-platform-update windows). One deploy was classifier-blocked until Pranav explicitly authorized "deploy each feature."
 - **FOLLOW-UPS:** (a) **Consumer wiring for Global Config — DONE** (PR #11, d62e7805). New `src/lib/platformConfig.ts` (fetches /config/public, cache + defaults); `useNearbyStores` radius now from serviceRadiusKm (was hardcoded 10km); `CartScreen` (LOCK OVERRIDE approved — layer 3, lock header refreshed) min-order gate (greys button + Alert + note), gating pickup AND dining (cart is the single funnel — the two @locked checkout screens were NOT touched). Behaviour-neutral today (radius 10km, min 0). consumer tsc 0. **Remaining: a consumer OTA to push it to devices** (can ride the next consumer release). Wati env confirmed SET on EB (WATI_API_ENDPOINT/TOKEN/AUTH_TEMPLATE) — two-way reply works live within the 24h window. Optional hardening: server-side min-order check in POST /orders (client gate is bypassable). (b) **Wati live replies** need WATI_API_ENDPOINT/TOKEN on EB + the customer inside the 24h window. (c) **Coupon fonts** (index.html) + **vite.config.mts** dev-proxy override remain LOCAL/uncommitted. (d) Still pending from before: Bucket 2 rest (?phone= filter, customers load-more, audit-log coverage), Bucket 3 (home KPI /admin/stats/*), payout/settlement surface (founder decision). See docs/admin-founder-gated-features + admin-dashboard-changes docs.
+
+---
+
+## Session: June 25, 2026 — Notifications #14 Phase 1 (recipient_role cutover + low-stock server-move) — BUILT, AUDITED, DEPLOYED LIVE
+
+Branch `feat/consumer-global-config-wiring`. Spec written first (`docs/notifications-coverage-spec-2026-06-23.html`, scope = order-lifecycle only). Pranav approved per-step, then authorized full execution of the gated deploy.
+
+### Code (4 commits, each tsc-clean + line-by-line audited)
+- **`55082b58` — recipient_role read cutover (both inboxes).** Consumer hook: replaced the hardcoded `CONSUMER_NOTIFICATION_TYPES` allowlist with `.eq('recipient_role','consumer')` on fetch + realtime guard + markAllAsRead; added the interface field. Merchant hook: added `.eq('recipient_role','merchant')` on fetch + realtime guard + markAllAsRead (was store_id-only — leaked for a dual-role account that ordered from its own store). Fail-closed on NULL. 9 spots total. Also fixed a latent dual-role "mark all read" bleed in both apps.
+- **`8ebe590f` — manual low-stock alert moved server-side.** `PATCH /merchant/store-products/:id` now dispatches `LOW_STOCK` via NotificationService (Expo push + recipient_role='merchant') on a downward threshold crossing (===0 / ≤5), mirroring the order-decrement path (index.ts:3339). Removed the merchant app's client-side `notifications` insert (useInventory.ts) which bypassed push + recipient_role → would have vanished after the cutover. Also corrected type INVENTORY→LOW_STOCK + link /inventory→/(main)/inventory. Best-effort pre-fetch (never blocks the edit); floating+caught dispatch.
+- **`6ffd68bb` — backfill script** (`scripts/backfill_notification_recipient_role.ts`). Dry-run default; `--apply` gated; abort-and-report guard (only backfills NULL→merchant if every NULL row is an unambiguous merchant-only type); writes a rollback JSON before mutating.
+- **`6492e450` — rebuilt dist + rollback snapshot.**
+
+### Deploy (executed + verified)
+1. **Backfill `--apply`:** 12 NULL rows (all NEW_ORDER_REQUEST/NEW_ORDER/ORDER_UPDATE/COMPLETED ×3) → 'merchant'. **0 NULL remaining.** Dist now 82 consumer / 307 merchant. Rollback: `scripts/_notif_recipient_role_backfill_rollback_2026-06-25.json`.
+2. **EB deploy:** `app-260625_105637612928` (pas-api-prod-v2, ap-south-1). Ready/Green, live `GET /` → HTTP 200.
+3. **Merchant OTA:** branch production, runtime 1.2.6, group `f8eed436` (android+ios).
+4. **Consumer OTA:** branch production, runtime 1.1.3, group `2951458e` — **also shipped the held H-5 cart-prune fix (`00615139`).**
+
+### Audit (no misses / no leaks confirmed)
+- **Only 2 notification-write paths exist** repo-wide (sendMerchant/sendConsumer in notification.service.ts) — **both unconditionally set recipientRole**. No raw inserts, no createMany/upsert/updateMany, no bypass. Class fully closed (past = backfill, future = no-bypass service).
+- admin-web touches the notifications table **nowhere**. Both apps read it **only** via the two hooks (all cutover-applied; markAsRead-by-id intentionally unscoped). Order-path LOW_STOCK still routes through the service → still tagged merchant.
+
+### Open threads
+- **Phase 2 (next):** API-only lifecycle gaps — PAYMENT_FAILED, ORDER_REQUEST_EXPIRED, REFUND_INITIATED, (REFUND_CREDITED pending the refund.processed webhook — decision D5). These show by role automatically now that the cutover is live.
+- Deploy-window note: a manual stock-out during the EB↔OTA gap could transiently double-alert or briefly not alert — harmless, self-healing.
+- Rollback if ever needed: restore the 12 ids in the rollback JSON to NULL; re-OTA the prior bundles.
+
+---
+
+## Session: June 25, 2026 (cont.) — Notifications #14 Phase 2 (lifecycle gaps) — BUILT, AUDITED, DEPLOYED LIVE (API-only)
+
+Investigated all 4 spec'd scenarios in-code first; the code reality refined the plan (flagged before writing). API-only → EB `app-260625_143131848924` (Ready/Green, live 200). No OTA: all are `sendConsumerNotification` → recipient_role='consumer' → show in the already-cutover consumer inbox automatically.
+
+### Shipped (3 commits, each tsc-clean + audited)
+- **`1e9b975a` — ORDER_REQUEST_EXPIRED.** Refactored `expireStaleOrderRequests` (scheduled-jobs.ts): blind bulk updateMany → select candidates + per-row compare-and-set + notify. Only the tick that flips a row (count===1) notifies → idempotent across cron retries. PENDING = "no store accepted"; ACCEPTED = "expired before payment". Pre-payment, never charged. Threaded `notificationService` param into the function + call site.
+- **`e26334a8` — PAYMENT_FAILED.** New `handlePaymentFailed` in the razorpay webhook (`payment.failed` was log-only). Resolves consumer from order notes (`consumerUserId`/`paymentType='consumer_order'`, stamped at create-order); idempotent on payment id (webhook retries no-op); merchant-signup/untagged skipped.
+- **`7b4d2f7a` — REFUND_INITIATED.** Added to `POST /admin/orders/:id/refund` (the only REAL refund that didn't notify). NOT added to cancel/return/SLA paths — they already notify with refund info (would double). `1a33832f` = rebuilt dist.
+- **DEFERRED — REFUND_CREDITED (D5):** needs Razorpay `refund.processed` dashboard subscription + handler. In forlater.md.
+
+### Audit (no misses / no leaks)
+- Idempotency per-scenario (CAS / existing-notif check / endpoint already-refunded guard). No backlog blast on EXPIRED (old cron kept rows flipped → ~0 stale at deploy). Fail-soft everywhere. No duplicate refund notifications. Consumer app falls back to TYPE_CONFIG.DEFAULT for the new types (no crash; dedicated icons = minor future-OTA polish).
+
+### ⚠️ Flagged (out of scope, in forlater.md) — possible money bug
+- **Legacy `POST /orders/:id/refund` SIMULATES refunds** — real Razorpay call is commented out (index.ts:~4234-4240); fabricates `rfnd_test_` id, flips REFUNDED, sends "Refund Processed" SMS, but no money moves. Merchant app calls it (useOrders.ts:482). Needs verification whether merchants rely on it for real refunds.
+
+### Open threads
+- REFUND_CREDITED (Razorpay dashboard subscription, then handler).
+- Verify/fix the simulated legacy refund endpoint.
+- Add icons for ORDER_REQUEST_EXPIRED / PAYMENT_FAILED / REFUND_INITIATED in the next consumer OTA.

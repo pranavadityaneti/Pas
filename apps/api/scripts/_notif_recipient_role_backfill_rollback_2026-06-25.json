@@ -1,0 +1,91 @@
+{
+  "generatedAt": "2026-06-25",
+  "action": "set recipient_role='merchant' where recipient_role IS NULL",
+  "previousValue": null,
+  "rows": [
+    {
+      "id": "009f1f3e-1f57-4b73-8d5c-c275cc282655",
+      "type": "NEW_ORDER_REQUEST",
+      "createdAt": "2026-05-29T03:18:02.211Z",
+      "userId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54",
+      "storeId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54"
+    },
+    {
+      "id": "56e72b61-e7f3-490c-9f07-e8928b1bdab7",
+      "type": "NEW_ORDER",
+      "createdAt": "2026-05-29T03:19:43.553Z",
+      "userId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54",
+      "storeId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54"
+    },
+    {
+      "id": "7a9fbaad-d886-4083-8675-32cfead7ac9f",
+      "type": "ORDER_UPDATE",
+      "createdAt": "2026-05-29T03:19:59.572Z",
+      "userId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54",
+      "storeId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54"
+    },
+    {
+      "id": "f9af6ecc-cddc-418b-a75c-524f2534797e",
+      "type": "COMPLETED",
+      "createdAt": "2026-05-29T03:20:17.207Z",
+      "userId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54",
+      "storeId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54"
+    },
+    {
+      "id": "a5a952a0-41ef-4f56-8781-0d0ba98594c5",
+      "type": "NEW_ORDER_REQUEST",
+      "createdAt": "2026-05-29T03:36:16.636Z",
+      "userId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54",
+      "storeId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54"
+    },
+    {
+      "id": "f306a585-cf3c-4f60-8538-987d16a48eba",
+      "type": "NEW_ORDER",
+      "createdAt": "2026-05-29T03:38:37.198Z",
+      "userId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54",
+      "storeId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54"
+    },
+    {
+      "id": "78e54d3c-b4d3-4599-8250-59139e0f1c34",
+      "type": "ORDER_UPDATE",
+      "createdAt": "2026-05-29T03:38:47.583Z",
+      "userId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54",
+      "storeId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54"
+    },
+    {
+      "id": "87d9d183-cc52-4075-8cb1-4a6adaff406f",
+      "type": "COMPLETED",
+      "createdAt": "2026-05-29T03:39:13.819Z",
+      "userId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54",
+      "storeId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54"
+    },
+    {
+      "id": "f98b6154-9a96-47c3-95b0-b88ca8512a99",
+      "type": "NEW_ORDER_REQUEST",
+      "createdAt": "2026-05-29T05:18:51.742Z",
+      "userId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54",
+      "storeId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54"
+    },
+    {
+      "id": "9c865c98-3f4c-489a-904c-e3a492aff7e1",
+      "type": "NEW_ORDER",
+      "createdAt": "2026-05-29T05:21:49.345Z",
+      "userId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54",
+      "storeId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54"
+    },
+    {
+      "id": "3ea506bd-4405-49b1-ac2b-8eef44ee7885",
+      "type": "ORDER_UPDATE",
+      "createdAt": "2026-05-29T05:22:00.535Z",
+      "userId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54",
+      "storeId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54"
+    },
+    {
+      "id": "da5f9fe5-0d55-4562-8d22-1093b2114062",
+      "type": "COMPLETED",
+      "createdAt": "2026-05-29T05:22:11.319Z",
+      "userId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54",
+      "storeId": "71fa7b7c-d5a2-4f42-8e4b-61383da57c54"
+    }
+  ]
+}

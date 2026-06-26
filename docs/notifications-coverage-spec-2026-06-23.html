@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAS — Notification Coverage Spec (#14, lifecycle scope) — 2026-06-23</title>
+<style>
+  :root{--ink:#1a2233;--mut:#5b6676;--line:#e3e8ef;--accent:#B52725;--ok:#166534;--ok-bg:#f1f9f3;--med:#854d0e;--med-bg:#fffbeb;--code:#f6f8fa;--low:#1e40af;--low-bg:#eff6ff}
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);line-height:1.55;margin:0;padding:0 24px 110px}
+  .wrap{max-width:1000px;margin:0 auto}
+  h1{font-size:26px;margin:24px 0 4px;letter-spacing:-0.01em} h2{font-size:19px;margin:34px 0 8px;padding-top:12px;border-top:3px solid var(--accent);scroll-margin-top:12px}
+  h3{font-size:15.5px;margin:20px 0 6px} h4{font-size:13px;margin:12px 0 4px;color:var(--mut);text-transform:uppercase;letter-spacing:0.02em}
+  .mut{color:var(--mut)} .sm{font-size:12.5px;color:var(--mut)} p,li,td{font-size:14px}
+  code{background:var(--code);padding:1px 6px;border-radius:4px;font-size:12.3px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12.2px;line-height:1.5;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  table{border-collapse:collapse;width:100%;margin:8px 0;font-size:13px} th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top} th{background:#f3f6fa;font-weight:600}
+  .tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:600;vertical-align:middle}
+  .tag.ok{background:var(--ok-bg);color:var(--ok);border:1px solid #bbf7d0} .tag.gap{background:#fdf3f3;color:#991b1b;border:1px solid #fecaca}
+  .tag.fix{background:var(--med-bg);color:var(--med);border:1px solid #fde68a} .tag.ph{background:var(--low-bg);color:var(--low);border:1px solid #bfdbfe}
+  .callout{border-left:4px solid var(--accent);background:#fdf3f3;padding:10px 14px;margin:14px 0;border-radius:0 8px 8px 0}
+  .callout.ok{border-color:var(--ok);background:var(--ok-bg)} .callout.med{border-color:var(--med);background:var(--med-bg)}
+  .english{background:#fafff5;border-left:4px solid #65a30d;padding:10px 14px;margin:10px 0;border-radius:0 6px 6px 0;font-size:13.5px}
+  .english strong{color:#365314}
+  .toc{background:#fafbfd;border:1px solid var(--line);border-radius:10px;padding:12px 18px;margin:12px 0} .toc ol{margin:0;padding-left:22px;font-size:13px;line-height:1.8} .toc a{color:var(--ink);text-decoration:none} .toc a:hover{text-decoration:underline}
+  ul.tight li,ol.tight li{margin:2px 0}
+  @media print{body{padding:0 12px} h2{break-before:page} .callout,table,pre{break-inside:avoid} .toc{break-after:page}}
+</style>
+</head>
+<body><div class="wrap">
+
+<h1>Notification Coverage — Spec &amp; Phased Plan</h1>
+<div class="mut">#14 · <b>lifecycle-only scope</b> (Pranav, 2026-06-23) · branch <code>feat/consumer-global-config-wiring</code> = <code>main</code></div>
+
+<div class="english">
+  <strong>In plain English.</strong> Your apps already send most order notifications — about 24 of them are live (order confirmed, ready, cancelled, returns, etc.). This isn't a rebuild. Three things are left: (1) a small plumbing change so each app shows the right person's notifications cleanly (the "recipient role" switch that was always planned for "after June 6" — that time is now); (2) fixing a low-stock alert that's wired the wrong way (it never actually pushes to the merchant's phone); and (3) adding the 4 customer notifications that are genuinely missing from the money journey — <em>payment failed</em>, <em>no store accepted your order</em>, <em>refund started</em>, <em>refund credited</em>. Merchant business alerts (KYC, payouts) are deliberately deferred to a later phase.
+</div>
+
+<div class="toc">
+<ol>
+  <li><a href="#state">Current state — what's already wired</a></li>
+  <li><a href="#gap">The gap (lifecycle scope) + the 2 anti-patterns</a></li>
+  <li><a href="#decisions">Design decisions</a></li>
+  <li><a href="#phase1">Phase 1 — Role-routing foundation (coupled)</a></li>
+  <li><a href="#phase2">Phase 2 — Lifecycle gap scenarios</a></li>
+  <li><a href="#phase3">Phase 3 — Verify, deploy, OTA</a></li>
+  <li><a href="#copy">Per-scenario copy table</a></li>
+  <li><a href="#deploy">Deploy vehicles + rollback</a></li>
+  <li><a href="#oos">Out of scope (deferred)</a></li>
+</ol>
+</div>
+
+<h2 id="state">1) Current state — what's already wired</h2>
+<p>Infrastructure is solid: <code>NotificationService</code> (<code>apps/api/src/services/notification.service.ts</code>) writes an in-app row <em>and</em> sends Expo push to all active devices, for both roles, inside the order transaction, deactivating stale tokens. <strong>It already sets <code>recipientRole: 'merchant' | 'consumer'</code> on every insert.</strong> ~24 dispatch sites are live across <code>index.ts</code> + <code>scheduled-jobs.ts</code>.</p>
+<table>
+<tr><th width="14%">Role</th><th>Wired types</th></tr>
+<tr><td><b>Customer</b> (12)</td><td><span class="tag ok">live</span> <code>ORDER_CONFIRMED</code> · <code>PAYMENT_SUCCESSFUL</code> · <code>DINING_BOOKED</code> · <code>ORDER_READY</code> · <code>DINING_READY</code> · <code>ORDER_COMPLETED</code> · <code>ORDER_CANCELLED</code> · <code>RETURN_REQUESTED</code> · <code>RETURN_DECISION</code> · <code>EXCHANGE_REQUESTED</code> · <code>EXCHANGE_DECISION</code> · arrival reminders (<code>PICKUP_REMINDER_30MIN/10MIN</code>, <code>DINING_REMINDER_30MIN</code>)</td></tr>
+<tr><td><b>Merchant</b> (11)</td><td><span class="tag ok">live</span> <code>NEW_ORDER</code> · <code>NEW_ORDER_REQUEST</code> · <code>LOW_STOCK</code> · <code>ORDER_CANCELLED</code> · <code>CANCELLED</code> · <code>RIDER_ARRIVED</code> · <code>ORDER_UPDATE</code> · <code>COMPLETED</code> · <code>ORDER_RESCHEDULED</code> · <code>RETURN_REQUESTED</code> · <code>EXCHANGE_REQUESTED</code></td></tr>
+</table>
+<p class="sm"><b>recipient_role data (prod, 2026-06-23):</b> 295 merchant · 82 consumer · 12 NULL. All 12 NULLs are merchant types (<code>NEW_ORDER_REQUEST</code>/<code>COMPLETED</code>/<code>ORDER_UPDATE</code>/<code>NEW_ORDER</code>) written before the column was added — a one-line backfill fixes them.</p>
+
+<h2 id="gap">2) The gap (lifecycle scope) + the 2 anti-patterns</h2>
+<h3>Missing customer lifecycle scenarios (4)</h3>
+<table>
+<tr><th width="22%">Scenario</th><th>Where it must fire</th><th width="16%">Type</th></tr>
+<tr><td><span class="tag gap">GAP</span> Payment failed</td><td><code>index.ts:781</code> — razorpay webhook <code>payment.failed</code> branch (today just logs). Resolve the consumer userId from the payment context.</td><td><code>PAYMENT_FAILED</code></td></tr>
+<tr><td><span class="tag gap">GAP</span> No store accepted (request expired)</td><td><code>scheduled-jobs.ts:571</code> — <code>expireStaleOrderRequests</code>, when flipping PENDING→EXPIRED. Pre-payment, so "you haven't been charged".</td><td><code>ORDER_REQUEST_EXPIRED</code></td></tr>
+<tr><td><span class="tag gap">GAP</span> Refund initiated</td><td>At refund creation — callers of <code>tryRazorpayRefund</code> (<code>scheduled-jobs.ts</code> SLA auto-refund + <code>index.ts:~4522</code> issue-PATCH refund).</td><td><code>REFUND_INITIATED</code></td></tr>
+<tr><td><span class="tag gap">GAP</span> Refund credited</td><td>Needs a Razorpay <code>refund.processed</code> webhook (today only <code>payment.captured</code>/<code>payment.failed</code> are handled). <b>Sub-decision in §3.</b></td><td><code>REFUND_CREDITED</code></td></tr>
+</table>
+<p class="sm">Note: "order rejected by merchant" is currently delivered as <code>ORDER_CANCELLED</code> — a copy nuance, not a hard gap. Out of lifecycle scope to split.</p>
+
+<h3>Two anti-patterns (solid-fix territory, per the No-Patches rule)</h3>
+<div class="callout med">
+  <strong>AP-1 — Low-stock is inserted client-side.</strong> <code>apps/merchant-app/src/hooks/useInventory.ts:165–185</code> does two direct <code>supabase.from('notifications').insert(...)</code> calls (type <code>INVENTORY</code>, "(Manual)") when a merchant edits stock to 0/low. This <b>bypasses <code>NotificationService</code></b> → <b>no push fires</b> and <code>recipient_role</code> is never set. After the read-cutover (below) these rows would <b>disappear from the merchant inbox</b> (they're neither <code>'merchant'</code> nor <code>'consumer'</code>). <b>Fix:</b> move the alert server-side into the manual-stock-edit API path (<code>PATCH /merchant/store-products/:id</code>) via <code>sendMerchantNotification</code>; delete the client inserts.
+</div>
+<div class="callout med">
+  <strong>AP-2 — Apps read by a type-allowlist, not <code>recipient_role</code>.</strong> The consumer hook (<code>useNotifications.ts</code>) filters <code>.in('type', CONSUMER_NOTIFICATION_TYPES)</code> — a hardcoded 14-type list with an explicit comment: <em>"once the recipient_role migration is live AND the API writes it, replace this allowlist."</em> Both conditions are now true. The merchant hook filters only by <code>store_id</code> (no role scoping). <b>This is the recipient_role cutover (your task #2)</b> and is the clean foundation for #14 — after it, every new customer notification appears by role automatically with no allowlist edits.
+</div>
+
+<h2 id="decisions">3) Design decisions</h2>
+<table>
+<tr><th width="6%">#</th><th>Decision</th></tr>
+<tr><td>D1</td><td><b>Do the cutover first</b> (fold task #2 into Phase 1). Every new lifecycle notification then shows by role with zero allowlist maintenance.</td></tr>
+<tr><td>D2</td><td><b>Phase 1 is coupled:</b> the cutover (AP-2) + the low-stock server move (AP-1) + the NULL backfill ship together. Shipping the cutover without AP-1 would silently drop manual low-stock alerts; shipping without the backfill would drop the 12 legacy merchant rows.</td></tr>
+<tr><td>D3</td><td><b>Cutover read change:</b> consumer → <code>.eq('recipient_role','consumer')</code> (delete the allowlist constant); merchant → add <code>.eq('recipient_role','merchant')</code> alongside its <code>store_id</code> filter.</td></tr>
+<tr><td>D4</td><td><b>Backfill:</b> <code>UPDATE notifications SET recipient_role='merchant' WHERE recipient_role IS NULL</code> — all 12 NULLs are confirmed merchant types. Idempotent, reversible (snapshot the ids first).</td></tr>
+<tr><td>D5</td><td><b>REFUND_CREDITED sub-decision:</b> (a) ship only <code>REFUND_INITIATED</code> now (easy, at refund creation) and defer <code>REFUND_CREDITED</code> until a <code>refund.processed</code> webhook is added; OR (b) add the refund webhook in Phase 2. <b>Recommend (a)</b> — initiated is the high-value "your money is on the way" message; credited can follow once the webhook is subscribed in the Razorpay dashboard. <em>(Confirm at Phase 2 start.)</em></td></tr>
+<tr><td>D6</td><td><b>No quiet-hours / digest batching in this scope</b> — every notification is transactional + user-triggered, so volume is naturally low. Defer batching to a later phase if push fatigue ever shows up in data.</td></tr>
+<tr><td>D7</td><td><b>Reuse existing patterns exactly:</b> same <code>NotificationService</code> call shape, same <code>link</code>/<code>metadata</code>/<code>referenceId</code> contract, same <code>routeForNotification</code> deep-link helpers. No new infrastructure.</td></tr>
+</table>
+
+<h2 id="phase1">4) Phase 1 — Role-routing foundation (coupled)</h2>
+<p><span class="tag ph">DB + API + both apps</span> Ships as: one DB backfill · one API add (server-side low-stock) · consumer OTA · merchant OTA.</p>
+<ol class="tight">
+  <li><b>1a — Backfill (DB).</b> <code>UPDATE notifications SET recipient_role='merchant' WHERE recipient_role IS NULL</code>. tsx script with a rollback JSON of the 12 affected ids. Verify 0 NULLs after.</li>
+  <li><b>1b — Consumer read cutover (app → OTA).</b> In <code>apps/consumer-app/src/hooks/useNotifications.ts</code>: replace <code>.in('type', CONSUMER_NOTIFICATION_TYPES)</code> with <code>.eq('recipient_role', 'consumer')</code>; delete the <code>CONSUMER_NOTIFICATION_TYPES</code> constant + its comment. Keep the realtime subscription + read/markRead untouched.</li>
+  <li><b>1c — Merchant read cutover (app → OTA).</b> In <code>apps/merchant-app/src/hooks/useNotifications.ts</code>: add <code>.eq('recipient_role', 'merchant')</code> to the fetch (line ~55) and the realtime/markRead reads as needed.</li>
+  <li><b>1d — Low-stock anti-pattern (app removal + API add).</b> Delete the two client-side inserts in <code>useInventory.ts:165–185</code>. Add a server-side low-stock dispatch in the manual-stock-edit API path (<code>PATCH /merchant/store-products/:id</code>): when an edit takes stock to 0 or ≤5, call <code>sendMerchantNotification({ type:'LOW_STOCK', ... })</code> (sets recipient_role + push). Mirror the existing order-decrement <code>LOW_STOCK</code> at <code>index.ts:3427</code>.</li>
+  <li><b>1e — Audit (mandatory, rule #3).</b> Confirm: 0 NULL rows; consumer inbox shows exactly its role rows (no merchant bleed for dual-role accounts); merchant inbox unaffected by consumer rows; the manual low-stock now pushes; the 14 previously-allowlisted types all still appear.</li>
+</ol>
+
+<h2 id="phase2">5) Phase 2 — Lifecycle gap scenarios</h2>
+<p><span class="tag ph">API only → EB deploy</span> All four are server-side dispatches; they appear by role automatically (post-Phase-1). No app change, no OTA.</p>
+<ol class="tight">
+  <li><b>2a — <code>PAYMENT_FAILED</code>.</b> In the <code>payment.failed</code> webhook branch (<code>index.ts:781</code>): resolve the consumer userId (from the Razorpay order notes / orphaned-payment record), then <code>sendConsumerNotification</code>. Edge: if no order/user resolves, log to Sentry and skip (don't throw).</li>
+  <li><b>2b — <code>ORDER_REQUEST_EXPIRED</code>.</b> In <code>expireStaleOrderRequests</code> (<code>scheduled-jobs.ts:571</code>): for each request flipped to EXPIRED, <code>sendConsumerNotification</code> to <code>consumer_user_id</code>. Pre-payment → "you haven't been charged."</li>
+  <li><b>2c — <code>REFUND_INITIATED</code>.</b> At each <code>tryRazorpayRefund</code> success (SLA auto-refund + issue-PATCH refund): <code>sendConsumerNotification</code> with the amount + "5–7 business days." Skip on simulated/stub refunds (or label them).</li>
+  <li><b>2d — <code>REFUND_CREDITED</code> (per D5).</b> If approved: add a Razorpay <code>refund.processed</code> webhook branch → <code>sendConsumerNotification</code>. Otherwise deferred.</li>
+  <li><b>2e — Audit (mandatory).</b> Each new dispatch: correct userId resolution, fail-soft on missing user, no transaction rollback risk (push is outside tx), no duplicate sends (idempotent per order/refund).</li>
+</ol>
+
+<h2 id="phase3">6) Phase 3 — Verify, deploy, OTA</h2>
+<ol class="tight">
+  <li><code>tsc --noEmit</code> on api + both apps after each phase; per-phase line-by-line audit.</li>
+  <li>Phase 1: run the backfill script (gated) → <code>npm run build</code> + <code>eb deploy</code> (server low-stock) → consumer OTA + merchant OTA (the read cutovers + client-insert removal).</li>
+  <li>Phase 2: <code>eb deploy</code> only.</li>
+  <li>End-to-end smoke per scenario (trigger each, confirm in-app row + push + correct inbox + deep-link route).</li>
+</ol>
+
+<h2 id="copy">7) Per-scenario copy (new types)</h2>
+<table>
+<tr><th>Type</th><th>Role</th><th>Title</th><th>Body</th><th>link</th></tr>
+<tr><td><code>PAYMENT_FAILED</code></td><td>consumer</td><td>Payment didn't go through</td><td>Your payment for order #{n} couldn't be completed. You haven't been charged — please try again.</td><td><code>/(main)/orders</code></td></tr>
+<tr><td><code>ORDER_REQUEST_EXPIRED</code></td><td>consumer</td><td>No store accepted your order</td><td>No nearby store confirmed your order in time. You haven't been charged — please try again.</td><td><code>/(main)/orders</code></td></tr>
+<tr><td><code>REFUND_INITIATED</code></td><td>consumer</td><td>Refund on the way</td><td>We've started a refund of ₹{amt} for order #{n}. It'll reach your account in 5–7 business days.</td><td><code>/(main)/orders</code></td></tr>
+<tr><td><code>REFUND_CREDITED</code></td><td>consumer</td><td>Refund credited</td><td>Your ₹{amt} refund for order #{n} has been credited.</td><td><code>/(main)/orders</code></td></tr>
+<tr><td><code>LOW_STOCK</code> (server)</td><td>merchant</td><td>Low / Out of stock</td><td>{product} is {0 ? 'out of stock' : 'low (N left)'} — update inventory.</td><td><code>/(main)/inventory</code></td></tr>
+</table>
+<p class="sm">Copy is a starting point — final wording is a 2-minute review pass before each phase ships.</p>
+
+<h2 id="deploy">8) Deploy vehicles + rollback</h2>
+<table>
+<tr><th>Phase</th><th>Vehicle(s)</th><th>Rollback</th></tr>
+<tr><td>1a backfill</td><td>tsx script (gated DB write)</td><td>rollback JSON restores the 12 ids to NULL</td></tr>
+<tr><td>1b/1c/1d (app)</td><td>consumer OTA + merchant OTA</td><td>revert the hook commits; re-OTA (allowlist still in git history)</td></tr>
+<tr><td>1d (server low-stock)</td><td>EB deploy</td><td>revert commit + eb deploy</td></tr>
+<tr><td>2a–2d</td><td>EB deploy</td><td>revert commit + eb deploy (server-only, no app dependency)</td></tr>
+</table>
+<p class="sm"><b>Sequencing safety:</b> ship Phase 1's EB part + backfill, then the OTAs. New Phase 2 types only become visible after the Phase 1 cutover OTA propagates (pre-cutover, the consumer allowlist would hide them) — so Phase 2 lands after Phase 1's OTA is out, OR the 4 new types are added to the allowlist as a one-line interim if Phase 2 must precede the OTA.</p>
+
+<h2 id="oos">9) Out of scope (deferred — not this task)</h2>
+<ul class="tight">
+  <li><b>Merchant business events</b> — KYC decision (approved/rejected/needs-info), settlement/payout processed. Deferred to a "#14 Phase 2 (merchant)" once the settlement engine leaves <code>CRON_DRY_RUN</code> and KYC UX (#11) lands.</li>
+  <li><b>Quiet hours / digest batching / per-type preferences</b> (D6).</li>
+  <li><b>Rename <code>MerchantPushToken</code> → <code>UserPushToken</code></b> (cosmetic; it's already functionally generic).</li>
+  <li><b>Marketing notifications</b> (coupon-expiring, win-back) — separate engagement track.</li>
+</ul>
+
+<p class="sm" style="margin-top:28px;border-top:1px solid var(--line);padding-top:12px"><em>Saved as <code>docs/notifications-coverage-spec-2026-06-23.html</code>. On approval: execute Phase 1 → audit → STOP → Phase 2 → audit → STOP → Phase 3.</em></p>
+
+</div></body></html>

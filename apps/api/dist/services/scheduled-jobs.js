@@ -1,3 +1,4 @@
+"use strict";
 /**
  * Scheduled background jobs (node-cron) running inside the existing Express API.
  *
@@ -18,29 +19,60 @@
  *   composite unique constraint on (referenceId, type) where type is a
  *   reminder type, OR use a distributed lock.
  */
-
-import cron from 'node-cron';
-import * as Sentry from '@sentry/node';
-import { PrismaClient } from '@prisma/client';
-import { NotificationService } from './notification.service';
-import { closeSettlementCycles, detectClawback, PHASE7_EPOCH } from './settlement.service';
-
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.initScheduledJobs = initScheduledJobs;
+exports.verifyPendingPayments = verifyPendingPayments;
+exports.sweepOrphanedPayments = sweepOrphanedPayments;
+const node_cron_1 = __importDefault(require("node-cron"));
+const Sentry = __importStar(require("@sentry/node"));
+const settlement_service_1 = require("./settlement.service");
 const REMINDER_TYPES = {
     PICKUP_30: 'PICKUP_REMINDER_30MIN',
     PICKUP_10: 'PICKUP_REMINDER_10MIN',
     DINING_30: 'DINING_REMINDER_30MIN',
-} as const;
-
+};
 const MIN_MS = 60 * 1000;
-
 /**
  * Mount all scheduled jobs. Call once at server boot, AFTER notificationService
  * and prisma are initialized.
  */
-export function initScheduledJobs(
-    prisma: PrismaClient,
-    notificationService: NotificationService
-): void {
+function initScheduledJobs(prisma, notificationService) {
     // Per-process running guard (round-5 hardening). node-cron fires every
     // minute regardless of whether the previous tick finished. With slow
     // Razorpay calls inside processOrderIssueSla, tick N+1 can start while
@@ -48,8 +80,7 @@ export function initScheduledJobs(
     // on the same row, but multiple ticks racing each other waste DB
     // connections and inflate Sentry noise. This flag serializes ticks.
     let cronTickRunning = false;
-
-    cron.schedule('* * * * *', async () => {
+    node_cron_1.default.schedule('* * * * *', async () => {
         if (cronTickRunning) {
             console.warn('[cron] previous tick still running — skipping this tick');
             return;
@@ -58,38 +89,44 @@ export function initScheduledJobs(
         try {
             try {
                 await firePickupReminders30Min(prisma, notificationService);
-            } catch (e) {
+            }
+            catch (e) {
                 console.error('[cron] firePickupReminders30Min error:', e);
                 Sentry.captureException(e, { tags: { area: 'cron.pickupReminders30' } });
             }
             try {
                 await firePickupReminders10Min(prisma, notificationService);
-            } catch (e) {
+            }
+            catch (e) {
                 console.error('[cron] firePickupReminders10Min error:', e);
                 Sentry.captureException(e, { tags: { area: 'cron.pickupReminders10' } });
             }
             try {
                 await fireDiningReminders30Min(prisma, notificationService);
-            } catch (e) {
+            }
+            catch (e) {
                 console.error('[cron] fireDiningReminders30Min error:', e);
                 Sentry.captureException(e, { tags: { area: 'cron.diningReminders30' } });
             }
             try {
                 await expireStaleOrderRequests(prisma, notificationService);
-            } catch (e) {
+            }
+            catch (e) {
                 console.error('[cron] expireStaleOrderRequests error:', e);
                 Sentry.captureException(e, { tags: { area: 'cron.expireStaleOrderRequests' } });
             }
             try {
                 await healMissingUserRows(prisma);
-            } catch (e) {
+            }
+            catch (e) {
                 console.error('[cron] healMissingUserRows error:', e);
                 Sentry.captureException(e, { tags: { area: 'cron.healMissingUserRows' } });
             }
             // WS2.D (2026-06-05): SLA auto-approve for return/exchange issues.
             try {
                 await processOrderIssueSla(prisma, notificationService);
-            } catch (e) {
+            }
+            catch (e) {
                 console.error('[cron] processOrderIssueSla error:', e);
                 Sentry.captureException(e, { tags: { area: 'cron.processOrderIssueSla' } });
             }
@@ -99,7 +136,8 @@ export function initScheduledJobs(
             // endpoint's post-tx cleanup).
             try {
                 await reconcileOrderRequestStatus(prisma);
-            } catch (e) {
+            }
+            catch (e) {
                 console.error('[cron] reconcileOrderRequestStatus error:', e);
                 Sentry.captureException(e, { tags: { area: 'cron.reconcileOrderRequestStatus' } });
             }
@@ -107,7 +145,8 @@ export function initScheduledJobs(
             // inconclusive at create time (Razorpay API error / SDK gap).
             try {
                 await verifyPendingPayments(prisma);
-            } catch (e) {
+            }
+            catch (e) {
                 console.error('[cron] verifyPendingPayments error:', e);
                 Sentry.captureException(e, { tags: { area: 'cron.verifyPendingPayments' } });
             }
@@ -118,42 +157,43 @@ export function initScheduledJobs(
                 if (new Date().getMinutes() % 10 === 0) {
                     await sweepOrphanedPayments(prisma);
                 }
-            } catch (e) {
+            }
+            catch (e) {
                 console.error('[cron] sweepOrphanedPayments error:', e);
                 Sentry.captureException(e, { tags: { area: 'cron.sweepOrphanedPayments' } });
             }
-        } finally {
+        }
+        finally {
             cronTickRunning = false;
         }
     });
-
     // Phase 7C (2026-06-10): weekly settlement close — Monday 02:00 IST,
     // closing the just-ended Mon-Sun IST week. Idempotent (cycle-level skip +
     // the SALE partial-unique), so the admin "Close cycle" button and this
     // cron can coexist safely.
-    cron.schedule('0 2 * * 1', async () => {
+    node_cron_1.default.schedule('0 2 * * 1', async () => {
         try {
             // 7G: drain the verification backlog FIRST so the close sees every
             // verifiable order (the per-minute tick is batch-capped at 25; a
             // backlog would otherwise hold orders for a full extra week).
             for (let i = 0; i < 40; i++) {
                 const n = await verifyPendingPayments(prisma);
-                if (n < 25) break;
+                if (n < 25)
+                    break;
             }
-            const result = await closeSettlementCycles(prisma);
+            const result = await (0, settlement_service_1.closeSettlementCycles)(prisma);
             console.log('[cron] weekly settlement close:', JSON.stringify(result));
-        } catch (e) {
+        }
+        catch (e) {
             console.error('[cron] weekly settlement close error:', e);
             Sentry.captureException(e, { tags: { area: 'cron.settlementClose' } });
         }
     }, { timezone: 'Asia/Kolkata' });
-
     console.log('[cron] Scheduled jobs initialized — running every 1 minute (+ weekly settlement close Mon 02:00 IST)');
     if (process.env.CRON_DRY_RUN === 'true') {
         console.warn('[cron] DRY-RUN MODE — Razorpay refund calls will be simulated only. Unset CRON_DRY_RUN to enable real refunds.');
     }
 }
-
 // ─────────────────────── WS2.D: SLA auto-approve cron ──────────────────
 // Polls order_issues for PENDING rows whose merchant-decision SLA has
 // elapsed (sla_due_at < now()) and auto-approves them. Each elapsed row:
@@ -168,13 +208,9 @@ export function initScheduledJobs(
 // Idempotent via the PENDING gate — a row that's already AUTO_APPROVED
 // won't be reprocessed. The partial index `order_issues_pending_sla_idx`
 // (WHERE status='PENDING') keeps the lookup cheap.
-
 // Locally-scoped Razorpay refund helper (mirrors apps/api/src/index.ts
 // processRazorpayRefund — kept in-file to avoid a circular import).
-async function tryRazorpayRefund(
-    orderMetadata: any,
-    amountInr: number,
-): Promise<{ razorpayRefundId: string; simulated: boolean }> {
+async function tryRazorpayRefund(orderMetadata, amountInr) {
     // Round-5 hardening: dry-run mode for the rollout-first-day. With
     // CRON_DRY_RUN=true, never actually call Razorpay — return a 'sim'
     // stub. Lets ops watch logs for what the cron WOULD do for 24h
@@ -184,14 +220,12 @@ async function tryRazorpayRefund(
         console.warn('[cron sla refund] DRY_RUN — would refund', { amountInr, stubId });
         return { razorpayRefundId: stubId, simulated: true };
     }
-
     // POST /orders persists Razorpay's payment id at metadata.razorpayPaymentId
     // (camelCase) — see index.ts ~line 2414 and InvoiceModal.tsx line 64. This
     // helper previously looked at the wrong keys and therefore ALWAYS fell
     // through to the simulated path. Fixed 2026-06-05 (Bug B).
     const paymentId = orderMetadata?.razorpayPaymentId || null;
-
-    let razorpayInstance: any = null;
+    let razorpayInstance = null;
     try {
         const Razorpay = require('razorpay');
         if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
@@ -200,33 +234,28 @@ async function tryRazorpayRefund(
                 key_secret: process.env.RAZORPAY_KEY_SECRET,
             });
         }
-    } catch (e) {
+    }
+    catch (e) {
         console.warn('[cron sla refund] razorpay sdk init failed:', e);
     }
-
     if (!razorpayInstance || !paymentId) {
         const stubId = `rfnd_sim_${Date.now()}`;
         console.warn('[cron sla refund] razorpay missing or no paymentId — simulating', stubId);
         return { razorpayRefundId: stubId, simulated: true };
     }
-
     try {
         const refund = await razorpayInstance.payments.refund(paymentId, {
             amount: Math.round(amountInr) * 100,
         });
-        return { razorpayRefundId: refund.id as string, simulated: false };
-    } catch (err: any) {
+        return { razorpayRefundId: refund.id, simulated: false };
+    }
+    catch (err) {
         console.error('[cron sla refund] razorpay refund failed:', paymentId, err?.message || err);
         return { razorpayRefundId: `rfnd_err_${Date.now()}`, simulated: true };
     }
 }
-
-async function processOrderIssueSla(
-    prisma: PrismaClient,
-    notificationService: NotificationService,
-): Promise<void> {
+async function processOrderIssueSla(prisma, notificationService) {
     const now = new Date();
-
     // Find elapsed PENDING issues. Cap the per-tick batch to avoid runaway
     // load if the backlog gets large.
     const elapsed = await prisma.orderIssue.findMany({
@@ -234,9 +263,8 @@ async function processOrderIssueSla(
         orderBy: { slaDueAt: 'asc' },
         take: 50,
     });
-
-    if (elapsed.length === 0) return;
-
+    if (elapsed.length === 0)
+        return;
     // Round-6 hardening (H5): true dry-run mode. The previous DRY_RUN gate
     // only stubbed the Razorpay HTTP call — DB state still committed +
     // customer notifications still fired. That is NOT a soak mode; it
@@ -250,9 +278,7 @@ async function processOrderIssueSla(
         }
         return;
     }
-
     console.log(`[cron sla] auto-approving ${elapsed.length} elapsed issue(s)`);
-
     for (const issue of elapsed) {
         try {
             const order = await prisma.order.findUnique({
@@ -263,13 +289,10 @@ async function processOrderIssueSla(
                 console.warn('[cron sla] order missing for issue', issue.id, '— skipping');
                 continue;
             }
-
-            const newOrderStatus =
-                issue.type === 'return' ? 'RETURN_APPROVED' :
+            const newOrderStatus = issue.type === 'return' ? 'RETURN_APPROVED' :
                 issue.type === 'exchange' ? 'EXCHANGE_APPROVED' :
-                order.status;
+                    order.status;
             const needsRefund = issue.type === 'return' && (issue.refundAmountInr ?? 0) > 0;
-
             // FLIP STATUS FIRST inside a transaction (Bug 3 fix).
             //
             // Previously the Razorpay refund was called BEFORE this
@@ -307,7 +330,7 @@ async function processOrderIssueSla(
                 });
                 if (updateRes.count === 0) {
                     wonRace = false;
-                    return;  // transaction body returns; nothing else mutates
+                    return; // transaction body returns; nothing else mutates
                 }
                 // Round-5 hardening: re-read order.metadata INSIDE the tx so
                 // concurrent writes (merchant PATCH, webhook) between findUnique
@@ -324,29 +347,32 @@ async function processOrderIssueSla(
                         metadata: {
                             ...(typeof fresh?.metadata === 'object' && fresh?.metadata !== null ? fresh.metadata : {}),
                             autoApprovedAt: now.toISOString(),
-                        } as any,
+                        },
                     },
                 });
             });
-
             if (!wonRace) {
                 console.log(`[cron sla] issue ${issue.id} was already decided by merchant — skipping refund + notif`);
                 continue;
             }
-
             // Razorpay refund AFTER status commit. The compare-and-set above
             // guarantees we only reach here if we own the resolution.
-            let refundResult: { razorpayRefundId: string; simulated: boolean } | null = null;
+            let refundResult = null;
             if (needsRefund) {
-                refundResult = await tryRazorpayRefund(order.metadata, issue.refundAmountInr!);
+                refundResult = await tryRazorpayRefund(order.metadata, issue.refundAmountInr);
                 // Phase 7D (2026-06-10): settled-order refund → clawback entry.
-                try { await detectClawback(prisma, order.id, issue.refundAmountInr!, `sla auto-refund ${refundResult.razorpayRefundId}`); } catch (e) { console.error('[7D] clawback detect (sla) failed:', e); }
+                try {
+                    await (0, settlement_service_1.detectClawback)(prisma, order.id, issue.refundAmountInr, `sla auto-refund ${refundResult.razorpayRefundId}`);
+                }
+                catch (e) {
+                    console.error('[7D] clawback detect (sla) failed:', e);
+                }
                 // Persist refund id back. If this write fails after Razorpay
                 // succeeded, ops reconciles from the dashboard.
                 await prisma.$transaction(async (tx) => {
                     await tx.orderIssue.update({
                         where: { id: issue.id },
-                        data: { refundRazorpayId: refundResult!.razorpayRefundId, refundProcessedAt: now },
+                        data: { refundRazorpayId: refundResult.razorpayRefundId, refundProcessedAt: now },
                     });
                     // Round-5 hardening: re-read metadata inside the tx so concurrent
                     // writes during the Razorpay HTTP call aren't clobbered.
@@ -359,13 +385,13 @@ async function processOrderIssueSla(
                         data: {
                             metadata: {
                                 ...(typeof fresh?.metadata === 'object' && fresh?.metadata !== null ? fresh.metadata : {}),
-                                returnRazorpayRefundId: refundResult!.razorpayRefundId,
-                                returnRefundSimulated: refundResult!.simulated,
+                                returnRazorpayRefundId: refundResult.razorpayRefundId,
+                                returnRefundSimulated: refundResult.simulated,
                                 autoApprovedAt: now.toISOString(),
-                            } as any,
+                            },
                         },
                     });
-                }).catch((e: any) => {
+                }).catch((e) => {
                     console.error('[cron sla] metadata refund write failed:', e);
                     Sentry.captureException(e, {
                         tags: { area: 'cron.metadataRefundWrite' },
@@ -373,7 +399,6 @@ async function processOrderIssueSla(
                     });
                 });
             }
-
             notificationService.sendConsumerNotification({
                 userId: order.userId,
                 title: `${issue.type === 'return' ? 'Return' : 'Exchange'} auto-approved`,
@@ -390,9 +415,9 @@ async function processOrderIssueSla(
                     razorpayRefundId: refundResult?.razorpayRefundId ?? null,
                 },
             }).catch(e => console.error('[cron sla] consumer notif failed:', e));
-
             console.log(`[cron sla] ✓ issue=${issue.id} type=${issue.type} order=#${order.orderNumber} ${refundResult ? `refund=${refundResult.razorpayRefundId}${refundResult.simulated ? '(sim)' : ''}` : 'no-refund'}`);
-        } catch (e) {
+        }
+        catch (e) {
             console.error('[cron sla] issue', issue.id, 'failed:', e);
             Sentry.captureException(e, {
                 tags: { area: 'cron.processIssueLoop' },
@@ -402,7 +427,6 @@ async function processOrderIssueSla(
         }
     }
 }
-
 // ─────────────── Round-5: reconciliation pass for N7 misses ──────────
 //
 // The /orders/:id/cancel endpoint flips its linked order_request to
@@ -415,23 +439,23 @@ async function processOrderIssueSla(
 //
 // This pass catches the drift: find COMPLETED order_requests whose
 // linked order is CANCELLED, and reconcile. Idempotent.
-
-async function reconcileOrderRequestStatus(prisma: PrismaClient): Promise<void> {
+async function reconcileOrderRequestStatus(prisma) {
     // Limit per-tick to avoid a runaway sweep.
-    const candidates: Array<{ id: string; order_id: string | null }> = await prisma.$queryRawUnsafe(`
+    const candidates = await prisma.$queryRawUnsafe(`
         SELECT r.id, o.id AS order_id
         FROM order_requests r
         JOIN orders o ON (o.metadata->>'orderRequestId')::uuid = r.id
         WHERE r.status = 'COMPLETED' AND o.status = 'CANCELLED'
         LIMIT 50
     `);
-    if (candidates.length === 0) return;
+    if (candidates.length === 0)
+        return;
     let healed = 0;
     for (const c of candidates) {
         const res = await prisma.order_requests.updateMany({
             where: { id: c.id, status: 'COMPLETED' },
             data: { status: 'CANCELLED', updated_at: new Date() },
-        }).catch((e: any) => {
+        }).catch((e) => {
             console.error('[cron reconcile] failed for', c.id, e);
             Sentry.captureException(e, {
                 tags: { area: 'cron.reconcileOrderRequestStatus' },
@@ -439,34 +463,24 @@ async function reconcileOrderRequestStatus(prisma: PrismaClient): Promise<void> 
             });
             return null;
         });
-        if (res && res.count > 0) healed++;
+        if (res && res.count > 0)
+            healed++;
     }
     if (healed > 0) {
         console.warn(`[cron reconcile] healed ${healed} stale COMPLETED order_requests whose orders are CANCELLED. Investigate cancel-endpoint SIGTERMs.`);
     }
 }
-
 // ---------- Reminder helpers ----------
-
 /**
  * Fire a customer reminder N minutes before their pickup/dining slot.
  * Uses a 2-minute window [now+(offsetMin-1), now+(offsetMin+1)] to absorb
  * minor cron skew. Dedup ensures no duplicate sends.
  */
-async function fireReminder(
-    prisma: PrismaClient,
-    notificationService: NotificationService,
-    orderType: 'pickup' | 'dine-in',
-    offsetMin: number,
-    reminderType: string,
-    title: string,
-    bodyTemplate: (orderNumber: string) => string
-): Promise<void> {
+async function fireReminder(prisma, notificationService, orderType, offsetMin, reminderType, title, bodyTemplate) {
     const now = Date.now();
     const windowStart = new Date(now + (offsetMin - 1) * MIN_MS);
     const windowEnd = new Date(now + (offsetMin + 1) * MIN_MS);
-
-    const candidates = await (prisma as any).order.findMany({
+    const candidates = await prisma.order.findMany({
         where: {
             // Include both CONFIRMED and PREPARING — merchants often move to
             // PREPARING well before the slot, so a strict CONFIRMED filter would
@@ -484,17 +498,16 @@ async function fireReminder(
             storeId: true,
         },
     });
-
     for (const order of candidates) {
-        if (!order.userId) continue;
-
+        if (!order.userId)
+            continue;
         // Dedupe: skip if we already sent this reminder for this order
-        const existing = await (prisma as any).notification.findFirst({
+        const existing = await prisma.notification.findFirst({
             where: { referenceId: order.id, type: reminderType },
             select: { id: true },
         });
-        if (existing) continue;
-
+        if (existing)
+            continue;
         try {
             await notificationService.sendConsumerNotification({
                 userId: order.userId,
@@ -507,59 +520,22 @@ async function fireReminder(
                 metadata: { orderNumber: order.orderNumber },
             });
             console.log(`[cron] Sent ${reminderType} for order ${order.orderNumber}`);
-        } catch (e) {
+        }
+        catch (e) {
             console.error(`[cron] Failed to send ${reminderType} for order ${order.id}:`, e);
         }
     }
 }
-
-async function firePickupReminders30Min(
-    prisma: PrismaClient,
-    notificationService: NotificationService
-): Promise<void> {
-    await fireReminder(
-        prisma,
-        notificationService,
-        'pickup',
-        30,
-        REMINDER_TYPES.PICKUP_30,
-        'Pickup slot in 30 min ⏰',
-        (orderNumber) => `Your order #${orderNumber} pickup slot is in 30 minutes.`
-    );
+async function firePickupReminders30Min(prisma, notificationService) {
+    await fireReminder(prisma, notificationService, 'pickup', 30, REMINDER_TYPES.PICKUP_30, 'Pickup slot in 30 min ⏰', (orderNumber) => `Your order #${orderNumber} pickup slot is in 30 minutes.`);
 }
-
-async function firePickupReminders10Min(
-    prisma: PrismaClient,
-    notificationService: NotificationService
-): Promise<void> {
-    await fireReminder(
-        prisma,
-        notificationService,
-        'pickup',
-        10,
-        REMINDER_TYPES.PICKUP_10,
-        'Your order is waiting 👋',
-        (orderNumber) => `Just 10 minutes until your pickup slot for order #${orderNumber}.`
-    );
+async function firePickupReminders10Min(prisma, notificationService) {
+    await fireReminder(prisma, notificationService, 'pickup', 10, REMINDER_TYPES.PICKUP_10, 'Your order is waiting 👋', (orderNumber) => `Just 10 minutes until your pickup slot for order #${orderNumber}.`);
 }
-
-async function fireDiningReminders30Min(
-    prisma: PrismaClient,
-    notificationService: NotificationService
-): Promise<void> {
-    await fireReminder(
-        prisma,
-        notificationService,
-        'dine-in',
-        30,
-        REMINDER_TYPES.DINING_30,
-        'Dining slot in 30 min 🍴',
-        (orderNumber) => `Your dining slot for order #${orderNumber} is in 30 minutes. See you soon!`
-    );
+async function fireDiningReminders30Min(prisma, notificationService) {
+    await fireReminder(prisma, notificationService, 'dine-in', 30, REMINDER_TYPES.DINING_30, 'Dining slot in 30 min 🍴', (orderNumber) => `Your dining slot for order #${orderNumber} is in 30 minutes. See you soon!`);
 }
-
 // ---------- Order request expiry (forlater #17) ----------
-
 /**
  * Flips PENDING/ACCEPTED order_requests past their expires_at to EXPIRED.
  *
@@ -568,7 +544,7 @@ async function fireDiningReminders30Min(
  * failure, the timer never fires and the row stays ACCEPTED forever in the DB.
  * Closes forlater #17.
  */
-async function expireStaleOrderRequests(prisma: PrismaClient, notificationService: NotificationService): Promise<void> {
+async function expireStaleOrderRequests(prisma, notificationService) {
     // Snapshot the rows about to expire so we can notify each consumer.
     // (updateMany returns only a count, so it can't drive per-row notifications.)
     const candidates = await prisma.order_requests.findMany({
@@ -578,8 +554,8 @@ async function expireStaleOrderRequests(prisma: PrismaClient, notificationServic
         },
         select: { id: true, consumer_user_id: true, store_name: true, order_type: true, status: true },
     });
-    if (candidates.length === 0) return;
-
+    if (candidates.length === 0)
+        return;
     let expired = 0;
     for (const r of candidates) {
         // Per-row compare-and-set: ONLY the cron tick that actually flips the row
@@ -589,9 +565,9 @@ async function expireStaleOrderRequests(prisma: PrismaClient, notificationServic
             where: { id: r.id, status: { in: ['PENDING', 'ACCEPTED'] }, expires_at: { lt: new Date() } },
             data: { status: 'EXPIRED', updated_at: new Date() },
         });
-        if (upd.count !== 1) continue;
+        if (upd.count !== 1)
+            continue;
         expired++;
-
         // PENDING → no merchant ever accepted; ACCEPTED → a store accepted but the
         // consumer didn't pay before the window closed. Both are pre-payment, so the
         // customer was never charged. recipient_role='consumer' is set by the service,
@@ -607,16 +583,13 @@ async function expireStaleOrderRequests(prisma: PrismaClient, notificationServic
             referenceId: r.id,
             link: '/(main)/orders',
             metadata: { orderRequestId: r.id, storeName: r.store_name ?? null, orderType: r.order_type ?? null, previousStatus: r.status },
-        }).catch((e: any) => console.error('[cron] ORDER_REQUEST_EXPIRED notif failed:', e));
+        }).catch((e) => console.error('[cron] ORDER_REQUEST_EXPIRED notif failed:', e));
     }
-
     if (expired > 0) {
         console.log(`[cron] Expired ${expired} stale order_requests (consumers notified)`);
     }
 }
-
 // ---------- Layer 3: self-heal missing consumer User rows ----------
-
 /**
  * Defense-in-depth backstop for the order-create FK (fk_orders_user → "User").
  *
@@ -630,7 +603,7 @@ async function expireStaleOrderRequests(prisma: PrismaClient, notificationServic
  * Raw SQL because `profiles` and `auth.users` are Supabase tables not in the
  * Prisma schema. ON CONFLICT (id) keeps it idempotent.
  */
-async function healMissingUserRows(prisma: PrismaClient): Promise<void> {
+async function healMissingUserRows(prisma) {
     const healed = await prisma.$executeRawUnsafe(`
         INSERT INTO "User" (id, email, "passwordHash", role, name, phone, "isAdmin", "createdAt", "updatedAt")
         SELECT p.id,
@@ -649,13 +622,11 @@ async function healMissingUserRows(prisma: PrismaClient): Promise<void> {
         console.error(`[cron][ALERT] Self-heal created ${healed} missing consumer "User" row(s). The signup trigger missed them — investigate.`);
     }
 }
-
 // ─────────────── Phase 7B (2026-06-10): payment verification jobs ───────────
 // Settlement prerequisite + the N6 decision (build the cron, don't soften the
 // copy). Shares the local Razorpay init + CRON_DRY_RUN conventions used by
 // tryRazorpayRefund above.
-
-function initLocalRazorpay(): any {
+function initLocalRazorpay() {
     try {
         const Razorpay = require('razorpay');
         if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
@@ -664,12 +635,12 @@ function initLocalRazorpay(): any {
                 key_secret: process.env.RAZORPAY_KEY_SECRET,
             });
         }
-    } catch (e) {
+    }
+    catch (e) {
         console.warn('[cron 7b] razorpay sdk init failed:', e);
     }
     return null;
 }
-
 /**
  * Re-verify orders whose create-time payment check was inconclusive
  * (payment_verified IS NULL): Razorpay API error, SDK unconfigured, or
@@ -685,50 +656,52 @@ function initLocalRazorpay(): any {
  * scanned despite isPaid=false (the partial-refund flow flips it; their kept
  * remainder still needs verification to settle).
  */
-export async function verifyPendingPayments(
-    prisma: PrismaClient,
-    window?: { from: Date; to: Date },
-): Promise<number> {
+async function verifyPendingPayments(prisma, window) {
     const rzp = initLocalRazorpay();
-    if (!rzp) return 0; // nothing to do without credentials — orders stay NULL
-
-    const from = window?.from ?? PHASE7_EPOCH;
+    if (!rzp)
+        return 0; // nothing to do without credentials — orders stay NULL
+    const from = window?.from ?? settlement_service_1.PHASE7_EPOCH;
     // Give create-time verification 3 minutes before the cron picks a row up.
     const to = window?.to ?? new Date(Date.now() - 3 * 60 * 1000);
-
     const candidates = await prisma.order.findMany({
         where: {
             paymentVerified: null,
             createdAt: { gte: from, lte: to },
-            OR: [{ isPaid: true }, { status: 'RETURN_APPROVED' as any }],
+            OR: [{ isPaid: true }, { status: 'RETURN_APPROVED' }],
         },
         select: { id: true, totalAmount: true, metadata: true },
         orderBy: { createdAt: 'asc' },
         take: 25,
     });
-    if (candidates.length === 0) return 0;
-
+    if (candidates.length === 0)
+        return 0;
     for (const o of candidates) {
-        const paymentId = (o.metadata as any)?.razorpayPaymentId
-            ? String((o.metadata as any).razorpayPaymentId)
+        const paymentId = o.metadata?.razorpayPaymentId
+            ? String(o.metadata.razorpayPaymentId)
             : null;
         if (!paymentId) {
             await prisma.order.update({
                 where: { id: o.id },
                 data: { paymentVerified: false, paymentVerificationNote: 'paid claim without payment id' },
             });
-            try { Sentry.captureMessage('phase7b: paid order has no payment id — HELD', { level: 'warning', extra: { orderId: o.id } }); } catch {}
+            try {
+                Sentry.captureMessage('phase7b: paid order has no payment id — HELD', { level: 'warning', extra: { orderId: o.id } });
+            }
+            catch { }
             continue;
         }
         try {
-            const p: any = await rzp.payments.fetch(paymentId);
+            const p = await rzp.payments.fetch(paymentId);
             const status = String(p?.status || '');
             if (status !== 'captured' && status !== 'authorized') {
                 await prisma.order.update({
                     where: { id: o.id },
                     data: { paymentVerified: false, paymentVerificationNote: `payment status ${status || 'unknown'}` },
                 });
-                try { Sentry.captureMessage('phase7b: cron verification FAILED — payment not captured', { level: 'warning', extra: { orderId: o.id, paymentId, status } }); } catch {}
+                try {
+                    Sentry.captureMessage('phase7b: cron verification FAILED — payment not captured', { level: 'warning', extra: { orderId: o.id, paymentId, status } });
+                }
+                catch { }
                 continue;
             }
             const capturedInr = Number(p.amount || 0) / 100;
@@ -742,22 +715,31 @@ export async function verifyPendingPayments(
                     where: { id: o.id },
                     data: { paymentVerified: false, paymentVerificationNote: `amount overrun: captured ₹${capturedInr}, booked ₹${bookedInr}` },
                 });
-                try { Sentry.captureMessage('phase7b: cron verification — amount overrun, HELD', { level: 'warning', extra: { orderId: o.id, paymentId, capturedInr, bookedInr } }); } catch {}
-            } else {
+                try {
+                    Sentry.captureMessage('phase7b: cron verification — amount overrun, HELD', { level: 'warning', extra: { orderId: o.id, paymentId, capturedInr, bookedInr } });
+                }
+                catch { }
+            }
+            else {
                 await prisma.order.update({
                     where: { id: o.id },
                     data: { paymentVerified: true, paymentVerificationNote: `captured ₹${capturedInr} (cron-verified)` },
                 });
             }
-        } catch (err: any) {
+        }
+        catch (err) {
             const msg = String(err?.message || err);
             if (/does not exist|not found|invalid id/i.test(msg)) {
                 await prisma.order.update({
                     where: { id: o.id },
                     data: { paymentVerified: false, paymentVerificationNote: 'payment id unknown to Razorpay' },
                 });
-                try { Sentry.captureMessage('phase7b: cron verification — payment id unknown, HELD', { level: 'warning', extra: { orderId: o.id, paymentId } }); } catch {}
-            } else {
+                try {
+                    Sentry.captureMessage('phase7b: cron verification — payment id unknown, HELD', { level: 'warning', extra: { orderId: o.id, paymentId } });
+                }
+                catch { }
+            }
+            else {
                 // Transport error — leave NULL; next tick retries.
                 console.warn(`[cron 7b] verify transport error for order ${o.id}: ${msg}`);
             }
@@ -765,7 +747,6 @@ export async function verifyPendingPayments(
     }
     return candidates.length;
 }
-
 /**
  * Orphaned-payments sweep (N6 decision: build the cron). Finds CAPTURED
  * consumer payments from the last 24h (excluding the most recent 15 min —
@@ -777,50 +758,53 @@ export async function verifyPendingPayments(
  * payments, unattributable) is flagged to Sentry for manual review — never
  * auto-refunded. Respects CRON_DRY_RUN.
  */
-export async function sweepOrphanedPayments(prisma: PrismaClient): Promise<void> {
+async function sweepOrphanedPayments(prisma) {
     const rzp = initLocalRazorpay();
-    if (!rzp) return;
-
+    if (!rzp)
+        return;
     const nowSec = Math.floor(Date.now() / 1000);
-    const list: any = await rzp.payments.all({
+    const list = await rzp.payments.all({
         from: nowSec - 24 * 60 * 60,
         to: nowSec - 15 * 60,
         count: 100,
     });
-    const payments: any[] = Array.isArray(list?.items) ? list.items : [];
-    if (payments.length === 0) return;
-
+    const payments = Array.isArray(list?.items) ? list.items : [];
+    if (payments.length === 0)
+        return;
     for (const p of payments) {
         try {
-            if (String(p?.status) !== 'captured') continue;
-            if (Number(p?.amount_refunded || 0) > 0) continue; // already (partially) refunded
-
+            if (String(p?.status) !== 'captured')
+                continue;
+            if (Number(p?.amount_refunded || 0) > 0)
+                continue; // already (partially) refunded
             // Skip non-consumer flows outright.
             const noteType = p?.notes?.paymentType ? String(p.notes.paymentType) : null;
-            if (noteType === 'merchant_signup') continue;
-
+            if (noteType === 'merchant_signup')
+                continue;
             // An order exists? Not an orphan.
             const order = await prisma.order.findFirst({
                 where: { metadata: { path: ['razorpayPaymentId'], equals: String(p.id) } },
                 select: { id: true },
             });
-            if (order) continue;
-
+            if (order)
+                continue;
             // Attribution gate for auto-refund.
             let attributable = noteType === 'consumer_order';
             if (!attributable && p?.order_id) {
                 try {
-                    const rzpOrder: any = await rzp.orders.fetch(String(p.order_id));
+                    const rzpOrder = await rzp.orders.fetch(String(p.order_id));
                     attributable = typeof rzpOrder?.receipt === 'string' && rzpOrder.receipt.startsWith('PAS-');
-                } catch { /* fetch failed — treat as unattributable */ }
+                }
+                catch { /* fetch failed — treat as unattributable */ }
             }
-
             if (!attributable) {
                 console.warn(`[cron 7b sweep] unattributable captured payment with no order — manual review: ${p.id} ₹${Number(p.amount) / 100}`);
-                try { Sentry.captureMessage('phase7b sweep: unattributable orphan payment — manual review', { level: 'warning', extra: { paymentId: p.id, amountInr: Number(p.amount) / 100, email: p.email, contact: p.contact } }); } catch {}
+                try {
+                    Sentry.captureMessage('phase7b sweep: unattributable orphan payment — manual review', { level: 'warning', extra: { paymentId: p.id, amountInr: Number(p.amount) / 100, email: p.email, contact: p.contact } });
+                }
+                catch { }
                 continue;
             }
-
             // Attributable consumer orphan → refund in full.
             if (process.env.CRON_DRY_RUN === 'true') {
                 console.warn(`[cron 7b sweep] DRY_RUN — would refund orphan ${p.id} ₹${Number(p.amount) / 100}`);
@@ -828,9 +812,14 @@ export async function sweepOrphanedPayments(prisma: PrismaClient): Promise<void>
             }
             const refund = await rzp.payments.refund(String(p.id), { amount: Number(p.amount) });
             console.error(`[cron 7b sweep][ORPHAN-REFUNDED] payment=${p.id} amount=₹${Number(p.amount) / 100} refund=${refund?.id}`);
-            try { Sentry.captureMessage('phase7b sweep: orphan consumer payment auto-refunded', { level: 'warning', extra: { paymentId: p.id, amountInr: Number(p.amount) / 100, refundId: refund?.id } }); } catch {}
-        } catch (err: any) {
+            try {
+                Sentry.captureMessage('phase7b sweep: orphan consumer payment auto-refunded', { level: 'warning', extra: { paymentId: p.id, amountInr: Number(p.amount) / 100, refundId: refund?.id } });
+            }
+            catch { }
+        }
+        catch (err) {
             console.error(`[cron 7b sweep] error handling payment ${p?.id}:`, err?.message || err);
         }
     }
 }
+//# sourceMappingURL=scheduled-jobs.js.map

@@ -757,7 +757,7 @@ app.post('/webhooks/razorpay', async (req, res) => {
         }
         else if (event === 'payment.failed' && payment) {
             console.warn('[razorpay-webhook] payment.failed for paymentId=', payment.id, 'orderId=', payment.order_id, 'reason=', payment.error_description);
-            // Currently log-only. Future: notify the merchant + mark draft to retry.
+            await handlePaymentFailed(payment);
         }
         else {
             console.log('[razorpay-webhook] event ignored (no handler):', event);
@@ -827,6 +827,54 @@ async function handlePaymentCaptured(payment) {
     // row will be missing. That's an admin-reconciliation case — too risky
     // to auto-increment used_count from a webhook without the merchant
     // confirming via the app.
+}
+/**
+ * Handler for Razorpay `payment.failed` events. Notifies the consumer that their
+ * payment didn't complete (they were NOT charged). Idempotent: a webhook
+ * re-delivery is a no-op because we first check for an existing PAYMENT_FAILED
+ * notification keyed by the payment id. Only consumer-order payments (tagged with
+ * consumerUserId in the Razorpay order notes at create-order time) are notified;
+ * merchant-signup / untagged failures are skipped.
+ */
+async function handlePaymentFailed(payment) {
+    const paymentId = payment.id;
+    const orderId = payment.order_id;
+    if (!paymentId || !orderId || !razorpayInstance)
+        return;
+    // Resolve the consumer from the Razorpay order notes (stamped at create-order time).
+    let consumerUserId;
+    try {
+        const order = await razorpayInstance.orders.fetch(orderId);
+        const notes = (order?.notes || {});
+        if (notes.paymentType === 'consumer_order' && notes.consumerUserId) {
+            consumerUserId = String(notes.consumerUserId);
+        }
+    }
+    catch (e) {
+        console.warn('[razorpay-webhook] payment.failed: could not fetch order notes for', orderId, '-', e?.message || e);
+        return;
+    }
+    if (!consumerUserId)
+        return; // not an attributable consumer payment — nothing to notify
+    // Idempotency: Razorpay retries webhooks — notify at most once per failed payment.
+    const already = await prisma.notification.findFirst({
+        where: { userId: consumerUserId, type: 'PAYMENT_FAILED', referenceId: paymentId },
+        select: { id: true },
+    });
+    if (already) {
+        console.log('[razorpay-webhook] payment.failed already notified for', paymentId, '— idempotent no-op');
+        return;
+    }
+    const reason = payment.error_description || '';
+    await notificationService.sendConsumerNotification({
+        userId: consumerUserId,
+        title: "Payment didn't go through",
+        body: `Your payment couldn't be completed${reason ? ` (${reason})` : ''}. You haven't been charged — please try again.`,
+        type: 'PAYMENT_FAILED',
+        referenceId: paymentId,
+        link: '/(main)/orders',
+        metadata: { paymentId, orderId, reason: reason || null },
+    });
 }
 /**
  * GET /payments/methods
@@ -908,6 +956,13 @@ app.get('/health', (req, res) => {
 // Get Products (with Filtering & Pagination)
 app.get('/products', async (req, res) => {
     try {
+        // H-1 solid fix (2026-06-23): admin-only catalog browse. Previously unauthenticated
+        // (display-audit CRIT 4): anyone could scrape the 140k catalog including internal
+        // importer fields (source, sourceProductId, productUrl, extraData). Caller is the
+        // admin MasterCatalog grid only.
+        const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+        if (!caller)
+            return;
         const { page = 1, limit = 50, search, category, vertical, brand, minPrice, maxPrice, gstRate, missingData, type = 'global' // 'global' | 'custom' | 'all'
          } = req.query;
         const skip = (Number(page) - 1) * Number(limit);
@@ -965,7 +1020,9 @@ app.get('/products', async (req, res) => {
                 skip,
                 take,
                 orderBy: { createdAt: 'desc' },
-                include: { images: true, Vertical: { select: { name: true } }, Tier2Category: { select: { name: true } } }
+                // H-1: PRODUCT_PUBLIC_SELECT strips internal-only fields (source, sourceProductId,
+                // productUrl, extraData, createdByStoreId, countryCode) by construction.
+                select: PRODUCT_PUBLIC_SELECT,
             }),
             prisma.product.count({ where })
         ]);
@@ -1080,7 +1137,12 @@ app.get('/products/template', async (req, res) => {
 // Export Products
 app.get('/products/export', async (req, res) => {
     try {
-        const products = await prisma.product.findMany();
+        // H-1 solid fix (2026-06-23): admin-only. Was unauthenticated → exposed the whole
+        // 140k catalog as a downloadable Excel to anyone with the URL.
+        const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+        if (!caller)
+            return;
+        const products = await prisma.product.findMany({ select: PRODUCT_PUBLIC_SELECT });
         const data = products.map(p => ({
             name: p.name,
             mrp: p.mrp,
@@ -1108,6 +1170,22 @@ app.get('/products/export', async (req, res) => {
 // rows (bulk-delete cascades into merchant inventory). Require an authenticated
 // admin (any tier) on all of them.
 const CATALOG_ADMIN_ROLES = ['SUPER_ADMIN', 'OPERATIONS', 'FINANCE', 'SUPPORT'];
+// H-1 solid fix (2026-06-23): explicit field whitelist for Product rows returned to ANY
+// admin/merchant-facing surface. Strips internal-only fields (importer lineage + supplier
+// URLs) so even if a future endpoint forgets a field map, callers cannot exfiltrate them.
+// Use via `select: PRODUCT_PUBLIC_SELECT` on prisma.product / prisma.storeProduct.product.
+const PRODUCT_PUBLIC_SELECT = {
+    id: true, name: true, description: true, image: true, mrp: true, brand: true, ean: true,
+    createdAt: true, updatedAt: true, unitType: true, unitValue: true, hsnCode: true,
+    gstRate: true, subcategory: true, unitPrice: true, uom: true, avgRating: true,
+    numberOfRatings: true, isSoldOut: true, catalogName: true, shippingCharges: true,
+    returnable: true, isVeg: true, category_id: true, vertical_id: true,
+    Vertical: { select: { id: true, name: true, is_active: true, requiresFssai: true } },
+    Tier2Category: { select: { id: true, name: true, active: true } },
+    images: true,
+    // Deliberately omitted (H-1): source, sourceProductId, productUrl, extraData,
+    // createdByStoreId, countryCode — internal lineage/supplier fields not for client surfaces.
+};
 // Category-visibility feature · Task 5: disabling a category hides it + all its products
 // platform-wide instantly — high impact, so the toggle is restricted to ops-level roles
 // (SUPER_ADMIN is always implicitly allowed inside requireRole). Viewing stays open to
@@ -2465,7 +2543,7 @@ app.get('/consumer/products/search', async (req, res) => {
                 }
             },
             include: {
-                product: true,
+                product: { select: PRODUCT_PUBLIC_SELECT },
                 store: { select: { id: true, name: true, address: true, image: true } }
             },
             take: Number(limit),
@@ -2740,7 +2818,7 @@ app.post('/orders', async (req, res) => {
                         ...(orderRequestId ? [{ metadata: { path: ['orderRequestId'], equals: orderRequestId } }] : [])
                     ]
                 },
-                include: { items: { include: { storeProduct: { include: { product: true } } } }, store: true },
+                include: { items: { include: { storeProduct: { include: { product: { select: PRODUCT_PUBLIC_SELECT } } } } }, store: true },
             });
             if (existingForPayment) {
                 console.log(`[POST /orders] Idempotent hit — order already exists for payment ${paymentId}`);
@@ -2908,7 +2986,7 @@ app.post('/orders', async (req, res) => {
                     }
                 },
                 include: {
-                    items: { include: { storeProduct: { include: { product: true } } } },
+                    items: { include: { storeProduct: { include: { product: { select: PRODUCT_PUBLIC_SELECT } } } } },
                     store: true
                 }
             });
@@ -3139,7 +3217,7 @@ app.post('/orders', async (req, res) => {
                     const sp = await tx.storeProduct.update({
                         where: { id: item.storeProductId },
                         data: { stock: { decrement: item.quantity } },
-                        include: { product: true }
+                        include: { product: { select: PRODUCT_PUBLIC_SELECT } }
                     });
                     if (sp.stock === 0) {
                         lowStockAlerts.push({
@@ -3378,6 +3456,28 @@ app.post('/order-requests', async (req, res) => {
             console.warn(`[POST /order-requests] 400 — Missing/empty requests array | user=${user.id}`);
             return res.status(400).json({ error: 'Missing or empty requests array' });
         }
+        // ── H-3 solid fix (2026-06-23): reject the whole request if ANY item is malformed.
+        // Prior behaviour silently filtered out items lacking `id` via `.filter(Boolean)`,
+        // which let unknown/malformed cart items flow past trust-sensitive gates (Category
+        // Status Gate, downstream order creation). Fail-closed at the front door so every
+        // gate downstream can trust that every item has a usable id.
+        for (let ri = 0; ri < requests.length; ri++) {
+            const r = requests[ri];
+            if (!Array.isArray(r?.items) || r.items.length === 0) {
+                console.warn(`[POST /order-requests] 400 — Request ${ri} has empty/missing items | user=${user.id}`);
+                return res.status(400).json({ error: 'INVALID_ORDER_REQUEST', message: `Request ${ri} has no items.` });
+            }
+            for (let ii = 0; ii < r.items.length; ii++) {
+                const it = r.items[ii];
+                if (!it || typeof it.id !== 'string' || it.id.length === 0) {
+                    console.warn(`[POST /order-requests] 400 — Item ${ri}.${ii} missing id | user=${user.id}`);
+                    return res.status(400).json({
+                        error: 'INVALID_ORDER_ITEM',
+                        message: `Item ${ri}.${ii} is missing a product id. Please remove the affected item and retry.`,
+                    });
+                }
+            }
+        }
         // ── Minimum-order floor (server-side, un-bypassable mirror of the cart gate) ──
         // requests[] is the whole cart split per store, so the sum of subtotals
         // equals the cart subtotal the consumer cart checks before checkout. This
@@ -3413,7 +3513,9 @@ app.post('/order-requests', async (req, res) => {
         // build that never got the consumer prune — could otherwise slip one through. This
         // is the airtight, OTA-independent backstop. Visibility logic mirrors the RESTRICTIVE
         // RLS exactly. Pre-transaction + pre-payment, so a rejection never orphans a charge.
-        const reqProductIds = [...new Set(requests.flatMap((r) => (Array.isArray(r?.items) ? r.items.map((it) => String(it?.id)).filter(Boolean) : [])))];
+        // H-3: front-door validation above guarantees every item.id is a non-empty string.
+        // No silent filtering — every product id must resolve, or the gate has failed.
+        const reqProductIds = [...new Set(requests.flatMap((r) => r.items.map((it) => String(it.id))))];
         if (reqProductIds.length > 0) {
             const prods = await prisma.product.findMany({
                 where: { id: { in: reqProductIds } },
@@ -3423,6 +3525,19 @@ app.post('/order-requests', async (req, res) => {
                     Tier2Category: { select: { active: true } },
                 },
             });
+            // H-3: every requested id MUST resolve to a real Product. Prisma's `in` silently
+            // returns fewer rows for unknown ids — same fail-open class as the prior `.filter(Boolean)`.
+            // Reject unknown ids before they can flow into the order transaction.
+            if (prods.length !== reqProductIds.length) {
+                const foundIds = new Set(prods.map((p) => p.id));
+                const missing = reqProductIds.filter((id) => !foundIds.has(id));
+                console.warn(`[POST /order-requests] 400 — Unknown product ids | missing=${missing.join(',')} user=${user.id}`);
+                return res.status(400).json({
+                    error: 'UNKNOWN_PRODUCT',
+                    message: `Some items reference products that no longer exist. Please refresh your cart.`,
+                    offenders: missing,
+                });
+            }
             const isVisible = (p) => (p.vertical_id == null || p.Vertical?.is_active === true) &&
                 (p.category_id == null || p.Tier2Category?.active === true);
             const disabled = prods.filter((p) => !isVisible(p));
@@ -3650,7 +3765,7 @@ app.patch('/orders/:id/status', async (req, res) => {
         // 1. Fetch current order to validate transition
         const currentOrder = await prisma.order.findUnique({
             where: { id },
-            include: { user: true, items: { include: { storeProduct: { include: { product: true } } } }, store: { include: { manager: true } } }
+            include: { user: true, items: { include: { storeProduct: { include: { product: { select: PRODUCT_PUBLIC_SELECT } } } } }, store: { include: { manager: true } } }
         });
         if (!currentOrder) {
             return res.status(404).json({ error: 'Order not found' });
@@ -3722,7 +3837,7 @@ app.patch('/orders/:id/status', async (req, res) => {
         const order = await prisma.order.update({
             where: { id },
             data,
-            include: { user: true, items: { include: { storeProduct: { include: { product: true } } } }, store: { include: { manager: true } } }
+            include: { user: true, items: { include: { storeProduct: { include: { product: { select: PRODUCT_PUBLIC_SELECT } } } } }, store: { include: { manager: true } } }
         });
         if (status === 'READY' && order.user?.phone && order.otp) {
             sms_service_1.smsService.sendOtp(order.user.phone, order.otp).catch(err => console.error('OTP SMS Failed:', err));
@@ -3991,7 +4106,7 @@ app.post('/webhooks/payment', async (req, res) => {
             const order = await prisma.order.update({
                 where: { id: orderId },
                 data: { isPaid: true },
-                include: { user: true, items: { include: { storeProduct: { include: { product: true } } } } }
+                include: { user: true, items: { include: { storeProduct: { include: { product: { select: PRODUCT_PUBLIC_SELECT } } } } } }
             });
             io.emit('order_updated', order);
             return res.json({ message: 'Payment captured' });
@@ -4038,7 +4153,7 @@ app.post('/orders/:id/verify-otp', async (req, res) => {
         }
         const updatedOrder = await prisma.order.findUnique({
             where: { id },
-            include: { user: true, items: { include: { storeProduct: { include: { product: true } } } } }
+            include: { user: true, items: { include: { storeProduct: { include: { product: { select: PRODUCT_PUBLIC_SELECT } } } } } }
         });
         if (!updatedOrder) {
             return res.status(500).json({ error: 'Verify-OTP committed but order vanished — please refresh.' });
@@ -4838,7 +4953,7 @@ app.post('/orders/:id/return', async (req, res) => {
         const photoList = Array.isArray(photos) ? photos.filter(p => typeof p === 'string') : [];
         const order = await prisma.order.findUnique({
             where: { id },
-            include: { user: true, items: { include: { storeProduct: { include: { product: true } } } } },
+            include: { user: true, items: { include: { storeProduct: { include: { product: { select: PRODUCT_PUBLIC_SELECT } } } } } },
         });
         if (!order)
             return res.status(404).json({ error: 'Order not found.' });
@@ -5055,15 +5170,111 @@ app.post('/orders/:id/exchange', async (req, res) => {
         return res.status(500).json({ error: 'Failed to create exchange request.', details: err?.message });
     }
 });
-/**
- * PATCH /orders/:id/issue/:issueId — merchant approves/rejects an issue.
- * Body: { decision: 'APPROVED' | 'REJECTED', merchantDecisionReason?: string }
- *
- * On APPROVED for a return: triggers Razorpay refund + flips order to
- * RETURN_APPROVED + REFUNDED. On APPROVED for exchange: flips to
- * EXCHANGE_APPROVED. On REJECTED: flips to RETURN_REJECTED or
- * EXCHANGE_REJECTED.
- */
+async function decideOrderIssue(params) {
+    const { orderId, issueId, decision, decisionReason, resolvedById } = params;
+    if (decision !== 'APPROVED' && decision !== 'REJECTED') {
+        return { ok: false, status: 400, error: "decision must be 'APPROVED' or 'REJECTED'." };
+    }
+    const order = await prisma.order.findUnique({ where: { id: orderId }, include: { user: true, store: true } });
+    if (!order)
+        return { ok: false, status: 404, error: 'Order not found.' };
+    const issue = await prisma.orderIssue.findUnique({ where: { id: issueId } });
+    if (!issue || issue.orderId !== order.id)
+        return { ok: false, status: 404, error: 'Issue not found for this order.' };
+    if (issue.status !== 'PENDING')
+        return { ok: false, status: 400, error: `Issue is already ${issue.status}; cannot decide twice.` };
+    const now = new Date();
+    const newIssueStatus = decision === 'APPROVED' ? 'APPROVED' : 'REJECTED';
+    const newOrderStatus = decision === 'APPROVED' && issue.type === 'return' ? 'RETURN_APPROVED' :
+        decision === 'REJECTED' && issue.type === 'return' ? 'RETURN_REJECTED' :
+            decision === 'APPROVED' && issue.type === 'exchange' ? 'EXCHANGE_APPROVED' :
+                decision === 'REJECTED' && issue.type === 'exchange' ? 'EXCHANGE_REJECTED' :
+                    order.status;
+    const needsRefund = decision === 'APPROVED' && issue.type === 'return' && (issue.refundAmountInr ?? 0) > 0;
+    // FLIP STATUS FIRST, atomically. The updateMany WHERE status:'PENDING' is a
+    // compare-and-set — if a concurrent cron auto-approve / another session already
+    // moved the issue out of PENDING, count === 0 and we bail (409) BEFORE the
+    // refund block, so the same payment is never refunded twice. isPaid flips here
+    // for refund-bearing approvals so the customer's state matches intent immediately.
+    let result;
+    try {
+        result = await prisma.$transaction(async (tx) => {
+            const updateRes = await tx.orderIssue.updateMany({
+                where: { id: issueId, status: 'PENDING' },
+                data: {
+                    status: newIssueStatus,
+                    merchantDecisionReason: decisionReason ? String(decisionReason).slice(0, 500) : null,
+                    resolvedBy: resolvedById,
+                    resolvedAt: now,
+                },
+            });
+            if (updateRes.count === 0)
+                throw new Error('CONCURRENT_DECISION');
+            const updatedIssue = await tx.orderIssue.findUnique({ where: { id: issueId } });
+            const updatedOrder = await tx.order.update({
+                where: { id: order.id },
+                data: { status: newOrderStatus, ...(needsRefund && { isPaid: false }) },
+            });
+            return { issue: updatedIssue, order: updatedOrder };
+        });
+    }
+    catch (err) {
+        if (err?.message === 'CONCURRENT_DECISION') {
+            return { ok: false, status: 409, error: 'This issue was already decided by another process (cron auto-approve or another session). Refresh and try again.' };
+        }
+        throw err;
+    }
+    // Razorpay refund AFTER status commit. Safe — the PENDING CAS above blocks duplicates.
+    let refundResult = null;
+    if (needsRefund) {
+        refundResult = await processRazorpayRefund(order.metadata, issue.refundAmountInr);
+        try {
+            await (0, settlement_service_1.detectClawback)(prisma, order.id, issue.refundAmountInr, `issue refund ${refundResult.razorpayRefundId}`);
+        }
+        catch (e) {
+            console.error('[7D] clawback detect (issue) failed:', e);
+        }
+        await prisma.$transaction(async (tx) => {
+            await tx.orderIssue.update({
+                where: { id: issueId },
+                data: { refundRazorpayId: refundResult.razorpayRefundId, refundProcessedAt: now },
+            });
+            await tx.order.update({
+                where: { id: order.id },
+                data: {
+                    metadata: {
+                        ...(typeof result.order.metadata === 'object' && result.order.metadata !== null ? result.order.metadata : {}),
+                        returnRazorpayRefundId: refundResult.razorpayRefundId,
+                        returnRefundSimulated: refundResult.simulated,
+                    },
+                },
+            });
+        }).catch((e) => console.error('[decideOrderIssue] metadata refund write failed:', e));
+    }
+    notificationService.sendConsumerNotification({
+        userId: order.userId,
+        title: `${issue.type === 'return' ? 'Return' : 'Exchange'} ${decision.toLowerCase()}`,
+        body: `Order #${order.orderNumber}: ${decision === 'APPROVED' ? 'approved' : 'declined'}${decisionReason ? ` — ${decisionReason}` : ''}.`,
+        type: issue.type === 'return' ? 'RETURN_DECISION' : 'EXCHANGE_DECISION',
+        referenceId: order.id,
+        storeId: order.storeId,
+        link: `/orders/${order.id}`,
+        metadata: {
+            orderNumber: order.orderNumber,
+            issueId: issue.id,
+            decision: newIssueStatus,
+            refundInr: issue.refundAmountInr ?? null,
+            razorpayRefundId: refundResult?.razorpayRefundId ?? null,
+        },
+    }).catch(e => console.error('[decideOrderIssue] customer notif failed:', e));
+    io.emit('order_updated', result.order);
+    return {
+        ok: true,
+        issue: result.issue,
+        order: result.order,
+        refund: refundResult ? { razorpayRefundId: refundResult.razorpayRefundId, simulated: refundResult.simulated } : null,
+    };
+}
 app.patch('/orders/:id/issue/:issueId', async (req, res) => {
     const user = await requireUser(req, res);
     if (!user)
@@ -5071,154 +5282,18 @@ app.patch('/orders/:id/issue/:issueId', async (req, res) => {
     try {
         const { id, issueId } = req.params;
         const { decision, merchantDecisionReason } = req.body || {};
-        if (decision !== 'APPROVED' && decision !== 'REJECTED') {
-            return res.status(400).json({ error: "decision must be 'APPROVED' or 'REJECTED'." });
-        }
-        const order = await prisma.order.findUnique({ where: { id }, include: { user: true, store: true } });
-        if (!order)
+        // Merchant authorization (store-scoped). The decision itself runs through the
+        // shared decideOrderIssue() so merchant + admin behave identically.
+        const ord = await prisma.order.findUnique({ where: { id }, select: { storeId: true } });
+        if (!ord)
             return res.status(404).json({ error: 'Order not found.' });
-        const canManage = await userCanManageOrderStore(user.id, order.storeId);
-        if (!canManage) {
+        const canManage = await userCanManageOrderStore(user.id, ord.storeId);
+        if (!canManage)
             return res.status(403).json({ error: 'You do not have merchant access to this order.' });
-        }
-        const issue = await prisma.orderIssue.findUnique({ where: { id: issueId } });
-        if (!issue || issue.orderId !== order.id) {
-            return res.status(404).json({ error: 'Issue not found for this order.' });
-        }
-        if (issue.status !== 'PENDING') {
-            return res.status(400).json({ error: `Issue is already ${issue.status}; cannot decide twice.` });
-        }
-        const now = new Date();
-        const newIssueStatus = decision === 'APPROVED' ? 'APPROVED' : 'REJECTED';
-        const newOrderStatus = decision === 'APPROVED' && issue.type === 'return' ? 'RETURN_APPROVED' :
-            decision === 'REJECTED' && issue.type === 'return' ? 'RETURN_REJECTED' :
-                decision === 'APPROVED' && issue.type === 'exchange' ? 'EXCHANGE_APPROVED' :
-                    decision === 'REJECTED' && issue.type === 'exchange' ? 'EXCHANGE_REJECTED' :
-                        order.status;
-        const needsRefund = decision === 'APPROVED' && issue.type === 'return' && (issue.refundAmountInr ?? 0) > 0;
-        // FLIP STATUS FIRST inside a transaction (Bug 2 fix).
-        //
-        // Previously the Razorpay refund was called BEFORE this transaction.
-        // If the refund succeeded but the transaction then failed, the issue
-        // would still be PENDING — so the merchant could click Approve again
-        // and refund the same payment a second time. By committing the
-        // APPROVED/REJECTED state first, the `issue.status !== 'PENDING'`
-        // guard at the top of this endpoint blocks any retry.
-        //
-        // isPaid is also flipped here for refund-bearing approvals so that
-        // the customer's perceived state ("refund issued") matches the
-        // merchant's intent the moment they tap Approve. If Razorpay fails
-        // afterward, metadata.returnRefundSimulated stays absent / 'rfnd_err'
-        // and ops reconciles from the dashboard.
-        // ATOMIC COMPARE-AND-SET (Bug N2 fix — third-pass audit).
-        //
-        // Previously this used `tx.orderIssue.update` which is unconditional —
-        // it doesn't re-check the row's current status. That left a TOCTOU
-        // race window: between the `issue.status !== 'PENDING'` check above
-        // and this transaction, the cron SLA job (or a parallel merchant tab)
-        // could have flipped the issue to AUTO_APPROVED/APPROVED. Both
-        // processes would then commit their own status change (last-write-
-        // wins) AND each would call Razorpay → double refund.
-        //
-        // `updateMany` with `status: 'PENDING'` in the WHERE clause makes
-        // this an atomic compare-and-set: the row only updates if its
-        // current status is still PENDING. If another process won the race,
-        // `count === 0` and we throw a sentinel error that the outer
-        // try/catch maps to a 409 — the refund block below is skipped
-        // because we never get there.
-        let result;
-        try {
-            result = await prisma.$transaction(async (tx) => {
-                const updateRes = await tx.orderIssue.updateMany({
-                    where: { id: issueId, status: 'PENDING' },
-                    data: {
-                        status: newIssueStatus,
-                        merchantDecisionReason: merchantDecisionReason ? String(merchantDecisionReason).slice(0, 500) : null,
-                        resolvedBy: user.id,
-                        resolvedAt: now,
-                    },
-                });
-                if (updateRes.count === 0) {
-                    // Another process (cron auto-approve or a second merchant tab)
-                    // already moved this issue out of PENDING. Bail before doing
-                    // anything else — the refund must not fire a second time.
-                    throw new Error('CONCURRENT_DECISION');
-                }
-                const updatedIssue = await tx.orderIssue.findUnique({ where: { id: issueId } });
-                const updatedOrder = await tx.order.update({
-                    where: { id: order.id },
-                    data: {
-                        status: newOrderStatus,
-                        ...(needsRefund && { isPaid: false }),
-                    },
-                });
-                return { issue: updatedIssue, order: updatedOrder };
-            });
-        }
-        catch (err) {
-            if (err?.message === 'CONCURRENT_DECISION') {
-                return res.status(409).json({
-                    error: 'This issue was already decided by another process (cron auto-approve or another session). Refresh and try again.',
-                });
-            }
-            throw err;
-        }
-        // Razorpay refund AFTER status is committed. Safe to retry the
-        // endpoint now — `issue.status !== 'PENDING'` blocks duplicates.
-        let refundResult = null;
-        if (needsRefund) {
-            refundResult = await processRazorpayRefund(order.metadata, issue.refundAmountInr);
-            // Phase 7D (2026-06-10): settled-order refund → clawback entry.
-            try {
-                await (0, settlement_service_1.detectClawback)(prisma, order.id, issue.refundAmountInr, `issue refund ${refundResult.razorpayRefundId}`);
-            }
-            catch (e) {
-                console.error('[7D] clawback detect (issue) failed:', e);
-            }
-            // Persist refund id back to issue + order metadata. If this
-            // post-refund write fails, ops reconciles from Razorpay; the
-            // status above is the canonical "approved" record.
-            await prisma.$transaction(async (tx) => {
-                await tx.orderIssue.update({
-                    where: { id: issueId },
-                    data: { refundRazorpayId: refundResult.razorpayRefundId, refundProcessedAt: now },
-                });
-                await tx.order.update({
-                    where: { id: order.id },
-                    data: {
-                        metadata: {
-                            ...(typeof result.order.metadata === 'object' && result.order.metadata !== null ? result.order.metadata : {}),
-                            returnRazorpayRefundId: refundResult.razorpayRefundId,
-                            returnRefundSimulated: refundResult.simulated,
-                        },
-                    },
-                });
-            }).catch((e) => console.error('[issue PATCH] metadata refund write failed:', e));
-        }
-        // Customer notification
-        notificationService.sendConsumerNotification({
-            userId: order.userId,
-            title: `${issue.type === 'return' ? 'Return' : 'Exchange'} ${decision.toLowerCase()}`,
-            body: `Order #${order.orderNumber}: ${decision === 'APPROVED' ? 'approved' : 'declined'}${merchantDecisionReason ? ` — ${merchantDecisionReason}` : ''}.`,
-            type: issue.type === 'return' ? 'RETURN_DECISION' : 'EXCHANGE_DECISION',
-            referenceId: order.id,
-            storeId: order.storeId,
-            link: `/orders/${order.id}`,
-            metadata: {
-                orderNumber: order.orderNumber,
-                issueId: issue.id,
-                decision: newIssueStatus,
-                refundInr: issue.refundAmountInr ?? null,
-                razorpayRefundId: refundResult?.razorpayRefundId ?? null,
-            },
-        }).catch(e => console.error('[issue PATCH] customer notif failed:', e));
-        io.emit('order_updated', result.order);
-        return res.json({
-            success: true,
-            issue: result.issue,
-            order: result.order,
-            refund: refundResult ? { razorpayRefundId: refundResult.razorpayRefundId, simulated: refundResult.simulated } : null,
-        });
+        const r = await decideOrderIssue({ orderId: id, issueId, decision, decisionReason: merchantDecisionReason, resolvedById: user.id });
+        if (!r.ok)
+            return res.status(r.status).json({ error: r.error });
+        return res.json({ success: true, issue: r.issue, order: r.order, refund: r.refund });
     }
     catch (err) {
         console.error('[issue PATCH] error:', err);
@@ -5307,26 +5382,35 @@ startAutoRejectTimer();
 // Get Merchant Inventory (Specific Store)
 app.get('/merchants/:id/inventory', async (req, res) => {
     try {
+        // H-1 solid fix (2026-06-23): admin-only. Three problems closed in one fix —
+        // (a) was unauthenticated (display-audit CRIT 4 leak), (b) filtered on the
+        // dead pre-Phase-2-FINAL `StoreProduct.storeId` column → always wrong rows,
+        // (c) `category` filter referenced a non-existent scalar (`Product.category`)
+        // so any caller passing ?category=... got a 500. Caller: admin MerchantInventoryModal
+        // which already passes a BRANCH id (selectedBranchId), so route name `:id` =
+        // branch_id. Field whitelist via PRODUCT_PUBLIC_SELECT.
+        const caller = await requireRole(req, res, CATALOG_ADMIN_ROLES);
+        if (!caller)
+            return;
         const { id } = req.params;
         const { search, category } = req.query;
-        const where = { storeId: id };
+        const where = { branch_id: id };
         if (search) {
             where.product = {
                 name: { contains: String(search), mode: 'insensitive' }
             };
         }
         if (category) {
+            // FK relation, not a scalar. `category` query param matches Tier2Category.name.
             where.product = {
                 ...where.product,
-                category: { in: String(category).split(',') }
+                Tier2Category: { name: { in: String(category).split(',') } },
             };
         }
         const inventory = await prisma.storeProduct.findMany({
             where,
-            include: {
-                product: true
-            },
-            orderBy: { updatedAt: 'desc' }
+            include: { product: { select: PRODUCT_PUBLIC_SELECT } },
+            orderBy: { updatedAt: 'desc' },
         });
         res.json(inventory);
     }
@@ -6584,6 +6668,16 @@ app.get('/debug/list-users', async (req, res) => {
 // ==========================================
 // --- WhatsApp OTP Authentication Routes ---
 // ==========================================
+// Test-phone OTP bypass: these numbers skip WhatsApp delivery (send-otp) and accept
+// the fixed code 123456 (verify-otp). For app-store reviewers + internal signup-flow
+// testing when WhatsApp/Wati is unavailable. NOT real users; suffix-matched to
+// tolerate 91 / +91 prefixes. REMOVE post-testing (tracked in forlater.md).
+const OTP_BYPASS_PHONES = ['9959777027', '9100117027'];
+const OTP_BYPASS_CODE = '123456';
+function isOtpBypassPhone(phone) {
+    const digits = String(phone || '').replace(/\D/g, '');
+    return OTP_BYPASS_PHONES.some(p => digits.endsWith(p));
+}
 /**
  * POST /auth/send-otp
  * Generate a 6-digit OTP and send via WhatsApp (Wati)
@@ -6595,8 +6689,8 @@ app.post('/auth/send-otp', async (req, res) => {
     const rawInput = req.body.phone || req.body.phoneNumber || '';
     const incomingPhone = String(rawInput).replace(/\D/g, '');
     console.log('>>> [DEBUG] PARSED PHONE:', incomingPhone);
-    if (incomingPhone.endsWith('9959777027')) {
-        console.log('[Reviewer Bypass] Intercepted Send OTP request. Bypassing WhatsApp API.');
+    if (isOtpBypassPhone(incomingPhone)) {
+        console.log('[OTP Bypass] Intercepted Send OTP for test number. Bypassing WhatsApp API.');
         return res.status(200).json({ success: true, message: 'Mock OTP sent successfully.' });
     }
     try {
@@ -6675,7 +6769,7 @@ app.post('/auth/verify-otp', async (req, res) => {
         if (!phone || !otp) {
             return res.status(400).json({ error: 'Phone and OTP are required' });
         }
-        const isReviewer = phone.endsWith('9959777027') && otp === '123456';
+        const isReviewer = isOtpBypassPhone(phone) && otp === OTP_BYPASS_CODE;
         let record = null;
         if (!isReviewer) {
             console.log(`[Auth] Looking for unverified OTP for phone: ${phone}`);
@@ -9970,11 +10064,105 @@ app.post('/admin/orders/:id/refund', async (req, res) => {
             after: { status: 'REFUNDED', refundRazorpayId: refund.id, refundAmountInr: amountInr },
             reason,
         });
+        // REFUND_INITIATED → tell the consumer their money is on the way. This admin
+        // path issues a REAL Razorpay refund and (unlike the cancel / return / SLA
+        // refund paths, which already notify via their decision messages) had no
+        // consumer notification. Fail-soft: a notify failure never fails the refund.
+        // recipient_role='consumer' is set by the service → shows in the consumer inbox.
+        notificationService.sendConsumerNotification({
+            userId: order.userId,
+            title: 'Refund on the way',
+            body: `We've started a refund of ₹${amountInr} for order #${order.orderNumber}. It'll reach your account in 5–7 business days.`,
+            type: 'REFUND_INITIATED',
+            referenceId: id,
+            link: '/(main)/orders',
+            storeId: order.storeId,
+            metadata: { orderNumber: order.orderNumber, refundInr: amountInr, razorpayRefundId: refund.id, source: 'admin' },
+        }).catch((e) => console.error('[admin refund] REFUND_INITIATED notif failed:', e));
         return res.json({ ok: true, refundId: refund.id, amountInr, order: { id: updated.id, status: updated.status } });
     }
     catch (err) {
         console.error('[admin/orders/:id/refund] error:', err?.message || err);
         return res.status(500).json({ error: 'Refund failed' });
+    }
+});
+// Phase 3a (2026-06-26): admin returns/exchanges queue. Returns are admin-owned, so
+// this lists OrderIssue rows across ALL stores (the merchant inbox is store-scoped).
+// requireAdmin. Query: ?status=PENDING|APPROVED|REJECTED|AUTO_APPROVED|ALL & type=return|exchange|ALL & limit
+app.get('/admin/issues', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res);
+        if (!admin)
+            return;
+        const statusParam = String(req.query.status || 'PENDING').toUpperCase();
+        const typeParam = String(req.query.type || 'ALL').trim();
+        const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '100'), 10) || 100));
+        const validStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'AUTO_APPROVED', 'ALL'];
+        if (!validStatuses.includes(statusParam))
+            return res.status(400).json({ error: `status must be one of ${validStatuses.join(', ')}` });
+        const validTypes = ['return', 'exchange', 'ALL'];
+        if (!validTypes.includes(typeParam))
+            return res.status(400).json({ error: `type must be one of ${validTypes.join(', ')}` });
+        const where = {};
+        if (statusParam !== 'ALL')
+            where.status = statusParam;
+        if (typeParam !== 'ALL')
+            where.type = typeParam;
+        const issues = await prisma.orderIssue.findMany({
+            where,
+            orderBy: [{ status: 'asc' }, { slaDueAt: 'asc' }],
+            take: limit,
+            include: {
+                order: {
+                    select: {
+                        id: true, orderNumber: true, status: true, totalAmount: true,
+                        customer_name: true, customer_phone: true, store_name: true,
+                        order_type: true, createdAt: true, isPaid: true, storeId: true,
+                        user: { select: { name: true, phone: true, email: true } },
+                        items: {
+                            select: {
+                                id: true, quantity: true, price: true, product_name: true,
+                                storeProduct: { select: { product: { select: { name: true, returnable: true } } } },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        return res.json(issues);
+    }
+    catch (err) {
+        console.error('[admin/issues] error:', err?.message || err);
+        return res.status(500).json({ error: 'Failed to list issues' });
+    }
+});
+// Phase 3a (2026-06-26): admin decides a return/exchange (approve/reject, + Razorpay
+// refund on approved returns). Same shared decideOrderIssue() engine as the merchant
+// route, admin-authorized (global, no store scoping). requireAdmin + audited.
+app.patch('/admin/orders/:id/issue/:issueId', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res);
+        if (!admin)
+            return;
+        const { id, issueId } = req.params;
+        const reason = req.body?.merchantDecisionReason ?? req.body?.reason;
+        const r = await decideOrderIssue({ orderId: id, issueId, decision: req.body?.decision, decisionReason: reason, resolvedById: admin.id });
+        if (!r.ok)
+            return res.status(r.status).json({ error: r.error });
+        await recordAdminAudit(req, {
+            actorId: admin.id,
+            action: 'order.issue.decide',
+            targetTable: 'order_issues',
+            targetId: issueId,
+            before: { status: 'PENDING' },
+            after: { decision: r.issue?.status ?? null, orderId: id, refundRazorpayId: r.refund?.razorpayRefundId ?? null },
+            reason: reason || null,
+        });
+        return res.json({ success: true, issue: r.issue, order: r.order, refund: r.refund });
+    }
+    catch (err) {
+        console.error('[admin issue decide] error:', err?.message || err);
+        return res.status(500).json({ error: 'Failed to decide issue' });
     }
 });
 // 2026-06-14: analytics depth — top products + GMV by category + by city for the
@@ -10248,6 +10436,27 @@ app.patch('/merchant/store-products/:id', async (req, res) => {
         const updates = pick(req.body, STORE_PRODUCT_UPDATE_COLS);
         if (Object.keys(updates).length === 0)
             return res.status(400).json({ error: 'No updatable fields provided' });
+        // Low-stock alerting (server-side). Capture the pre-edit stock so we can detect a
+        // DOWNWARD threshold crossing after the write — only when this edit changes stock.
+        // This replaces the merchant app's old client-side notifications insert
+        // (useInventory.ts), which bypassed NotificationService → no push, no
+        // recipient_role (invisible after the role cutover). Best-effort: a failure to
+        // read the pre-edit row just skips the alert; it never blocks the inventory edit.
+        const stockIsChanging = updates.stock != null;
+        let preEdit = null;
+        if (stockIsChanging) {
+            try {
+                const spBefore = await prisma.storeProduct.findUnique({
+                    where: { id },
+                    select: { stock: true, branch_id: true, product: { select: { name: true } } },
+                });
+                if (spBefore)
+                    preEdit = { stock: Number(spBefore.stock ?? 0), branchId: spBefore.branch_id, name: spBefore.product?.name || 'Item' };
+            }
+            catch (e) {
+                console.error('[PATCH /merchant/store-products] pre-edit stock fetch failed (alert skipped):', e);
+            }
+        }
         // Phase 3 Item 2 (2026-06-16): a ₹0 listing can never be live. If this edit
         // sets price ≤ 0, force the row inactive in the same write. (The activate-an-
         // existing-₹0-row edge case is caught by the DB CHECK backstop.)
@@ -10258,6 +10467,33 @@ app.patch('/merchant/store-products/:id', async (req, res) => {
         const { error } = await supabaseAdmin.from('StoreProduct').update(updates).eq('id', id);
         if (error)
             throw new Error(error.message);
+        // Fire a low-stock / out-of-stock alert ONLY on a downward threshold crossing,
+        // mirroring the order-decrement path (~index.ts:3339). Routes through
+        // NotificationService → Expo push + recipient_role='merchant'. Floating + caught:
+        // an alert failure must never fail the inventory edit.
+        if (preEdit && stockIsChanging) {
+            const newStock = Number(updates.stock);
+            const oldStock = preEdit.stock;
+            if (Number.isFinite(newStock) && newStock !== oldStock) {
+                let alert = null;
+                if (newStock === 0 && oldStock > 0) {
+                    alert = { title: 'Out of Stock Alert', body: `${preEdit.name} is completely out of stock.` };
+                }
+                else if (newStock > 0 && newStock <= 5 && oldStock > 5) {
+                    alert = { title: 'Low Stock Warning', body: `Action Required: Only ${newStock} left of ${preEdit.name}.` };
+                }
+                if (alert) {
+                    notificationService.sendMerchantNotification({
+                        storeId: preEdit.branchId,
+                        title: alert.title,
+                        body: alert.body,
+                        type: 'LOW_STOCK',
+                        link: '/(main)/inventory',
+                        metadata: { storeProductId: id, productName: preEdit.name, stock: newStock, source: 'manual-edit' },
+                    }).catch(e => console.error('[PATCH /merchant/store-products] Low stock notif failed:', e));
+                }
+            }
+        }
         res.json({ ok: true });
     }
     catch (error) {

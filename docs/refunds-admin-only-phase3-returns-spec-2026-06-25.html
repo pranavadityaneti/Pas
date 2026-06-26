@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAS — Phase 3: Returns/Exchanges → Admin (spec) — 2026-06-25</title>
+<style>
+  :root{--ink:#1a2233;--mut:#5b6676;--line:#e3e8ef;--accent:#B52725;--ok:#166534;--ok-bg:#f1f9f3;--med:#854d0e;--med-bg:#fffbeb;--code:#f6f8fa;--low:#1e40af;--low-bg:#eff6ff}
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);line-height:1.55;margin:0;padding:0 24px 110px}
+  .wrap{max-width:1000px;margin:0 auto}
+  h1{font-size:26px;margin:24px 0 4px;letter-spacing:-0.01em} h2{font-size:19px;margin:32px 0 8px;padding-top:12px;border-top:3px solid var(--accent);scroll-margin-top:12px}
+  h3{font-size:15.5px;margin:18px 0 6px} h4{font-size:13px;margin:12px 0 4px;color:var(--mut);text-transform:uppercase;letter-spacing:0.02em}
+  .mut{color:var(--mut)} .sm{font-size:12.5px;color:var(--mut)} p,li,td{font-size:14px}
+  code{background:var(--code);padding:1px 6px;border-radius:4px;font-size:12.3px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12.2px;line-height:1.5}
+  table{border-collapse:collapse;width:100%;margin:8px 0;font-size:13px} th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top} th{background:#f3f6fa;font-weight:600}
+  .tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:600}
+  .tag.ok{background:var(--ok-bg);color:var(--ok);border:1px solid #bbf7d0} .tag.new{background:var(--low-bg);color:var(--low);border:1px solid #bfdbfe} .tag.strip{background:#fdf3f3;color:#991b1b;border:1px solid #fecaca} .tag.q{background:var(--med-bg);color:var(--med);border:1px solid #fde68a}
+  .callout{border-left:4px solid var(--accent);background:#fdf3f3;padding:10px 14px;margin:14px 0;border-radius:0 8px 8px 0}
+  .callout.ok{border-color:var(--ok);background:var(--ok-bg)} .callout.med{border-color:var(--med);background:var(--med-bg)}
+  .english{background:#fafff5;border-left:4px solid #65a30d;padding:10px 14px;margin:10px 0;border-radius:0 6px 6px 0;font-size:13.5px}
+  .english strong{color:#365314}
+  .toc{background:#fafbfd;border:1px solid var(--line);border-radius:10px;padding:12px 18px;margin:12px 0} .toc ol{margin:0;padding-left:22px;font-size:13px;line-height:1.8} .toc a{color:var(--ink);text-decoration:none}
+  ul.tight li,ol.tight li{margin:3px 0}
+  @media print{body{padding:0 12px} h2{break-before:page} .callout,table,pre{break-inside:avoid} .toc{break-after:page}}
+</style>
+</head>
+<body><div class="wrap">
+
+<h1>Phase 3 — Returns &amp; Exchanges move to Admin</h1>
+<div class="mut">2026-06-25 · part of "refunds are admin-only; merchant app is display-only" · Pranav decision</div>
+
+<div class="english">
+  <strong>In plain English.</strong> Today, a merchant approves or rejects a customer's return/exchange request from their app, and approving a return instantly refunds the customer. You've decided that <em>returns should be the admin's job</em> — the admin reviews and decides every return/exchange and issues the refund, and the merchant only <em>sees</em> what happened. This spec is the plan to move that capability from the merchant app to the admin dashboard <strong>safely</strong> — building the admin side first so no return ever gets stuck with nobody able to act on it.
+</div>
+
+<div class="toc">
+<ol>
+  <li><a href="#now">How returns work today</a></li>
+  <li><a href="#target">Target model</a></li>
+  <li><a href="#seq">The one rule: admin-capability-first</a></li>
+  <li><a href="#build">The build, by surface</a></li>
+  <li><a href="#phases">Phased execution</a></li>
+  <li><a href="#decisions">Open decisions for you</a></li>
+  <li><a href="#related">Related pending (booking, cancel copy)</a></li>
+  <li><a href="#deploy">Deploy + rollback</a></li>
+</ol>
+</div>
+
+<h2 id="now">1) How returns work today</h2>
+<ul class="tight">
+  <li><b>Customer submits</b> a return/exchange → an <code>OrderIssue</code> row is created (<code>status='PENDING'</code>, <code>type='return'|'exchange'</code>, <code>reason</code>, <code>photos[]</code>, <code>refundAmountInr</code>, <code>slaDueAt</code>).</li>
+  <li><b>Merchant decides</b> — merchant app <code>settings/returns.tsx</code> → <code>GET /orders/issues/inbox</code> (their pending list) + <code>PATCH /orders/:id/issue/:issueId</code> (<code>{decision:'APPROVED'|'REJECTED'}</code>). Auth = <code>userCanManageOrderStore</code>. <b>Approve a return → real Razorpay refund + order → RETURN_APPROVED/REFUNDED.</b> Approve exchange → EXCHANGE_APPROVED. Reject → RETURN_REJECTED/EXCHANGE_REJECTED.</li>
+  <li><b>SLA safety net</b> — <code>processOrderIssueSla</code> cron auto-approves any PENDING issue past <code>slaDueAt</code> (24h) and refunds (<code>tryRazorpayRefund</code>) so returns never hang on merchant inaction.</li>
+  <li><b>Customer notifications</b> — <code>RETURN_DECISION</code>/<code>EXCHANGE_DECISION</code> fire on decision (incl. refund amount).</li>
+  <li><b>Admin today:</b> <span class="tag strip">none</span> — admin-web has <b>no</b> returns/issues UI. The admin only has Refunds &amp; Disputes (which issues refunds on cancelled orders).</li>
+</ul>
+
+<h2 id="target">2) Target model</h2>
+<table>
+<tr><th>Actor</th><th>Before</th><th>After</th></tr>
+<tr><td><b>Customer</b></td><td>submits return/exchange</td><td>unchanged — submits the same way, still gets decision + refund notifications</td></tr>
+<tr><td><b>Merchant</b></td><td>decides + (approve) refunds</td><td><span class="tag strip">display-only</span> sees the request + its status/decision; <b>no approve/reject, no refund</b></td></tr>
+<tr><td><b>Admin</b></td><td>nothing</td><td><span class="tag new">owns it</span> reviews every return/exchange, approves/rejects, and issues the refund</td></tr>
+</table>
+
+<h2 id="seq">3) The one rule — admin-capability-first</h2>
+<div class="callout">
+  <strong>Never strip the merchant's decision power before the admin has it</strong>, or pending returns get orphaned (merchant can't act, admin can't yet) and customers wait indefinitely. So: build + deploy + verify the admin returns capability <b>first</b>; only then convert the merchant inbox to display-only (OTA). The order of the phases below enforces this.
+</div>
+
+<h2 id="build">4) The build, by surface</h2>
+
+<h3>API <span class="tag new">add</span> <span class="tag strip">restrict</span></h3>
+<ul class="tight">
+  <li><b>New: <code>GET /admin/issues</code></b> (requireAdmin) — list <code>OrderIssue</code> rows across <em>all</em> stores, filterable by status (default PENDING), with order + customer + store + reason + photos + refundAmountInr. Mirrors the merchant inbox shape but admin-scoped + global.</li>
+  <li><b>New: <code>PATCH /admin/orders/:id/issue/:issueId</code></b> (requireAdmin) — admin approve/reject. <b>Reuse the exact existing decision logic</b> (the body of the current <code>PATCH /orders/:id/issue/:issueId</code>: status flips, Razorpay refund on return-approve, clawback, <code>RETURN_DECISION</code>/<code>EXCHANGE_DECISION</code> + <code>REFUND_INITIATED</code> notifications) — only the auth changes from <code>userCanManageOrderStore</code> → <code>requireAdmin</code>. Factor the shared logic into one helper called by both, then retire the merchant route (next bullet).</li>
+  <li><b>Restrict: <code>PATCH /orders/:id/issue/:issueId</code></b> (merchant) → remove the decision capability. Options: (a) return <code>403</code> "returns are handled by the platform"; or (b) delete the route. Recommend <b>403</b> first (defensive — stale app builds can't sneak a decision through), delete later.</li>
+  <li><b>Keep: <code>GET /orders/issues/inbox</code></b> (merchant) — but it becomes a <b>read-only</b> feed (the merchant app no longer renders action buttons).</li>
+  <li><b>SLA cron</b> — see Decision D1 (keep as a platform safety-net vs remove).</li>
+</ul>
+
+<h3>Admin-web <span class="tag new">new module</span></h3>
+<ul class="tight">
+  <li><b>Returns &amp; Exchanges queue</b> — a new screen (sibling to Refunds &amp; Disputes; gated by an RBAC permission e.g. <code>returns.resolve</code>). Lists pending issues from <code>GET /admin/issues</code>: order #, customer, store, type, reason, photos, refund amount, age vs SLA.</li>
+  <li><b>Decision UI</b> — Approve / Reject (with reason) per row → <code>PATCH /admin/orders/:id/issue/:issueId</code>. Approve-return shows the refund amount + confirms it will issue a real Razorpay refund. Resolved rows show the decision + refund id.</li>
+  <li>Surface in Sidebar + SupportHome, behind the permission.</li>
+</ul>
+
+<h3>Merchant app <span class="tag strip">display-only</span> (OTA, LAST)</h3>
+<ul class="tight">
+  <li><code>settings/returns.tsx</code> — remove <code>handleDecision</code> + the Approve/Reject buttons + the "issue a Razorpay refund" alert. Keep the list as a <b>read-only</b> view: each request shows its status (Pending review / Approved / Rejected) + refund status when present. Add a small note: "Returns are reviewed by the PAS team."</li>
+  <li>No other merchant refund entry points remain (order-reject already stripped in Phase 1).</li>
+</ul>
+
+<h3>Notifications — unchanged for the customer</h3>
+<p><code>RETURN_DECISION</code>/<code>EXCHANGE_DECISION</code> + <code>REFUND_INITIATED</code> already fire inside the decision logic; reused as-is, now triggered by the admin. The customer experience is identical — they just don't know (or care) that an admin decided instead of the merchant.</p>
+
+<h2 id="phases">5) Phased execution (safe order)</h2>
+<table>
+<tr><th>Phase</th><th>What</th><th>Ship</th></tr>
+<tr><td><b>3a</b></td><td>API: factor decision logic into a shared helper; add <code>GET /admin/issues</code> + <code>PATCH /admin/orders/:id/issue/:issueId</code> (requireAdmin). <b>Additive — no removal yet.</b></td><td>EB</td></tr>
+<tr><td><b>3b</b></td><td>Admin-web: Returns &amp; Exchanges queue + decision UI + RBAC + nav.</td><td>Vercel</td></tr>
+<tr><td><b>3c</b></td><td><b>Verify</b> admin can list + approve/reject + refund a real return end-to-end (push a test issue).</td><td>—</td></tr>
+<tr><td><b>3d</b></td><td>API: merchant decision route → 403. Merchant app: returns inbox → display-only.</td><td>EB + merchant OTA</td></tr>
+<tr><td><b>3e</b></td><td>SLA cron decision (D1) applied.</td><td>EB</td></tr>
+</table>
+<p class="sm">3a–3c give the admin the power; only 3d removes it from the merchant — the admin-capability-first rule, enforced.</p>
+
+<h2 id="decisions">6) Open decisions for you</h2>
+<table>
+<tr><th width="6%">#</th><th>Decision</th><th>Recommendation</th></tr>
+<tr><td>D1</td><td><span class="tag q">SLA auto-approve cron</span> — today it auto-approves + refunds PENDING returns after 24h so they never hang. Keep it (platform safety-net, not a merchant/admin action), or remove it so an admin must decide every return?</td><td><b>Keep</b> — it's a platform policy, not a merchant refund; prevents returns stranding if admins are slow. (It already refunds + notifies.)</td></tr>
+<tr><td>D2</td><td><span class="tag q">Exchanges</span> — "returns move to admin." Exchanges are the same <code>OrderIssue</code> mechanism (no refund, just approve→EXCHANGE_APPROVED). Move exchanges to admin too, or leave exchanges with merchants?</td><td><b>Move both</b> — same queue, consistent "merchant display-only," one build.</td></tr>
+<tr><td>D3</td><td><span class="tag q">Merchant visibility</span> — should merchants still see the full returns inbox (read-only), or only see the resolved status on the order itself?</td><td><b>Read-only inbox</b> — keeps merchants informed (what's being returned, why) without acting.</td></tr>
+</table>
+
+<h2 id="related">7) Related pending (same "merchants don't refund" model)</h2>
+<ul class="tight">
+  <li><b>Phase 2 — Booking cancel</b> (<code>bookings.tsx</code>): "This will refund ₹X" on cancel. Needs the same treatment — merchant cancels (no refund) → admin refunds. Smaller; verify the admin queue surfaces cancelled bookings. <em>Queued.</em></li>
+  <li><b>Paid-cancel copy</b>: when a paid order is rejected, the <code>ORDER_CANCELLED</code> notification doesn't yet say "a refund will be processed." Small API copy polish so customers aren't anxious between cancel and admin refund.</li>
+  <li><b>Dead endpoint cleanup</b>: the legacy simulated <code>POST /orders/:id/refund</code> is now unused (Phase 1 removed its only caller) — delete it.</li>
+</ul>
+
+<h2 id="deploy">8) Deploy + rollback</h2>
+<ul class="tight">
+  <li><b>Vehicles:</b> 3a/3e → EB · 3b → Vercel (admin-web, auto from <code>main</code>) · 3d → EB + merchant OTA.</li>
+  <li><b>Rollback:</b> 3a/3b are additive (revert commit + redeploy; no data migration). 3d is the only behavior-removal — revert restores the merchant decision route + buttons. The SLA cron remains a backstop throughout, so even mid-migration no return strands.</li>
+</ul>
+
+<p class="sm" style="margin-top:28px;border-top:1px solid var(--line);padding-top:12px"><em>Saved <code>docs/refunds-admin-only-phase3-returns-spec-2026-06-25.html</code>. Phase 1 (order-reject → admin) already shipped (merchant OTA group 2064f616). On approval of D1–D3, execute 3a→3e in order.</em></p>
+
+</div></body></html>

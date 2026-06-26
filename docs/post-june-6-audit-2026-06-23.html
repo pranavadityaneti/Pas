@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAS — Post-June-6 Audit (2026-06-23)</title>
+<style>
+  :root{
+    --ink:#1a2233; --mut:#5b6676; --line:#e3e8ef; --accent:#B52725;
+    --crit:#991b1b; --crit-bg:#fdf3f3;
+    --high:#9a3412; --high-bg:#fff4ec;
+    --med:#854d0e; --med-bg:#fffbeb;
+    --low:#1e40af; --low-bg:#eff6ff;
+    --ok:#166534; --ok-bg:#f1f9f3;
+    --code:#f6f8fa;
+  }
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);line-height:1.55;margin:0;padding:0 24px 110px;background:#fff}
+  .wrap{max-width:1040px;margin:0 auto}
+  h1{font-size:28px;margin:24px 0 6px;letter-spacing:-0.01em}
+  h2{font-size:20px;margin:36px 0 8px;padding-top:14px;border-top:3px solid var(--accent);scroll-margin-top:14px}
+  h3{font-size:16px;margin:22px 0 6px;scroll-margin-top:14px}
+  h4{font-size:14px;margin:14px 0 4px;color:var(--mut);text-transform:uppercase;letter-spacing:0.02em}
+  .mut{color:var(--mut)}
+  .sm{font-size:12.5px;color:var(--mut)}
+  p,li,td{font-size:14px}
+  code{background:var(--code);padding:1px 6px;border-radius:4px;font-size:12.5px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12.3px;line-height:1.5;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+  table{border-collapse:collapse;width:100%;margin:8px 0;font-size:13px}
+  th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+  th{background:#f3f6fa;font-weight:600}
+  td.center{text-align:center}
+  .tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:0.02em;vertical-align:middle}
+  .tag.crit{background:var(--crit-bg);color:var(--crit);border:1px solid #fecaca}
+  .tag.high{background:var(--high-bg);color:var(--high);border:1px solid #fed7aa}
+  .tag.med{background:var(--med-bg);color:var(--med);border:1px solid #fde68a}
+  .tag.low{background:var(--low-bg);color:var(--low);border:1px solid #bfdbfe}
+  .tag.ok{background:var(--ok-bg);color:var(--ok);border:1px solid #bbf7d0}
+  .tag.gated{background:#f4f4f5;color:#525252;border:1px solid #d4d4d8}
+  .tag.open{background:var(--crit-bg);color:var(--crit);border:1px solid #fecaca}
+  .tag.fixed{background:var(--ok-bg);color:var(--ok);border:1px solid #bbf7d0}
+  .tag.partial{background:var(--med-bg);color:var(--med);border:1px solid #fde68a}
+  .callout{border-left:4px solid var(--accent);background:var(--crit-bg);padding:10px 14px;margin:14px 0;border-radius:0 8px 8px 0}
+  .callout.ok{border-color:var(--ok);background:var(--ok-bg)}
+  .callout.med{border-color:var(--med);background:var(--med-bg)}
+  .callout.low{border-color:var(--low);background:var(--low-bg)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+  .card{border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:#fff}
+  .card h4{margin-top:0}
+  .kpi{font-size:24px;font-weight:700;color:var(--ink)}
+  .toc{background:#fafbfd;border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:14px 0 8px}
+  .toc h3{margin:0 0 8px;border:0}
+  .toc ol{margin:0;padding-left:22px;font-size:13px;line-height:1.85}
+  .toc a{color:var(--ink);text-decoration:none}
+  .toc a:hover{text-decoration:underline}
+  .english{background:#fafff5;border-left:4px solid #65a30d;padding:10px 14px;margin:10px 0;border-radius:0 6px 6px 0;font-size:13.5px}
+  .english strong{color:#365314}
+  .finding{border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:10px 0;background:#fff}
+  .finding .h{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+  .finding .h .id{font-weight:700;font-size:14px}
+  .finding .meta{font-size:12px;color:var(--mut);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin-bottom:6px}
+  .finding .why{margin:6px 0 0}
+  .finding .fix{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
+  ul.tight, ol.tight{margin:4px 0 8px;padding-left:22px}
+  ul.tight li, ol.tight li{margin:2px 0}
+  hr{border:0;border-top:1px solid var(--line);margin:24px 0}
+  .scroll-x{overflow-x:auto}
+  @media print{
+    body{padding:0 12px}
+    h2{break-before:page}
+    .toc{break-after:page}
+    .finding,.callout,.card{break-inside:avoid}
+  }
+</style>
+</head>
+<body><div class="wrap">
+
+<h1>PAS — Post–June 6 Build Audit</h1>
+<div class="mut">2026-06-23 · branch <code>feat/consumer-global-config-wiring</code> = <code>main</code> (reconciled) · scope: all work since the native build cut on 2026-06-06</div>
+
+<div class="callout ok" style="margin-top:14px">
+  <strong>📌 Updates since publish (2026-06-23 evening):</strong>
+  <ul class="tight" style="margin:6px 0 0">
+    <li><strong>H-1 SHIPPED ✓</strong> — auth-guards + field whitelist deployed to EB (<code>app-260623_020000054421</code>). Smoke verified: all 3 previously-unauth product endpoints now return <code>401</code>. <em>Scope expanded during the mandatory line-by-line audit:</em> the original H-1 named 3 endpoints; the audit surfaced and closed <strong>9 additional sibling-class endpoints</strong> (auth'd order/return paths that leaked the same importer fields) in the same fix — 12 sites total. The class is fully closed; <code>product: true</code> count in the API source is now <strong>0</strong>.</li>
+    <li><strong>H-3 SHIPPED ✓</strong> — order-gate fail-closed on malformed/unknown items (same EB deploy as H-1). The audit found 2 additional sibling fail-open points beyond the original (empty items array; unknown product ids that don't exist in DB) — all 3 closed together.</li>
+    <li><strong>H-5 CODED + AUDITED, OTA HELD</strong> — cart-prune defensive guards added (commit <code>00615139</code>). Per Pranav's call, holds until next consumer OTA push; correctness already covered by the strengthened server-side H-3 gate.</li>
+    <li><strong>A.2 Play "App Access" — RESOLVED.</strong> Pranav's correction (2026-06-23): the screenshot referenced was outdated; new AABs were approved and the Android apps went live the previous day. Strike from Tier 0.</li>
+    <li><strong>Process rule added to CLAUDE.md (global + project):</strong> <em>"No patches — solid fixes only."</em> Every fix must close the underlying class of failure, not the symptom. Every implementation requires a mandatory line-by-line audit before being declared done. This is why H-1 grew from 3 to 12 sites and H-3 from 1 to 3 fail-open points in the audits above.</li>
+  </ul>
+</div>
+
+<h2 id="tldr">TL;DR — what to know before reading</h2>
+<div class="grid3" style="margin-top:10px">
+  <div class="card"><h4>Built since June 6</h4><div class="kpi">~13 workstreams</div><div class="sm">114 non-merge commits + 11 PR merges. End-to-end across all 4 apps + DB.</div></div>
+  <div class="card"><h4>Defects from this audit</h4><div class="kpi">2/2 <span class="tag fixed" style="font-size:10px;vertical-align:middle">CRIT SHIPPED</span></div><div class="sm">H-1 + H-3 deployed 2026-06-23. H-2 still gated on legal. H-5 coded, OTA held.</div></div>
+  <div class="card"><h4>Hard external deadlines</h4><div class="kpi">1 left</div><div class="sm">Supabase GRANT migration (2026-10-30). Play "App Access" — RESOLVED (Android live).</div></div>
+</div>
+<div class="callout ok">
+  <strong>Headline (post-fix).</strong> The June-6 → June-22 window shipped a lot — coupons end-to-end, the category enable/disable feature, a 139,880-product catalog load, Phase 2 FINAL inventory rework, Phase 8 RLS lockdown, Phase 9 write-through-API, two iOS builds + an OTA, and the admin dashboard's analytics/refund/Wati/global-config depth. <strong>The two unauth catalog leaks this audit found (originally flagged in the 2026-06-15 display audit as still open) were CLOSED on 2026-06-23</strong> as H-1 + H-3 — auth-guarded, field-whitelisted, deployed to EB, smoke-tested 401. The mandatory line-by-line audit during implementation surfaced and closed an additional 9 sibling-class leaks (auth'd order/return endpoints that leaked the same importer fields) in the same release. Remaining named risks: H-2 (commission-tier mismatch, gated on legal A.1) and assorted MED-severity items in §5.
+</div>
+
+<div class="toc">
+<h3>Contents</h3>
+<ol>
+  <li><a href="#built">Bone structure — what is BUILT</a></li>
+  <li><a href="#changemap">Change map — every commit since June 6, by ship vehicle</a></li>
+  <li><a href="#saved">Saved for later (deferred queue, themed)</a></li>
+  <li><a href="#known">Known errors &amp; defects (already logged)</a></li>
+  <li><a href="#hidden">Hidden errors — NEW adversarial findings (this audit)</a></li>
+  <li><a href="#plan">Proposed plan — prioritized, with sequencing</a></li>
+  <li><a href="#deploy">Deploy / release state</a></li>
+  <li><a href="#appendix">Appendix — hard dates, gated migrations, env flips, rollback map</a></li>
+</ol>
+</div>
+
+<div class="english">
+  <strong>In plain English.</strong> This document is a complete X-ray of everything that has changed in PAS since you cut the June-6 app build. It tells you (1) what's live, (2) what's intentionally parked for later, (3) what's broken that you already know about, (4) what's broken that <em>nobody</em> had spotted before this audit — including two endpoints serving your full catalog with no login required — and (5) the order I'd fix them in. Read §1 + §5 + §6 if you only have ten minutes.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<h2 id="built">1) Bone structure — what is BUILT</h2>
+
+<p>Grouped by app. Every entry is documented as shipped (not theoretical). Branch <code>feat</code> = <code>main</code> @ <code>40fa0fbe</code> as of 2026-06-23.</p>
+
+<h3>Customer app — "Pick At Store" v1.1.3 (live on App Store / Play)</h3>
+<table>
+<tr><th width="22%">Area</th><th>Built</th></tr>
+<tr><td>Catalog &amp; discovery</td><td>Global search; nearby-store discovery with category-aware filtering + empty-store auto-hide (RPC <code>get_nearby_stores</code>); category browse; floating cart band; <code>is_deleted</code> filtered everywhere; broken-image SafeImage fallback; veg/non-veg dots driven by real <code>Product.isVeg</code>; veg filter on food stores.</td></tr>
+<tr><td>Coupons</td><td>4 themed ticket cards; Available-Coupons section; Swiggy-style Apply screen; redemption wired into pickup + dining checkouts; multi-store discount allocation; per-store breakdown signed by server.</td></tr>
+<tr><td>Checkout &amp; orders</td><td>Pickup + dining checkouts with idempotent retry; invoice modal; orders inbox; order actions (cancel/reschedule/return/exchange); dining slot booking; global-config-driven service radius + minimum order.</td></tr>
+<tr><td>Notifications</td><td>Push (order accepted/ready), in-app toast banners, notifications inbox, tap-to-deep-link.</td></tr>
+<tr><td>Category-visibility (June 22)</td><td>Cart prune on focus + applied-coupon reset when category-disabled items are removed; auth fixes (refresh-token rotation race).</td></tr>
+<tr><td>Support &amp; profile</td><td>Wati "chat with us" button; profile/auth/timezone fixes.</td></tr>
+</table>
+
+<h3>Merchant app — "PAS Partner" v1.2.6 (live)</h3>
+<table>
+<tr><th width="22%">Area</th><th>Built</th></tr>
+<tr><td>Signup</td><td>Componentised multi-step (identity → stores → KYC → subscription → review); in-app drawn e-signature (react-native-svg) + personalized signed-PDF + server consent record (IP + SHA-256). <em>Note: legal-enforceability gap — see §3.C.</em></td></tr>
+<tr><td>Catalog picker</td><td>Browse / search / filter the 140k master catalogue; multi-select → bulk price + stock; MRP-ceiling guard (DB trigger + API 400); FSSAI banner; lazy image re-host on first listing.</td></tr>
+<tr><td>Inventory &amp; orders</td><td>Inventory screen reads via <code>branch_id</code> (post-Phase 2 FINAL); orders + receipts; returns/exchanges inbox; new-order push.</td></tr>
+<tr><td>Settings &amp; earnings</td><td>Per-store pricing; partner coupons; earnings / settlements UI (placeholder ×0.98 formula — see §3.D); all settings.</td></tr>
+<tr><td>Architecture (Phases 8/9)</td><td>All branch / Store / catalog / inventory writes routed through the API (no direct PostgREST writes from app); branch state realtime sync (Supabase Realtime + AppState + 60s polling); OTP-modal-reset fix (PR #4).</td></tr>
+</table>
+
+<h3>Admin dashboard — Vite/React on Vercel</h3>
+<table>
+<tr><th width="22%">Area</th><th>Built</th></tr>
+<tr><td>Auth &amp; RBAC</td><td>WhatsApp-OTP login + email/password fallback; role-aware sidebar (SUPER_ADMIN / OPERATIONS / FINANCE / SUPPORT); Roles &amp; Permissions; Invite-Admin; inline role/status edit; role-aware home dashboards (4 tiers) with real KPIs.</td></tr>
+<tr><td>Master Catalog</td><td>Live taxonomy (Vertical/Tier2Category); product grid with filters; Bulk Import (only ingest path); <strong>Categories tab — enable/disable verticals + subcategories</strong> (June 21–22, live with grey OFF-toggle).</td></tr>
+<tr><td>Analytics &amp; Reports</td><td>Real charts; date filters (Today/7d/30d/90d/Custom); KPI strip (GMV/Orders/AOV/Cancellation); Revenue/Order-volume/Status charts; sortable Top Stores; CSV export; compare-vs-previous deltas; Top Products/Category/City; audit log.</td></tr>
+<tr><td>Operations</td><td>Two-way Wati support inbox (threaded conversations + reply); Refunds &amp; Disputes queue (surfaces stranded/pending; guarded refund actions).</td></tr>
+<tr><td>Merchants &amp; KYC</td><td>KYC review queue + "Needs info"; Legal &amp; Signature panel (consent + signed PDF); merchant directory + detail sheets; add/edit/export.</td></tr>
+<tr><td>Marketing &amp; Coupons</td><td>Coupon Builder (live preview, 4 themes); coupon detail page; analytics hub; merchant-signup coupons CRUD.</td></tr>
+<tr><td>Finance</td><td>Settlements Manager (cycle table, line drill-down, mark-paid + UTR, commission-rules editor). <em>Note: settlements in CRON_DRY_RUN — see §3.D.</em></td></tr>
+<tr><td>Customers &amp; Orders</td><td>Real DB binding; Block/Unblock; detail drawer; force-complete/cancel with audit log; realtime updates; server pagination.</td></tr>
+<tr><td>Global Config</td><td><code>platform_settings</code> panel (service radius + min order) → consumed live.</td></tr>
+<tr><td>Cross-cutting</td><td>Sentry; admin reads route through <code>/admin/...</code> API (Prisma, RLS bypassed); admin design system.</td></tr>
+</table>
+
+<h3>API — Express + Prisma + Supabase Postgres (on Elastic Beanstalk)</h3>
+<table>
+<tr><th width="22%">Area</th><th>Built</th></tr>
+<tr><td>Catalog &amp; ingest</td><td>16 catalog/product endpoints locked with <code>requireRole</code> (Phase 1); Apify webhook gated by <code>CATALOG_WEBHOOK_SECRET</code>; Blinkit bulk loader (streaming + batched <code>createMany</code>; 139,880 rows / 0 errors); category-aware <code>GET /merchant/catalog</code> (keyset pagination); FSSAI/MRP/<code>CATEGORY_DISABLED</code> guards in configure.</td></tr>
+<tr><td>Category visibility</td><td>3 admin endpoints (GET / PATCH vertical / PATCH subcategory); 4 RESTRICTIVE RLS policies hide disabled categories from anon+authenticated reads; <code>get_nearby_stores</code> made category-aware; "Category Status Gate" rejecting disabled-category items in <code>POST /order-requests</code> (airtight, OTA-independent); <code>GET /verticals</code> filters out disabled categories from the merchant signup picker (coupling D2).</td></tr>
+<tr><td>Orders</td><td>4-layer FK-race hardening on order creation; order-request realtime; soft-auth flags <code>REQUIRE_ORDERS_AUTH</code> + <code>REQUIRE_COUPON_TOKEN</code> (pending flip); orphaned-payments sweep cron.</td></tr>
+<tr><td>Coupons</td><td>Server-side validation/redemption with signed token (<code>validationToken</code>), cart-hash, server-authoritative per-store breakdown; rate-limit, replay protection, BOGO; analytics endpoints.</td></tr>
+<tr><td>Settlement engine</td><td><code>settlement.service.ts</code> with IST week math, <code>resolveRule</code>, <code>closeSettlementCycles</code>, <code>detectClawback</code>, payment verification, 9 settlement endpoints. Running in <code>CRON_DRY_RUN</code>.</td></tr>
+<tr><td>Misc</td><td>Global Config endpoints; analytics breakdowns; disputes + refund; Wati two-way; merchant consent endpoint; Sentry; <code>requireUser</code> / <code>requireRole</code> middleware.</td></tr>
+</table>
+
+<h3>Database — Supabase Postgres</h3>
+<ul class="tight">
+  <li><strong>Schema additions:</strong> <code>Vertical.is_active</code>, <code>Tier2Category.active</code>, <code>CategoryMapping</code>, <code>merchant_branches.store_id</code> + FK, <code>StoreProduct.branch_id NOT NULL</code>, <code>Product.isVeg</code>, <code>MerchantConsent</code>/<code>merchant_consents</code>, <code>platform_settings</code>, <code>admin_audit_log</code>, <code>coupon_redemptions</code> + theme.</li>
+  <li><strong>Constraints / functions:</strong> <code>enforce_mrp_ceiling</code> trigger, <code>idx_product_name_trgm</code> GIN, <code>is_super_admin()</code> SECURITY DEFINER, signup triggers (<code>auto_create_default_branch</code>, <code>auto_create_owner_store_staff</code>).</li>
+  <li><strong>RLS:</strong> 4 RESTRICTIVE category-visibility policies (Vertical, Tier2Category, Product, StoreProduct); Phase 8 lockdown (User + order_items + 5 defense tables); category-aware <code>get_nearby_stores</code> RPC.</li>
+  <li><strong>Settlement:</strong> 37-row <code>commission_rules</code>, <code>merchant_settlement_profiles</code>, <code>settlement_cycles</code>, <code>settlement_lines</code>, payment-verification columns.</li>
+  <li><strong>Data:</strong> 139,880 Blinkit Product rows + 294 legacy; categorized 139,965 / 140,174 (covered in this session); 136 Tier2Categories across all verticals; 643 Blinkit→PAS mappings (630 active, 13 PENDING_DECISION).</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<h2 id="changemap">2) Change map — every commit since June 6, by ship vehicle</h2>
+
+<p class="sm">Baseline: <code>9a44cf02</code> (last commit of 2026-06-06). HEAD: <code>2f7bdd5e</code> (2026-06-23). Total: 114 non-merge commits + 11 PR merges (#1, #3, #5–#11, #12, branch-sync).</p>
+
+<h3>Native-build-only (required a new app build)</h3>
+<table>
+<tr><th width="14%">SHA</th><th>Change</th><th width="22%">Why native</th></tr>
+<tr><td><code>196e425e</code></td><td>e-Sign V1 — drawn signature + signed PDF + consent</td><td>Adds <code>react-native-svg</code> + bumps <code>app.json</code></td></tr>
+<tr><td><code>480972d8</code></td><td>Keyboard-covers-input fix (Bug #16) + version bump</td><td>Both apps' version bumped</td></tr>
+<tr><td><code>3cf039e2</code></td><td>Consumer 1.1.2→1.1.3, Merchant 1.2.5→1.2.6 (version bump)</td><td>Build-trigger</td></tr>
+<tr><td><code>3e3caf37</code></td><td>Regenerate <code>yarn.lock</code> to match <code>package.json</code></td><td>EAS build unblocker</td></tr>
+</table>
+<p class="sm">These four produced Consumer 1.1.3 (iOS build 22) and Merchant 1.2.6 (iOS build 17), both submitted to App Store Connect. Android AABs uploaded manually.</p>
+
+<h3>OTA / app code (JS/TS-only, ships over-the-air)</h3>
+<p class="sm">Notable consumer-app: <code>e00cdb29</code> hide deleted listings · <code>db25c0c2</code> SafeImage fallback · <code>d62e7805</code> Global Config consumption · <code>9e4092ad</code> real veg dots + filter · <code>ce571deb</code> cart-prune (T7b, shipped 2026-06-22). Notable merchant-app: <code>c586850f</code> OTP modal reset · <code>00872d09</code> inventory via branch_id · <code>19ceb31b</code> catalog-picker UI. Cross-cutting: <code>b888b6d9</code> Option-A patches · <code>565bc6f6</code> Phase 9a app rewires · <code>d9d2a2bb</code> Phase 9b app rewires.</p>
+
+<h3>Server (Express → Elastic Beanstalk)</h3>
+<p class="sm">Highlights: <code>5da03730</code>/<code>43abec8f</code> Coupon foolproof Phases 1+2+3+2L+4 · <code>000f816c</code>/<code>6841ae51</code> soft-auth + 5 hot-fixes · <code>ee0b062a</code>/<code>a1cac38d</code> Phase 8 branch CRUD + write-through · <code>2974e080</code>/<code>020584b2</code> Phase 9a/b backend · <code>2609058a</code> Phase 1 auth-guard on catalog/product writes + webhook secret · <code>e86734f8</code>/<code>d5b1b81f</code> inventory error-hunt fixes · <code>0c0765a5</code>/<code>5fdfc981</code> category guard + admin endpoints · <code>3d50ab94</code> <code>/verticals</code> coupling fix; <code>d704e8d4</code> H-1 solid fix (12 endpoints); <code>a0dd8594</code> H-3 solid fix (3 fail-open points). Latest deploy: <code>app-260623_020000054421</code> (2026-06-23).</p>
+
+<h3>DB (Prisma migrations + applied SQL + data scripts)</h3>
+<p class="sm">Migrations: <code>8aa8ea47</code>/<code>274f169a</code> Phase 8 RLS · <code>e1c40367</code>/<code>fcfd1735</code>/<code>65d7002c</code> Category taxonomy (table + 41 subcats + 643 mappings) · <code>7eb29e24</code>/<code>e60d91fe</code> Phase 2 FINAL <code>StoreProduct.storeId</code> rework · <code>77c10f60</code> hide empty stores · <code>d5c74028</code>/<code>6f41a44b</code> <code>Product.isVeg</code> + backfill · <code>29896b3b</code> MRP trigger + trgm index · <code>39aedd0c</code>/<code>03a18f2d</code>/<code>d0f63da4</code> Category visibility 3 migrations.<br>Data scripts (this session, all with rollback JSONs): <code>4c2f9c21</code> 330 Electricals · <code>84256a82</code> Freshly produce · <code>e6cc252b</code> Clean cuts meat · <code>adb6b516</code> 44 catalog food · <code>3841e67e</code> 90 non-food · <code>ceae4228</code> delete 8 gibberish · <code>d7914bb2</code> final 9.</p>
+
+<h3>Admin-web (Vite/React → Vercel)</h3>
+<p class="sm">PRs #6–#11 landed admin features (KYC review, analytics depth, refund/dispute queue, two-way Wati inbox, Global Config, branch-sync). Recent feat: <code>6773db05</code> live taxonomy fix · <code>bd6836aa</code> Categories tab · <code>f6fbfc20</code> OFF-toggle visibility fix. <strong>Pipeline incident:</strong> admin-web prod was frozen at the June-15 build (e4aa9ebc) for ~5 weeks because feature work lived on <code>feat</code> while Vercel auto-deploys <code>main</code>. <strong>Resolved 2026-06-22</strong> via PR #12 (feat↔main reconciliation, 0-conflict clean merge, preview build verified, then merged → prod re-deployed). Branches now identical.</p>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<h2 id="saved">3) Saved for later (the deferred queue, themed)</h2>
+
+<p>Cited from <code>forlater.md</code>, the assessment doc, and recent <code>SESSION_LOG.md</code> entries. Hard deadlines flagged.</p>
+
+<h3 id="saved-security">A. Security &amp; hard deadlines</h3>
+<table>
+<tr><th width="22%">Item</th><th>What &amp; why</th><th width="18%">Status / deadline</th></tr>
+<tr><td><strong>#16a — Keystore rotation</strong></td><td>Passwords in git <em>history</em> (file gitignored now). <code>.jks</code> never in git, so not exploitable alone. Clean fix = Play Console upload-key reset. Both apps share one keystore.</td><td><span class="tag partial">PARTIAL</span> rotate-decision pending</td></tr>
+<tr><td><strong>#16b — Supabase GRANT migration</strong></td><td>Public-schema tables need explicit <code>GRANT ... TO authenticated, anon</code>. Add GRANTs to all new-table migrations now (PR checklist); audit existing tables.</td><td><span class="tag crit">DEADLINE 2026-10-30</span></td></tr>
+<tr><td><strong>#16c — Broad RLS sweep</strong></td><td>Two structural RLS bugs already found by accident (orders branch-vs-merchant UUID; <code>merchant_branches</code> over-permissive). Same pattern likely on <code>StoreProduct</code>, <code>notifications</code>. Audit-only first.</td><td><span class="tag open">OPEN</span></td></tr>
+<tr><td><strong>merchant_branches write-lockdown migration</strong></td><td><code>scripts/phase8_branch_lockdown.STAGED.sql</code> revokes anon/authenticated INSERT/UPDATE/DELETE. Gated on merchant OTA propagation.</td><td><span class="tag gated">GATED</span></td></tr>
+<tr><td><strong>REQUIRE_ORDERS_AUTH=true</strong></td><td>POST /orders + PATCH /order-requests in soft-auth. Flip via <code>eb setenv ... ; eb deploy</code> once Sentry shows <code>phase: pre-ota-soft-auth</code> at zero for 24h.</td><td><span class="tag gated">GATED</span> post-OTA</td></tr>
+<tr><td><strong>REQUIRE_COUPON_TOKEN=true</strong></td><td>Coupon-token enforcement is log-only. Flip after consumer OTA propagates. R3 qty-binding prereq already landed.</td><td><span class="tag gated">GATED</span> post-OTA</td></tr>
+</table>
+
+<h3 id="saved-legal">B. Legal / compliance (the real launch gates, need CA/lawyer)</h3>
+<table>
+<tr><th width="22%">Item</th><th>Why critical</th><th width="14%">Status</th></tr>
+<tr><td><strong>A.1 Merchant agreement re-draft</strong></td><td>15 severe points flagged for CA/lawyer (see <code>merchant-agreements-compliance-review-2026-06-15.html</code>): 1.9% gateway fee not authorized in signed text; commission engine default 8/10 exceeds signed 5/7; real DPDP DPA absent; FSSAI mandatory licence + consumer-display + PAS's own e-commerce FBO; pharmacy routed to generic template with no drug controls; T+2 settlement promised in text vs weekly system; 18% GST-on-commission + 0.1% §194-O TDS thin-but-arguable + not implemented; no arbitration clause; drawn-signature has no §85B presumption (§3A e-sign needed); Telangana stamp duty unaddressed; missing boilerplate.</td><td><span class="tag crit">CRITICAL</span></td></tr>
+<tr><td><strong>A.2 Play "App Access" rejection</strong></td><td><s>Reviewers' test login failed; re-submit version code 15.</s> Pranav correction 2026-06-23: the referenced screenshot was outdated — new AABs were approved and the Android apps went live. No action needed.</td><td><span class="tag fixed">RESOLVED</span></td></tr>
+<tr><td><strong>Bakery commission default</strong></td><td>Bakeries routed to Restaurant agreement (food + dining); ₹2,999 fee fixed (isPremium=true, 2026-06-14) but commission default (8/10) still wrong vs signed (5/7).</td><td><span class="tag open">OPEN</span></td></tr>
+</table>
+
+<h3 id="saved-kyc">C. KYC &amp; e-Sign</h3>
+<table>
+<tr><th width="22%">Item</th><th>Detail</th><th width="14%">Status</th></tr>
+<tr><td><strong>#11 KYC review UX overhaul</strong></td><td>No decision audit trail (compliance-critical); can't view uploaded PDFs (SecureImage img-only); hides captured fields (is_veg/cuisines/restaurantType/bank_name/signature); cramped 340px decision panel; irreversible Approve with no confirm.</td><td><span class="tag high">HIGH</span></td></tr>
+<tr><td><strong>#12 Aadhaar eSign (Digio)</strong></td><td>Today's drawn signature is a valid §10A e-contract via audit trail but lacks §85B presumption.</td><td><span class="tag high">HIGH</span></td></tr>
+<tr><td>KYC/GST verification vendor</td><td>Karza/IDfy/DigiLocker — <strong>decision 2026-06-15: keep manual</strong>, parked.</td><td><span class="tag gated">PARKED</span></td></tr>
+</table>
+
+<h3 id="saved-finance">D. Finance / payouts</h3>
+<table>
+<tr><th width="22%">Item</th><th>Detail</th><th width="14%">Status</th></tr>
+<tr><td><strong>#5 Real payout formula</strong></td><td>Replace <code>× 0.98</code> placeholder. Spec: <code>payout = gross − commission − 18%GST(commission) − 1.9%gateway(gross) + platformCouponReimb − clawback − 0.1%TDS(gross)</code>. Engine exists; only new field = gateway charge (already fetched at <code>index.ts:2917</code>, currently discarded). <strong>Gated:</strong> 1.9% gateway not authorized in signed agreements — need re-paper before deduction.</td><td><span class="tag gated">GATED</span> on legal</td></tr>
+<tr><td>Payout vendor selection</td><td>Razorpay X doesn't support PAS's business type. Cashfree Payouts / Open Money / Decentro. Recommendation: Cashfree.</td><td><span class="tag open">OPEN</span></td></tr>
+<tr><td>Settlement engine deferred items</td><td>Negative-net cycles; rupee rounding (&lt;₹1 drift); close scalability (paging); missed-Monday catch-up; <code>detectClawback</code> DB uniqueness; order-create price validation (commission-evasion); residual micro-race on refund (needs SELECT FOR UPDATE).</td><td><span class="tag med">MEDIUM</span></td></tr>
+<tr><td>Operational prereq for first settlement</td><td>Assign commission categories in admin → Finance → Settlements → Merchants; decide CRON_DRY_RUN flip-back.</td><td><span class="tag open">OPEN</span></td></tr>
+</table>
+
+<h3 id="saved-catalog">E. Catalog &amp; inventory</h3>
+<table>
+<tr><th width="22%">Item</th><th>Detail</th><th width="14%">Status</th></tr>
+<tr><td><strong>#6 / B10 — Drop <code>StoreProduct.storeId</code></strong></td><td>Dead column post-Phase-2-FINAL. ALTER TABLE DROP COLUMN. Gated on merchant 1.2.6 adoption on both stores. Shipped merchant bundles still read it directly via Supabase in 2–3 spots.</td><td><span class="tag gated">GATED</span></td></tr>
+<tr><td><strong>#7 Delete legacy/test products</strong></td><td><code>source='zepto'</code> 134 + null-source 111 + live_sync 39. Unblocked but confirm first.</td><td><span class="tag open">OPEN</span></td></tr>
+<tr><td><strong>#8 Pack-size / sibling variants</strong></td><td>Blinkit sibling data preserved in <code>extraData</code> but not grouped. Minimal model: <code>variantGroupId</code>+<code>variantLabel</code>. Touches <code>useProducts.ts</code> @lock.</td><td><span class="tag med">MEDIUM</span></td></tr>
+<tr><td>13 PENDING_DECISION mappings</td><td>Digital Goods/E-Cards (629), NULL (325), Specials, Seasonal, tobacco/Paan — founder decision held.</td><td><span class="tag open">OPEN</span></td></tr>
+<tr><td>"Dark green bel"</td><td>1 truly ambiguous catalog-only product left after the cleanup pass. Trivial — delete or leave.</td><td><span class="tag low">LOW</span></td></tr>
+</table>
+
+<h3 id="saved-notif">F. Notifications</h3>
+<table>
+<tr><th width="22%">Item</th><th>Detail</th><th width="14%">Status</th></tr>
+<tr><td><strong>#14 Full notification scenario coverage</strong></td><td>Push infra shipped but full customer plan (14 scenarios / 4 phases) + merchant-side status-change/reschedule/refund notifications not all wired. Next priority-queue item.</td><td><span class="tag open">OPEN</span></td></tr>
+<tr><td><code>recipient_role</code> cutover</td><td>Migration <code>20260528120000</code> + dispatch wiring written, not applied. Strict 3-step ordering: migrate → deploy → swap reads.</td><td><span class="tag gated">STAGED</span></td></tr>
+<tr><td>B3 verification (next-session reminder)</td><td>Confirm <code>link</code> + <code>metadata</code> populated on notifications.</td><td><span class="tag low">LOW</span></td></tr>
+</table>
+
+<h3 id="saved-coupons">G. Coupons — deferred audit findings</h3>
+<p class="sm">OTA gates (largely resolved via the cart_items_store_product_id migration): N1 storeProductId threading; N3 replay snapshot; N4 SIGNED_OUT clear; N5 token-verify orphan; N6 orphan-payments sweep cron. Consumer-app 🔒: R4 stale discount at payment consent (trust gap, money-safe); R5 late swap-accept during Razorpay window; R6 per-store GST whole-rupee drift ±₹1. Backend: single-store JTI single-use; perCustomerLimit atomic CAS; payment-level idempotency index; store-scope check; partial-unique-index drift; BOGO 0/0 guard; <code>Idempotency-Key</code> on POST /coupon; GIN on split_order_ids. Admin: CouponBuilder field extensions (<code>dailyUsageLimit</code>, <code>eligibleVerticals</code>, <code>eligibleOrderTypes</code>, <code>bogoMode</code>, <code>inactiveSinceDays</code>). Consumer nits: dead static-data imports in StorefrontScreen/FavoritesScreen (both 🔒); <code>OffersScreen.tsx</code> hardcoded <code>AVAILABLE_COUPONS</code>.</p>
+
+<h3 id="saved-admin">H. Admin polish &amp; product (later)</h3>
+<p class="sm"><strong>#13 quick-wins:</strong> fonts (Hanken Grotesk + Space Mono), <code>?phone=</code> filter for Wati history, customers load-more (&gt;400), wider audit-log coverage; KPI endpoints (<code>/admin/stats/{operations,support,finance}</code>) → today the tiles count via direct Supabase with RLS risk (can read 0). <strong>Later:</strong> drag-rearrange dashboards (needs react-grid-layout + <code>user_dashboard_layouts</code>); Reports tab (order/refund/GST/payout exports); customer wallet + Grant Credit; customer tags/LTV/cohort; <strong>#15 product bets</strong> — Reschedule + Reorder; Instagram tagging; Razorpay webhook → server-side order creation; server-side order-request expiry.</p>
+
+<h3 id="saved-process">I. Process / older queue</h3>
+<p class="sm">#1 unified Order ID (PAS-YYYYMMDD-NNNN); #2 realtime on merchant Pending/Processing tabs; #4 timings save bug — verified FIXED 2026-06-13; #5 architectural <code>is_active</code> split into <code>is_active</code> + <code>accepting_orders</code>; #7 operating-hours coverage SQL; #11 OTP cache bug — FIXED 2026-06-13 (PR #4). Process: post-Phase-7/8 full line-by-line consumer + merchant audit (Pranav-requested 2026-06-09).</p>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<h2 id="known">4) Known errors &amp; defects (already logged)</h2>
+
+<h3>Inventory error-hunt (41-agent audit, 2026-06-15) — 34 defects</h3>
+<table>
+<tr><th width="6%">Sev</th><th>Defect</th><th width="22%">Status</th></tr>
+<tr><td><span class="tag crit">CRIT</span></td><td>Importer inserts 0 rows but returns HTTP 200 (phantom <code>category</code> key). 141k load would silently land nothing.</td><td><span class="tag fixed">FIXED</span> Phase 1 (<code>e86734f8</code>)</td></tr>
+<tr><td><span class="tag crit">CRIT</span></td><td>MRP&gt;₹1000 ÷100 corrupts prices (₹1,899→₹18.99). 23.6% of Blinkit rows affected (33,385).</td><td><span class="tag fixed">FIXED</span> Phase 1</td></tr>
+<tr><td><span class="tag crit">CRIT</span></td><td><code>StoreProduct.storeId</code> holds branch id, FK not enforced — 26/44 listings orphaned. Freshly silently lost 67% of catalog.</td><td><span class="tag fixed">FIXED</span> Phase 2 FINAL (Option B)</td></tr>
+<tr><td><span class="tag high">HIGH</span></td><td>Phantom category/vertical breaks 6 handlers (grid edit, bulk-update, filter, consumer 500, blank Category column).</td><td><span class="tag fixed">FIXED</span> (<code>d5b1b81f</code>)</td></tr>
+<tr><td><span class="tag high">HIGH</span></td><td>MOCK_PRODUCTS served in PROD on any DB error (HTTP 200, no env guard).</td><td><span class="tag fixed">FIXED</span> Phase 1</td></tr>
+<tr><td><span class="tag high">HIGH</span></td><td>Default-veg dot on 286/294 products; soft-delete leak; ₹0 listings; hotlinked images; pack-size blank.</td><td><span class="tag fixed">FIXED</span> Phases 3 + sub-3</td></tr>
+</table>
+
+<h3>Merchant/customer display audit (2026-06-15) — 5 go-live blockers</h3>
+<table>
+<tr><th width="6%">Sev</th><th>Defect</th><th width="22%">Status</th></tr>
+<tr><td><span class="tag crit">CRIT 1</span></td><td>Green veg dot on everything (141k incl. meat/electronics).</td><td><span class="tag fixed">FIXED</span> (sub-3, <code>9e4092ad</code>)</td></tr>
+<tr><td><span class="tag crit">CRIT 2</span></td><td>Products can go live at ₹0.</td><td><span class="tag fixed">FIXED</span> (app + DB CHECK, <code>c0f8b977</code>)</td></tr>
+<tr><td><span class="tag crit">CRIT 3</span></td><td>Images hotlinked from <code>cdn.grofers.com</code>.</td><td><span class="tag fixed">FIXED</span> (<code>db25c0c2</code> + lazy re-host)</td></tr>
+<tr><td><span class="tag crit">CRIT 4</span></td><td>Full catalog leaks with no auth (<code>GET /products</code>, <code>GET /merchants/:id/inventory</code>) — full row incl. <code>source</code>/<code>source_product_id</code>/<code>product_url</code>/<code>extra_data</code>; permissive CORS.</td><td><span class="tag fixed">FIXED</span> 2026-06-23 (H-1, EB <code>app-260623_020000054421</code>) — scope expanded to 12 endpoints</td></tr>
+<tr><td><span class="tag crit">CRIT 5</span></td><td>Food ships with zero FSSAI/allergen/net-qty.</td><td><span class="tag partial">PARTIAL</span> — FSSAI 403 gate added (sub-2); allergen/net-qty capture open</td></tr>
+</table>
+
+<h3>Coupon-foolproof findings</h3>
+<p class="sm"><strong>FIXED:</strong> Phase 7G blockers + 16 high (<code>04734624</code>); R3 qty-binding (<code>7b07df82</code>); N1 storeProductId threading (cart_items_store_product_id migration). <strong>OPEN:</strong> R4 stale discount at payment consent (trust gap, money-safe); R5 late swap-accept during Razorpay window (pre-existing); R6 per-store GST drift ±₹1 (pre-existing); N3/N4/N5/N6 OTA gates as itemised above.</p>
+
+<h3>ERRORS.md (approaches that took &gt;2 attempts — now codified)</h3>
+<ul class="tight">
+  <li>EB deploys on t3.micro thrashed (45min timeout) → fix: t3.small + Timeout 3600 + ship pre-built dist. Resolved.</li>
+  <li><code>eb setenv</code> standalone on Node 24/AL2023 rolls back the var → always chain <code>eb setenv … ; eb deploy</code>; poll <code>eb status</code> Ready first. (Caused 93-min outage on 2026-06-05.)</li>
+  <li>Postgres column-level REVOKE is a no-op vs table-level grant — REVOKE table-level first, then GRANT allowed columns; verify via <code>information_schema.column_privileges</code>.</li>
+</ul>
+
+<h3>Structural DB / RLS bugs found historically — all FIXED</h3>
+<p class="sm"><code>orders</code> RLS structurally broken (branch/merchant UUID mismatch) → JOIN through merchant_branches; <code>orders.store_id → Store.id</code> FK violation (Varsha bangles) → realign + signup triggers; <code>handle_new_user</code> missing User row → checkout FK failure (L2/L3/L4 hardening); frequent signouts (refresh-token rotation race) → 60s reuse interval + single-in-flight Promise; F1 forward-leak (branches without store_id) → 6 creation sites fixed; F2 <code>delete_merchants_cascaded</code> referenced dead storeId → rewrite to branch_id; F3 coupon vertical-eligibility fail-OPEN → restored fail-closed; Admin login "42P17" recursion → <code>is_super_admin()</code> SECURITY DEFINER.</p>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<h2 id="hidden">5) Hidden errors — NEW adversarial findings (this audit, 2026-06-23)</h2>
+
+<p>These were not in any prior queue and were surfaced by re-reading the recent code adversarially.</p>
+
+<div class="finding">
+  <div class="h"><span class="id">H-1</span><span class="tag crit">CRITICAL</span><span class="tag fixed">SHIPPED 2026-06-23</span><span class="mut">data exposure</span></div>
+  <div class="meta">apps/api/src/index.ts:950 (<code>GET /products</code>) · apps/api/src/index.ts:5551 (<code>GET /merchants/:id/inventory</code>)</div>
+  <p class="why"><strong>Both endpoints are unauthenticated.</strong> Confirmed by reading the route handlers: there is no <code>requireUser</code>/<code>requireRole</code> call. They run via Prisma (service_role) so RLS does not apply. <code>GET /products</code> returns the full <code>Product</code> rows (including internal-only fields <code>source</code>, <code>source_product_id</code>, <code>product_url</code>, <code>extra_data</code>, <code>createdByStoreId</code>) plus the joined <code>images</code> array, paginated, no auth required. <code>GET /merchants/:id/inventory</code> returns <code>StoreProduct</code> rows + full <code>Product</code> include, again no auth, no field whitelist. This is the same <code>CRIT 4</code> flagged in the merchant-customer display audit on 2026-06-15 — it remains unfixed.</p>
+  <p class="why"><strong>Compounding bug in <code>/merchants/:id/inventory</code>:</strong> the filter <code>where: { storeId: id }</code> still uses the dead pre-Phase-2-FINAL <code>StoreProduct.storeId</code> column, and the <code>category</code> query-param uses <code>where.product.category</code> — which doesn't exist (Product has FKs only). The endpoint will return wrong/empty data when those params are used, in addition to leaking what it does return.</p>
+  <div class="fix"><strong>Proposed fix:</strong>
+    <ol class="tight">
+      <li>Add <code>requireRole(req, res, CATALOG_ADMIN_ROLES)</code> to <code>GET /products</code>. Field-whitelist the response (strip <code>source</code>/<code>source_product_id</code>/<code>product_url</code>/<code>extra_data</code>).</li>
+      <li>Add <code>requireUser</code> (or <code>requireRole</code>) to <code>GET /merchants/:id/inventory</code> + an authorization check (caller is staff of merchant <code>id</code> OR platform admin). Fix the column (<code>branch_id</code> not <code>storeId</code>) and the category filter (FK join, not scalar).</li>
+      <li>tsc + smoke test in staging; deploy.</li>
+    </ol>
+    <strong>Risk if not fixed:</strong> anyone with the API URL can scrape your full 140k catalog including supplier IDs and source URLs.
+  </div>
+  <div class="fix" style="border-top:1px solid var(--ok)"><strong>SHIPPED 2026-06-23.</strong> Deployed via EB <code>app-260623_020000054421</code>. Smoke verified: all 3 endpoints now return 401 unauth. <strong>Scope expanded by mandatory line-by-line audit (rule #3):</strong> implementation found 9 additional sibling-class endpoints (auth'd order/return paths with <code>include: { product: true }</code>) leaking the same importer fields to logged-in users. All 12 sites closed in one release via a central <code>PRODUCT_PUBLIC_SELECT</code> field whitelist. The dead <code>StoreProduct.storeId</code> column and the dead <code>product.category</code> scalar filter on <code>/merchants/:id/inventory</code> — both pre-existing always-broken bugs — were closed in the same fix. Final grep: residual <code>product: true</code> in the API = 0; the class is fully closed. Commits: code <code>d704e8d4</code>, combined dist <code>88c6c8c2</code>.</div>
+</div>
+
+<div class="finding">
+  <div class="h"><span class="id">H-2</span><span class="tag crit">CRITICAL</span><span class="mut">data integrity (gated)</span></div>
+  <div class="meta">apps/api/src/services/settlement.service.ts (engine default tier) · agreement re-paper</div>
+  <p class="why"><strong>Commission engine default tier (8/10) exceeds the rate in signed agreements (5/7 for Restaurant, Bakery routed to Restaurant).</strong> No code links the rate a merchant signed to the engine's <code>commission_rate</code> field. The settlements scheduler is currently in <code>CRON_DRY_RUN</code> so no real money has moved — but the moment that flag flips, any unassigned merchant gets 8/10 deducted vs their signed 5/7. This is documented in <code>merchant-agreements-compliance-review-2026-06-15.html</code> §2 and is gated alongside the legal re-paper, but it must NOT be allowed to slip past the flag-flip.</p>
+  <div class="fix"><strong>Proposed fix:</strong> before CRON_DRY_RUN flip, (a) assign commission categories to every onboarded merchant in admin → Finance → Settlements → Merchants; (b) add a guard in <code>resolveRule</code> that refuses to settle merchants with the default tier still selected (errors loudly to Sentry instead of charging the wrong rate); (c) re-paper agreements with corrected commission terms before any live settlement.</p>
+</div>
+
+<div class="finding">
+  <div class="h"><span class="id">H-3</span><span class="tag high">HIGH</span><span class="tag fixed">SHIPPED 2026-06-23</span><span class="mut">order gate — fail-open vs malformed input</span></div>
+  <div class="meta">apps/api/src/index.ts (POST /order-requests, "Category Status Gate")</div>
+  <p class="why">The gate builds <code>reqProductIds = requests.flatMap(items.map(it =&gt; String(it?.id)).filter(Boolean))</code> — empty/missing <code>id</code> values are silently <em>filtered out</em>. If the consumer payload omits <code>productId</code> for any item (legacy cart row, malformed retry), that item flows through the gate without being checked. Today the consumer always sends <code>id</code>, so this is latent, not active — but it's a fail-open shape that should be a fail-closed reject.</p>
+  <div class="fix"><strong>Proposed fix:</strong> if any item lacks <code>id</code>, reject the whole request with <code>400 INVALID_ORDER_ITEM</code> (don't .filter(Boolean)). Same change in the validateCategoriesEnabled call site.</div>
+  <div class="fix" style="border-top:1px solid var(--ok)"><strong>SHIPPED 2026-06-23.</strong> Deployed via the same EB release as H-1. <strong>Scope expanded by mandatory line-by-line audit (rule #3):</strong> the original H-3 named one fail-open point (missing <code>id</code>); the audit surfaced and closed two more — <code>(2)</code> empty/missing <code>items</code> array on a request flowed through to write an empty order row; <code>(3)</code> item ids that exist on the wire but don't match any DB Product passed silently because Prisma <code>in</code> just returns fewer rows than requested. All three fail-open points closed in one fix: a front-door validator returns <code>400 INVALID_ORDER_REQUEST</code>, <code>400 INVALID_ORDER_ITEM</code>, or <code>400 UNKNOWN_PRODUCT</code> (with offenders list) as appropriate, BEFORE any downstream gate runs. The silent <code>.filter(Boolean)</code> was removed (not commented over), so future readers can't accidentally rely on the bug-masking behavior. Commit <code>a0dd8594</code>.</div>
+</div>
+
+<div class="finding">
+  <div class="h"><span class="id">H-4</span><span class="tag high">HIGH</span><span class="mut">RLS — uncategorized products are immune to the toggle</span></div>
+  <div class="meta">apps/api/scripts/migrate_category_visibility_rls.ts (cat_vis_product / cat_vis_storeproduct)</div>
+  <p class="why">By design (and reviewed when the spec was approved): a product with <code>vertical_id IS NULL</code> OR <code>category_id IS NULL</code> is treated as "not gated" → always visible to customers regardless of which category an admin toggles off. This was acceptable when the live catalog was 99.85% categorized — but it means <strong>the toggle cannot ever hide an uncategorized product</strong>, even via a parent category. We discovered the symptom in this session ("Freshly Vadapalli store stayed visible after Fresh Items was disabled"). Today only "Dark green bel" + a tiny tail remain truly uncategorized, so impact is minimal — but if uncategorized SKUs ever creep back in (e.g. a new partner load), category-disable becomes silently leaky for them.</p>
+  <div class="fix"><strong>Proposed fix:</strong> add a CI/admin alarm (or a daily Sentry breadcrumb) that fails loud if <code>count(*) FROM "Product" WHERE vertical_id IS NULL AND EXISTS (StoreProduct active listings)</code> &gt; 0. Optionally tighten the RLS predicate to deny uncategorized when a "default-deny" admin setting is on. Treat the alarm as a data-hygiene gate before promoting any new bulk loader.</div>
+</div>
+
+<div class="finding">
+  <div class="h"><span class="id">H-5</span><span class="tag high">HIGH</span><span class="tag partial">CODED · OTA HELD</span><span class="mut">cart prune — supabase .in() default limit + fail-open</span></div>
+  <div class="meta">apps/consumer-app/src/context/CartContext.tsx <code>revalidateCart()</code></div>
+  <p class="why">The function calls <code>supabase.from('Product').select('id').in('id', ids)</code> with no <code>.limit(...)</code>. supabase-js defaults to 1000 rows; carts will never approach that, so functionally fine — but more importantly, the read is treated as the source of truth: any product whose id is <em>not</em> returned is pruned and a <code>clearAppliedCoupon()</code> fires. <strong>Edge case:</strong> if supabase quietly returns a partial result (e.g. server clamps the response set, a retry returns a different snapshot), the code happily prunes items the user actually still has. The catch only resets on a thrown error or an <code>error</code> object — not on partial result sets.</p>
+  <div class="fix"><strong>Proposed fix:</strong> require <code>data.length === ids.length</code> before pruning; if shorter, log a warning + leave the cart alone. This preserves the legitimate "RLS hid 1 of 5" case (data.length &lt; ids.length is exactly what we want to act on) by also checking that the supabase request didn't error and returned its <code>count</code> matches the request, OR — simpler and equally safe — only prune items whose id is in the requested set AND not in the response set, and never auto-clear the coupon unless &gt;=1 cart item actually moves (already the case — keep that contract).</div>
+  <div class="fix" style="border-top:1px solid var(--ok)"><strong>CODED + AUDITED 2026-06-23 (commit <code>00615139</code>) — OTA HELD per Pranav's call.</strong> Two defensive guards added on top of the existing error/throw handlers: (1) bail if the supabase response is not a real array (null/undefined data with no error treated as anomalous); (2) <em>never auto-wipe a non-empty cart</em> — if every item in the cart would be pruned in one go, treat as a transient blip and skip. The "RLS legitimately hid 1 of N" case still works (the intended path). The extreme "every category in your cart got disabled at once" case is now handled by the server-side H-3 Category Status Gate at checkout instead of by silent local pruning — zero false-positive cart wipes is worth the edge-case delay. Will ship in the next consumer OTA push.</div>
+</div>
+
+<div class="finding">
+  <div class="h"><span class="id">H-6</span><span class="tag med">MEDIUM</span><span class="mut">/verticals filter — admin signup picker UX</span></div>
+  <div class="meta">apps/api/src/index.ts <code>GET /verticals</code> + apps/admin-web (admin "Add Merchant" sheet)</div>
+  <p class="why">The fix made <code>/verticals</code> filter <code>where: { is_active: true }</code>. That endpoint has only one caller in the merchant signup flow (verified). <strong>However</strong>: if admin-web's "Add Merchant" sheet ever picks a vertical via the same endpoint, an admin would not be able to onboard a merchant in a temporarily-disabled vertical. Verify the admin path uses <code>GET /admin/categories</code> (which returns all, including disabled) and not <code>/verticals</code>.</p>
+  <div class="fix"><strong>Proposed fix:</strong> grep <code>apps/admin-web/src</code> for any <code>'/verticals'</code> caller; if present, switch it to the admin endpoint or expose a query param <code>?includeDisabled=true</code> guarded by <code>requireRole</code>.</div>
+</div>
+
+<div class="finding">
+  <div class="h"><span class="id">H-7</span><span class="tag med">MEDIUM</span><span class="mut">RLS — service_role caches in tooling</span></div>
+  <div class="meta">cross-cutting</div>
+  <p class="why">Any backend service that caches product/vertical/category rows fetched via service_role (e.g. PostgREST tooling, a future ISR/edge cache, analytics ETL) will not respect the RESTRICTIVE RLS. Today the consumer doesn't use such a path — but the design implicitly assumes every customer-facing read goes through the supabase client as anon/authenticated. Future tooling could introduce a leak.</p>
+  <div class="fix"><strong>Proposed fix:</strong> add a PR-checklist line item: "Any new endpoint that returns Product/Vertical/Tier2Category/StoreProduct to a customer surface MUST go through supabase (anon/authenticated) OR explicitly re-implement the visibility predicate. Document in CONTRIBUTING.md alongside the GRANT rule."</div>
+</div>
+
+<div class="finding">
+  <div class="h"><span class="id">H-8</span><span class="tag med">MEDIUM</span><span class="mut">documentation drift</span></div>
+  <div class="meta">SESSION_LOG.md / forlater.md / various plans</div>
+  <p class="why">The session log refers to the admin-web reconciliation, but the older "OTA backlog empty" claim in <code>934e0628</code> (and earlier handoffs) is now outdated — the cart-prune OTA shipped 2026-06-22; future readers reaching the older doc first could mis-conclude. Several plan files still reference "main is 80 commits behind" — true at the time, false now.</p>
+  <div class="fix"><strong>Proposed fix:</strong> add a banner to <code>SESSION_LOG.md</code> top: "Reconciled 2026-06-23: feat == main. OTA cart-prune shipped 2026-06-22." (Already partially done — confirm visible at the very top.)</div>
+</div>
+
+<div class="finding">
+  <div class="h"><span class="id">H-9</span><span class="tag low">LOW</span><span class="mut">tooling — pooler transaction quirk</span></div>
+  <div class="meta">various scripts/recat_*.ts encountered P2028</div>
+  <p class="why">Prisma's interactive transactions over the Supabase pooler frequently throw P2028 ("Transaction not found") when a transaction runs across many sequential queries. Resolved per-script (resolve IDs upfront, sequential single-row updates) but it'll keep biting future migration/data scripts.</p>
+  <div class="fix"><strong>Proposed fix:</strong> add an internal helper <code>safeBatchUpdate(prisma, model, updates)</code> that resolves ids upfront then executes one <code>$executeRawUnsafe</code> per batch outside any interactive tx. Document the gotcha in ERRORS.md.</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<h2 id="plan">6) Proposed plan — prioritized, with sequencing</h2>
+
+<div class="callout ok">
+  <strong>Sequencing principle:</strong> Tier 0 was the 2 critical exposures + the Play submission — <strong>all closed 2026-06-23.</strong> Remaining: H-2 (gated on legal A.1), Tier 1 launch gates, Tier 2 security hygiene, Tier 3 Supabase deadline, Tier 4 feature catch-up.
+</div>
+
+<h3>Tier 0 — immediate (DONE 2026-06-23)</h3>
+<ol>
+  <li><span class="tag fixed">DONE</span> <strong>H-1 fix</strong> — auth-guard + field-whitelist <code>GET /products</code>, <code>GET /products/export</code>, <code>GET /merchants/:id/inventory</code>; closed 9 sibling-class endpoints in the same release. <code>eb deploy</code> verified, smoke 401 on all 3.</li>
+  <li><span class="tag fixed">DONE</span> <strong>A.2 Play "App Access"</strong> — Pranav's correction: Android apps were already live by 2026-06-22. No action needed.</li>
+  <li><span class="tag fixed">DONE</span> <strong>H-3 fix</strong> — fail-closed on malformed/unknown order items; bundled with the H-1 EB deploy. Closed 3 fail-open points (missing items array, missing item id, unknown product id) instead of just the named one.</li>
+  <li><span class="tag partial">CODED · HELD</span> <strong>H-5 fix</strong> — cart-prune guards implemented + audited; OTA held per Pranav. Will ship with the next consumer OTA push.</li>
+</ol>
+
+<h3>Tier 1 — launch gates (next 2 weeks, needs external input)</h3>
+<ol>
+  <li><strong>A.1 Agreement re-draft</strong> — hand the 15 severe points to your CA/lawyer. <em>This blocks: payout-formula go-live, settlement engine flip, gateway-fee deduction.</em></li>
+  <li><strong>H-2 commission-tier guard</strong> — implement the guard in <code>resolveRule</code> that refuses default-tier settlements; assign commission categories to all onboarded merchants in admin. <em>Prerequisite for flipping <code>CRON_DRY_RUN</code> off.</em></li>
+  <li><strong>Payout vendor (Cashfree)</strong> — select + integrate. Needed before any real payout.</li>
+</ol>
+
+<h3>Tier 2 — security &amp; data hygiene (within 1 month)</h3>
+<ol>
+  <li><strong>#16c broad RLS sweep</strong> — audit every table for RLS coverage; the two structural bugs already found (orders, merchant_branches) mean others likely lurk.</li>
+  <li><strong>H-4 uncategorized-product alarm</strong> — add the data-hygiene gate before any future bulk load.</li>
+  <li><strong>#11 KYC review UX</strong> — decision audit trail (compliance-critical), PDF viewing, fields, confirm dialog.</li>
+  <li><strong>Apply staged merchant_branches lockdown migration</strong> — once merchant OTA propagation is verified.</li>
+  <li><strong>Flip REQUIRE_ORDERS_AUTH + REQUIRE_COUPON_TOKEN</strong> — once Sentry shows the soft-auth phase at zero for 24h.</li>
+</ol>
+
+<h3>Tier 3 — hard deadline (by 2026-10-30)</h3>
+<ol>
+  <li><strong>Supabase GRANT migration</strong> — add GRANTs to new-table migrations (PR checklist) + audit existing tables (schedule early October).</li>
+</ol>
+
+<h3>Tier 4 — feature catch-up (when bandwidth allows)</h3>
+<ol>
+  <li><strong>#14 Notifications</strong> — full 14-scenario customer plan + merchant gaps.</li>
+  <li><strong>Coupon deferred items</strong> — R4/R5/R6 + remaining backend mediums.</li>
+  <li><strong>#8 Pack-size variants</strong> — Blinkit sibling grouping.</li>
+  <li><strong>#7 Delete legacy/test products</strong> — confirm + delete.</li>
+  <li><strong>#13 Admin quick-wins</strong> — fonts, audit-log coverage, KPI endpoints.</li>
+  <li><strong>#15 Product bets</strong> — Reschedule + Reorder, Instagram tagging, Razorpay-webhook order creation, server-side order-request expiry.</li>
+</ol>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<h2 id="deploy">7) Deploy / release state</h2>
+
+<table>
+<tr><th width="22%">Surface</th><th>State</th></tr>
+<tr><td>Consumer app</td><td><strong>v1.1.3 LIVE</strong>. iOS build 22 submitted; Android AAB uploaded. Last OTA: 2026-06-22 (cart-prune T7b, group <code>79b10cb5</code>, runtime 1.1.3).</td></tr>
+<tr><td>Merchant app</td><td><strong>v1.2.6 LIVE</strong>. iOS build 17 submitted. <strong>OTA queue empty on this branch</strong> — Phase 9 rewires + OTP fix are on main and ready to OTA when desired.</td></tr>
+<tr><td>Admin-web</td><td><strong>LIVE</strong>. Production at <code>main</code> = <code>40fa0fbe</code> as of 2026-06-22 (post PR #12 reconciliation). Vercel auto-deploy from <code>main</code> restored.</td></tr>
+<tr><td>API (EB)</td><td><strong>LIVE</strong>. Latest deploy <code>app-260623_020000054421</code> (H-1 + H-3 solid fixes, 2026-06-23). Previous: <code>app-260622_015312842345</code> (<code>/verticals</code> coupling). Health green; <code>eb status</code> Ready. Smoke-verified post-deploy: <code>GET /products</code>/<code>/products/export</code>/<code>/merchants/:id/inventory</code> all return <code>401</code> unauth (was <code>200</code> + full catalog).</td></tr>
+<tr><td>Database</td><td>Applied (recent): 3 category-visibility migrations · Phase 2 FINAL B1–B11 · MRP trigger · Phase 7 settlement · Phase 8 RLS · category data scripts. <strong>Staged/gated:</strong> <code>phase8_branch_lockdown.STAGED.sql</code> (post-merchant-OTA); B10 column drop (post-merchant-1.2.6 adoption); <code>20260528120000_add_recipient_role</code> (3-step ordered cutover); payout-formula schema add (post-CA / re-paper).</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<h2 id="appendix">8) Appendix</h2>
+
+<h3>Hard external deadlines</h3>
+<ul class="tight">
+  <li><strong>2026-10-30</strong> — Supabase public-schema GRANT migration (#16b). Hard date; tables become inaccessible without explicit GRANTs after.</li>
+  <li><s>Immediate — Play "App Access" re-submission (A.2).</s> <span class="tag fixed">RESOLVED</span> Android apps live (2026-06-22, Pranav correction).</li>
+</ul>
+
+<h3>Env-var flips waiting on signals</h3>
+<ul class="tight">
+  <li><code>REQUIRE_ORDERS_AUTH=true</code> — when Sentry shows <code>phase: pre-ota-soft-auth</code> at zero for 24h post consumer-OTA propagation.</li>
+  <li><code>REQUIRE_COUPON_TOKEN=true</code> — same gating.</li>
+  <li><code>CRON_DRY_RUN</code> flip-back — only after H-2 fix + commission categories assigned + payout vendor live.</li>
+  <li><code>CATALOG_WEBHOOK_SECRET</code> — only if Apify sync resumes.</li>
+</ul>
+
+<h3>Rollback map (all reversible data scripts from this session)</h3>
+<table>
+<tr><th>Script</th><th>Rollback file</th></tr>
+<tr><td><code>recat_electricals_2026-06-22.ts</code></td><td><code>_recat_rollback_2026-06-22.json</code></td></tr>
+<tr><td><code>recat_freshly_produce_2026-06-22.ts</code></td><td><code>_recat_freshly_rollback_2026-06-22.json</code></td></tr>
+<tr><td><code>recat_cleancuts_meat_2026-06-22.ts</code></td><td><code>_recat_cleancuts_rollback_2026-06-22.json</code></td></tr>
+<tr><td><code>recat_catalog_food_2026-06-22.ts</code></td><td><code>_recat_catalog_food_rollback_2026-06-22.json</code></td></tr>
+<tr><td><code>recat_catalog_nonfood_2026-06-22.ts</code></td><td><code>_recat_nonfood_rollback_2026-06-22.json</code></td></tr>
+<tr><td><code>delete_gibberish_2026-06-22.ts</code></td><td><code>_deleted_gibberish_2026-06-22.json</code></td></tr>
+<tr><td><code>recat_last10_2026-06-22.ts</code></td><td><code>_recat_last10_rollback_2026-06-22.json</code></td></tr>
+</table>
+<p class="sm">Backup tag for the branch reconciliation: <code>backup/main-pre-reconcile-2026-06-22</code> (= <code>e4aa9ebc</code>, the June-15 admin-web prod build).</p>
+
+<h3>Methodology notes (for future audits)</h3>
+<p class="sm">This document was built by triangulating three sources in parallel: (a) every queue/spec doc (<code>forlater.md</code>, <code>ERRORS.md</code>, <code>SESSION_LOG.md</code>, the 9 HTML reviews); (b) the full <code>git log</code> since baseline <code>9a44cf02</code> mapped by ship-vehicle; (c) a fresh adversarial code re-read of the recent category/catalog work to surface defects post-dating the prior audits. Every finding cites <code>file:line</code>. Severity uses CRITICAL (data loss / external exposure / regulatory) · HIGH (money path / launch blocker / hidden fail-open) · MEDIUM (UX, fix-when-touched) · LOW (cosmetic, docs drift).</p>
+
+<p class="sm" style="margin-top:30px;border-top:1px solid var(--line);padding-top:14px"><em>Document saved as <code>docs/post-june-6-audit-2026-06-23.html</code>. Open in any browser; print to PDF with the included <code>@media print</code> rules for a clean export.</em></p>
+
+</div></body></html>

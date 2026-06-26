@@ -13,33 +13,11 @@ import * as Haptics from 'expo-haptics';
 import { supabase } from '../lib/supabase';
 import { showToast } from '../components/NotificationToast';
 
-// Customer-facing notification types only. The `notifications` table is keyed by
-// user_id with no role column yet, so a dual-role account (merchant + customer)
-// would otherwise see its MERCHANT notifications in this inbox. This allowlist
-// scopes the customer inbox to customer notifications.
-// JUNE 6 (Option B): once the `recipient_role` column migration is live AND the API
-// writes it, replace this allowlist with `.eq('recipient_role', 'consumer')`.
-const CONSUMER_NOTIFICATION_TYPES = [
-    'ORDER_CONFIRMED',
-    'PAYMENT_SUCCESSFUL',
-    'ORDER_READY',
-    'ORDER_COMPLETED',
-    'ORDER_CANCELLED',
-    'DINING_BOOKED',
-    'DINING_READY',
-    'PICKUP_REMINDER_30MIN',
-    'PICKUP_REMINDER_10MIN',
-    'DINING_REMINDER_30MIN',
-    // 2026-06-05 — WS2 lifecycle notification types. These were emitted by
-    // the API the moment WS2.C shipped, but this allowlist filtered them
-    // out — so customers who filed a return/exchange got nothing in-app
-    // when the merchant decided or the cron auto-approved after the 24h
-    // SLA. Adding all four sender-side types here.
-    'RETURN_REQUESTED',     // consumer in-app on their own return submission
-    'EXCHANGE_REQUESTED',   // consumer in-app on their own exchange submission
-    'RETURN_DECISION',      // merchant or cron decision on a return
-    'EXCHANGE_DECISION',    // merchant or cron decision on an exchange
-];
+// Customer-facing inbox is scoped by recipient_role = 'consumer', set server-side
+// by NotificationService on every insert. This replaces the former hardcoded type
+// allowlist: a dual-role account (merchant + customer) keyed by the same user_id
+// sees ONLY its customer notifications here, and every new customer notification
+// type appears automatically — there is no allowlist to keep in sync.
 
 export interface ConsumerNotification {
     id: string;
@@ -52,6 +30,7 @@ export interface ConsumerNotification {
     link?: string | null;
     reference_id?: string | null;
     metadata?: any;
+    recipient_role?: string | null;  // server-set role tag; this inbox is scoped to 'consumer'
     created_at: string;
 }
 
@@ -72,7 +51,7 @@ export function useNotifications(userId: string | undefined) {
                 .from('notifications')
                 .select('*')
                 .eq('user_id', userId)
-                .in('type', CONSUMER_NOTIFICATION_TYPES)
+                .eq('recipient_role', 'consumer')
                 .order('created_at', { ascending: false })
                 .limit(50);
 
@@ -114,7 +93,9 @@ export function useNotifications(userId: string | undefined) {
                     const n = payload.new as ConsumerNotification;
                     // Ignore inserts that aren't customer notifications (e.g. this
                     // account's own merchant notifications) — keeps toast + list clean.
-                    if (!CONSUMER_NOTIFICATION_TYPES.includes((n.type || '').toUpperCase())) return;
+                    // recipient_role is the server-set source of truth; NULL/missing
+                    // fails closed (treated as not-consumer), so nothing leaks in.
+                    if ((n.recipient_role || '') !== 'consumer') return;
                     try {
                         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                     } catch {
@@ -147,6 +128,7 @@ export function useNotifications(userId: string | undefined) {
             .from('notifications')
             .update({ is_read: true })
             .eq('user_id', userId)
+            .eq('recipient_role', 'consumer')
             .eq('is_read', false);
         if (!error) {
             setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));

@@ -132,9 +132,6 @@ export function useInventory() {
 
 
     const updateItem = async (id: string, updates: Partial<InventoryItem>) => {
-        // 1. Capture previous state for delta-check
-        const previousItem = inventory.find(item => item.id === id);
-
         // Optimistic Update
         setInventory(prev => prev.map(item => item.id === id ? { ...item, ...updates } : item));
 
@@ -149,45 +146,11 @@ export function useInventory() {
             return;
         }
 
-        // 2. Fire threshold-based notifications on successful update
-        if (previousItem && updates.stock !== undefined) {
-            const newStock = Number(updates.stock);
-            const oldStock = Number(previousItem.stock || 0);
-
-            // Only proceed if the stock actually changed mathematically
-            if (newStock !== oldStock) {
-                try {
-                    const { data: { user } } = await supabase.auth.getUser();
-                    if (!user || !branchId) return;
-
-                    const productName = previousItem.product?.name || 'Item';
-                    
-                    if (newStock === 0 && oldStock > 0) {
-                        await supabase.from('notifications').insert({
-                            id: Math.random().toString(36).substring(2, 15),
-                            user_id: user.id,
-                            store_id: branchId,
-                            type: 'INVENTORY',
-                            title: 'Out of Stock (Manual)',
-                            message: `${productName} was manually marked out of stock.`,
-                            link: '/inventory'
-                        });
-                    } else if (newStock <= 5 && newStock > 0 && oldStock > 5) {
-                        await supabase.from('notifications').insert({
-                            id: Math.random().toString(36).substring(2, 15),
-                            user_id: user.id,
-                            store_id: branchId,
-                            type: 'INVENTORY',
-                            title: 'Low Stock (Manual)',
-                            message: `Manual update: Only ${newStock} left of ${productName}.`,
-                            link: '/inventory'
-                        });
-                    }
-                } catch (e) {
-                    console.error('[useInventory] Notification insert failed:', e);
-                }
-            }
-        }
+        // Low-stock / out-of-stock alerts are dispatched SERVER-SIDE by the API
+        // (PATCH /merchant/store-products/:id → NotificationService → Expo push +
+        // recipient_role='merchant'). The former client-side notifications insert here
+        // bypassed push and never set recipient_role, so its rows vanished after the
+        // notification role cutover. Removed 2026-06-25.
     };
 
     const deleteItem = async (id: string) => {
