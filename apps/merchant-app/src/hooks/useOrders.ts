@@ -472,40 +472,10 @@ export function useOrders(dateRange?: DateRange) {
         }
     };
 
-    const refundOrder = async (orderId: string, amount?: number, reason?: string) => {
-
-        try {
-            const body: any = {};
-            if (amount) body.amount = amount;
-            if (reason) body.reason = reason;
-
-            const response = await fetch(`${API_URL}/orders/${orderId}/refund`, {
-                method: 'POST',
-                headers: await authHeaders(),
-                body: JSON.stringify(body)
-            });
-
-            if (!response.ok) {
-                const text = await response.text();
-                let err;
-                try {
-                    err = JSON.parse(text);
-                } catch (e) {
-                    err = { error: `Server Error (${response.status}): ${text.substring(0, 100)}...` };
-                }
-                throw new Error(err.error || err.details || 'Refund failed');
-            }
-
-            const result = await response.json();
-            if (result.order) {
-                setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: result.order.status } : o));
-            }
-            return { success: true };
-        } catch (error: any) {
-            console.error('Error refunding order:', error);
-            return { success: false, error: error.message };
-        }
-    };
+    // Refunds are admin-only (Pranav decision, 2026-06-25): the merchant app NEVER
+    // issues refunds. Order rejection just sets CANCELLED; a paid rejected order then
+    // surfaces in the admin Refunds & Disputes queue for an admin to refund. The
+    // former refundOrder() (POST /orders/:id/refund, a simulated refund) was removed.
 
     return {
         orders,
@@ -513,7 +483,6 @@ export function useOrders(dateRange?: DateRange) {
         refreshing,
         refetch: () => fetchOrders(true),
         updateOrderStatus,
-        verifyOTP,
-        refundOrder
+        verifyOTP
     };
 }

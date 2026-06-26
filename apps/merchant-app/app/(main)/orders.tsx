@@ -50,7 +50,7 @@ export default function OrdersScreen() {
     };
     const [dateRange, setDateRange] = useState<DateRange>(getDefaultRange);
 
-    const { orders, loading, refreshing, refetch, updateOrderStatus, verifyOTP, refundOrder } = useOrders(dateRange);
+    const { orders, loading, refreshing, refetch, updateOrderStatus, verifyOTP } = useOrders(dateRange);
     const { store, activeStoreId, branches, merchantId } = useStore();
     
     const activeBranch = branches.find(b => b.id === activeStoreId);
@@ -156,17 +156,11 @@ export default function OrdersScreen() {
 
         const res = await updateOrderStatus(rejectionOrder.id, 'CANCELLED', reason);
         if (res.success) {
-            // Auto-refund if the order was already paid (skip for order_requests)
-            if (rejectionOrder.isPaid && !rejectionOrder.id.startsWith('req_')) {
-                const refundRes = await refundOrder(rejectionOrder.id, undefined, reason);
-                if (refundRes.success) {
-                    showToast(`Order #${rejectionOrder.displayId} Rejected & Refunded`);
-                } else {
-                    showToast(`Order Rejected. Refund failed — process manually.`);
-                }
-            } else {
-                showToast(`Order #${rejectionOrder.displayId} Rejected: ${reason}`);
-            }
+            // Refunds are admin-only: the merchant never issues a refund. A paid
+            // rejected order stays CANCELLED + paid and surfaces in the admin Refunds
+            // & Disputes queue, where an admin issues the real Razorpay refund (the
+            // customer is then notified). The merchant app is display-only for refunds.
+            showToast(`Order #${rejectionOrder.displayId} Rejected: ${reason}`);
             setShowRejectionModal(false);
             setRejectionOrder(null);
         } else {
