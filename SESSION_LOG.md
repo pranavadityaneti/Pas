@@ -4,6 +4,28 @@
 
 ---
 
+## Session: June 26, 2026 — Notifications hardening B1/B2/B3 (applied + deployed + audited)
+
+### Done
+- **B3 — realtime publication ROOT-CAUSE FIX (prod DB, applied):** Discovered `notifications` was **never** in the `supabase_realtime` publication (it had 8 tables; notifications absent) even though both apps subscribe to a `postgres_changes` channel on it → **live in-app notifications never worked** (bell only updated on fetch/refresh). A merchant-app comment had misdiagnosed this as an invalid filter. Applied idempotent `ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications` via `prisma db execute` → verified (9 tables now). Committed artifact: `apps/api/prisma/realtime_notifications_publication.sql`. RLS verified (SELECT `auth.uid()=user_id`) → no cross-user leak via realtime. **GOTCHA: publication is NOT managed by prisma migrate — re-apply that SQL on any DB rebuild.**
+- **B1 — push decoupling + atomic expiry (API, deployed):** Added `sendConsumerPush()` to notification.service.ts (push-only, reuses generic `merchantPushToken` table, never throws). Refactored `expireStaleOrderRequests` (scheduled-jobs.ts) → atomic `$transaction`: CAS flip→EXPIRED + ORDER_REQUEST_EXPIRED notification commit together (exactly-once); push OUTSIDE tx; roll-back-and-retry-next-tick on transient failure (no message drop).
+- **B2 — committed-stock low-stock crossing (API, deployed):** `PATCH /merchant/store-products/:id` re-reads committed stock after the write so the low/out-of-stock alert reflects concurrent order-decrements, not just the requested value.
+- **Deploy:** `npm run build` (tsc exit 0) → `eb deploy` → `app-260626_110841182841`, Ready/Green, `/health` 200. Prod already had A1+A2 (`app-260626_103455624574`).
+
+### Audit (line-by-line, post-deploy)
+- B1a: correct (mirrors proven sendConsumerNotification token path).
+- B1b: poison-row concern MOOT — `consumer_user_id` NOT NULL + `notifications` has NO FK → notification.create has no permanent failure mode → retry-on-transient is correct.
+- B2: oldStock-staleness residual benign (guarded by Number.isFinite + newStock!==oldStock).
+- B3 consequence: consumer `shouldShowBanner:false` (foreground = toast only, clean); **merchant `shouldShowBanner:true`** → foreground may show push banner + in-app toast/sound (mild redundancy). FLAGGED, not changed — UX call + 1-line merchant OTA if wanted.
+
+### Open threads
+- **B4 (next):** subscribe to Razorpay `refund.processed` webhook (dashboard) + handler in POST /webhooks/razorpay → REFUND_CREDITED notification.
+- B5/B6: notification icons for 3 new consumer types; merchant business notifications (KYC/payout).
+- B1/B2/B3 code is LIVE but UNCOMMITTED in the worktree (deploy shipped via .ebignore from working tree). Commit when ready.
+- Pre-existing: uncommitted deletion of `apps/api/scripts/check_provisional.ts` (not mine).
+
+---
+
 ## Session: June 22, 2026 — Category feature go-live, catalog cleanup, OTA, branch scope
 
 ### Done (continuation of the category-visibility work)
