@@ -6708,6 +6708,16 @@ app.get('/debug/list-users', async (req, res) => {
 // ==========================================
 // --- WhatsApp OTP Authentication Routes ---
 // ==========================================
+// Test-phone OTP bypass: these numbers skip WhatsApp delivery (send-otp) and accept
+// the fixed code 123456 (verify-otp). For app-store reviewers + internal signup-flow
+// testing when WhatsApp/Wati is unavailable. NOT real users; suffix-matched to
+// tolerate 91 / +91 prefixes. REMOVE post-testing (tracked in forlater.md).
+const OTP_BYPASS_PHONES = ['9959777027', '9100117027'];
+const OTP_BYPASS_CODE = '123456';
+function isOtpBypassPhone(phone) {
+    const digits = String(phone || '').replace(/\D/g, '');
+    return OTP_BYPASS_PHONES.some(p => digits.endsWith(p));
+}
 /**
  * POST /auth/send-otp
  * Generate a 6-digit OTP and send via WhatsApp (Wati)
@@ -6719,8 +6729,8 @@ app.post('/auth/send-otp', async (req, res) => {
     const rawInput = req.body.phone || req.body.phoneNumber || '';
     const incomingPhone = String(rawInput).replace(/\D/g, '');
     console.log('>>> [DEBUG] PARSED PHONE:', incomingPhone);
-    if (incomingPhone.endsWith('9959777027')) {
-        console.log('[Reviewer Bypass] Intercepted Send OTP request. Bypassing WhatsApp API.');
+    if (isOtpBypassPhone(incomingPhone)) {
+        console.log('[OTP Bypass] Intercepted Send OTP for test number. Bypassing WhatsApp API.');
         return res.status(200).json({ success: true, message: 'Mock OTP sent successfully.' });
     }
     try {
@@ -6799,7 +6809,7 @@ app.post('/auth/verify-otp', async (req, res) => {
         if (!phone || !otp) {
             return res.status(400).json({ error: 'Phone and OTP are required' });
         }
-        const isReviewer = phone.endsWith('9959777027') && otp === '123456';
+        const isReviewer = isOtpBypassPhone(phone) && otp === OTP_BYPASS_CODE;
         let record = null;
         if (!isReviewer) {
             console.log(`[Auth] Looking for unverified OTP for phone: ${phone}`);
