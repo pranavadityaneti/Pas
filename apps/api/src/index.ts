@@ -5407,6 +5407,126 @@ app.post('/orders/:id/exchange', async (req, res) => {
  * EXCHANGE_APPROVED. On REJECTED: flips to RETURN_REJECTED or
  * EXCHANGE_REJECTED.
  */
+// Shared return/exchange decision engine — used by BOTH the merchant route below
+// AND the admin route (PATCH /admin/orders/:id/issue/:issueId). The CALLER does
+// authorization; this performs the atomic decision: compare-and-set the issue out
+// of PENDING, flip order status, issue the Razorpay refund (returns only) + clawback,
+// persist the refund id, and notify the consumer (RETURN_DECISION/EXCHANGE_DECISION).
+// The PENDING compare-and-set makes it idempotent — a retry or a concurrent cron
+// auto-approve can never double-refund (returns ok:false status 409 instead).
+type DecideIssueResult =
+    | { ok: true; issue: any; order: any; refund: { razorpayRefundId: string; simulated: boolean } | null }
+    | { ok: false; status: number; error: string };
+async function decideOrderIssue(params: {
+    orderId: string;
+    issueId: string;
+    decision: 'APPROVED' | 'REJECTED';
+    decisionReason?: string;
+    resolvedById: string;
+}): Promise<DecideIssueResult> {
+    const { orderId, issueId, decision, decisionReason, resolvedById } = params;
+    if (decision !== 'APPROVED' && decision !== 'REJECTED') {
+        return { ok: false, status: 400, error: "decision must be 'APPROVED' or 'REJECTED'." };
+    }
+
+    const order = await prisma.order.findUnique({ where: { id: orderId }, include: { user: true, store: true } });
+    if (!order) return { ok: false, status: 404, error: 'Order not found.' };
+
+    const issue = await prisma.orderIssue.findUnique({ where: { id: issueId } });
+    if (!issue || issue.orderId !== order.id) return { ok: false, status: 404, error: 'Issue not found for this order.' };
+    if (issue.status !== 'PENDING') return { ok: false, status: 400, error: `Issue is already ${issue.status}; cannot decide twice.` };
+
+    const now = new Date();
+    const newIssueStatus = decision === 'APPROVED' ? 'APPROVED' : 'REJECTED';
+    const newOrderStatus =
+        decision === 'APPROVED' && issue.type === 'return'   ? 'RETURN_APPROVED'   :
+        decision === 'REJECTED' && issue.type === 'return'   ? 'RETURN_REJECTED'   :
+        decision === 'APPROVED' && issue.type === 'exchange' ? 'EXCHANGE_APPROVED' :
+        decision === 'REJECTED' && issue.type === 'exchange' ? 'EXCHANGE_REJECTED' :
+        order.status;
+    const needsRefund = decision === 'APPROVED' && issue.type === 'return' && (issue.refundAmountInr ?? 0) > 0;
+
+    // FLIP STATUS FIRST, atomically. The updateMany WHERE status:'PENDING' is a
+    // compare-and-set — if a concurrent cron auto-approve / another session already
+    // moved the issue out of PENDING, count === 0 and we bail (409) BEFORE the
+    // refund block, so the same payment is never refunded twice. isPaid flips here
+    // for refund-bearing approvals so the customer's state matches intent immediately.
+    let result: { issue: any; order: any };
+    try {
+        result = await prisma.$transaction(async (tx) => {
+            const updateRes = await tx.orderIssue.updateMany({
+                where: { id: issueId, status: 'PENDING' },
+                data: {
+                    status: newIssueStatus,
+                    merchantDecisionReason: decisionReason ? String(decisionReason).slice(0, 500) : null,
+                    resolvedBy: resolvedById,
+                    resolvedAt: now,
+                },
+            });
+            if (updateRes.count === 0) throw new Error('CONCURRENT_DECISION');
+            const updatedIssue = await tx.orderIssue.findUnique({ where: { id: issueId } });
+            const updatedOrder = await tx.order.update({
+                where: { id: order.id },
+                data: { status: newOrderStatus, ...(needsRefund && { isPaid: false }) },
+            });
+            return { issue: updatedIssue!, order: updatedOrder };
+        });
+    } catch (err: any) {
+        if (err?.message === 'CONCURRENT_DECISION') {
+            return { ok: false, status: 409, error: 'This issue was already decided by another process (cron auto-approve or another session). Refresh and try again.' };
+        }
+        throw err;
+    }
+
+    // Razorpay refund AFTER status commit. Safe — the PENDING CAS above blocks duplicates.
+    let refundResult: { razorpayRefundId: string; simulated: boolean } | null = null;
+    if (needsRefund) {
+        refundResult = await processRazorpayRefund(order.metadata, issue.refundAmountInr!);
+        try { await detectClawback(prisma, order.id, issue.refundAmountInr!, `issue refund ${refundResult.razorpayRefundId}`); } catch (e) { console.error('[7D] clawback detect (issue) failed:', e); }
+        await prisma.$transaction(async (tx) => {
+            await tx.orderIssue.update({
+                where: { id: issueId },
+                data: { refundRazorpayId: refundResult!.razorpayRefundId, refundProcessedAt: now },
+            });
+            await tx.order.update({
+                where: { id: order.id },
+                data: {
+                    metadata: {
+                        ...(typeof result.order.metadata === 'object' && result.order.metadata !== null ? result.order.metadata : {}),
+                        returnRazorpayRefundId: refundResult!.razorpayRefundId,
+                        returnRefundSimulated: refundResult!.simulated,
+                    } as any,
+                },
+            });
+        }).catch((e: any) => console.error('[decideOrderIssue] metadata refund write failed:', e));
+    }
+
+    notificationService.sendConsumerNotification({
+        userId: order.userId,
+        title: `${issue.type === 'return' ? 'Return' : 'Exchange'} ${decision.toLowerCase()}`,
+        body: `Order #${order.orderNumber}: ${decision === 'APPROVED' ? 'approved' : 'declined'}${decisionReason ? ` — ${decisionReason}` : ''}.`,
+        type: issue.type === 'return' ? 'RETURN_DECISION' : 'EXCHANGE_DECISION',
+        referenceId: order.id,
+        storeId: order.storeId,
+        link: `/orders/${order.id}`,
+        metadata: {
+            orderNumber: order.orderNumber,
+            issueId: issue.id,
+            decision: newIssueStatus,
+            refundInr: issue.refundAmountInr ?? null,
+            razorpayRefundId: refundResult?.razorpayRefundId ?? null,
+        },
+    }).catch(e => console.error('[decideOrderIssue] customer notif failed:', e));
+    io.emit('order_updated', result.order);
+
+    return {
+        ok: true,
+        issue: result.issue,
+        order: result.order,
+        refund: refundResult ? { razorpayRefundId: refundResult.razorpayRefundId, simulated: refundResult.simulated } : null,
+    };
+}
+
 app.patch('/orders/:id/issue/:issueId', async (req, res) => {
     const user = await requireUser(req, res);
     if (!user) return;
@@ -5414,156 +5534,16 @@ app.patch('/orders/:id/issue/:issueId', async (req, res) => {
         const { id, issueId } = req.params;
         const { decision, merchantDecisionReason } = req.body || {};
 
-        if (decision !== 'APPROVED' && decision !== 'REJECTED') {
-            return res.status(400).json({ error: "decision must be 'APPROVED' or 'REJECTED'." });
-        }
+        // Merchant authorization (store-scoped). The decision itself runs through the
+        // shared decideOrderIssue() so merchant + admin behave identically.
+        const ord = await prisma.order.findUnique({ where: { id }, select: { storeId: true } });
+        if (!ord) return res.status(404).json({ error: 'Order not found.' });
+        const canManage = await userCanManageOrderStore(user.id, ord.storeId);
+        if (!canManage) return res.status(403).json({ error: 'You do not have merchant access to this order.' });
 
-        const order = await prisma.order.findUnique({ where: { id }, include: { user: true, store: true } });
-        if (!order) return res.status(404).json({ error: 'Order not found.' });
-
-        const canManage = await userCanManageOrderStore(user.id, order.storeId);
-        if (!canManage) {
-            return res.status(403).json({ error: 'You do not have merchant access to this order.' });
-        }
-
-        const issue = await prisma.orderIssue.findUnique({ where: { id: issueId } });
-        if (!issue || issue.orderId !== order.id) {
-            return res.status(404).json({ error: 'Issue not found for this order.' });
-        }
-        if (issue.status !== 'PENDING') {
-            return res.status(400).json({ error: `Issue is already ${issue.status}; cannot decide twice.` });
-        }
-
-        const now = new Date();
-        const newIssueStatus = decision === 'APPROVED' ? 'APPROVED' : 'REJECTED';
-        const newOrderStatus =
-            decision === 'APPROVED' && issue.type === 'return'   ? 'RETURN_APPROVED'   :
-            decision === 'REJECTED' && issue.type === 'return'   ? 'RETURN_REJECTED'   :
-            decision === 'APPROVED' && issue.type === 'exchange' ? 'EXCHANGE_APPROVED' :
-            decision === 'REJECTED' && issue.type === 'exchange' ? 'EXCHANGE_REJECTED' :
-            order.status;
-        const needsRefund = decision === 'APPROVED' && issue.type === 'return' && (issue.refundAmountInr ?? 0) > 0;
-
-        // FLIP STATUS FIRST inside a transaction (Bug 2 fix).
-        //
-        // Previously the Razorpay refund was called BEFORE this transaction.
-        // If the refund succeeded but the transaction then failed, the issue
-        // would still be PENDING — so the merchant could click Approve again
-        // and refund the same payment a second time. By committing the
-        // APPROVED/REJECTED state first, the `issue.status !== 'PENDING'`
-        // guard at the top of this endpoint blocks any retry.
-        //
-        // isPaid is also flipped here for refund-bearing approvals so that
-        // the customer's perceived state ("refund issued") matches the
-        // merchant's intent the moment they tap Approve. If Razorpay fails
-        // afterward, metadata.returnRefundSimulated stays absent / 'rfnd_err'
-        // and ops reconciles from the dashboard.
-        // ATOMIC COMPARE-AND-SET (Bug N2 fix — third-pass audit).
-        //
-        // Previously this used `tx.orderIssue.update` which is unconditional —
-        // it doesn't re-check the row's current status. That left a TOCTOU
-        // race window: between the `issue.status !== 'PENDING'` check above
-        // and this transaction, the cron SLA job (or a parallel merchant tab)
-        // could have flipped the issue to AUTO_APPROVED/APPROVED. Both
-        // processes would then commit their own status change (last-write-
-        // wins) AND each would call Razorpay → double refund.
-        //
-        // `updateMany` with `status: 'PENDING'` in the WHERE clause makes
-        // this an atomic compare-and-set: the row only updates if its
-        // current status is still PENDING. If another process won the race,
-        // `count === 0` and we throw a sentinel error that the outer
-        // try/catch maps to a 409 — the refund block below is skipped
-        // because we never get there.
-        let result: { issue: any; order: any };
-        try {
-            result = await prisma.$transaction(async (tx) => {
-                const updateRes = await tx.orderIssue.updateMany({
-                    where: { id: issueId, status: 'PENDING' },
-                    data: {
-                        status: newIssueStatus,
-                        merchantDecisionReason: merchantDecisionReason ? String(merchantDecisionReason).slice(0, 500) : null,
-                        resolvedBy: user.id,
-                        resolvedAt: now,
-                    },
-                });
-                if (updateRes.count === 0) {
-                    // Another process (cron auto-approve or a second merchant tab)
-                    // already moved this issue out of PENDING. Bail before doing
-                    // anything else — the refund must not fire a second time.
-                    throw new Error('CONCURRENT_DECISION');
-                }
-                const updatedIssue = await tx.orderIssue.findUnique({ where: { id: issueId } });
-                const updatedOrder = await tx.order.update({
-                    where: { id: order.id },
-                    data: {
-                        status: newOrderStatus,
-                        ...(needsRefund && { isPaid: false }),
-                    },
-                });
-                return { issue: updatedIssue!, order: updatedOrder };
-            });
-        } catch (err: any) {
-            if (err?.message === 'CONCURRENT_DECISION') {
-                return res.status(409).json({
-                    error: 'This issue was already decided by another process (cron auto-approve or another session). Refresh and try again.',
-                });
-            }
-            throw err;
-        }
-
-        // Razorpay refund AFTER status is committed. Safe to retry the
-        // endpoint now — `issue.status !== 'PENDING'` blocks duplicates.
-        let refundResult: { razorpayRefundId: string; simulated: boolean } | null = null;
-        if (needsRefund) {
-            refundResult = await processRazorpayRefund(order.metadata, issue.refundAmountInr!);
-            // Phase 7D (2026-06-10): settled-order refund → clawback entry.
-            try { await detectClawback(prisma, order.id, issue.refundAmountInr!, `issue refund ${refundResult.razorpayRefundId}`); } catch (e) { console.error('[7D] clawback detect (issue) failed:', e); }
-            // Persist refund id back to issue + order metadata. If this
-            // post-refund write fails, ops reconciles from Razorpay; the
-            // status above is the canonical "approved" record.
-            await prisma.$transaction(async (tx) => {
-                await tx.orderIssue.update({
-                    where: { id: issueId },
-                    data: { refundRazorpayId: refundResult!.razorpayRefundId, refundProcessedAt: now },
-                });
-                await tx.order.update({
-                    where: { id: order.id },
-                    data: {
-                        metadata: {
-                            ...(typeof result.order.metadata === 'object' && result.order.metadata !== null ? result.order.metadata : {}),
-                            returnRazorpayRefundId: refundResult!.razorpayRefundId,
-                            returnRefundSimulated: refundResult!.simulated,
-                        } as any,
-                    },
-                });
-            }).catch((e: any) => console.error('[issue PATCH] metadata refund write failed:', e));
-        }
-
-        // Customer notification
-        notificationService.sendConsumerNotification({
-            userId: order.userId,
-            title: `${issue.type === 'return' ? 'Return' : 'Exchange'} ${decision.toLowerCase()}`,
-            body: `Order #${order.orderNumber}: ${decision === 'APPROVED' ? 'approved' : 'declined'}${merchantDecisionReason ? ` — ${merchantDecisionReason}` : ''}.`,
-            type: issue.type === 'return' ? 'RETURN_DECISION' : 'EXCHANGE_DECISION',
-            referenceId: order.id,
-            storeId: order.storeId,
-            link: `/orders/${order.id}`,
-            metadata: {
-                orderNumber: order.orderNumber,
-                issueId: issue.id,
-                decision: newIssueStatus,
-                refundInr: issue.refundAmountInr ?? null,
-                razorpayRefundId: refundResult?.razorpayRefundId ?? null,
-            },
-        }).catch(e => console.error('[issue PATCH] customer notif failed:', e));
-        io.emit('order_updated', result.order);
-
-        return res.json({
-            success: true,
-            issue: result.issue,
-            order: result.order,
-            refund: refundResult ? { razorpayRefundId: refundResult.razorpayRefundId, simulated: refundResult.simulated } : null,
-        });
+        const r = await decideOrderIssue({ orderId: id, issueId, decision, decisionReason: merchantDecisionReason, resolvedById: user.id });
+        if (!r.ok) return res.status(r.status).json({ error: r.error });
+        return res.json({ success: true, issue: r.issue, order: r.order, refund: r.refund });
     } catch (err: any) {
         console.error('[issue PATCH] error:', err);
         Sentry.captureException(err, { tags: { area: 'ws2.merchantPatch' }, extra: { orderId: req.params.id, issueId: req.params.issueId, userId: user.id } });
@@ -10452,6 +10432,78 @@ app.post('/admin/orders/:id/refund', async (req, res) => {
     } catch (err: any) {
         console.error('[admin/orders/:id/refund] error:', err?.message || err);
         return res.status(500).json({ error: 'Refund failed' });
+    }
+});
+
+// Phase 3a (2026-06-26): admin returns/exchanges queue. Returns are admin-owned, so
+// this lists OrderIssue rows across ALL stores (the merchant inbox is store-scoped).
+// requireAdmin. Query: ?status=PENDING|APPROVED|REJECTED|AUTO_APPROVED|ALL & type=return|exchange|ALL & limit
+app.get('/admin/issues', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res); if (!admin) return;
+        const statusParam = String(req.query.status || 'PENDING').toUpperCase();
+        const typeParam = String(req.query.type || 'ALL').trim();
+        const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '100'), 10) || 100));
+        const validStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'AUTO_APPROVED', 'ALL'];
+        if (!validStatuses.includes(statusParam)) return res.status(400).json({ error: `status must be one of ${validStatuses.join(', ')}` });
+        const validTypes = ['return', 'exchange', 'ALL'];
+        if (!validTypes.includes(typeParam)) return res.status(400).json({ error: `type must be one of ${validTypes.join(', ')}` });
+
+        const where: any = {};
+        if (statusParam !== 'ALL') where.status = statusParam;
+        if (typeParam !== 'ALL') where.type = typeParam;
+
+        const issues = await prisma.orderIssue.findMany({
+            where,
+            orderBy: [{ status: 'asc' }, { slaDueAt: 'asc' }],
+            take: limit,
+            include: {
+                order: {
+                    select: {
+                        id: true, orderNumber: true, status: true, totalAmount: true,
+                        customer_name: true, customer_phone: true, store_name: true,
+                        order_type: true, createdAt: true, isPaid: true, storeId: true,
+                        user: { select: { name: true, phone: true, email: true } },
+                        items: {
+                            select: {
+                                id: true, quantity: true, price: true, product_name: true,
+                                storeProduct: { select: { product: { select: { name: true, returnable: true } } } },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        return res.json(issues);
+    } catch (err: any) {
+        console.error('[admin/issues] error:', err?.message || err);
+        return res.status(500).json({ error: 'Failed to list issues' });
+    }
+});
+
+// Phase 3a (2026-06-26): admin decides a return/exchange (approve/reject, + Razorpay
+// refund on approved returns). Same shared decideOrderIssue() engine as the merchant
+// route, admin-authorized (global, no store scoping). requireAdmin + audited.
+app.patch('/admin/orders/:id/issue/:issueId', async (req, res) => {
+    try {
+        const admin = await requireAdmin(req, res); if (!admin) return;
+        const { id, issueId } = req.params;
+        const reason = req.body?.merchantDecisionReason ?? req.body?.reason;
+        const r = await decideOrderIssue({ orderId: id, issueId, decision: req.body?.decision, decisionReason: reason, resolvedById: admin.id });
+        if (!r.ok) return res.status(r.status).json({ error: r.error });
+        await recordAdminAudit(req, {
+            actorId: admin.id,
+            action: 'order.issue.decide',
+            targetTable: 'order_issues',
+            targetId: issueId,
+            before: { status: 'PENDING' },
+            after: { decision: r.issue?.status ?? null, orderId: id, refundRazorpayId: r.refund?.razorpayRefundId ?? null },
+            reason: reason || null,
+        });
+        return res.json({ success: true, issue: r.issue, order: r.order, refund: r.refund });
+    } catch (err: any) {
+        console.error('[admin issue decide] error:', err?.message || err);
+        return res.status(500).json({ error: 'Failed to decide issue' });
     }
 });
 
