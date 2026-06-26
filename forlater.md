@@ -38,6 +38,9 @@
 
 ## ⏰ NEXT SESSION REMINDERS (read at start of next session)
 
+0. **OTP test-bypass — REMOVE post-testing (security).** `index.ts` `OTP_BYPASS_PHONES = ['9959777027','9100117027']` + code `123456` lets these numbers skip WhatsApp + sign in with a fixed OTP (added 2026-06-25, EB `app-260626_074033519585`, for signup testing while Wati/WhatsApp was down). Strip `9100117027` (and ideally move the whole list to an env var) once testing is done. **Pending manual run by Pranav:** `cd apps/api && npx tsx scripts/_purge_9100117027.ts --apply` — frees 9100117027 (deletes 3 User accounts + auth login + store shell + favorites/staff/order_requests/OTPs; writes a rollback snapshot). The auto-classifier blocks the agent from running it (production user-account deletion); Pranav runs it or adds a Bash permission rule. Signup on 9100117027 also works WITHOUT the purge (just not a clean slate).
+
+
 1. **Verify B3 (API server-side notification metadata) is actually populating link + metadata.** Yesterday's `eb deploy` officially failed but the new code activated at 17:52 UTC after a 45-minute npm install. No notifications fired between then and end-of-session — so verification was deferred to next morning. **First action of next session:** run this SQL:
    ```sql
    SELECT id, type, link, metadata, created_at
