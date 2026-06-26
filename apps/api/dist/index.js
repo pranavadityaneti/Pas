@@ -3978,125 +3978,18 @@ app.patch('/orders/:id/status', async (req, res) => {
         res.status(500).json({ error: 'Failed to update order status' });
     }
 });
-// Refund Order Endpoint
+// Refund Order Endpoint — RETIRED 2026-06-26 (audit A1: "merchants never refund").
+// This legacy route was merchant-gated (userCanManageOrderStore) and only SIMULATED
+// a refund — it flipped the order to REFUNDED + clawed back the payout + sent a
+// "Refund Processed" SMS without ever moving money. That is exactly the merchant-
+// reachable refund path the audit flagged. It has no callers (the merchant app's
+// refundOrder() was removed in Phase 1). It now returns 403 so a stale merchant build
+// can't fake a refund. Real refunds are admin-only: POST /admin/orders/:id/refund.
 app.post('/orders/:id/refund', async (req, res) => {
-    // Round-5 hardening (forlater #11): auth was completely absent on this
-    // endpoint. Any unauthenticated caller could refund any order and wipe
-    // its metadata. Now requires (a) a valid user token and (b) merchant
-    // access to the order's store.
     const user = await requireUser(req, res);
     if (!user)
         return;
-    try {
-        const { id } = req.params;
-        const { amount, reason } = req.body; // Optional partial refund later
-        const order = await prisma.order.findUnique({
-            where: { id },
-            include: { user: true }
-        });
-        if (!order)
-            return res.status(404).json({ error: 'Order not found' });
-        const canManage = await userCanManageOrderStore(user.id, order.storeId);
-        if (!canManage) {
-            return res.status(403).json({ error: 'You do not have merchant access to this order.' });
-        }
-        if (!order.isPaid)
-            return res.status(400).json({ error: 'Cannot refund an unpaid order' });
-        if (order.status === 'REFUNDED')
-            return res.status(400).json({ error: 'Order already refunded' });
-        // Round-5 hardening: block WS2 lifecycle states. The WS2 flows have
-        // their own refund handling — going through this legacy endpoint
-        // would wipe the WS2 metadata and bypass the issue-tracking flow.
-        if (['CANCELLED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'RETURN_REQUESTED',
-            'EXCHANGE_APPROVED', 'EXCHANGE_REJECTED', 'EXCHANGE_REQUESTED'].includes(order.status)) {
-            return res.status(400).json({
-                error: `Order is in ${order.status} — use the WS2 endpoints (cancel / issue PATCH) instead.`,
-            });
-        }
-        // Initialize Razorpay (Safely)
-        let razorpayInstance = null;
-        try {
-            const Razorpay = require('razorpay');
-            if (process.env.RAZORPAY_KEY_ID) {
-                razorpayInstance = new Razorpay({
-                    key_id: process.env.RAZORPAY_KEY_ID,
-                    key_secret: process.env.RAZORPAY_KEY_SECRET
-                });
-            }
-            else {
-                console.warn('[Refund] No Razorpay keys found in env. Refund will be SIMULATED.');
-            }
-        }
-        catch (e) {
-            console.warn('[Refund] Failed to load Razorpay library. Refund will be SIMULATED.', e);
-        }
-        // Attempt Refund via Razorpay if possible
-        let refundResult = null;
-        if (razorpayInstance) {
-            try {
-                // In production, we'd use paymentId. Here we simulate the call mostly.
-                // await razorpayInstance.payments.refund(...) 
-                console.log(`[Refund] Initiating Razorpay refund for Order #${order.orderNumber}...`);
-                // Simulate a real ID since we don't have a paymentId to refund against in this mock DB
-                // In a real flow:
-                // refundResult = await razorpayInstance.payments.refund(order.paymentId, { amount: amount * 100 });
-                refundResult = { id: `rfnd_test_${Date.now()}`, status: 'processed' };
-            }
-            catch (rpError) {
-                console.error('[Refund] Razorpay API failed:', rpError);
-                // Depending on policy, we might want to return here. 
-                // But for this test phase, we'll proceed to mark as REFUNDED locally so the flow isn't blocked.
-            }
-        }
-        // Update Status to REFUNDED (Local Database)
-        // Round-5 hardening: spread existing metadata instead of replacing.
-        // Previous behavior wiped razorpayPaymentId, orderRequestId, and any
-        // WS2 audit fields. Now we merge — the refund id is added alongside
-        // the existing record.
-        const refundedOrder = await prisma.order.update({
-            where: { id },
-            data: {
-                status: 'REFUNDED',
-                isPaid: false,
-                returnReason: reason || 'Refund processed',
-                metadata: refundResult
-                    ? {
-                        ...(typeof order.metadata === 'object' && order.metadata !== null ? order.metadata : {}),
-                        razorpayRefundId: refundResult.id,
-                        legacyRefundAt: new Date().toISOString(),
-                    }
-                    : order.metadata ?? undefined,
-            },
-            include: { user: true }
-        });
-        // Phase 7G (2026-06-11, audit fix): this endpoint can flip a settled
-        // COMPLETED order to REFUNDED — the ledger must claw the payout back
-        // on the next cycle, same as the cancel/issue/SLA refund paths.
-        const clawAmount = Number(amount) > 0 ? Number(amount) : (Number(order.totalAmount) || 0);
-        try {
-            await (0, settlement_service_1.detectClawback)(prisma, id, clawAmount, `legacy refund ${refundResult?.id ?? 'recorded'}`);
-        }
-        catch (e) {
-            console.error('[7D] clawback detect (legacy refund) failed:', e);
-        }
-        if (refundedOrder.user?.phone) {
-            sms_service_1.smsService.sendOrderUpdate(refundedOrder.user.phone, id, 'Refund Processed').catch(err => console.error('SMS Failed:', err));
-        }
-        io.emit('order_updated', refundedOrder);
-        // IMPORTANT: Always return JSON
-        res.json({ success: true, message: 'Refund processed successfully', order: refundedOrder });
-    }
-    catch (error) {
-        console.error('Refund Error:', error);
-        // Round-6 (cross-cutting medium): Sentry parity with WS2 endpoints.
-        Sentry.captureException(error, {
-            tags: { area: 'ws2.legacyRefund' },
-            extra: { orderId: req.params.id, userId: user.id },
-        });
-        // Ensure JSON response even on crash
-        (0, api_error_handler_1.markResponseAsReported)(res);
-        res.status(500).json({ error: 'Failed to process refund', details: error.message });
-    }
+    return res.status(403).json({ error: 'Refunds are handled by the PAS team. Merchants cannot issue refunds.' });
 });
 // Payment Webhook (Simulation)
 app.post('/webhooks/payment', async (req, res) => {
