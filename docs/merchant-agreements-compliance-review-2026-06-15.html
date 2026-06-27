@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Merchant Agreements — Compliance Review (2026-06-15)</title>
+<style>
+  :root { --ink:#1a1a1a; --muted:#666; --red:#B52725; --line:#e3e3e3; --bg:#fafafa; --code:#f4f4f6;
+          --crit:#c0392b; --critbg:#fdecea; --high:#9a6700; --highbg:#fff8e6; --med:#2c5f8a; --medbg:#eaf3fb; --green:#1b7f3b; --greenbg:#e7f6ec; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--ink); line-height: 1.55; margin: 0; background:#fff; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 40px 28px 90px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  h2 { font-size: 19px; margin: 40px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--red); }
+  h3 { font-size: 15.5px; margin: 22px 0 6px; }
+  p, li, td { font-size: 14px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+  .disclaimer { background: var(--critbg); border: 1px solid #f3b7b0; border-left: 4px solid var(--crit); border-radius: 6px; padding: 13px 16px; margin: 18px 0; font-size: 13.5px; }
+  .disclaimer b { color: var(--crit); }
+  .banner { background: var(--bg); border: 1px solid var(--line); border-left: 4px solid var(--red); border-radius: 6px; padding: 12px 16px; margin: 16px 0; font-size: 13.5px; }
+  .toc { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 16px 20px; margin: 22px 0; }
+  .toc ol { margin: 6px 0 0; padding-left: 20px; } .toc a { color: var(--red); text-decoration: none; } .toc a:hover { text-decoration: underline; }
+  .item { border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; margin: 14px 0; }
+  .item.crit { border-left: 4px solid var(--crit); } .item.high { border-left: 4px solid var(--high); } .item.med { border-left: 4px solid var(--med); }
+  .sev { display:inline-block; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:10px; letter-spacing:.4px; vertical-align:middle; margin-right:8px; }
+  .sev.crit { background:var(--critbg); color:var(--crit); } .sev.high { background:var(--highbg); color:var(--high); }
+  .sev.med { background:var(--medbg); color:var(--med); } .sev.live { background:#2b2b2b; color:#fff; }
+  .item h3 { margin-top: 0; }
+  .why { color:#333; } .fix { background:var(--code); border:1px solid var(--line); border-radius:6px; padding:9px 12px; margin-top:8px; font-size:13px; }
+  .fix b { color: var(--green); }
+  code { font-family:"SF Mono",Menlo,Consolas,monospace; background:var(--code); padding:1px 5px; border-radius:4px; font-size:12.5px; }
+  ul.tight { margin:6px 0; } ul.tight li { margin:4px 0; }
+  table { border-collapse: collapse; width:100%; margin:14px 0; font-size:13px; }
+  th, td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
+  th { background:var(--bg); font-weight:600; }
+  .ok { background: var(--greenbg); border:1px solid #bfe3cb; border-radius:8px; padding:12px 18px; margin:14px 0; }
+  .small { font-size:12.5px; color:var(--muted); }
+  hr { border:none; border-top:1px solid var(--line); margin:28px 0; }
+  @media print { .wrap{max-width:100%;padding:0;} h2{page-break-after:avoid;} .item,table{page-break-inside:avoid;} a{color:var(--ink);text-decoration:none;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Merchant Agreements — Compliance Review</h1>
+  <p class="sub">Pick At Store (PAS Retail Networks Pvt. Ltd.) · 2026-06-15 · three agreements: Grocery (2%), Other Stores (5%), Restaurant (5%/7%)</p>
+
+  <div class="disclaimer">
+    <b>NOT LEGAL ADVICE.</b> This is a structured, non-lawyer review (engineering + compliance lens) to hand to qualified Indian legal counsel and a chartered accountant. Every item below is flagged for their confirmation, not asserted as legal fact. Several findings were verified directly in the codebase and are noted as such.
+  </div>
+
+  <div class="banner">
+    <b>Bottom line.</b> The agreements are a competent B2B skeleton — clear intermediary status, indemnity, liability cap, a named grievance officer, and a real electronic-execution audit trail. But they were drafted <b>before</b> today's tax/fee decisions, and in four places the <b>live system contradicts the signed text on money</b>. Two of those are exposures to fix <b>before the first real settlement and before more merchants sign</b>: (1) the 1.9% gateway fee is authorized nowhere in the signed document, and (2) the commission engine's default rate (8%/10%) exceeds the signed restaurant/bakery rate (5%/7%).
+  </div>
+
+  <div class="toc">
+    <b>Contents</b>
+    <ol>
+      <li><a href="#today">Today's tax/fee decisions vs the signed text</a></li>
+      <li><a href="#contradictions">Signed text vs the live system (verified in code)</a></li>
+      <li><a href="#critical">Critical must-haves missing</a></li>
+      <li><a href="#sector">Sector / licensing gaps (FSSAI, pharmacy, Legal Metrology)</a></li>
+      <li><a href="#enforce">Enforceability — e-signature, stamp duty, boilerplate</a></li>
+      <li><a href="#quickwins">Quick wins</a></li>
+      <li><a href="#checklist">Lawyer + CA checklist</a></li>
+      <li><a href="#strengths">What the agreements get right</a></li>
+    </ol>
+  </div>
+
+  <h2 id="today">1 · Today's tax/fee decisions vs the signed text</h2>
+  <p>Of the four charges decided today, only the commission itself is clearly on the signed page. The rest range from <b>absent</b> to <b>thin-but-arguable</b> — and none are implemented in the settlement engine yet.</p>
+
+  <div class="item crit">
+    <h3><span class="sev crit">CRITICAL · ABSENT</span>1.9% payment-gateway fee borne by the merchant</h3>
+    <p class="why">No clause anywhere authorizes it. §23 (Payment Services) only <i>disclaims PAS liability</i> for gateway failures; the §3.5/§3.7 settlement clause deducts "other agreed charges," but that term is undefined and the 1.9% is quantified nowhere in the signed document — so it is not an "agreed" charge against any merchant. The commission (2/5/7%) is stated precisely; a fee that's ~25–95% as large is invisible. <b>Verified in code:</b> the net formula omits any gateway term and there's no gateway column in the schema — so it's neither papered <i>nor</i> implemented.</p>
+    <div class="fix"><b>Fix:</b> Add an explicit "Payment Processing Fee" clause in COMMERCIAL TERMS (1.9% of gross, deductible at settlement, pass-through of aggregator charges, exclusive of taxes), and add it to the §3.5/§3.7 deduction list. <b>Until re-signed, deducting 1.9% on already-signed agreements is a live unauthorized-deduction exposure</b> — counsel to advise: notice+consent, re-sign, or separate invoice.</div>
+  </div>
+
+  <div class="item high">
+    <h3><span class="sev high">HIGH · THIN</span>18% GST on PAS commission + tax invoice</h3>
+    <p class="why">Only support is §3.4/§3.6 "exclusive of applicable taxes." Arguably puts GST on top of commission, but does not name 18%, does not state PAS will <b>raise a GST tax invoice</b>, and does not confirm the merchant can claim input tax credit. §25 runs the other way (merchant-side tax only). Reserved <code>gstOnCommission</code> column exists but is hardcoded 0.</p>
+    <div class="fix"><b>Fix:</b> Add to Taxes: "PAS's commission, onboarding fee, payment-processing fee and other charges are exclusive of GST; PAS shall levy GST at the applicable rate (currently 18%) and issue a valid GST tax invoice enabling input tax credit. PAS's GSTIN is [___]." CA to confirm SAC/rate + place-of-supply.</div>
+  </div>
+
+  <div class="item high">
+    <h3><span class="sev high">HIGH · THIN</span>0.1% TDS §194-O withheld by PAS</h3>
+    <p class="why">Only support is the settlement "taxes, government deductions" catch-all — which doesn't name §194-O, doesn't oblige PAN furnishing (so the §206AA higher non-PAN rate isn't flagged), doesn't commit PAS to issue Form 16A, and the merchant never expressly consents. PAN <i>is</i> captured in the header (helpful), but the clause is missing. No TDS computation in the engine.</p>
+    <div class="fix"><b>Fix:</b> Add a clause: merchant acknowledges PAS is an e-commerce operator under §194-O and authorizes 0.1% deduction (or §206AA rate without valid PAN), agrees to furnish/maintain PAN, and PAS deposits the TDS + issues Form 16A for Form 26AS credit. CA to confirm the gross base + thresholds.</div>
+  </div>
+
+  <div class="item med">
+    <h3><span class="sev med">MEDIUM</span>GST TCS §52 (0.5%) — not selected, but confirm it's genuinely not mandatory</h3>
+    <p class="why">Correctly absent operationally, but <b>for a GST-registered e-commerce operator collecting consideration on registered sellers' taxable supplies, §52 TCS is commonly mandatory, not optional.</b> Get the CA's written determination, and add a dormant enabling clause so PAS needn't re-paper every agreement if it later applies.</p>
+  </div>
+
+  <div class="item med">
+    <h3><span class="sev med">MEDIUM</span>Dining commission base — what 7% / 1.9% / GST / TDS attach to</h3>
+    <p class="why">§3.4 charges 7% on "orders originating through the Platform." Unclear whether, for a customer who only <i>reserved</i> via the Platform and pays in-restaurant (PAS not processing payment), 7% applies to the whole bill — and whether the gateway fee + §194-O TDS even apply to that non-Platform-processed leg. This sets the base every today-charge attaches to. CA to confirm.</p>
+  </div>
+
+  <div class="banner"><b>Sequencing implication for the payout build:</b> the engine work we scoped (deduct 1.9% gateway + 18% GST + 0.1% TDS) should not go live <b>deducting from merchants</b> until these charges are papered + re-consented. Build the math now; gate the live deduction on the agreement update.</div>
+
+  <h2 id="contradictions">2 · Signed text vs the live system (verified in code)</h2>
+  <p>These are not drafting opinions — the reviewers traced them to specific code/migrations.</p>
+
+  <div class="item crit">
+    <h3><span class="sev crit">CRITICAL</span><span class="sev live">LIVE EXPOSURE</span>Commission default (8%/10%) exceeds the signed restaurant/bakery rate (5%/7%)</h3>
+    <p class="why">The restaurant body promises 5% (pickup) / 7% (pickup+dining). But the settlement engine resolves the rate at close from the admin-editable <code>commission_rules</code> table, and the seed (migration <code>20260610170000</code>) sets the <b>NULL/untiered default for Restaurant/Bakery to 8%/10%</b>. An untiered restaurant that signed 5/7 would be charged 8/10 — ~60%/43% above the only rate it ever saw. There's no code path linking the signed rate to the profile the engine reads. <span class="small">(Real settlements are in dry-run with no categories assigned yet, so this is a latent default, not money already taken — but it must be corrected before go-live.)</span></p>
+    <div class="fix"><b>Fix (both sides):</b> capture the signed commission rate onto the settlement profile at e-sign and have the engine prefer it, OR set the Restaurant/Bakery NULL-tier default to 5/7 so the safe default never exceeds the signed promise. Add §3.3A: "PAS shall not apply a rate higher than the accepted rate without the Merchant's acceptance of revised terms." <b>Do not ship the current default.</b></div>
+  </div>
+
+  <div class="item high">
+    <h3><span class="sev high">HIGH</span>Contract says T+2 settlement; system settles weekly</h3>
+    <p class="why">§3.5/§3.7 promise settlement "initiated within two (2) business days" of completion. The cron runs <code>0 2 * * 1</code> (Mon 02:00 IST) and closes only the prior fully-elapsed week, with PAID a further manual step — routinely 6–13+ days, never T+2. A structural breach of the written promise for nearly every order; the "unless otherwise notified" hedge is too weak to cover a permanent weekly cadence.</p>
+    <div class="fix"><b>Fix:</b> Rewrite the §3.5/§3.7 timing to a weekly cycle with a stated post-close payout SLA (e.g. "close Monday, pay by Wednesday"), keeping the existing adjustments carve-out.</div>
+  </div>
+
+  <div class="item high">
+    <h3><span class="sev high">HIGH</span>Bakery signs ₹2,999 but is charged ₹999 (+ 8/10 default)</h3>
+    <p class="why">Bakeries route to the Restaurant agreement (states ₹2,999 onboarding) but onboarding is charged off <code>Vertical.isPremium</code> (₹2,999 only if premium, else ₹999), and bakery is not premium. So a bakery signs ₹2,999 yet pays ₹999, and inherits the 8/10 commission default. (This is forlater item B.)</p>
+    <div class="fix"><b>Fix before any bakery signs:</b> either make Bakeries premium (so the charged ₹2,999 matches the agreement) + seed its rule to 5/7, OR route bakeries to Other Stores (₹999 + 5%). The charged onboarding MUST equal the §3.1 figure in the signed agreement.</div>
+  </div>
+
+  <div class="item med">
+    <h3><span class="sev med">MEDIUM</span>Commission-category matching is admin free-text</h3>
+    <p class="why">The engine matches a free-typed <code>commissionCategory</code> exactly against the rules table; a mismatch <i>holds</i> the order, a wrong-but-valid category silently charges another vertical's rate. The signed agreement's vertical is never consulted.</p>
+    <div class="fix"><b>Fix:</b> Derive the commission category deterministically from the signed agreement type at e-sign; normalize seed naming; add a referential check.</div>
+  </div>
+
+  <h2 id="critical">3 · Critical must-haves missing</h2>
+  <div class="item crit">
+    <h3><span class="sev crit">CRITICAL</span>A real Data Processing Addendum (DPDP Act 2023)</h3>
+    <p class="why">The whole data surface is one undifferentiated paragraph (§22) + a thin confidentiality clause. "Data Fiduciary" / "Data Processor" appear nowhere; no documented-instructions duty, no sub-processing control, no audit right, no data-principal-rights assistance, no cross-border or retention/deletion terms. Breach notice is one-directional (Merchant→PAS) and silent on PAS's duty to notify the Data Protection Board + affected principals. DPDP processing-by-a-processor needs a valid contract — this is a placeholder, not compliance.</p>
+    <div class="fix"><b>Fix:</b> Add a DPA schedule: PAS = Data Fiduciary, Merchant = Processor on documented instructions; breach-notice + duty to assist PAS's Board/principal notification; sub-processor authorization + flow-down; audit; principal-rights assistance; cross-border restriction; return-or-delete on termination with a deletion certificate. Finalize fields with counsel against the in-force DPDP Rules.</div>
+  </div>
+  <div class="item crit">
+    <h3><span class="sev crit">CRITICAL</span>FSSAI: mandatory licence + consumer-display + PAS's own e-commerce FBO status</h3>
+    <p class="why">The FSSAI header field is <b>optional</b> (renders "—" when blank) and food verticals route by category name with no licence gate — a food merchant can sign with no FSSAI number. The FSS e-commerce framework requires each seller's FSSAI number to be displayed to consumers, and a food-facilitating platform is itself an FBO needing its own registration. §4.3's generic "food safety registrations where applicable" does not discharge these public-law duties enforced directly against PAS.</p>
+    <div class="fix"><b>Fix:</b> Add a Food-Vertical Schedule (hold valid FSSAI, furnish number/certificate before activation, authorize consumer display, notify on suspension); make the field mandatory/validated for food templates; and (PAS-entity action) confirm PAS holds the right FSSAI e-commerce FBO registration.</div>
+  </div>
+  <div class="item crit">
+    <h3><span class="sev crit">CRITICAL</span>Pharmacy routed to the generic template — zero drug controls</h3>
+    <p class="why">"Pharmacy &amp; wellness" routes to the generic Other Stores 5% template with no drug-licence requirement, no registered-pharmacist supervision, no Schedule H/H1/X prescription validation. Online pharmacy is heavily litigated with direct platform liability.</p>
+    <div class="fix"><b>Fix:</b> Either block pharmacy onboarding until a dedicated e-pharmacy framework exists, or add a Pharmacy Schedule (valid drug licence, registered-pharmacist dispensing, prescription validation, no banned drugs, PAS delist right). Route to a pharmacy-law specialist.</div>
+  </div>
+  <div class="item high">
+    <h3><span class="sev high">HIGH</span>No arbitration / dispute-resolution clause (yet §27 references it)</h3>
+    <p class="why">§21 gives only governing law + exclusive Hyderabad jurisdiction. There's no arbitration clause — but §27 (Survival) and the recital reference "dispute resolution," an internal inconsistency opposing counsel can exploit.</p>
+    <div class="fix"><b>Fix:</b> Add a Dispute Resolution clause as <b>§34</b> (fills the existing 33→35 gap, resolves the dangling reference): good-faith negotiation → arbitration under the 1996 Act, Hyderabad seat, English, with a §9 interim-relief carve-out. Counsel must draft the arbitrator-appointment mechanism (unilateral PAS appointment is challengeable).</div>
+  </div>
+
+  <h2 id="sector">4 · Sector / licensing gaps</h2>
+  <ul class="tight">
+    <li><b>Legal Metrology / Packaged Commodities</b> — no clause requiring MRP, net quantity, manufacturer details, country of origin, mfg/expiry on pre-packaged goods (grocery, packaged food, electronics, fashion, cosmetics). Absent.</li>
+    <li><b>FSSAI shelf-life-at-delivery</b> — packaged food needs ≥30% shelf life / 45 days remaining at delivery; clauses ban only "expired products." Absent.</li>
+    <li><b>Age-restricted categories</b> — no alcohol/tobacco/nicotine entry in Prohibited Products; no restaurant liquor/excise-licence warranty.</li>
+    <li><b>Seller-disclosure flow-through (CP E-Commerce Rules)</b> — merchant not obliged to furnish legal name + address + GSTIN + grievance contact for consumer display.</li>
+    <li><b>Return/refund/warranty policy not incorporated</b> — §8/§20/§33 defer to undefined "PAS policies" with no named/versioned/URL'd policy; a merchant signs without knowing the refund regime applied to its settlements.</li>
+    <li><b>Fair-ranking disclosure + PAS-side no-price-manipulation undertaking</b> — only the merchant is bound (reviews); no reciprocal PAS undertaking.</li>
+    <li><b>Allergen display for all food sellers</b> — restaurant §5.1 covers allergens; standard §5.1 does not, so meat/grocery packaged-food sellers have no allergen duty.</li>
+    <li><b>CCO / Nodal / Resident Grievance Officer</b> — only a single Grievance Officer; if PAS crosses the SSMI user threshold, IT Rules 2021 require the three named India-resident roles. Counsel to confirm threshold.</li>
+  </ul>
+
+  <h2 id="enforce">5 · Enforceability</h2>
+  <ul class="tight">
+    <li><b>E-signature method.</b> A finger-drawn signature is almost certainly <i>not</i> an "electronic signature" under IT Act §3A (which contemplates Aadhaar eSign / DSC), so it does <b>not</b> attract the Evidence Act §85B presumption. It can still be a valid §10A e-contract — but its weight rests on the audit trail (IP, device, timestamp, SHA-256 hash, click-acceptances) admitted via a §65B certificate. Reword §24 to rest on §10A + the audit record; ensure IP/device/timestamp are captured <b>server-side</b>; offer an Aadhaar eSign/DSC path for high-value relationships.</li>
+    <li><b>Stamp duty (Telangana) is unaddressed.</b> An unstamped agreement is inadmissible in evidence until deficit duty + penalty are paid — the single most likely reason an otherwise-valid agreement fails at the admissibility stage, directly undercutting the §21 court-enforcement strategy. CA/local counsel to set the duty + e-stamping method.</li>
+    <li><b>Missing boilerplate:</b> no Notices/address-for-service, no severability, no no-waiver, no mutual-amendment mechanism, no signatory-authority warranty, no insurance requirement (despite heavy food/allergen indemnity), no express books/audit right.</li>
+    <li><b>Unilateral amendment exposure:</b> §3.6/§3.8 let PAS revise commercial terms on "reasonable prior notice" with no consent and no opt-out. More defensible B2B than B2C, but counsel should add a defined notice period + a no-penalty termination-on-adverse-change right, and consider carving the core commission rate out of unilateral revision.</li>
+    <li><b>Numbering defects:</b> both bodies jump §33→§35 (no §34); the standard body has two "POLICY FRAMEWORK" sections (§20 + §33); §27 references a non-existent "dispute resolution" clause. Confirm with counsel before renumbering executed copies.</li>
+    <li><b>Recital party ID:</b> "registered office in India" is generic; state the actual Hyderabad office + CIN/GSTIN.</li>
+    <li><b>Aadhaar:</b> <code>maskAadhaar()</code> masks only the rendered display — confirm the full Aadhaar/PAN at rest is encrypted/access-controlled, and confirm the lawful basis for collecting Aadhaar at all (Aadhaar Act/UIDAI).</li>
+  </ul>
+
+  <h2 id="quickwins">6 · Quick wins (low effort, high value)</h2>
+  <ul class="tight">
+    <li>Append a signed <b>"Schedule of Charges"</b> table (commission %, 1.9% gateway, 18% GST, 0.1% TDS) so the full economic deal is on the signed page and covered by the document hash — directly fixes the consent-evidence gap for today's deductions.</li>
+    <li>Add a §2.5 <b>signatory-authority warranty</b> + a signing-UI checkbox recorded in the audit block.</li>
+    <li>Reword §24 to rest on IT Act §10A + the audit record (waive "signed electronically" objection).</li>
+    <li>Add Notices, Severability, No-Waiver clauses (three structural gaps closed at once).</li>
+    <li>Amend §32 to state 48-hour acknowledgement + disposal within one month + a ticket reference number.</li>
+    <li>Make the FSSAI field mandatory/validated for food templates + a one-line activation precondition.</li>
+    <li>Add alcohol/tobacco/age-restricted entries to Prohibited Products + a restaurant liquor-licence line.</li>
+    <li>Insert Dispute Resolution as §34; fix the recital's registered office.</li>
+  </ul>
+
+  <h2 id="checklist">7 · Lawyer + CA checklist</h2>
+  <table>
+    <tr><th>For</th><th>Question</th></tr>
+    <tr><td>CA</td><td>Is "exclusive of applicable taxes" enough to charge 18% GST on commission? Correct SAC/rate? Must PAS issue a GST tax invoice for the merchant's ITC?</td></tr>
+    <tr><td>CA</td><td>Is the "government deductions" catch-all sufficient authority to withhold §194-O TDS, or is an express clause required? Confirm the 0.1% gross base, thresholds, §206AA non-PAN rate.</td></tr>
+    <tr><td>CA</td><td>Is GST TCS §52 (0.5%) genuinely not applicable, or mandatory for a GST-registered ECO collecting consideration? Written determination either way.</td></tr>
+    <tr><td>CA</td><td>For dining: do 7% / 1.9% / GST / TDS attach only to Platform-processed payment legs, or also to in-restaurant bills of reservation-only customers?</td></tr>
+    <tr><td>Counsel</td><td>Does deducting the 1.9% gateway fee under already-signed agreements (which never mention it) create unauthorized-deduction exposure? Remediation — notice+consent, re-sign, or invoice?</td></tr>
+    <tr><td>Counsel</td><td>Does charging a commission higher than the signed rate (8/10 vs 5/7 via the engine) risk being voidable / mis-selling under CP(E-Commerce) Rules + Contract Act?</td></tr>
+    <tr><td>Counsel</td><td>Does PAS cross the SSMI user threshold (CCO + Nodal + Resident Grievance Officer)? Which intermediary/e-commerce duties apply to a pickup/reservation marketplace?</td></tr>
+    <tr><td>Counsel</td><td>Does PAS need its OWN FSSAI e-commerce FBO registration? Is it a precondition to lawful food onboarding regardless of merchant warranties?</td></tr>
+    <tr><td>Pharmacy counsel</td><td>Will pharmacy include prescription/Schedule drugs? If so the generic template is inadequate — block or build a dedicated e-pharmacy framework; assess direct platform liability.</td></tr>
+    <tr><td>CA/Counsel</td><td>Correct Telangana stamp duty + e-stamping method; must each per-merchant PDF be individually stamped? (governs admissibility)</td></tr>
+    <tr><td>Counsel</td><td>Unconscionability/§23 pass on unilateral amendment (§3.6/§3.8) + immediate-suspension powers in a B2B context.</td></tr>
+    <tr><td>Counsel</td><td>E-signature: confirm drawn signature lacks §85B presumption; advise Aadhaar eSign/DSC path; confirm a §65B(4) certificate is producible from server-side audit data.</td></tr>
+    <tr><td>Counsel</td><td>Confirm in-force DPDP Rules breach window/fields + cross-border restrictions; finalize the DPA; review PAS's Privacy Policy separately.</td></tr>
+    <tr><td>Counsel + security</td><td>Lawful basis for collecting Aadhaar at all; confirm full Aadhaar/PAN at rest is encrypted/access-controlled.</td></tr>
+    <tr><td>Counsel</td><td>Is renumbering the "verbatim-from-PDF" bodies safe given already-executed copies?</td></tr>
+  </table>
+
+  <h2 id="strengths">8 · What the agreements get right</h2>
+  <div class="ok">
+  <ul class="tight">
+    <li>Intermediary/marketplace status clearly established (§1.2–1.4) — a solid classification foundation.</li>
+    <li>Named Grievance Officer with full contact + postal address (§32), citing the IT Act 2000 + CP E-Commerce Rules 2020, with a 48-hour acknowledgement.</li>
+    <li>Real electronic-execution evidence: signed-at timestamp (IST), IP, device, SHA-256 doc hash, explicit Privacy/Terms/Partner click-acceptances — the right architecture for §65B/§10A.</li>
+    <li>Sensible data-minimization: Aadhaar masked to last-4 on display; PAN captured (supports TDS/GST mechanics once clauses are added).</li>
+    <li>Strong private-risk allocation: broad merchant indemnity (incl. food safety), a 3-month-commission liability cap, chargeback recovery, broad verification/suspension powers.</li>
+    <li>The restaurant body is thoughtfully differentiated (dining section, allergen/hygiene wording, two-tier commission, menus in the IP licence, 30-day termination).</li>
+    <li>Good engineering self-awareness: the bakery mismatch and the "reserved until CA confirms" tax columns are already flagged in code + forlater — gaps aren't papered over.</li>
+    <li>The onboarding fee correctly reads "plus applicable taxes" (§3.1) — the model for how every PAS charge should read.</li>
+  </ul>
+  </div>
+
+  <hr>
+  <p class="small">Prepared for Pranav via a 6-domain structured review (tax, consumer-protection/intermediary, DPDP, sector/FSSAI, contract-hygiene, internal-coherence). Saved as HTML per standing preference — forwardable to counsel + CA; browser-print produces a clean PDF. <b>Not legal advice.</b></p>
+
+</div>
+</body>
+</html>

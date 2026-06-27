@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phase 2 — Category Taxonomy &amp; Blinkit Mapping (for approval)</title>
+<style>
+  :root { --ink:#1a1a1a; --muted:#666; --red:#B52725; --line:#e3e3e3; --bg:#fafafa; --code:#f4f4f6; --green:#1b7f3b; --greenbg:#e7f6ec; --amber:#9a6700; --amberbg:#fff8e6; --new:#1b7f3b; }
+  * { box-sizing:border-box; } body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; color:var(--ink); line-height:1.55; margin:0; background:#fff; }
+  .wrap { max-width:940px; margin:0 auto; padding:40px 28px 90px; }
+  h1 { font-size:25px; margin:0 0 4px; } h2 { font-size:18px; margin:36px 0 10px; padding-bottom:6px; border-bottom:2px solid var(--red); }
+  .sub { color:var(--muted); font-size:13px; margin:0 0 16px; }
+  p,li,td { font-size:14px; }
+  .banner { background:var(--bg); border:1px solid var(--line); border-left:4px solid var(--red); border-radius:6px; padding:12px 16px; margin:16px 0; font-size:13.5px; }
+  .decision { background:var(--amberbg); border:1px solid #f0d98a; border-left:4px solid var(--amber); border-radius:6px; padding:11px 15px; margin:10px 0; }
+  .decision b { color:var(--amber); }
+  table { border-collapse:collapse; width:100%; margin:12px 0; font-size:13px; } th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top;} th{background:var(--bg);font-weight:600;}
+  .new { color:var(--new); font-weight:600; } .pend { color:var(--amber); font-weight:600; }
+  .toc { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:14px 20px; margin:20px 0; } .toc a{color:var(--red);text-decoration:none;} .toc a:hover{text-decoration:underline;}
+  code { font-family:"SF Mono",Menlo,Consolas,monospace; background:var(--code); padding:1px 5px; border-radius:4px; font-size:12.3px; }
+  .stat { display:inline-block; background:var(--greenbg); color:var(--green); border-radius:8px; padding:4px 10px; font-size:13px; font-weight:600; margin:2px 6px 2px 0; }
+  ol.steps li { margin:7px 0; } .small{font-size:12.5px;color:var(--muted);}
+  hr{border:none;border-top:1px solid var(--line);margin:26px 0;}
+  @media print { .wrap{max-width:100%;padding:0;} h2{page-break-after:avoid;} table{page-break-inside:avoid;} a{color:var(--ink);text-decoration:none;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Phase 2 — Category Taxonomy &amp; Blinkit Mapping</h1>
+  <p class="sub">Pick At Store · 2026-06-15 · <b>for your approval — no DB changes until you sign off</b></p>
+
+  <div class="banner">
+    <b>What this is.</b> Your finalized taxonomy is <b>15 verticals + 95 subcategories</b> (pulled live from the DB). The purchased Blinkit catalog has <b>47 messy categories / 643 category-subcategory pairs</b>. This maps every Blinkit category into your 15, folding Blinkit's long tail into your existing subcategories and proposing <b>28 new subcategories</b> only where a real, sizeable product group had no home. <b>11 judgment calls</b> are flagged for you rather than guessed.
+  </div>
+
+  <p>
+    <span class="stat">15 verticals (unchanged)</span>
+    <span class="stat">95 existing subcats</span>
+    <span class="stat">+28 new subcats proposed</span>
+    <span class="stat">47/47 categories mapped</span>
+    <span class="stat">11 decisions for you</span>
+  </p>
+
+  <div class="toc"><b>Contents</b> &nbsp;·&nbsp; <a href="#structure">Proposed 15-vertical structure</a> · <a href="#decisions">Your 11 decisions</a> · <a href="#mapping">47 → 15 mapping</a> · <a href="#plan">Execution plan</a></div>
+
+  <h2 id="structure">1 · Proposed structure — 15 verticals (<span class="new">green = new subcategory</span>)</h2>
+  <table>
+    <tr><th>Vertical</th><th>Existing subcategories</th><th>New (proposed)</th></tr>
+    <tr><td><b>Bakeries &amp; Desserts</b></td><td>Artisanal Sweets · Breads &amp; Buns · Cakes &amp; Pastries · Cookies &amp; Biscuits · Party Supplies</td><td class="new">Ice Cream &amp; Frozen Desserts · Candies &amp; Confections · Mouth Fresheners · Syrups &amp; Toppings · Yogurt Desserts · Rusks &amp; Wafers · Baking Supplies &amp; Ingredients</td></tr>
+    <tr><td><b>Beauty &amp; Personal Care</b></td><td>Bath &amp; Body · Hair Care · Makeup &amp; Cosmetics · Men's Grooming · Skincare</td><td class="new">Fragrances · Oral Care · Feminine Care · Deodorants &amp; Talc · Women's Grooming · Tools &amp; Accessories · Gift Sets &amp; Kits · Hair Accessories</td></tr>
+    <tr><td><b>Electricals, Paints &amp; Automotive</b></td><td>Batteries · Bike Care · Bulbs &amp; Lighting · Car Cleaning · Extension Boards · Helmets · Motor Oils · Plugs &amp; Switches · Spray Paints · Wires &amp; Cables</td><td class="small">— none —</td></tr>
+    <tr><td><b>Electronics &amp; Accessories</b></td><td>Cables &amp; Chargers · Earphones · Keyboards &amp; Mice · Mobile Accessories · Power Banks · Screen Guards · Smart Gadgets · Smart Watches · Storage · Trimmers</td><td class="small">— none —</td></tr>
+    <tr><td><b>Fashion &amp; Apparel</b></td><td>Accessories &amp; Jewelry · Footwear · Kids' Wear · Men's Clothing · Women's Clothing</td><td class="small">— none —</td></tr>
+    <tr><td><b>Fresh Items</b></td><td>Chicken &amp; Poultry · Exotic Fruits &amp; Greens · Fresh Fruits · Fresh Produce · Fresh Vegetables · Meat &amp; Seafood</td><td class="small">— none —</td></tr>
+    <tr><td><b>Grocery &amp; Kirana</b></td><td>Atta · Beverages · Cooking Oil &amp; Ghee · Dairy &amp; Milk · Dal &amp; Pulses · General · Household Supply · Masalas &amp; Spices · Ready-to-Eat · Rice &amp; Grains · Snacks &amp; Munchies · Staples &amp; Pulse</td><td class="new">Sauces &amp; Spreads · Frozen Foods · Breakfast &amp; Cereals · Lassi &amp; Shakes · Water &amp; Ice · <span class="pend">Paan &amp; Tobacco (decision)</span></td></tr>
+    <tr><td><b>Hardware &amp; Plumbing</b> <span class="small">(was empty)</span></td><td class="small">— none —</td><td class="new">Home Improvement &amp; Tools</td></tr>
+    <tr><td><b>Home &amp; Lifestyle</b></td><td>Bathroom Accessories · Bedding &amp; Towels · Cleaning Supplies · Doormats &amp; Rugs · Gardening · Home Decor · Home Essentials · Kitchenware · Pooja Room Decor · Repellents · Storage &amp; Organizers</td><td class="new">Small Appliances · Disposables &amp; Tissues</td></tr>
+    <tr><td><b>Pet Care &amp; Supplies</b></td><td>Cat Food · Dog Food · Pet Grooming · Pet Health · Toys &amp; Accessories</td><td class="small">— none —</td></tr>
+    <tr><td><b>Pharmacy &amp; Wellness</b></td><td>Ayurveda · Baby Care · Digestives · First Aid · Health Monitors · OTC Medicines · Pain Relief · Personal Care · Personal Hygiene · Sexual Wellness · Vitamins</td><td class="new">Cold &amp; Cough · Health Supports &amp; Ortho · Adult Incontinence · Masks &amp; Sanitizers · Smoking Cessation Aids · Baby Diapers &amp; Wipes · Baby Feeding Essentials · Nursing &amp; Lactation · Baby Bathing Essentials · Baby Gear &amp; Equipment</td></tr>
+    <tr><td><b>Pooja &amp; Festive Needs</b> <span class="small">(empty)</span></td><td class="small">— none —</td><td class="pend">stays empty unless you promote Blinkit's pooja items here (see decision)</td></tr>
+    <tr><td><b>Restaurants &amp; Cafes</b> <span class="small">(merchant dine-in — no catalog products)</span></td><td>Beverages · Chinese &amp; Fast Food · North Indian &amp; Biryani · South Indian · Sweets &amp; Desserts</td><td class="small">— none (not a packaged-catalog vertical) —</td></tr>
+    <tr><td><b>Sports &amp; Fitness</b> <span class="small">(was empty)</span></td><td class="small">— none —</td><td class="new">Sports, Fitness &amp; Outdoors</td></tr>
+    <tr><td><b>Stationery, Gifting &amp; Toys</b></td><td>Art &amp; Craft · Board Games · Books · Gifting &amp; Packing · Notebooks · Office Supplies · Party Decorations · Pens &amp; Markers · School Supplies · Toys &amp; Games</td><td class="new">Magazines</td></tr>
+  </table>
+  <p class="small">Biggest additions: <b>Pharmacy &amp; Wellness +10</b> (Blinkit's whole baby-care range + cold/cough/masks), <b>Beauty +8</b>, <b>Bakeries +7</b>, <b>Grocery +6</b>. The 3 previously-empty verticals get real homes: Hardware, Sports — and Pooja stays empty pending your call.</p>
+
+  <h2 id="decisions">2 · Your 11 decisions (recommendations in <b>bold</b>)</h2>
+
+  <div class="decision"><b>1. Tobacco / Paan Corner</b> — Blinkit has Cigarettes (104), Cigar (14), Tobacco (5), Hookah (62), Lighters (110), Ashtrays (14), Rolling Needs (198). <b>Recommend: exclude all tobacco/smoking SKUs; allow only Paan Masala + Non-Tobacco Blends under Grocery → General.</b> (Aligns with the agreement-compliance gap that flagged no alcohol/tobacco controls.)</div>
+  <div class="decision"><b>2. NULL category (325 items)</b> — no Blinkit category at all. <b>Recommend: route to an "Unmapped/Review" holding bucket, excluded from the storefront until classified.</b> Do NOT auto-map.</div>
+  <div class="decision"><b>3. Specials (Print-as-a-service, Bill Breaker, Freebie)</b> — these are services/promo mechanics, not products. <b>Recommend: exclude from the import entirely.</b></div>
+  <div class="decision"><b>4. Digital Goods → E-Cards (629)</b> — digital gift cards, not physical inventory. <b>Recommend: exclude from the physical catalog</b> (or a separate digital flow later).</div>
+  <div class="decision"><b>5. Baby apparel</b> — Blinkit "Baby Accessories &amp; Apparel" (772) currently sits in Pharmacy → Baby Care. <b>Recommend: keep all baby items together under Pharmacy → Baby Care</b> for shopper convenience (vs splitting apparel to Fashion → Kids' Wear).</div>
+  <div class="decision"><b>6. Body jewellery</b> — Blinkit "Personal Care → Jewellery" (234) mapped to Fashion → Accessories &amp; Jewelry. <b>Confirm it's fashion jewellery</b>, not body-piercing care.</div>
+  <div class="decision"><b>7. Sports &amp; Fitness vertical</b> — Blinkit's sports/fitness items (nested in Home categories) routed to the standalone Sports &amp; Fitness vertical via new "Sports, Fitness &amp; Outdoors". <b>Confirm.</b></div>
+  <div class="decision"><b>8. Hardware &amp; Plumbing vertical</b> — Blinkit "Home Improvement" / "Hardware &amp; Electricals" routed here (new "Home Improvement &amp; Tools") rather than Home &amp; Lifestyle. <b>Confirm.</b></div>
+  <div class="decision"><b>9. Pooja &amp; Festive Needs vertical</b> — currently no Blinkit category maps cleanly; its pooja/festive items were routed into Home &amp; Lifestyle (Pooja Room Decor / Home Decor). <b>Decide: leave Pooja vertical empty, or promote those items into it</b> (would need new subcats there).</div>
+  <div class="decision"><b>10. Frozen items</b> — split: frozen savoury → Grocery (new "Frozen Foods"); ice cream / frozen desserts → Bakeries &amp; Desserts. <b>Confirm you don't want a single unified Frozen home.</b></div>
+  <div class="decision"><b>11. "Paan &amp; Tobacco" subcategory</b> — held out of the seed entirely pending decision #1; nothing regulated gets created without your sign-off.</div>
+
+  <h2 id="mapping">3 · The 47 → 15 category mapping</h2>
+  <table>
+    <tr><th>PAS vertical</th><th>Blinkit categories mapped in</th></tr>
+    <tr><td>Grocery &amp; Kirana</td><td>Atta/Rice/Dal · Dry Fruits/Masala/Oil · Masala/Oil/More · Grocery · Packaged Food · Organic &amp; Premium · Organic &amp; Gourmet · Sauces &amp; Spreads · Dairy &amp; Breakfast · Dairy/Bread/Eggs · Dairy &amp; Beverages · Instant &amp; Frozen Food · Breakfast &amp; Instant Food · Munchies · Cold Drinks &amp; Juices · Tea/Coffee/Health Drinks · Tea/Coffee/Milk Drinks · Paan Corner*</td></tr>
+    <tr><td>Pharmacy &amp; Wellness</td><td>Pharma &amp; Wellness · Baby Care</td></tr>
+    <tr><td>Beauty &amp; Personal Care</td><td>Beauty &amp; Cosmetics · Personal Care · Personal Care &amp; Beauty</td></tr>
+    <tr><td>Home &amp; Lifestyle</td><td>Home &amp; Office · Home Furnishing &amp; Decor · Kitchen &amp; Dining · Home &amp; Kitchen · Cleaning Essentials</td></tr>
+    <tr><td>Bakeries &amp; Desserts</td><td>Ice Cream &amp; Frozen Desserts · Sweet Tooth · Bakery &amp; Biscuits</td></tr>
+    <tr><td>Fresh Items</td><td>Vegetables &amp; Fruits · Fruits &amp; Vegetables · Chicken/Meat/Fish</td></tr>
+    <tr><td>Stationery, Gifting &amp; Toys</td><td>Toys &amp; Games · Stationery Needs · Stationery · Books · Magazines</td></tr>
+    <tr><td>Fashion &amp; Apparel</td><td>Fashion &amp; Accessories · Fashion and Accessories</td></tr>
+    <tr><td>Electronics &amp; Accessories</td><td>Electronics &amp; Electricals</td></tr>
+    <tr><td>Pet Care &amp; Supplies</td><td>Pet Care</td></tr>
+    <tr><td>Hardware &amp; Plumbing</td><td><span class="small">(via Blinkit "Home Improvement" sub-items)</span></td></tr>
+    <tr><td>Sports &amp; Fitness</td><td><span class="small">(via Blinkit "Sports &amp; Fitness" sub-items)</span></td></tr>
+    <tr><td><span class="pend">Decision — exclude/triage</span></td><td>NULL (325) · Specials · Digital Goods/E-Cards (629) · Seasonal &amp; More (1)</td></tr>
+  </table>
+  <p class="small">* Paan Corner enters Grocery but its regulated tobacco SKUs are held pending decision #1.</p>
+
+  <h2 id="plan">4 · Execution plan (each step ships + stops for approval)</h2>
+  <ol class="steps">
+    <li><b>Schema:</b> add a <code>CategoryMapping</code> table (blinkitCategory, blinkitSubcategory, pasVerticalId, pasTier2CategoryId, status: ACTIVE | PENDING_DECISION | EXCLUDED), unique on (category, subcategory). Migration — <b>your approval before any DB change</b>.</li>
+    <li><b>Seed the 28 new subcategories</b> under their verticals (idempotent upsert). Excludes the regulated "Paan &amp; Tobacco" pending decision #1.</li>
+    <li><b>Seed the mapping rows</b> for the confidently-mapped categories (status ACTIVE), generated as a typed array reviewed against the CSV.</li>
+    <li><b>Seed the decision-pending / excluded rows</b> (NULL, Specials, Digital Goods, tobacco) as PENDING_DECISION / EXCLUDED — never hit the storefront.</li>
+    <li><b>Wire the importer</b> (feeds Phase 5 bulk-load): look up (category, subcategory) → assign vertical + subcategory if ACTIVE; else route to the Review queue. Log any unmapped pair.</li>
+    <li><b>Tiny admin review screen</b> listing non-ACTIVE + unmapped hits so you resolve the long tail one at a time.</li>
+    <li><b>Verify:</b> <code>tsc</code> after each step; dry-run a sample import and assert 0 products land with a null vertical and 0 storefront rows from excluded categories.</li>
+  </ol>
+
+  <hr>
+  <p class="small">Drafted by a 7-agent mapping pass over the real 643-pair Blinkit taxonomy + your live 15-vertical / 95-subcategory taxonomy. Proposed new subcategories kept minimal and consistent with your existing naming. <b>Nothing is seeded until you approve.</b></p>
+</div>
+</body>
+</html>

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>PAS Admin Dashboard — Changes & Pending (2026-06-14)</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:1000px;margin:0 auto;padding:28px 32px 80px;color:#1a1a1a;background:#fafafa;line-height:1.5}
+h1{font-size:23px;margin:0 0 2px}h2{font-size:18px;margin:30px 0 8px;padding-bottom:6px;border-bottom:2px solid #B52725;color:#B52725}
+h3{font-size:14px;margin:18px 0 6px;color:#111;text-transform:uppercase;letter-spacing:.5px}
+.lead{color:#555;font-size:14px;margin-bottom:8px}
+code{background:#eee;padding:1px 5px;border-radius:3px;font-family:'SF Mono',Menlo,Consolas,monospace;font-size:88%}
+ul{margin:4px 0 12px;padding-left:20px}li{margin:3px 0;font-size:13.5px}
+.tag{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:6px;vertical-align:middle}
+.done{background:#dcfce7;color:#166534}.new{background:#fee2e2;color:#991b1b}
+.hi{background:#fef2f2;color:#dc2626}.med{background:#fffbeb;color:#b45309}.low{background:#eff6ff;color:#1d4ed8}
+.box{background:#fff;border:1px solid #e5e5e5;border-radius:8px;padding:12px 16px;margin:8px 0}
+.toc a{color:#1e40af;text-decoration:none}
+@media print{body{background:#fff;max-width:none}}
+</style></head><body>
+<h1>PAS Admin Dashboard — changes shipped &amp; pending</h1>
+<div class="lead">Generated 2026-06-14. Local dev: <code>http://localhost:3001/</code> · Prod: Vercel (deploys on merge to main). Sources: git history of <code>apps/admin-web</code>, <code>forlater.md</code>, and the 2026-06-14 merchant-signup audit.</div>
+
+<h2 id="shipped">Part 1 — Changes shipped</h2>
+
+<h3>Auth &amp; login</h3>
+<ul>
+<li><span class="tag done">done</span>WhatsApp / phone-OTP-first login (primary) + email-password fallback.</li>
+<li><span class="tag done">done</span>Redesigned login — frosted photo backdrop, phone-OTP-first flow.</li>
+<li><span class="tag done">done</span>Phone + email admin invites; inline role/status edit; role assigned on OTP login.</li>
+</ul>
+
+<h3>Dashboard / home (RBAC)</h3>
+<ul>
+<li><span class="tag done">done</span>RBAC v1 + role-aware sidebar (SUPER_ADMIN / OPERATIONS / FINANCE / SUPPORT).</li>
+<li><span class="tag done">done</span>Role-aware home dashboard (Tier C) — each role lands on its own home page (<code>Dashboard.tsx</code> router + <code>home/*Home.tsx</code>).</li>
+<li><span class="tag done">done</span>Quick Actions moved to the header beside the date chips.</li>
+</ul>
+
+<h3>Merchants &amp; KYC</h3>
+<ul>
+<li><span class="tag new">new 06-14</span><strong>e-Sign "Legal &amp; Signature" panel in the KYC queue</strong> — shows signed agreement version + type, signatory + designation, signed-at, accepted docs, device/IP/hash, and a "View signed agreement (PDF)" link. Closes the audit gap (approving with no proof of signing).</li>
+<li><span class="tag done">done</span>KYC <code>needs_info</code> decision — emails the merchant for missing details (Resend) without rejecting.</li>
+<li><span class="tag done">done</span>Phase 8/9 — admin add/delete branch + all merchant/Store/catalog writes routed through the API (no direct Supabase writes).</li>
+</ul>
+
+<h3>Customers</h3>
+<ul>
+<li><span class="tag done">done</span>Real data: real city (from last order), real status, Orders / AOV / Last-Order columns, Total/Active/Suspended strip, per-row actions (view, WhatsApp, orders, Wati history, suspend/reactivate).</li>
+<li><span class="tag done">done</span>Customer detail drawer (real order history; fixed wrong-table + fake-email bugs), real addresses, incomplete-signup toggle, edit-name, duplicate-hint, deep-link <code>/customers?id=</code>.</li>
+<li><span class="tag done">done</span>Reads routed through the admin API (Prisma) + server-side pagination.</li>
+</ul>
+
+<h3>Orders</h3>
+<ul>
+<li><span class="tag done">done</span>OrderManager rebuilt around the real 6-state enum (PENDING/CONFIRMED/READY/COMPLETED/CANCELLED/REFUNDED); removed fake SLA / driver / timeline.</li>
+<li><span class="tag done">done</span>Force Complete / Force Cancel write an <code>admin_audit_log</code> row (actor + before/after + IP + UA); <code>/orders?userId=</code> deep-link.</li>
+</ul>
+
+<h3>Analytics / reports</h3>
+<ul>
+<li><span class="tag done">done</span>Analytics v1: date chips (Today/7d/30d/90d/Custom), KPI strip (GMV, Orders, AOV, Cancellation Rate), Revenue/Order-volume/Status charts, sortable Top Stores, CSV export. Backed by <code>get_super_admin_stats_in_range</code> RPC.</li>
+<li><span class="tag done">done</span>Renamed <code>/analytics</code> → <code>/reports</code>; brand-red palette (dropped cyan gradient).</li>
+</ul>
+
+<h3>Coupons / marketing</h3>
+<ul>
+<li><span class="tag done">done</span>Coupon Builder (full design, camelCase, live preview) + preset themes (classic/bold/modern/festive) + overlap auto-shrink fix.</li>
+<li><span class="tag done">done</span>Coupon Foolproof admin (Phases 1-3): schema, server hardening, admin analytics.</li>
+<li><span class="tag done">done</span>Merchant Signup Coupons CRUD (partner-coupon system).</li>
+</ul>
+
+<h3>Architecture / cross-cutting</h3>
+<ul>
+<li><span class="tag done">done</span>Architectural rule: admin reads go through <code>/admin/...</code> API (Prisma + service-role), not direct PostgREST — fixed the RLS-blocked-read bug class.</li>
+<li><span class="tag done">done</span>Sentry monitoring; secure API auth interceptor; Vercel production proxy.</li>
+<li><span class="tag done">done</span>Cross-module UI aligned to an admin design system (<code>docs/admin-design-system.md</code>).</li>
+<li><span class="tag done">done</span><code>wati_inbox</code> table + webhook stub (foundation for a future support inbox).</li>
+</ul>
+
+<h2 id="pending">Part 2 — Pending changes</h2>
+
+<h3>Merchant-signup display gaps (from the 2026-06-14 audit — most relevant now)</h3>
+<div class="box">
+<ul>
+<li><span class="tag hi">high</span><strong>Phantom <code>category</code> field</strong> — the KYC review renders <code>selectedApp.category</code>, but that column doesn't exist on <code>merchants</code> (only <code>vertical_id</code>) → always blank. Resolve &amp; show the vertical name.</li>
+<li><span class="tag med">med</span><strong>New signup fields not shown to the approver</strong> — designation (signatory), additional branches, multi-account bank list, store hours, lat/long, <code>has_branches</code>, <code>bank_name</code> are captured at signup but never surfaced in review.</li>
+<li><span class="tag med">med</span><code>needs_info</code> missing from the Merchant TS status type — a needs-info merchant has no dedicated filter/view.</li>
+<li><span class="tag low">low</span>Dual PAN column (<code>pan_doc_url</code> vs <code>pan_document_url</code>) — KYC viewer handles both; verify the merchant detail sheet does too.</li>
+</ul>
+</div>
+
+<h3>Dashboard / home</h3>
+<ul>
+<li><span class="tag med">med</span>Home tiles still count via direct Supabase (RLS risk → can read 0). Add <code>/admin/stats/{operations,support,finance}</code> endpoints and migrate the home dashboards.</li>
+<li><span class="tag low">low</span>Tier D: drag-rearrange tiles + per-user saved layouts + tile picker (needs <code>react-grid-layout</code> + <code>user_dashboard_layouts</code>).</li>
+</ul>
+
+<h3>Audit log</h3>
+<ul>
+<li><span class="tag med">med</span>Build an <code>/audit</code> viewer page once data accumulates.</li>
+<li><span class="tag low">low</span>Extend coverage: user suspend / role-change, admin invite, merchant KYC decision.</li>
+</ul>
+
+<h3>Support / operations</h3>
+<ul>
+<li><span class="tag med">med</span>Order / refund / dispute resolution queue — unified view of stranded payments + Wati-escalated complaints + pending refunds (needs Wati + Razorpay context in admin).</li>
+<li><span class="tag med">med</span>Wati support inbox UI (the <code>wati_inbox</code> foundation exists; the admin inbox screen does not).</li>
+<li><span class="tag low">low</span><code>/customer-support?phone=</code> filter so the "Wati history" link opens that customer's thread.</li>
+</ul>
+
+<h3>Coupons</h3>
+<ul>
+<li><span class="tag med">med</span>CouponBuilder field extensions — <code>dailyUsageLimit</code>, <code>eligibleVerticals</code>, <code>eligibleOrderTypes</code>, <code>bogoMode</code>, <code>inactiveSinceDays</code> aren't settable in the UI (admins use direct DB today).</li>
+<li><span class="tag low">low</span>Load brand fonts (Hanken Grotesk + Space Mono) in <code>index.html</code> for exact coupon typography.</li>
+</ul>
+
+<h3>Reports &amp; config</h3>
+<ul>
+<li><span class="tag med">med</span>Reports tab: order / refund / GST / payout reports with date pickers + export (analytics CSV shipped; these don't exist yet).</li>
+<li><span class="tag med">med</span>Global Config tab (currently hidden — was 100% mock): needs a <code>platform_settings</code> table + GET/PATCH routes + app consumption (Max COD, Min Order, Platform Fee, Service Radius, Referral Bonuses, etc.).</li>
+</ul>
+
+<h3>Settlements / finance</h3>
+<ul>
+<li><span class="tag med">med</span>Settlement / payout admin surface — gated on a payout vendor (Razorpay X unsupported → Cashfree / Open / Decentro).</li>
+<li><span class="tag low">low</span>Payment-verification override UI (held-orders worklist) — the API endpoint exists; no admin screen yet (curl-only today).</li>
+</ul>
+
+<h3>Customers (post-launch)</h3>
+<ul>
+<li><span class="tag low">low</span>Load-more / infinite-scroll when the customer base crosses ~400 (server pagination already exists).</li>
+<li><span class="tag low">low</span>Wallet balance + Grant Credit (<code>wallets</code> table), customer tags (VIP / At-Risk), LTV percentile, cohort retention.</li>
+</ul>
+
+<h3>Analytics (deferred depth)</h3>
+<ul>
+<li><span class="tag low">low</span>Top SKUs / category breakdown (OrderItem joins), city/geo breakdown (branch joins), compare-vs-previous-period delta tiles.</li>
+</ul>
+
+<p style="color:#777;font-size:12px;margin-top:30px">Companion docs: <code>merchant-signup-and-admin-audit-2026-06-14.html</code>, <code>merchant-esign-v1-build-plan-2026-06-14.html</code>. Operational (not a build): assign commission categories in Finance → Settlements → Merchants; the agreement-vs-admin commission alignment is logged in <code>forlater.md</code>.</p>
+</body></html>

@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inventory + KYC Hardening — Phase-wise Plan (2026-06-15)</title>
+<style>
+  :root { --ink:#1a1a1a; --muted:#666; --red:#B52725; --line:#e3e3e3; --bg:#fafafa; --code:#f4f4f6;
+          --crit:#c0392b; --critbg:#fdecea; --high:#9a6700; --highbg:#fff8e6; --med:#2c5f8a; --medbg:#eaf3fb; --green:#1b7f3b; --greenbg:#e7f6ec;
+          --inv:#1d4ed8; --sib:#7c3aed; --kyc:#b45309; --cross:#475569; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--ink); line-height: 1.55; margin:0; background:#fff; }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 40px 28px 90px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  h2 { font-size: 19px; margin: 38px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--red); }
+  h3 { font-size: 15.5px; margin: 20px 0 6px; }
+  p, li, td { font-size: 14px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+  .banner { background: var(--bg); border:1px solid var(--line); border-left:4px solid var(--red); border-radius:6px; padding:12px 16px; margin:16px 0; font-size:13.5px; }
+  .danger { background: var(--critbg); border:1px solid #f3b7b0; border-left:4px solid var(--crit); border-radius:6px; padding:13px 16px; margin:16px 0; }
+  .danger b { color: var(--crit); }
+  .toc { background: var(--bg); border:1px solid var(--line); border-radius:8px; padding:16px 20px; margin:22px 0; }
+  .toc a { color: var(--red); text-decoration:none; } .toc a:hover { text-decoration:underline; }
+  .phase { border:1px solid var(--line); border-radius:8px; padding:13px 16px; margin:12px 0; }
+  .phase.inv { border-left:4px solid var(--inv); } .phase.siblings { border-left:4px solid var(--sib); }
+  .phase.kyc-ux { border-left:4px solid var(--kyc); } .phase.cross-cutting { border-left:4px solid var(--cross); }
+  .phase h3 { margin:0 0 6px; }
+  .badges { margin:4px 0 8px; } .badge { display:inline-block; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:10px; margin-right:6px; letter-spacing:.3px; }
+  .b-inv{background:#e0e7ff;color:var(--inv);} .b-sib{background:#ede9fe;color:var(--sib);} .b-kyc{background:#fef3c7;color:var(--kyc);} .b-cross{background:#e2e8f0;color:var(--cross);}
+  .b-eff{background:#eef0f2;color:#444;} .b-dep{background:#fff;border:1px solid var(--line);color:var(--muted);} .b-must{background:#2b2b2b;color:#fff;}
+  .phase .goal { font-weight:600; } .phase .why { color:#444; font-size:13px; margin:4px 0; }
+  .phase ul { margin:6px 0 0 0; padding-left:18px; } .phase li { font-size:12.8px; margin:3px 0; }
+  .sev { display:inline-block; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:10px; margin-right:8px; }
+  .sev.crit{background:var(--critbg);color:var(--crit);} .sev.high{background:var(--highbg);color:var(--high);}
+  code { font-family:"SF Mono",Menlo,Consolas,monospace; background:var(--code); padding:1px 5px; border-radius:4px; font-size:12.3px; }
+  table { border-collapse:collapse; width:100%; margin:12px 0; font-size:13px; } th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top;} th{background:var(--bg);font-weight:600;}
+  ul.tight li { margin:4px 0; }
+  .ok { background:var(--greenbg); border:1px solid #bfe3cb; border-radius:8px; padding:12px 18px; margin:12px 0; }
+  .small { font-size:12.5px; color:var(--muted); }
+  hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+  @media print { .wrap{max-width:100%;padding:0;} h2{page-break-after:avoid;} .phase,table{page-break-inside:avoid;} a{color:var(--ink);text-decoration:none;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Inventory + KYC Hardening — Phase-wise Plan</h1>
+  <p class="sub">Pick At Store · 2026-06-15 · read-only audit (8 agents) → 16 phases across 3 tracks · no code written yet</p>
+
+  <div class="danger">
+    <b>URGENT — independent of the data purchase.</b> Every catalog/product <i>write</i> endpoint (<code>/catalog/sync/approve</code>, <code>/products/bulk-delete</code>, the Apify webhook, all product mutations — <code>index.ts</code> lines ~1500–2420) is <b>completely unauthenticated</b> — verified: zero <code>requireAdmin/requireRole/requireUser</code> calls in that range. Anyone on the internet can inject or bulk-delete products today, and <code>/products/bulk-delete</code> cascades into <code>StoreProduct</code> (merchant inventory). This is Phase 1 and should land regardless of whether you buy the Zepto data.
+  </div>
+
+  <div class="banner">
+    <b>Verdict.</b> The inventory module is <b>not load-ready for 172k SKUs</b> — and the gap is structural, not cosmetic. Foundations are sound (<code>source_product_id</code> is genuinely unique → idempotent re-runs; the approve path validates taxonomy; null-byte sanitization exists). But the working surface is thin: unauthenticated writes, a price heuristic that corrupts every >₹1000 product, a category mapper that dumps ~25–35 of 40 categories into a non-existent "General" bucket, the one flat-file endpoint dead-on-arrival, no sibling model, and ingestion that loads the whole file into memory + does 172k serial DB calls. The KYC screen works but keeps no decision audit trail, can't render PDF documents, hides several submitted fields, and crams decisions into a 340px column. The plan below sequences the must-fix-before-loading items first.
+  </div>
+
+  <div class="toc">
+    <b>Contents</b> &nbsp;·&nbsp;
+    <a href="#critical">Critical-now</a> ·
+    <a href="#siblings">Sibling verdict</a> ·
+    <a href="#phases">The 16 phases</a> ·
+    <a href="#kyc">KYC UX proposal</a> ·
+    <a href="#questions">Open questions</a> ·
+    <a href="#sequence">Recommended sequence</a>
+  </div>
+
+  <h2 id="critical">Must-fix before the 172k load</h2>
+  <ol class="tight">
+    <li><span class="sev crit">SECURITY</span><b>Authenticate every catalog/product write endpoint</b> (Phase 1) — verified zero auth guards in <code>index.ts</code> 1500–2420.</li>
+    <li><span class="sev crit">DATA</span><b>Replace <code>mapCategory</code> with a data-driven CategoryMapping table</b> (Phase 2) — else most of 172k lands uncategorized + in the wrong vertical (<code>'General'</code> isn't a real category → <code>category_id = NULL</code>).</li>
+    <li><span class="sev crit">MONEY</span><b>Delete the <code>MRP &gt; 1000 ? /100</code> heuristic</b> for the flat-file path (Phase 5) — the dataset is already in rupees, so every genuine ₹1,200 product silently becomes ₹12.</li>
+    <li><span class="sev crit">SCALE</span><b>Build a streaming, chunked, resumable bulk-load CLI</b> that bypasses the sync-queue + the synchronous HTTP handler (Phase 5) — the current paths can't finish 172k (in-memory load + 172k serial awaits inside a 60s transaction).</li>
+    <li><span class="sev high">DATA</span><b>Land the additive <code>variantGroupId</code> columns before the load</b> (Phase 3) — else the seller's sibling linkage is permanently lost and can only be reconstructed later from unreliable name heuristics.</li>
+    <li><span class="sev high">PLUMBING</span><b>Reconcile the StoreProduct migration drift</b> (Phase 4) — schema declares <code>branch_id/is_deleted/</code>new unique key but no migration adds them; the Phase 2/3/7 migrations would apply onto a history that doesn't match prod.</li>
+    <li><span class="sev high">CORRECTNESS</span><b>Don't stage 172k into the review queue UI</b> — <code>GET /catalog/sync/queue</code> is an unbounded <code>findMany</code> rendered un-virtualized; it freezes the admin tab. The load goes through the CLI, not the queue.</li>
+  </ol>
+
+  <h2 id="siblings">Sibling / variant verdict</h2>
+  <p><b>Not supported today.</b> There's no parent/variant-group concept anywhere — <code>Product</code> has no <code>variant_group_id</code>; the only "variant" is <code>StoreProduct.variant</code>, a free-text per-listing string. Worse, the merchant catalog-picker's <code>cleanName</code> dedup actively <i>collapses</i> every same-base-name product to one arbitrary pack size, and a modal <i>fabricates</i> fake variants from hardcoded ratios (offering 250ml/500ml/1L for a 5kg atta).</p>
+  <div class="ok">
+    <b>Minimal, non-breaking model:</b> add two nullable columns to <code>Product</code> — <code>variantGroupId</code> (all siblings share one UUID) + <code>variantLabel</code> ("500 ml", "Pack of 6") — plus <code>variant_group_id</code> on <code>SyncQueue</code>. <b>NULL = standalone flat SKU = exactly today's behavior</b>, so nothing breaks. Derive the group UUID deterministically from the seller's parent key (<code>uuidv5</code>) so re-runs are idempotent.
+    <br><br><b>Phasing (important):</b> <b>schema column FIRST (before the load)</b>, then ingest-flat-with-linkage, then merchant grouping, then the consumer variant-selector card LAST (fully deferrable — old single-card rendering stays correct while <code>variantGroupId</code> is NULL). You <i>can</i> load flat with zero schema change, but you'd permanently lose the grouping signal unless you capture it during that same load.
+  </div>
+
+  <h2 id="phases">The 16 phases</h2>
+  <p class="small">Tracks: <span class="badge b-inv">inventory</span> <span class="badge b-sib">siblings</span> <span class="badge b-kyc">kyc-ux</span> <span class="badge b-cross">cross-cutting</span> · Effort S/M/L · <span class="badge b-must">MUST-BEFORE-LOAD</span></p>
+
+  <div class="phase inv"><h3>Phase 1 — Lock down catalog/product write endpoints</h3>
+    <div class="badges"><span class="badge b-inv">inventory</span><span class="badge b-eff">S</span><span class="badge b-must">MUST-BEFORE-LOAD</span></div>
+    <div class="goal">Stop the entire catalog/product mutation surface being publicly callable.</div>
+    <div class="why">Verified zero <code>requireAdmin/requireRole/requireUser</code> in 1500–2420. Anyone can promote rows, POST a fake Apify webhook, or bulk-delete (cascades to merchant inventory).</div>
+    <ul><li>Add <code>requireRole(req,res,['SUPER_ADMIN','OPERATIONS'])</code> to every write handler (sync trigger/queue/approve/reject, products bulk/bulk-delete/bulk-update/patch/delete, image routes, bulk-import-json).</li><li>Webhook (1625): verify a shared secret since Apify can't send a Bearer token.</li><li>Ship route-by-route; smoke-test the admin catalog UI after each (confirm admin-web attaches the token).</li></ul>
+  </div>
+
+  <div class="phase inv"><h3>Phase 2 — Data-driven CategoryMapping table + seed</h3>
+    <div class="badges"><span class="badge b-inv">inventory</span><span class="badge b-eff">M</span><span class="badge b-must">MUST-BEFORE-LOAD</span></div>
+    <div class="goal">Replace the 8-keyword matcher with an explicit (category, subcategory) → (vertical_id, category_id) lookup for all 40 + 451.</div>
+    <div class="why"><code>mapCategory</code> defaults unmatched categories to <code>'General'</code> (not a real category → NULL). A one-time human mapping of 451 rows replaces mis-shelving 172k SKUs.</div>
+    <ul><li>New <code>CategoryMapping</code> table (source_platform, source_category, source_subcategory, vertical_id, category_id) + migration.</li><li>Seed script from the seller's 40+451 list (ops curates ~451 rows before load).</li><li>Unmapped pair → <code>NEEDS_MAPPING</code> holding state, never silently to "General".</li><li><b>Depends on:</b> the seller's category list (their screenshot).</li></ul>
+  </div>
+
+  <div class="phase siblings"><h3>Phase 3 — Additive sibling/variant schema columns</h3>
+    <div class="badges"><span class="badge b-sib">siblings</span><span class="badge b-eff">S</span><span class="badge b-must">MUST-BEFORE-LOAD</span><span class="badge b-dep">after Phase 4</span></div>
+    <div class="goal">Land nullable <code>variantGroupId</code>/<code>variantLabel</code> on <code>Product</code> (+ <code>variant_group_id</code> on <code>SyncQueue</code>) before the load.</div>
+    <div class="why">Purely additive nullable columns; NULL = today's flat behavior. Cheap now, expensive to back-fill across 172k later.</div>
+    <ul><li>Migration adds the columns + <code>@@index([variant_group_id])</code>. Zero impact on existing rows/queries.</li></ul>
+  </div>
+
+  <div class="phase cross-cutting"><h3>Phase 4 — Reconcile StoreProduct migration drift</h3>
+    <div class="badges"><span class="badge b-cross">cross-cutting</span><span class="badge b-eff">M</span><span class="badge b-must">MUST-BEFORE-LOAD</span></div>
+    <div class="goal">Make migration history match the live DB so Phases 2/3/7 migrations apply safely.</div>
+    <div class="why"><code>branch_id/is_deleted/</code>new unique key are in <code>schema.prisma</code> but no migration adds them (applied out-of-band). New migrations onto a drifted history risk Prisma dropping/recreating constraints.</div>
+    <ul><li>Baseline migration recording the actual StoreProduct shape; verify <code>migrate deploy</code> on a staging clone reproduces prod. <b>STOP for approval before any DB migration.</b></li></ul>
+  </div>
+
+  <div class="phase inv"><h3>Phase 5 — Streaming bulk-load CLI (the 172k path)</h3>
+    <div class="badges"><span class="badge b-inv">inventory</span><span class="badge b-eff">L</span><span class="badge b-must">MUST-BEFORE-LOAD</span><span class="badge b-dep">after 2,3,4</span></div>
+    <div class="goal">A CLI/background job that streams the CSV, maps fields + taxonomy + sibling linkage, and chunk-upserts straight into <code>Product</code> — bypassing the queue + the HTTP handler.</div>
+    <div class="why">The three scale killers verified: un-paginated full-file GET, 172k serial awaits, a 60s transaction that can't finish. Plus the MRP heuristic corrupts the high-value tail.</div>
+    <ul><li><code>scripts/bulk-load-catalog.ts</code>: stream with <code>csv-parse</code> (not <code>xlsx.readFile</code> — fully in-memory); map the documented columns; store Image URL verbatim (no <code>/production/</code> re-prefix).</li><li><b>Delete the <code>&gt;1000 ? /100</code> MRP heuristic</b> for this path; reject MRP ≤ 0 / non-numeric.</li><li>Resolve taxonomy via the Phase 2 table; set <code>variantGroupId = uuidv5(sellerParentId)</code> + <code>variantLabel</code> from Quantity.</li><li>Chunked multi-row <code>INSERT … ON CONFLICT DO UPDATE</code> (500–1000/stmt), each in its own short tx + a durable cursor for resume.</li><li>Dry-run mode + 100-row sample test + idempotency test (run twice → inserted=0); final inserted/updated/skipped tally + error report.</li></ul>
+  </div>
+
+  <div class="phase inv"><h3>Phase 6 — Fix /products/bulk-import-json (incremental top-ups)</h3>
+    <div class="badges"><span class="badge b-inv">inventory</span><span class="badge b-eff">M</span><span class="badge b-dep">after 1,2</span></div>
+    <div class="goal">Repair the broken HTTP bulk path so smaller incremental imports work.</div>
+    <div class="why">Verified: passes a non-existent <code>category</code> key masked by <code>: any</code> → Prisma rejects 100% of rows at runtime. Inserts nothing today.</div>
+    <ul><li>Remove the <code>category</code> key; add vertical/category resolution via the Phase 2 table; drop the <code>: any</code> cast (typed input so tsc catches it).</li><li>Drop the per-row second <code>findUnique</code>; make <code>sourceProductId</code> mandatory; add a 1-row integration test.</li></ul>
+  </div>
+
+  <div class="phase inv"><h3>Phase 7 — Catalog search/list indexes for 172k</h3>
+    <div class="badges"><span class="badge b-inv">inventory</span><span class="badge b-eff">M</span><span class="badge b-dep">after 4</span></div>
+    <div class="goal">Make admin + merchant catalog browse/search fast at 172k.</div>
+    <div class="why"><code>Product</code> has no index on name/createdAt/brand; ILIKE name search + offset pagination full-scan at 172k. And <code>GET /products</code> currently returns <code>MOCK_PRODUCTS</code> on filter error (admins silently see fake data).</div>
+    <ul><li>Raw-SQL migration: <code>pg_trgm</code> GIN on <code>name</code>, btree on <code>createdAt</code>/<code>brand</code> (CREATE INDEX CONCURRENTLY).</li><li>Fix <code>GET /products</code> to filter on <code>category_id/vertical_id</code> (today filters non-existent scalars) and remove the MOCK_PRODUCTS fallback (flag separately — adjacent feature).</li></ul>
+  </div>
+
+  <div class="phase cross-cutting"><h3>Phase 8 — Tighten RLS on Product / StoreProduct</h3>
+    <div class="badges"><span class="badge b-cross">cross-cutting</span><span class="badge b-eff">M</span><span class="badge b-dep">after 11</span></div>
+    <div class="goal">Stop any authenticated merchant editing/deleting master catalog rows directly via PostgREST.</div>
+    <div class="why">Verified: Product grants authenticated INSERT/UPDATE/DELETE with <code>WITH CHECK(true)</code> — any merchant JWT can edit/delete the 172k purchased rows bypassing the API.</div>
+    <ul><li>Make master <code>Product</code> writes service_role-only (or scoped to custom products); scope <code>StoreProduct</code> writes to the caller's store/branch. <b>Enumerate every current read/write path first; STOP for approval (RLS change).</b></li></ul>
+  </div>
+
+  <div class="phase inv"><h3>Phase 9 — Bulk-load admin surface + paginate sync queue</h3>
+    <div class="badges"><span class="badge b-inv">inventory</span><span class="badge b-eff">L</span><span class="badge b-dep">after 1,2,5</span></div>
+    <div class="goal">Give ops a real bulk-import page; stop the sync-queue UI rendering 172k rows.</div>
+    <ul><li>Server-side pagination on <code>GET /catalog/sync/queue</code> (currently unbounded) + drop the metadata blob from the projection.</li><li>Virtualize the admin sync-queue tab; new "Bulk Catalog Import" page (streamed upload + column mapping + live progress) wired to the Phase 5 CLI; fetch real verticals/categories instead of 8 hardcoded strings.</li></ul>
+  </div>
+
+  <div class="phase siblings"><h3>Phase 10 — Server-paginated merchant catalog endpoint</h3>
+    <div class="badges"><span class="badge b-sib">siblings</span><span class="badge b-eff">L</span><span class="badge b-dep">after 7</span></div>
+    <div class="goal">Replace the unbounded <code>select('*')</code> + <code>cleanName</code> dedup with a paginated, server-searched catalog API.</div>
+    <div class="why">The merchant picker does <code>select('*')</code> with no limit (OOM/truncates at Supabase's ~1000 cap) then collapses every same-base-name SKU to one arbitrary pack size — the single biggest functional blocker.</div>
+    <ul><li>New <code>GET /merchant/catalog?search=&vertical=&brand=&cursor=&limit=</code> (keyset, backed by Phase 7 indexes).</li><li>Catalog-picker → paginated FlatList + debounced search; <b>remove the <code>cleanName</code> dedup entirely</b>.</li></ul>
+  </div>
+
+  <div class="phase cross-cutting"><h3>Phase 11 — Move merchant direct-DB reads behind API</h3>
+    <div class="badges"><span class="badge b-cross">cross-cutting</span><span class="badge b-eff">M</span><span class="badge b-dep">before 8</span></div>
+    <div class="goal">Stop the merchant app reading <code>Product/StoreProduct</code> directly so the Phase 8 RLS lockdown doesn't break it.</div>
+    <div class="why">Phase 9b moved writes behind the API but reads still go direct; tightening read RLS would silently break them.</div>
+    <ul><li>Route <code>ConfigureProductsModal</code> + <code>AddCustomProductModal</code> lookups through API endpoints.</li></ul>
+  </div>
+
+  <div class="phase siblings"><h3>Phase 12 — Sibling-aware merchant config + remove mock variants</h3>
+    <div class="badges"><span class="badge b-sib">siblings</span><span class="badge b-eff">M</span><span class="badge b-dep">after 3,5,10</span></div>
+    <div class="goal">One picker card per variant group; variants from REAL sibling rows, not fabricated ratios.</div>
+    <div class="why"><code>getVariantsForCategory</code> invents sizes/prices (250ml for a 5kg atta), misleading merchants into underpricing.</div>
+    <ul><li>Group by <code>variantGroupId</code> (one card → variant sub-list, each with real MRP); remove the mock generator; merchant sets price + stock per real sibling.</li></ul>
+  </div>
+
+  <div class="phase siblings"><h3>Phase 13 — Consumer variant-selector card</h3>
+    <div class="badges"><span class="badge b-sib">siblings</span><span class="badge b-eff">L</span><span class="badge b-dep">after 3,5,12</span></div>
+    <div class="goal">Collapse sibling cards into one storefront card with a pack-size selector.</div>
+    <div class="why">Consumer renders one card per StoreProduct with the variant concatenated onto the name. Fully deferrable — old rendering stays correct while <code>variantGroupId</code> is NULL.</div>
+    <ul><li>Add a second grouping pass in the store endpoint returning <code>variants[]</code>; add a selector to <code>ProductCard</code>. <b>Note: <code>useProducts.ts</code> is <code>@lock</code> — needs your explicit permission.</b></li></ul>
+  </div>
+
+  <div class="phase kyc-ux"><h3>Phase 14 — KYC: persist decision audit trail + split reason fields</h3>
+    <div class="badges"><span class="badge b-kyc">kyc-ux</span><span class="badge b-eff">M</span></div>
+    <div class="goal">Record WHO decided WHAT (+ the checklist) on every KYC decision; stop reject/needs_info sharing one column.</div>
+    <div class="why">Verified: the kyc-decision endpoint persists no reviewer identity/audit/checklist — no record of who approved/rejected a merchant or why. Approve is destructive (activates store + emails merchant).</div>
+    <ul><li>Write an audit row (reviewer userId, decision, checklist snapshot, reason); separate <code>needs_info</code> note from rejection reason; send the checklist to the server; guard the <code>store.id===merchant.id</code> assumption.</li></ul>
+  </div>
+
+  <div class="phase kyc-ux"><h3>Phase 15 — KYC: surface hidden fields + real document viewer</h3>
+    <div class="badges"><span class="badge b-kyc">kyc-ux</span><span class="badge b-eff">L</span></div>
+    <div class="goal">Show the reviewer everything submitted; let them actually read PDFs and rotated scans.</div>
+    <div class="why"><code>is_veg/cuisines/restaurantType/bank_name</code> captured but never shown; MSME/FSSAI conditional; <code>SecureImage</code> is img-only so PDF certificates render broken; the drawn signature is omitted from the consent endpoint.</div>
+    <ul><li>Add a Business Profile block + bank_name + always-show MSME/FSSAI; content-type-aware viewer (pdf.js for PDFs, pan/zoom/rotate for images, side-by-side compare); mask Aadhaar/bank with click-to-reveal.</li></ul>
+  </div>
+
+  <div class="phase kyc-ux"><h3>Phase 16 — KYC: queue triage + decision-panel redesign</h3>
+    <div class="badges"><span class="badge b-kyc">kyc-ux</span><span class="badge b-eff">L</span><span class="badge b-dep">after 14,15</span></div>
+    <div class="goal">Make the queue scannable/filterable; give the decision controls room.</div>
+    <div class="why">No search/filter/sort; pending + needs_info mixed; decision panel crammed to 340px with 10px fonts; irreversible Approve has no final confirm.</div>
+    <ul><li>Status chips + text search (name/PAN/phone) + city/vertical filter + oldest-first + age badge; widen + regroup the decision panel into labelled collapsible sections; Approve confirmation modal; one endpoint for the whole panel.</li></ul>
+  </div>
+
+  <h2 id="kyc">KYC UX — current problems &amp; proposed shape</h2>
+  <p><b>Captured at signup but never shown to the reviewer:</b> business profile (is_veg, cuisines, restaurant type, turnover), bank name, MSME/FSSAI (conditional), the drawn signature image, and any prior decision history. <b>Can't verify documents:</b> the viewer renders everything as an <code>&lt;img&gt;</code>, so PDF certificates show broken and there's no rotate / fit-to-width / side-by-side compare. <b>No accountability:</b> nothing records who approved/rejected a merchant.</p>
+  <p><b>Proposed:</b> keep the 3-pane shell but rebuild each pane — a triaged, searchable, oldest-first queue; a content-type-aware document viewer with compare mode; and a widened decision pane grouped into Business Profile / Identity &amp; Compliance / Bank / Legal &amp; Consent, with masked-reveal on Aadhaar+bank, a checklist that names the value being verified ("Name on PAN matches owner: Ravi Kumar"), an Approve confirmation summary, and an audit row on every decision. Served from one endpoint.</p>
+
+  <h2 id="questions">Open questions (gate specific phases)</h2>
+  <ul class="tight">
+    <li><b>Sibling linkage format</b> — does the seller's file have an explicit, stable parent-id column, or is grouping only implied by (brand + base name)? The whole sibling track depends on this. <b>(ask on/after the call)</b></li>
+    <li><b>File format</b> — CSV or xlsx? The Phase 5 CLI must stream CSV (xlsx is fully in-memory at 172k).</li>
+    <li><b>451 → taxonomy</b> — do we map onto existing categories, or create new Vertical/Tier2Category rows (Paan Corner, Pet Care, Stationery…)? Gates Phase 2 seed quality.</li>
+    <li><b>Unmapped rows</b> — hold in <code>NEEDS_MAPPING</code> (recommended) or hard-reject from the load?</li>
+    <li><b>Consumer sibling UX</b> — single card + selector now (Phase 13), or separate cards acceptable for v1?</li>
+    <li><b>Signature privacy</b> — render the drawn signature inline in the KYC panel, or keep the signed PDF canonical?</li>
+    <li><b>Job runner</b> — is there a background worker the Phase 5 load can hook, or does it run as a one-off CLI against prod?</li>
+  </ul>
+
+  <h2 id="sequence">Recommended sequence</h2>
+  <table>
+    <tr><th>Stage</th><th>Phases</th><th>Why this order</th></tr>
+    <tr><td><b>A — before any 172k load</b></td><td>1 (auth) → 4 (drift) → 2 (category map) + 3 (sibling cols) → 5 (CLI)</td><td>Close the security hole, fix migration history, then the three things that make the load <i>correct</i> (category, siblings, streaming). 1 is urgent on its own.</td></tr>
+    <tr><td><b>B — make it usable</b></td><td>7 (indexes) → 10 (merchant catalog API) → 9 (admin bulk page)</td><td>172k is unusable without search/pagination on both merchant + admin sides.</td></tr>
+    <tr><td><b>C — siblings UX</b></td><td>12 (merchant grouping) → 13 (consumer selector)</td><td>Real variant UX once the data + columns exist; 13 is deferrable (and touches a locked file).</td></tr>
+    <tr><td><b>D — hardening</b></td><td>6 (json import) → 11 (reads behind API) → 8 (RLS)</td><td>Incremental-import fix + the RLS lockdown (11 must precede 8).</td></tr>
+    <tr><td><b>KYC (parallel track)</b></td><td>14 (audit trail) → 15 (fields + viewer) → 16 (triage + redesign)</td><td>Independent of the catalog work; can run alongside. 14 is the compliance-critical one.</td></tr>
+  </table>
+
+  <hr>
+  <p class="small">Read-only audit (8 agents) → consolidated plan. Every load-bearing claim was spot-verified against the code with file:line. No code written. Saved as HTML per standing preference; browser-print → PDF.</p>
+
+</div>
+</body>
+</html>

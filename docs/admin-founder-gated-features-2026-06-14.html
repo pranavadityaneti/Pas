@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>PAS Admin — Founder-gated features (decisions needed) 2026-06-14</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:1000px;margin:0 auto;padding:28px 32px 80px;color:#1a1a1a;background:#fafafa;line-height:1.5}
+h1{font-size:23px;margin:0 0 2px}h2{font-size:17px;margin:26px 0 6px;color:#B52725}
+.lead{color:#555;font-size:14px;margin-bottom:14px}
+.card{background:#fff;border:1px solid #e5e5e5;border-left:4px solid #B52725;border-radius:6px;padding:14px 18px;margin:14px 0}
+.card h2{margin-top:0;border:0}
+code{background:#eee;padding:1px 5px;border-radius:3px;font-family:'SF Mono',Menlo,Consolas,monospace;font-size:88%}
+.q{background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:8px 12px;margin:8px 0;font-size:13.5px}
+.q b{color:#92400e}
+.meta{font-size:12px;color:#777;margin-top:6px}
+.rec{background:#ecfdf5;border:1px solid #a7f3d0;border-radius:6px;padding:6px 12px;margin:6px 0;font-size:13px;color:#065f46}
+ul{margin:6px 0 6px;padding-left:20px}li{margin:3px 0;font-size:13.5px}
+.eff{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:4px;background:#eef2ff;color:#3730a3}
+</style></head><body>
+<h1>Admin dashboard — founder-gated features</h1>
+<div class="lead">Generated 2026-06-14. These are the pending admin items I <strong>can't responsibly build without your decision</strong> (they need a vendor pick, a product call, or are large features). Buckets 1–3 (display fixes, quick wins, KPI endpoints) don't need this — they're being built/shipped separately. Each card below = a decision for you.</div>
+
+<div class="card">
+<h2>1. Settlement / Payout admin surface <span class="eff">large · blocked</span></h2>
+<p>A screen to view + trigger merchant payouts (and the merchant-facing "Earnings/Payout" tab) can't be built until two things are decided. Today the merchant dashboard shows a <strong>placeholder</strong> payout (<code>todaySum × 0.98</code>) — a fake number; real bank credits won't match it.</p>
+<div class="q"><b>Decision 1a — Payout vendor.</b> Razorpay X does <em>not</em> support your business type. Pick one: <strong>Cashfree Payouts</strong> · Open Money · Decentro · (or retry RazorpayX with a different entity). This unblocks automated payouts + the settlement screen.</div>
+<div class="q"><b>Decision 1b — Real payout formula.</b> Need: (i) PAS commission structure (the agreements say 2%/5%/7% — confirm that's the binding rate), (ii) who absorbs the payment-gateway fee + 18% GST on it, (iii) TDS u/s 194-O (1%) — deduct at source or show gross, (iv) settlement frequency (T+1 / T+2 / weekly) for what "today's payout" means.</div>
+<div class="rec">Recommendation: pick Cashfree Payouts (best India coverage), and lock the formula = gross − PAS commission − gateway fee − GST-on-fee − TDS, settled T+2. I'll build the calc server-side once confirmed.</div>
+<div class="meta">Source: forlater "Real merchant payout formula" + "payout-vendor alternative".</div>
+</div>
+
+<div class="card">
+<h2>2. Global Config (platform settings) <span class="eff">medium · blocked</span></h2>
+<p>The Global Config tab is currently <strong>hidden</strong> because it was 100% mock (Save did nothing). To revive it I need a <code>platform_settings</code> table + GET/PATCH routes + the apps to actually consume the values.</p>
+<div class="q"><b>Decision 2 — Which settings are real for launch?</b> Candidates: Max COD, Min Order value, Platform Fee, Delivery/convenience fare, Referral bonuses, Service Radius (the consumer 10 km), Driver-assignment timeout. Which of these do you actually want to control centrally now vs. later?</div>
+<div class="rec">Recommendation: start with just <strong>Service Radius</strong> + <strong>Min Order</strong> (the two that affect live behaviour today); defer the rest until the features that use them exist.</div>
+</div>
+
+<div class="card">
+<h2>3. Order / refund / dispute resolution queue <span class="eff">large</span></h2>
+<p>A unified support view: stranded/charged-but-no-order payments, Wati-escalated complaints, and pending refunds — with one-click refund + context.</p>
+<div class="q"><b>Decision 3 — Scope + sequencing.</b> Full dispute workflow, or start with just the <strong>stranded-payments worklist</strong> (the orphan-payment sweep already finds these; this just surfaces them for action)? The full version needs Wati + Razorpay context wired into admin.</div>
+<div class="rec">Recommendation: build the <strong>stranded-payments worklist first</strong> (high money-safety value, small), defer the full dispute UI.</div>
+</div>
+
+<div class="card">
+<h2>4. Wati support inbox UI <span class="eff">large</span></h2>
+<p>The <code>wati_inbox</code> table + webhook foundation exists; the admin inbox <em>screen</em> doesn't.</p>
+<div class="q"><b>Decision 4 — Build now or post-launch? And scope:</b> read-only thread view, or reply-from-admin (which needs Wati send templates + agent routing)?</div>
+<div class="rec">Recommendation: post-launch. Until then the "Send WhatsApp" (wa.me) links on the Customers page cover ad-hoc support.</div>
+</div>
+
+<div class="card">
+<h2>5. Customers — wallet / tags / LTV / cohorts <span class="eff">medium · post-launch</span></h2>
+<div class="q"><b>Decision 5 — Any of these for launch?</b> Wallet balance + Grant Credit (needs <code>wallets</code> table), customer tags (VIP / At-Risk), LTV percentiles, cohort retention.</div>
+<div class="rec">Recommendation: all post-launch — none are needed to operate. Revisit after real customer volume.</div>
+</div>
+
+<div class="card">
+<h2>6. Analytics depth <span class="eff">medium</span></h2>
+<div class="q"><b>Decision 6 — Priority?</b> Top SKUs / category breakdown (OrderItem joins), city/geo breakdown (branch joins), compare-vs-previous-period delta tiles. All are RPC extensions.</div>
+<div class="rec">Recommendation: add compare-vs-previous-period tiles first (highest founder/investor value), defer SKU/geo.</div>
+</div>
+
+<div class="card">
+<h2>7. Operational (not a build) — commission categories <span class="eff">action</span></h2>
+<p>Assign commission categories in <strong>Finance → Settlements → Merchants</strong> so settlements aren't all held. Also: the agreement states a fixed commission but admin sets <code>commission_rate</code> independently — decide whether to align them (logged in <code>forlater.md</code>, your "leave independent for now").</p>
+</div>
+
+<p style="color:#777;font-size:12px;margin-top:24px">Companion: <code>admin-dashboard-changes-and-pending-2026-06-14.html</code> (full changelog + pending). Buckets 1–3 are tracked separately and don't need these decisions.</p>
+</body></html>

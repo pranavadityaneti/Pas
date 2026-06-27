@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>PAS — QA Bug Triage (2026-06-13)</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:1040px;margin:0 auto;padding:28px 32px 80px;color:#1a1a1a;background:#fafafa;line-height:1.55}
+h1{font-size:24px;margin:0 0 4px}h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1.5px solid #d4d4d4}
+.lead{color:#555;font-size:14px;margin-bottom:18px}
+table{border-collapse:collapse;width:100%;font-size:12.5px;margin:8px 0 16px;background:#fff}
+th,td{padding:7px 9px;text-align:left;border-bottom:1px solid #eee;vertical-align:top}th{background:#f6f6f6;font-weight:700}
+code{background:#f0f0f0;padding:1px 5px;border-radius:3px;font-family:'SF Mono',Menlo,Consolas,monospace;font-size:90%}
+.pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:10.5px;font-weight:700}
+.p0{background:#fee2e2;color:#991b1b}.p1{background:#fef3c7;color:#92400e}.p2{background:#dbeafe;color:#1e40af}
+.ota{background:#d1fae5;color:#065f46}.build{background:#fde68a;color:#92400e}.be{background:#e0e7ff;color:#3730a3}
+.dec{background:#ffedd5;color:#9a3412}.wai{background:#f3e8ff;color:#6b21a8}
+.crit{background:#fef2f2;border-left:3px solid #dc2626;padding:8px 14px;margin:10px 0;font-size:13px}
+.note{background:#fffbe6;border-left:3px solid #f59e0b;padding:8px 14px;margin:10px 0;font-size:13px}
+@media print{body{background:#fff;max-width:none}}
+</style></head><body>
+<h1>PAS — QA Bug Triage</h1>
+<div class="lead"><strong>2026-06-13.</strong> 17 issues from the founder's testing team, against the <strong>currently-live build</strong> (pre Phase 8/9). Investigated read-only across consumer app, merchant app, and API. Source: <code>docs/feedback/Bugs-2026-06-13.pdf</code>.
+Legend: <span class="pill p0">P0 money</span> <span class="pill p1">P1 functional</span> <span class="pill p2">P2 UX</span> · ship: <span class="pill ota">OTA</span> <span class="pill be">BACKEND</span> <span class="pill build">NATIVE BUILD</span> · <span class="pill dec">DECISION</span> <span class="pill wai">NEEDS QA REPRO</span></div>
+
+<div class="crit"><strong>The single build-forcing item:</strong> only <strong>#16 (Android keyboard)</strong> needs a native build — it requires <code>softwareKeyboardLayoutMode: "resize"</code> in the consumer <code>app.json</code> (an AndroidManifest change, not OTA-able). <strong>Everything else ships via OTA or a backend deploy.</strong> So: one fresh consumer native build closes the keyboard bug — and if you're building anyway, bundle Sentry activation + the stuck-splash fix into it.</div>
+
+<h2>Theme 1 — Order / payment state machine (P0 cluster)</h2>
+<p><strong>Three shared root causes</strong> drive six bugs:</p>
+<ul>
+<li><strong>SRC-A "two clocks":</strong> the customer's countdown uses the server <code>expires_at</code>, but the actual auto-expire is a client <code>setTimeout(120s)</code> started later (after the network round-trip). They never reconcile → timer drift + premature "timed out". (<code>useOrderRequests.ts:50,183-188</code>)</li>
+<li><strong>SRC-B coupled multi-store gate:</strong> <code>allResolved = requests.every(status !== 'PENDING')</code> — the screen won't advance until <em>all</em> stores answer, so an accepted store waits on a slow sibling. (<code>useOrderRequests.ts:61</code>)</li>
+<li><strong>Load-bearing defect:</strong> the server cron <code>expireStaleOrderRequests</code> expires <code>status IN ('PENDING','ACCEPTED')</code> past <code>expires_at</code> — so an <em>accepted-but-unpaid</em> order is killed at 2 min and shows "timed out". (<code>scheduled-jobs.ts:571-585</code>)</li>
+</ul>
+<table>
+<tr><th>#</th><th>Bug</th><th>Root cause</th><th>Sev</th><th>Effort</th><th>Ship</th></tr>
+<tr><td>8</td><td>Order rejected but <strong>payment captured</strong> (charged, no order)</td><td>Pre-pay reject = no money (correct). Post-capture orphan IS caught by the Phase 7B sweep — tag <code>paymentType='consumer_order'</code> <strong>confirmed present</strong> (index.ts:589). <strong>BUT <code>CRON_DRY_RUN=true</code> is still ON</strong> → sweep only logs, doesn't refund yet.</td><td><span class="pill p0">P0</span></td><td>S (flip flag)</td><td><span class="pill be">BACKEND</span></td></tr>
+<tr><td>14</td><td>Accepted store still "times out" in a 2-store cart</td><td>SRC-B holds the accepted store + the cron expires the ACCEPTED row at 2 min</td><td><span class="pill p0">P0</span></td><td>M</td><td><span class="pill ota">OTA</span>+<span class="pill be">BE</span></td></tr>
+<tr><td>13</td><td>Two-store: 1st acceptance shouldn't wait on the 2nd</td><td>SRC-B (coupled gate)</td><td><span class="pill p1">P1</span></td><td>L (flow redesign)</td><td><span class="pill ota">OTA</span></td></tr>
+<tr><td>1</td><td>Vendor rejects → shows "store timed out"</td><td>Client EXPIRED timer races + wins over the REJECTED status near the boundary (backend reject path is correct)</td><td><span class="pill p1">P1</span></td><td>M</td><td><span class="pill ota">OTA</span></td></tr>
+<tr><td>15</td><td>Cancel payment after accept → shows "timed out"</td><td>No distinct "payment cancelled" state; decays into EXPIRED (SRC-A + cron)</td><td><span class="pill p1">P1</span></td><td>M</td><td><span class="pill ota">OTA</span></td></tr>
+<tr><td>9</td><td>Countdown seconds drift/jump</td><td>SRC-A (device clock vs server clock; interval not aligned to second boundary)</td><td><span class="pill p2">P2</span></td><td>S</td><td><span class="pill ota">OTA</span></td></tr>
+</table>
+<div class="note"><strong>#8 is the real money item and it's overdue:</strong> the auto-refund machinery works and is correctly tagged, but it's been in <strong>observe-only mode</strong> (<code>CRON_DRY_RUN=true</code>, set 2026-06-10) far past its 24h window. Flipping it off (after a glance at the Sentry "would-refund" logs) is what actually starts refunding charged-but-no-order payments. The "shows timed out" parts (#1/#15) are separate consumer display fixes.</div>
+
+<h2>Theme 2 — Cart pricing</h2>
+<table>
+<tr><th>#</th><th>Verdict</th><th>Detail</th><th>Effort</th><th>Ship</th></tr>
+<tr><td>3</td><td><strong>Working as intended</strong> (lock decision) — only a missing indicator</td><td>Cart correctly locks add-time price; never re-reads it. "Different price next time" = a fresh add at current price (correct). Gap: no "price locked" badge. (<code>CartContext.tsx</code>)</td><td>S</td><td><span class="pill ota">OTA</span></td></tr>
+<tr><td>4</td><td><strong>Real — missing feature</strong></td><td>1kg vs 1.5kg are separate SKUs (<code>StoreProduct</code> unique on branch+product+variant). No in-cart variant/weight selector exists, so a weight change never reprices. <span class="pill wai">NEEDS QA REPRO</span> — where did they change weight? No such UI found.</td><td>M</td><td><span class="pill ota">OTA</span></td></tr>
+<tr><td>5</td><td><strong>Unconfirmed</strong></td><td>Quantity→total path is reactive &amp; correct. Possible rapid-tap stale-prop race in StorefrontScreen handlers. <span class="pill wai">NEEDS QA REPRO</span> — exact screen + steps.</td><td>S?</td><td><span class="pill ota">OTA</span></td></tr>
+</table>
+
+<h2>Theme 3 — Inventory / discovery</h2>
+<table>
+<tr><th>#</th><th>Root cause</th><th>Effort</th><th>Ship</th></tr>
+<tr><td>2</td><td><strong>Confirmed one-line bug:</strong> consumer <code>useProducts.ts:61</code> filters <code>active=true</code> only, missing <code>is_deleted=false</code>. Merchant soft-delete sets <code>is_deleted=true</code> but leaves <code>active=true</code> → deleted items still show to customers. (Stock-0 items are greyed, by design.)</td><td>S</td><td><span class="pill ota">OTA</span></td></tr>
+<tr><td>11</td><td><strong>Confirmed:</strong> <code>FavoritesScreen.tsx:30</code> uses web CSS <code>backgroundImage</code> on an RN <code>&lt;View&gt;</code> (ignored). Swap to <code>&lt;Image source={{uri}}&gt;</code>. File is NOT locked.</td><td>S</td><td><span class="pill ota">OTA</span></td></tr>
+<tr><td>12</td><td>No store-hours UI exists anywhere; <code>checkIsOpen</code> defaults NULL hours → "open"; ~25/26 branches have NULL hours. Ties to the <strong>D1 signup-hours-capture</strong> decision + a data backfill.</td><td>M-L</td><td><span class="pill ota">OTA</span>+<span class="pill be">data</span></td></tr>
+</table>
+
+<h2>Theme 4 — UX + product questions</h2>
+<table>
+<tr><th>#</th><th>Item</th><th>Root cause / current behavior</th><th>Effort</th><th>Ship</th></tr>
+<tr><td>16</td><td>Keyboard covers inputs</td><td>Consumer app has no keyboard-aware lib + <strong>missing <code>softwareKeyboardLayoutMode</code> in app.json</strong> (merchant has <code>resize</code>). Forms in CheckoutScreen, OrderActionsSheet, SupportScreen lack <code>KeyboardAvoidingView</code>.</td><td>M</td><td><span class="pill build">BUILD</span>+<span class="pill ota">OTA</span></td></tr>
+<tr><td>17</td><td>Android "Proceed" hard to tap</td><td>Floating cart band's wrapper has lower <code>elevation</code> than the absolute tab bar → tab bar intercepts lower taps (Android z-order). <code>FloatingCartBand.tsx</code>.</td><td>S</td><td><span class="pill ota">OTA</span></td></tr>
+<tr><td>6</td><td>Notif toggle → OS settings</td><td>Consumer push row fires an <code>Alert</code> instead of <code>Linking.openSettings()</code> (<code>ProfileScreen.tsx:740</code>). Merchant has no push toggle.</td><td>S</td><td><span class="pill ota">OTA</span></td></tr>
+<tr><td>7</td><td><span class="pill dec">DECISION</span> Per-item pickup times</td><td>Pickup time is <strong>per-store, not per-item</strong>. 3 items from one store = one time. Different times only across different stores.</td><td>—</td><td>—</td></tr>
+<tr><td>10</td><td><span class="pill dec">DECISION</span> Notify the "someone else" pickup contact</td><td><strong>No</strong> — that name/phone is stored for the merchant's reference only; all OTP/SMS/push go to the <strong>account holder</strong>. The third party is never contacted.</td><td>—</td><td>—</td></tr>
+</table>
+
+<h2>What needs YOU (decisions) + QA (repro)</h2>
+<table>
+<tr><th>Type</th><th>Item</th></tr>
+<tr><td><span class="pill be">overdue ops</span></td><td><strong>Flip <code>CRON_DRY_RUN</code> off</strong> (after checking Sentry would-refund logs) — this is what actually auto-refunds #8 orphans. Window long elapsed.</td></tr>
+<tr><td><span class="pill dec">decision</span></td><td><strong>#10</strong> — notify the someone-else pickup contact via SMS (incl. the OTP)? Recommend yes.</td></tr>
+<tr><td><span class="pill dec">decision</span></td><td><strong>#7</strong> — support per-item pickup times within one store? Recommend no (keep per-store) unless there's demand.</td></tr>
+<tr><td><span class="pill dec">decision</span></td><td><strong>#12</strong> — ties to D1 (capture hours at signup). Confirm we surface hours + "closing soon" in the consumer app, and backfill the 25 NULL branches.</td></tr>
+<tr><td><span class="pill wai">QA repro</span></td><td><strong>#4</strong> — where exactly was 1kg→1.5kg changed? (no in-cart weight selector found). <strong>#5</strong> — exact screen + steps for "quantity not reflected".</td></tr>
+</table>
+
+<p style="color:#777;font-size:12px;margin-top:36px">Generated 2026-06-13 from a 4-track parallel read-only code investigation. No files changed. Locked files any fix would touch: CheckoutScreen, DiningCheckoutScreen, CartContext, CartScreen, useProducts, dataTransformer, useStores, StorefrontScreen, useOrderRequests — each needs an explicit lock override before editing. FavoritesScreen + ProfileScreen + FloatingCartBand are unlocked.</p>
+</body></html>

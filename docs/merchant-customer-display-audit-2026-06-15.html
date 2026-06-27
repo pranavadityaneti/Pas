@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What Merchants &amp; Customers See — Display Audit (2026-06-15)</title>
+<style>
+  :root { --ink:#1a1a1a; --muted:#666; --red:#B52725; --line:#e3e3e3; --bg:#fafafa; --code:#f4f4f6; --crit:#c0392b; --critbg:#fdecea; --high:#9a6700; --highbg:#fff8e6; --med:#2c5f8a; --medbg:#eaf3fb; --green:#1b7f3b; --greenbg:#e7f6ec; }
+  *{box-sizing:border-box;} body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);line-height:1.55;margin:0;background:#fff;}
+  .wrap{max-width:920px;margin:0 auto;padding:40px 28px 90px;}
+  h1{font-size:25px;margin:0 0 4px;} h2{font-size:18px;margin:34px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--red);}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 16px;}
+  p,li,td{font-size:14px;}
+  .danger{background:var(--critbg);border:1px solid #f3b7b0;border-left:4px solid var(--crit);border-radius:6px;padding:13px 16px;margin:16px 0;}
+  .danger b{color:var(--crit);}
+  .ok{background:var(--greenbg);border:1px solid #bfe3cb;border-radius:8px;padding:12px 16px;margin:14px 0;}
+  .item{border:1px solid var(--line);border-radius:8px;padding:13px 16px;margin:11px 0;}
+  .item.crit{border-left:4px solid var(--crit);} .item.high{border-left:4px solid var(--high);}
+  .sev{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px;margin-right:8px;}
+  .sev.crit{background:var(--critbg);color:var(--crit);} .sev.high{background:var(--highbg);color:var(--high);} .sev.med{background:var(--medbg);color:var(--med);}
+  .item h3{margin:0 0 5px;font-size:14.5px;} .item .why{color:#444;font-size:13px;} .fix{background:var(--code);border:1px solid var(--line);border-radius:6px;padding:8px 11px;margin-top:7px;font-size:12.8px;} .fix b{color:var(--green);}
+  code{font-family:"SF Mono",Menlo,Consolas,monospace;background:var(--code);padding:1px 5px;border-radius:4px;font-size:12.3px;}
+  table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13px;} th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top;} th{background:var(--bg);font-weight:600;}
+  ul.tight li{margin:4px 0;} .small{font-size:12.5px;color:var(--muted);}
+  hr{border:none;border-top:1px solid var(--line);margin:24px 0;}
+  @media print{.wrap{max-width:100%;padding:0;}h2{page-break-after:avoid;}.item,table{page-break-inside:avoid;}a{color:var(--ink);}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>What Merchants &amp; Customers Actually See</h1>
+  <p class="sub">Pick At Store · 2026-06-15 · read-only audit (5 agents, claims verified at file:line) · before the 141k Blinkit load</p>
+
+  <div class="danger">
+    <b>Do not let Blinkit rows reach customers until these are fixed.</b> Five blockers — the worst is that <b>every product with no veg flag shows a GREEN vegetarian dot</b>, so all 141k rows (meat, fish, eggs, pet food, even electronics) would display as vegetarian to customers. Plus: products can go live at <b>₹0</b>, images are <b>hotlinked from the competitor's CDN</b>, food ships with <b>zero FSSAI/allergen info</b>, and two endpoints <b>leak the full catalog with no auth</b>.
+  </div>
+
+  <div class="ok">
+    <b>The single highest-leverage guard:</b> load every Blinkit row <b>inactive + zero-stock + with re-hosted images</b>, surfacing to customers only after a merchant sets a real selling price and their own stock. That one rule neutralizes the ₹0-live, stale-availability, out-of-stock-flood, and broken-image risks at once.
+  </div>
+
+  <h2>What the MERCHANT sees</h2>
+  <table>
+    <tr><th>Screen</th><th>Shown</th><th>Missing / wrong</th></tr>
+    <tr><td>Browse catalog (<code>catalog-picker</code>)</td><td>image · name (parentheses stripped) · MRP</td><td>category line is <b>always blank</b> (no such column); <b>no price, brand, pack-size, or "Blinkit" source</b>; <b>capped at ~1,000 rows</b> → 99% of 141k unreachable</td></tr>
+    <tr><td>Configure before adding</td><td>image · name · editable selling price · editable stock</td><td><b>fabricated</b> pack-size variants (250ml/500ml/1L invented at fake price ratios) with a <b>fictional MRP anchor</b></td></tr>
+    <tr><td>Own inventory (<code>InventoryCard</code>)</td><td>image · name+variant · real MRP · your price · stock · discount% · active toggle</td><td><b>brand &amp; pack-size fetched but not shown</b> → "Amul Milk 500ml" vs "1L" look identical</td></tr>
+  </table>
+
+  <h2>What the CUSTOMER sees</h2>
+  <table>
+    <tr><th>Surface</th><th>Shown</th><th>Missing / wrong</th></tr>
+    <tr><td>Storefront card (<code>ProductCard</code>)</td><td>name+variant · image · selling price · pack ("1 Pc" default) · <b>veg/non-veg dot</b> · out-of-stock overlay</td><td>no brand · no MRP/strikethrough · no discount% · <b>no product-detail screen at all</b> (tapping does nothing)</td></tr>
+    <tr><td>Search card</td><td>richer: name · image · price · brand · strikethrough MRP · %off · store+distance · pack badge</td><td>(this card is better than the storefront card — inconsistent)</td></tr>
+  </table>
+  <p class="small">The consumer store API (<code>index.ts:2558</code>) does whitelist fields (good) — but it serves the raw grofers image URL and the raw Blinkit subcategory string as the section header.</p>
+
+  <h2>The 5 go-live blockers</h2>
+
+  <div class="item crit"><h3><span class="sev crit">CRITICAL</span>1. Green veg dot on everything non-veg</h3>
+    <p class="why">Verified: <code>useProducts.ts:82</code> defaults <code>isVeg ?? true</code>. Blinkit ingestion never sets a veg flag → all 141k rows (meat/fish/eggs/pet food/cleaning/electronics) render a green vegetarian dot, and it carries into the cart. The dining path defaults the <i>opposite</i> way — proof this is an accident, not policy.</p>
+    <div class="fix"><b>Fix:</b> change the default to <code>?? undefined</code> (the card already hides the dot when veg is unknown); only set the flag where Blinkit gives a reliable food tag. <b>⚠ <code>useProducts.ts</code> is <code>@lock</code> — needs your chat approval before I touch it.</b></div>
+  </div>
+
+  <div class="item crit"><h3><span class="sev crit">CRITICAL</span>2. Products can go live at ₹0</h3>
+    <p class="why">Blinkit data is MRP-only (no selling price). Both write paths coerce a missing price to <code>0</code> and force <code>active=true</code> (<code>index.ts:10455 / :10526</code>); the only check is price ≤ MRP, which ₹0 passes. The customer sees "₹0" with a working Add button.</p>
+    <div class="fix"><b>Fix:</b> reject <code>price ≤ 0 &amp;&amp; active=true</code> at every write layer; require a selling price &gt; 0 before a listing can go active; hide ₹0 rows on the consumer side as defense-in-depth.</div>
+  </div>
+
+  <div class="item crit"><h3><span class="sev crit">CRITICAL</span>3. Images hotlinked from the competitor's CDN</h3>
+    <p class="why">Ingestion stores the raw <code>cdn.grofers.com</code> URL and the consumer renders it directly with <b>no re-hosting and no error fallback</b>. If Blinkit rotates its CDN or blocks hotlinking, all 141k images break to grey boxes at once — plus it leaks your storefront traffic/referer to a competitor and is brand/IP exposure.</p>
+    <div class="fix"><b>Fix:</b> re-host every image to your own Supabase bucket at ingest (download → upload → store the PAS URL), exactly as merchant uploads already work. Add an onError placeholder on the card as a stopgap. <b>Until this runs, the 141k load is un-shippable to customers.</b></div>
+  </div>
+
+  <div class="item crit"><h3><span class="sev crit">CRITICAL</span>4. Full catalog leaks with no auth</h3>
+    <p class="why"><code>GET /products</code> (<code>index.ts:1087</code>) and <code>GET /merchants/:id/inventory</code> (<code>index.ts:5550</code>) have <b>no auth guard</b> and return the <b>entire Product row</b> — including <code>source</code>, <code>source_product_id</code> (the Blinkit ID), <code>product_url</code>, <code>extra_data</code> — to any caller, under permissive CORS. After the load that's all 141k rows + their Blinkit provenance, exposed publicly.</p>
+    <div class="fix"><b>Fix:</b> add auth (requireAdmin / requireUser+ownership) + an explicit field whitelist (never return source/source_product_id/product_url/extra_data). Pair with DB column-grants/a sanitized view so direct-Supabase reads are covered too. <span class="small">(This overlaps Phase 1 / Phase 8 of the inventory plan.)</span></div>
+  </div>
+
+  <div class="item crit"><h3><span class="sev crit">CRITICAL</span>5. Food ships with zero mandatory info</h3>
+    <p class="why">No FSSAI licence, allergens, ingredients, net-quantity, country-of-origin, manufacturer, or expiry — none of these fields exist on the Product model and ingestion captures none. The <code>Vertical.requiresFssai</code> flag exists but isn't enforced on the listing path.</p>
+    <div class="fix"><b>Fix:</b> gate food verticals (<code>requiresFssai=true</code>) — suppress food products from the storefront until the legally-required declarations are captured at ingest. Confirm the exact legal threshold with counsel. <span class="small">(Ties to the agreement-compliance FSSAI gap.)</span></div>
+  </div>
+
+  <h2>Also found (high / medium)</h2>
+  <ul class="tight">
+    <li><b>~1,000-row cap (high):</b> the merchant catalog does <code>select('*')</code> with no pagination → merchants can reach ~1% of 141k and search looks broken. Move search/pagination server-side.</li>
+    <li><b>Name-only dedupe hides sizes (high):</b> "Amul Gold (500ml)" and "(1L)" collapse to one row, and pack-size isn't shown anywhere → distinct SKUs become unpickable. Key dedupe on name+pack+brand; show pack size.</li>
+    <li><b>Brand invisible on storefront (high):</b> near-duplicate Blinkit items can't be told apart by customers; brand isn't even selected. Add it to the card.</li>
+    <li><b>uom precedence bug (medium):</b> <code>index.ts:2572</code> ternary never returns the plain <code>uom</code> string → pack size blank on most Blinkit items. One-line fix.</li>
+    <li><b>is_deleted not filtered (medium):</b> consumer queries filter <code>active</code> only; a soft-deleted-but-active listing would still show. Add <code>.eq('is_deleted', false)</code>.</li>
+    <li><b>Raw Blinkit subcategory as section header (medium):</b> the storefront groups by Blinkit's own subcategory string, ignoring your curated taxonomy. Map via category_id/vertical_id (this is what Phase 2 enables).</li>
+    <li><b>Names/deeplinks unsanitized (medium):</b> Blinkit names/brands flow verbatim; the CSV-import path even maps a <code>blinkit.com</code> deeplink onto the product. Strip competitor tokens + drop product_url at ingest.</li>
+    <li><b>No "Blinkit/source" indicator for merchants (medium):</b> Blinkit rows look identical to curated PAS data; your "control what reaches merchants" goal has no UI enforcement point.</li>
+  </ul>
+
+  <h2>Guards to put in place before the load</h2>
+  <ol class="tight">
+    <li><b>Re-host all images</b> to your bucket (blocking) + onError placeholder.</li>
+    <li><b>Load Blinkit rows inactive + zero-stock</b> until a merchant sets price + stock (the master guard).</li>
+    <li><b>Block ₹0 live listings</b> at every write layer.</li>
+    <li><b>Fix the veg default</b> to "unknown = no dot" (needs @lock approval).</li>
+    <li><b>Gate food categories</b> behind FSSAI/declarations.</li>
+    <li><b>Lock + whitelist</b> the two leaking endpoints; column-protect source/provenance.</li>
+    <li><b>Sanitize names + drop deeplinks</b>; scan the source file for competitor text.</li>
+    <li><b>Fix uom precedence + is_deleted filter + dedupe/brand/pack display.</b></li>
+  </ol>
+
+  <hr>
+  <p class="small">Read-only audit, every claim verified at file:line. Two of the fix sites — <code>useProducts.ts</code> and <code>catalog-picker.tsx</code> — carry <code>@lock</code> headers; per protocol I'll get your explicit approval before editing either, one change at a time. No code changed in this audit.</p>
+</div>
+</body>
+</html>

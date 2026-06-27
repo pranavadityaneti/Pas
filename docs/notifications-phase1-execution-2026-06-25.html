@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAS — Notifications #14 Phase 1: Execution &amp; Audit — 2026-06-25</title>
+<style>
+  :root{--ink:#1a2233;--mut:#5b6676;--line:#e3e8ef;--accent:#B52725;--ok:#166534;--ok-bg:#f1f9f3;--med:#854d0e;--med-bg:#fffbeb;--code:#f6f8fa;--low:#1e40af;--low-bg:#eff6ff}
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);line-height:1.55;margin:0;padding:0 24px 110px}
+  .wrap{max-width:1000px;margin:0 auto}
+  h1{font-size:26px;margin:24px 0 4px;letter-spacing:-0.01em} h2{font-size:19px;margin:34px 0 8px;padding-top:12px;border-top:3px solid var(--accent);scroll-margin-top:12px}
+  h3{font-size:15.5px;margin:20px 0 6px} h4{font-size:13px;margin:12px 0 4px;color:var(--mut);text-transform:uppercase;letter-spacing:0.02em}
+  .mut{color:var(--mut)} .sm{font-size:12.5px;color:var(--mut)} p,li,td{font-size:14px}
+  code{background:var(--code);padding:1px 6px;border-radius:4px;font-size:12.3px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12.2px;line-height:1.5;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  table{border-collapse:collapse;width:100%;margin:8px 0;font-size:13px} th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top} th{background:#f3f6fa;font-weight:600}
+  .tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:600;vertical-align:middle}
+  .tag.ok{background:var(--ok-bg);color:var(--ok);border:1px solid #bbf7d0}
+  .tag.med{background:var(--med-bg);color:var(--med);border:1px solid #fde68a}
+  .callout{border-left:4px solid var(--accent);background:#fdf3f3;padding:10px 14px;margin:14px 0;border-radius:0 8px 8px 0}
+  .callout.ok{border-color:var(--ok);background:var(--ok-bg)} .callout.med{border-color:var(--med);background:var(--med-bg)}
+  .english{background:#fafff5;border-left:4px solid #65a30d;padding:10px 14px;margin:10px 0;border-radius:0 6px 6px 0;font-size:13.5px}
+  .english strong{color:#365314}
+  .toc{background:#fafbfd;border:1px solid var(--line);border-radius:10px;padding:12px 18px;margin:12px 0} .toc ol{margin:0;padding-left:22px;font-size:13px;line-height:1.8} .toc a{color:var(--ink);text-decoration:none} .toc a:hover{text-decoration:underline}
+  ul.tight li,ol.tight li{margin:2px 0}
+  .ok-check{color:var(--ok);font-weight:700}
+  @media print{body{padding:0 12px} h2{break-before:page} .callout,table,pre{break-inside:avoid} .toc{break-after:page}}
+</style>
+</head>
+<body><div class="wrap">
+
+<h1>Notifications #14 — Phase 1: Execution &amp; Audit</h1>
+<div class="mut">2026-06-25 · branch <code>feat/consumer-global-config-wiring</code> · <span class="tag ok">LIVE</span></div>
+
+<div class="english">
+  <strong>In one line.</strong> The notification plumbing is now live: each app shows its own role's notifications by an explicit tag (not a workaround), the 12 legacy untagged rows were backfilled so nothing disappeared, and the merchant "manual low-stock" alert was moved to the server so it actually pushes to the phone. Nothing changed visually; nothing broke for anyone.
+</div>
+
+<div class="toc">
+<ol>
+  <li><a href="#live">What went live (4 actions)</a></li>
+  <li><a href="#commits">Commits</a></li>
+  <li><a href="#audit">The audit — no misses, no leaks, not a patch</a></li>
+  <li><a href="#english">Plain English — what changes for people</a></li>
+  <li><a href="#notdone">What's not done + safety nets</a></li>
+  <li><a href="#evidence">Verification evidence (raw)</a></li>
+</ol>
+</div>
+
+<h2 id="live">1) What went live — 4 actions, all verified</h2>
+<table>
+<tr><th width="5%">#</th><th width="22%">Action</th><th>Result</th></tr>
+<tr><td>1</td><td><b>DB backfill</b> (<code>--apply</code>)</td><td>12 NULL rows → <code>merchant</code>; <b class="ok-check">0 NULL remain</b>; distribution now <b>82 consumer / 307 merchant</b>. Rollback JSON saved.</td></tr>
+<tr><td>2</td><td><b>API → Elastic Beanstalk</b></td><td><code>app-260625_105637612928</code> · <b>Ready / Green</b> · live <code>GET /</code> → <b>HTTP 200</b></td></tr>
+<tr><td>3</td><td><b>Merchant OTA</b></td><td>branch <code>production</code> · runtime <b>1.2.6</b> · android+ios · group <code>f8eed436</code></td></tr>
+<tr><td>4</td><td><b>Consumer OTA</b></td><td>branch <code>production</code> · runtime <b>1.1.3</b> · android+ios · group <code>2951458e</code> · <b>also shipped the held H-5 cart-prune fix</b></td></tr>
+</table>
+
+<h2 id="commits">2) Commits</h2>
+<table>
+<tr><th width="18%">Commit</th><th>Change</th></tr>
+<tr><td><code>55082b58</code></td><td>recipient_role read cutover (both inboxes — fetch · realtime guard · markAllAsRead · interface; 9 spots)</td></tr>
+<tr><td><code>8ebe590f</code></td><td>manual low-stock alert moved server-side (<code>PATCH /merchant/store-products/:id</code>) + client insert removed</td></tr>
+<tr><td><code>6ffd68bb</code></td><td>backfill script (dry-run default · <code>--apply</code> gated · abort-and-report guard · rollback JSON)</td></tr>
+<tr><td><code>6492e450</code></td><td>rebuilt <code>dist/index.js</code> + rollback snapshot</td></tr>
+<tr><td><code>84a6c2af</code></td><td>session log</td></tr>
+</table>
+
+<h2 id="audit">3) The audit — no misses, no leaks, not a patch</h2>
+<div class="callout ok">
+  <strong>The one failure class this change could introduce:</strong> after the cutover, the apps read notifications by <code>recipient_role</code>, so any notification written <em>without</em> that tag becomes invisible. The audit traced every write and read across the whole repo to prove that can't happen.
+</div>
+<table>
+<tr><th width="30%">Check</th><th>Finding</th></tr>
+<tr><td><b>Every write is tagged</b></td><td><span class="ok-check">✓</span> Across all of <code>api/src</code> there are <b>exactly two</b> notification-creating paths (<code>sendMerchantNotification</code>, <code>sendConsumerNotification</code>) and <b>both unconditionally set <code>recipientRole</code></b>. No raw insert, no <code>createMany</code>/<code>upsert</code>, no bypass — in the API or the crons.</td></tr>
+<tr><td><b>Why it's a fix, not a patch</b></td><td><span class="ok-check">✓</span> The class is closed for <b>all past rows</b> (backfill) <em>and</em> <b>all future rows</b> (no code path can write an untagged notification). Root cause, every surface.</td></tr>
+<tr><td><b>Every read is handled</b></td><td><span class="ok-check">✓</span> admin-web touches the table <b>nowhere</b>. Both apps read it <b>only</b> via the two hooks (fetch + realtime + mark-all role-scoped; mark-as-read-by-id intentionally unscoped — it acts on a row already in the scoped list).</td></tr>
+<tr><td><b>No collateral damage</b></td><td><span class="ok-check">✓</span> Order-driven <code>LOW_STOCK</code> (untouched) already routes through the service → stays tagged <code>merchant</code>. Backfill touched <b>only</b> the 12 NULL rows; the 82 consumer + 295 existing merchant rows untouched.</td></tr>
+<tr><td><b>Latent bug fixed in passing</b></td><td><span class="ok-check">✓</span> Both apps' "mark all read" was unscoped — a dual-role account marking-all in one app marked the other role's rows read too. Now role-scoped.</td></tr>
+<tr><td><b>Fail-closed</b></td><td><span class="ok-check">✓</span> A NULL/missing <code>recipient_role</code> is treated as "not mine" in both realtime guards — a mistagged row can never leak into the wrong inbox.</td></tr>
+</table>
+<div class="callout med">
+  <strong>Honest caveat — one thing not end-to-end fired.</strong> The server-side low-stock dispatch is verified by code + compile + deploy, but I did <b>not</b> trigger it against a real merchant's inventory (that's a live side-effect on a real store). Its first real proof is the next genuine manual stock-out. Likewise the realtime guard relies on Supabase delivering <code>recipient_role</code> in the INSERT payload — guaranteed by-design (INSERT events carry all columns), and the in-app list works regardless, but not live-fired.
+</div>
+
+<h2 id="english">4) Plain English — what changes for people</h2>
+<ul class="tight">
+  <li><b>Nothing breaks, immediately.</b> Users still on the old build see exactly what they saw before — the backfill only <em>added</em> a tag, it removed nothing. Users who get the OTA switch to the cleaner role-based behavior.</li>
+  <li><b>Merchants:</b> the inbox is scoped to merchant notifications by identity (not a store-ID workaround), so a merchant who also shops as a customer never sees customer notifications bleed in. And a <b>manual</b> stock-out / low-stock now <b>pushes to their phone</b> and looks identical to the automatic order-driven alert — before, it was created silently with no push and would have <em>vanished</em> after this change.</li>
+  <li><b>Customers:</b> the inbox is scoped to consumer notifications by identity. The real win is future-proofing — every new customer notification (Phase 2's payment-failed, refund-started, etc.) lands in the right inbox automatically, with no app update.</li>
+</ul>
+
+<h2 id="notdone">5) What's not done + safety nets</h2>
+<ul class="tight">
+  <li><b>Phase 2 (next, API-only / EB):</b> the 4 lifecycle gaps — <code>PAYMENT_FAILED</code>, <code>ORDER_REQUEST_EXPIRED</code>, <code>REFUND_INITIATED</code>, and <code>REFUND_CREDITED</code> (this last needs a Razorpay <code>refund.processed</code> webhook — decision <b>D5</b>). They'll show by role automatically now that the cutover is live.</li>
+  <li><b>Deploy-window note:</b> a manual stock-out in the brief gap between the EB deploy and a device receiving the OTA could transiently double-alert or briefly not alert — harmless, self-healing.</li>
+  <li><b>Rollback if ever needed:</b> restore the 12 ids in <code>apps/api/scripts/_notif_recipient_role_backfill_rollback_2026-06-25.json</code> to NULL, and re-publish the prior OTA bundles. The EB deploy reverts with one redeploy.</li>
+</ul>
+
+<h2 id="evidence">6) Verification evidence (raw)</h2>
+<h4>DB distribution after backfill (idempotent re-run)</h4>
+<pre>recipient_role distribution: consumer: 82 · merchant: 307
+NULL recipient_role rows: 0  →  nothing to backfill. Done.</pre>
+<h4>Elastic Beanstalk</h4>
+<pre>Deployed Version: app-260625_105637612928
+Status: Ready    Health: Green
+GET https://api.pickatstore.io/  ->  HTTP 200 (0.236s)</pre>
+<h4>OTA publishes</h4>
+<pre>Merchant  branch=production  runtime=1.2.6  group=f8eed436-27af-46b8-be9f-67a444033352  (android, ios)
+Consumer  branch=production  runtime=1.1.3  group=2951458e-e62d-46e2-b6f6-1d94b2362147  (android, ios)
+Both bundled commit 6ffd68bb (cutover + low-stock + H-5 on consumer).</pre>
+
+<p class="sm" style="margin-top:28px;border-top:1px solid var(--line);padding-top:12px"><em>Saved <code>docs/notifications-phase1-execution-2026-06-25.html</code>. Spec it implements: <code>docs/notifications-coverage-spec-2026-06-23.html</code>.</em></p>
+
+</div></body></html>

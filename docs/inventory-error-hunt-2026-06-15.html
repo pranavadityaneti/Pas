@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inventory Error-Hunt — Verified Defects + Fix Plan (2026-06-15)</title>
+<style>
+  :root{--ink:#1a1a1a;--muted:#666;--red:#B52725;--line:#e3e3e3;--bg:#fafafa;--code:#f4f4f6;--crit:#c0392b;--critbg:#fdecea;--high:#9a6700;--highbg:#fff8e6;--med:#2c5f8a;--medbg:#eaf3fb;--green:#1b7f3b;--greenbg:#e7f6ec;}
+  *{box-sizing:border-box;}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);line-height:1.55;margin:0;background:#fff;}
+  .wrap{max-width:920px;margin:0 auto;padding:40px 28px 90px;}
+  h1{font-size:25px;margin:0 0 4px;}h2{font-size:18px;margin:34px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--red);}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 16px;}
+  p,li,td{font-size:14px;}
+  .danger{background:var(--critbg);border:1px solid #f3b7b0;border-left:4px solid var(--crit);border-radius:6px;padding:13px 16px;margin:16px 0;}
+  .danger b{color:var(--crit);}
+  .counts{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0;}
+  .pill{border-radius:8px;padding:6px 12px;font-size:13px;font-weight:700;}
+  .pill.c{background:var(--critbg);color:var(--crit);}.pill.h{background:var(--highbg);color:var(--high);}.pill.m{background:var(--medbg);color:var(--med);}.pill.l{background:#eef0f2;color:#555;}
+  .item{border:1px solid var(--line);border-radius:8px;padding:13px 16px;margin:11px 0;}
+  .item.crit{border-left:4px solid var(--crit);}.item.high{border-left:4px solid var(--high);}
+  .sev{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px;margin-right:8px;}
+  .sev.crit{background:var(--critbg);color:var(--crit);}.sev.high{background:var(--highbg);color:var(--high);}
+  .item h3{margin:0 0 5px;font-size:14.5px;}.item .why{color:#444;font-size:13px;}.fix{background:var(--code);border:1px solid var(--line);border-radius:6px;padding:8px 11px;margin-top:7px;font-size:12.8px;}.fix b{color:var(--green);}
+  code{font-family:"SF Mono",Menlo,Consolas,monospace;background:var(--code);padding:1px 5px;border-radius:4px;font-size:12.2px;}
+  .phase{border:1px solid var(--line);border-radius:8px;padding:12px 16px;margin:10px 0;}
+  .phase h3{margin:0 0 4px;font-size:14.5px;}.phase ul{margin:5px 0 0 18px;}.phase li{font-size:13px;margin:3px 0;}
+  ul.tight li{margin:4px 0;}.small{font-size:12.5px;color:var(--muted);}
+  hr{border:none;border-top:1px solid var(--line);margin:24px 0;}
+  @media print{.wrap{max-width:100%;padding:0;}h2{page-break-after:avoid;}.item,.phase{page-break-inside:avoid;}a{color:var(--ink);}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Inventory Error-Hunt — Verified Defects &amp; Fix Plan</h1>
+  <p class="sub">Pick At Store · 2026-06-15 · 41-agent adversarial audit (every finding a second agent tried to refute) · current state: 294 products / 44 listings</p>
+
+  <div class="danger">
+    <b>VERDICT: NOT ready for the 141k load.</b> The single most important finding — <b>if we'd run the importer today, it would have inserted 0 products while reporting HTTP 200 "success."</b> You'd have thought 141k loaded; nothing would have. Good thing we audited first.
+  </div>
+
+  <div class="counts">
+    <span class="pill c">3 critical</span><span class="pill h">14 high</span><span class="pill m">6 medium</span><span class="pill l">2 low</span>
+    <span class="small" style="align-self:center">· 34 confirmed (false positives already filtered out)</span>
+  </div>
+
+  <h2>The root cause — one bug, many symptoms</h2>
+  <p>Most of the serious defects trace to <b>one systemic confusion</b>: the API code treats <code>category</code> and <code>vertical</code> as plain text columns on the Product table — but those columns <b>don't exist</b>. The Product table only has <code>category_id</code> / <code>vertical_id</code> (UUID foreign keys). So every code path that reads or writes the scalar names silently fails:</p>
+  <ul class="tight">
+    <li>the <b>importer</b> writes a phantom <code>category</code> → Prisma rejects every row → <b>0 inserted, HTTP 200</b>;</li>
+    <li>the catalog grid's <b>Category &amp; Vertical columns are always blank</b> (the API never maps the FK to a name) — <b>this is exactly what you saw in your screenshot</b>;</li>
+    <li>editing a product's category/vertical from the grid <b>fails 100% of the time</b>;</li>
+    <li>bulk-update <b>500s</b>, the filter <b>falls back to fake data</b>, and the consumer storefront query <b>500s</b>.</li>
+  </ul>
+  <p>And the whole class of failures is <b>masked by a MOCK_PRODUCTS fallback</b> that serves 3 fabricated products on any DB error — in production, at HTTP 200 — so bugs look like "real but wrong" data instead of errors.</p>
+
+  <h2>The 3 critical defects</h2>
+  <div class="item crit"><h3><span class="sev crit">CRITICAL</span>1. The importer inserts 0 rows but reports success</h3>
+    <p class="why">The bulk-import path writes a non-existent <code>Product.category</code> field (<code>index.ts:2379</code>); Prisma throws on every row, the error is swallowed, and it returns HTTP 200. A 141k load would silently land nothing.</p>
+    <div class="fix"><b>Fix:</b> remove the phantom <code>category</code> key; resolve to <code>category_id</code>/<code>vertical_id</code>; add a 1-row smoke test that asserts a row actually exists.</div>
+  </div>
+  <div class="item crit"><h3><span class="sev crit">CRITICAL</span>2. The ₹>1000 ÷100 heuristic corrupts prices</h3>
+    <p class="why">Any MRP over ₹1000 is divided by 100 (<code>index.ts:1466</code>) — ₹1,899 stored as ₹18.99. With the Blinkit data 24% of products are &gt;₹1000, and the wrong price flows all the way to customer orders.</p>
+    <div class="fix"><b>Fix:</b> drop the division for the rupee dataset; reject non-numeric/≤0; audit existing rows.</div>
+  </div>
+  <div class="item crit"><h3><span class="sev crit">CRITICAL</span>3. Merchant listings point at the wrong key — 26 of 44 orphaned</h3>
+    <p class="why"><code>StoreProduct.storeId</code> is being set to a <i>branch</i> id, and the FK isn't enforced — so <b>26 of 44 listings are orphaned</b> and only 2 of 4 stores return any inventory at all. (This is why the catalog looks so sparse.)</p>
+    <div class="fix"><b>Fix:</b> key inventory on <code>branch_id</code> with a real FK; backfill the 26 orphans.</div>
+  </div>
+
+  <h2>Key high-severity defects</h2>
+  <div class="item high"><h3><span class="sev high">HIGH</span>Phantom category/vertical breaks 6 handlers</h3><p class="why">Grid edits fail; bulk-update 500s; the catalog filter falls through to mock data; the consumer storefront query 500s — all the same scalar-vs-FK root cause (<code>index.ts:2125, 1057, 2463</code>).</p></div>
+  <div class="item high"><h3><span class="sev high">HIGH</span>MOCK_PRODUCTS served in production</h3><p class="why">On any DB error, <code>GET /products</code> returns 3 fabricated products at HTTP 200 with no environment guard (<code>index.ts:1106</code>) — masking real bugs as silently-wrong data. <b>Fix: return 500; delete the mock fallbacks.</b></p></div>
+  <div class="item high"><h3><span class="sev high">HIGH</span>Customer-facing (confirms the display audit)</h3><p class="why"><b>286 of 294</b> products default to a green veg dot; soft-deleted listings still show (no <code>is_deleted</code> filter); ₹0 listings can go live; images hotlinked from grofers.com with no fallback; pack-size blank from a precedence bug.</p></div>
+
+  <h2>The phased "make it solid" plan</h2>
+  <div class="phase"><h3>Phase 1 — Unblock the load <span class="small">[M]</span></h3><div class="small">Importer inserts; failures become visible.</div>
+    <ul><li>Remove the phantom <code>category</code> key; resolve to ids</li><li>Delete the MOCK_PRODUCTS fallbacks → return 500 on error</li><li>Fix the MRP ÷100</li><li>One-row smoke test (assert a row exists)</li></ul></div>
+  <div class="phase"><h3>Phase 2 — Data integrity <span class="small">[L]</span></h3><div class="small">No orphaned/uncategorized; edits + filters work.</div>
+    <ul><li>Fix the <code>storeId</code>/branch_id FK; backfill 26 orphans</li><li>Replace phantom category/vertical across the 6 handlers (use the FK/relation forms)</li><li>Approve-flow rejects rows with missing taxonomy</li><li>Fix the audit-log join</li></ul></div>
+  <div class="phase"><h3>Phase 3 — Customer safety <span class="small">[M]</span></h3><div class="small">Correct deletes, veg, images, prices before anyone sees Blinkit.</div>
+    <ul><li><code>is_deleted:false</code> on consumer queries; soft-delete sets active=false</li><li>Veg tri-state (unknown = no dot); backfill</li><li>Re-host images + onError fallback</li><li>Reject price ≤ 0</li></ul></div>
+  <div class="phase"><h3>Phase 4 — Scale <span class="small">[L]</span></h3><div class="small">Browse 141k; resilient bulk.</div>
+    <ul><li>Paginated, server-searched catalog picker; fix the cleanName dedup key</li><li>Batched approve INSERT; chunked importer with per-batch transactions + row cap</li></ul></div>
+  <div class="phase"><h3>Phase 5 — Polish <span class="small">[M]</span></h3><div class="small">Errors, template, banner.</div>
+    <ul><li>Safe Prisma error messages</li><li>Fix the Excel template + the localhost button <span class="small">(✓ already removed)</span></li><li>Apify terminal states + timeout; paginate the sync queue; clamp NaN limit</li></ul></div>
+
+  <h2>One-time cleanup on the current 294 products</h2>
+  <ul class="tight">
+    <li><b>176</b> products with null vertical · <b>209</b> with null category → re-categorise (the new mapping makes this mechanical once the importer is fixed).</li>
+    <li><b>26</b> orphaned merchant listings → backfill branch_id.</li>
+    <li><b>286</b> defaulting to veg → backfill once the tri-state lands.</li>
+    <li>Any MRP-corrupted rows (the ÷100 bug) → audit + correct.</li>
+    <li>The old Zepto rows (<code>source='zepto'</code>, 134) → delete <i>after</i> the Blinkit load is verified (per your instruction).</li>
+  </ul>
+
+  <hr>
+  <p class="small">41-agent run, 34 defects confirmed via code + live-DB introspection; false positives refuted and dropped. These phases supersede/refine the earlier inventory-hardening plan with verified, prioritized fixes. Recommended order: Phase 1 → 2 → 3 before any Blinkit load reaches customers; 4 → 5 alongside/after. <b>Nothing changed by this audit.</b></p>
+</div>
+</body>
+</html>
