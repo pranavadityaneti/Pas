@@ -47,6 +47,12 @@
 //      session-recovery, errorDiagnostic, or the coupon flow.
 // Any modification to the checkout flow, error UI, or session-handling logic
 // REQUIRES the user's explicit chat-confirmed approval. Hard lock.
+//   2026-06-27 (approved + RE-LOCKED): B1 — lastKnownUserRef snapshots the user
+//     before the Razorpay WebView; handlePaymentSuccess falls back to it (soft-auth)
+//     instead of throwing "User not authenticated". C1 — post-payment failure screen
+//     reframed to "Payment Received / confirming your order" (Clock icon) because the
+//     server payment.captured webhook backstop now guarantees the order or auto-refund.
+//     Lock REMAINS IN FORCE for the checkout flow, error UI, and session-handling.
 // Confirm Pre-order Screen: Order review with arrival details → Order confirmed with OTP.
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
@@ -180,6 +186,15 @@ export default function CheckoutScreen() {
     }, [items]);
 
     const forceNav = useRef(false);
+    // B1 (2026-06-27, lock-approved): snapshot the authenticated user while the
+    // session is healthy — BEFORE the Razorpay WebView, which can evict the Supabase
+    // session on Android. handlePaymentSuccess falls back to this so it can still
+    // build the order payload + call POST /orders (soft-auth) instead of dead-ending
+    // on "User not authenticated" — the exact failure that stranded founder Android
+    // test orders. The server webhook backstop is the deeper guarantee; this keeps
+    // the customer on the fast path (instant success screen).
+    const lastKnownUserRef = useRef<any>(null);
+    useEffect(() => { if (user) lastKnownUserRef.current = user; }, [user]);
 
     // Handle cancellation via API
     const executeCancelOrder = async () => {
@@ -535,13 +550,16 @@ export default function CheckoutScreen() {
             })));
             setStep('waiting');
         } catch (e: any) {
-            console.error('[Checkout] Order request failed:', e?.message || e);
-            const msg = e?.message?.includes('offline')
-                ? e.message
-                : e?.message?.includes('session')
-                    ? 'Your session has expired. Please sign out and sign in again.'
-                    : 'Failed to submit order requests. Please try again.';
-            Alert.alert('Error', msg);
+            const raw = e?.message ? String(e.message) : '';
+            console.error('[Checkout] Order request failed:', raw || e);
+            // 2026-06-26: surface the REAL reason (server message like
+            // CATEGORY_UNAVAILABLE / UNKNOWN_PRODUCT, or the client-side merchant-
+            // resolution error) instead of a generic catch-all, so field failures
+            // are diagnosable. Only the session-expiry case gets a friendlier rewrite.
+            const msg = /session/i.test(raw)
+                ? 'Your session has expired. Please sign out and sign in again.'
+                : (raw || 'Failed to submit order requests. Please try again.');
+            Alert.alert('Could not place order', msg);
         }
     };
 
@@ -554,11 +572,15 @@ export default function CheckoutScreen() {
             // Razorpay WebView can evict the Supabase session, especially on Android.
             // If the cached useAuth user is null after payment, refresh + read from
             // getSession (NOT getUser — getUser hangs on GET /auth/v1/user, per supabase.ts).
-            let effectiveUser: any = user;
+            let effectiveUser: any = user || lastKnownUserRef.current;
             if (!effectiveUser) {
                 try { await supabase.auth.refreshSession(); } catch (e) { console.warn('[Checkout] refreshSession failed', e); }
                 const { data: { session: refreshedSession } } = await supabase.auth.getSession();
-                effectiveUser = refreshedSession?.user || null;
+                // B1 (2026-06-27): fall back to the pre-WebView snapshot when the live
+                // session was evicted. POST /orders is soft-auth and trusts body.userId,
+                // so a valid cached id lets the order go through on the fast path instead
+                // of throwing "User not authenticated" below.
+                effectiveUser = refreshedSession?.user || lastKnownUserRef.current || null;
                 console.log('[Checkout] Session recovery attempt — user:', effectiveUser?.id || 'still null');
             }
 
@@ -774,14 +796,14 @@ export default function CheckoutScreen() {
     if (step === 'error') {
         return (
             <SafeAreaView className="flex-1 bg-white items-center justify-center p-8">
-                <XCircle size={60} color="#EF4444" className="mb-6" />
-                <Text className="text-[24px] font-bold text-gray-900 text-center mb-3">Order Sync Failed</Text>
+                <Clock size={60} color="#F59E0B" className="mb-6" />
+                <Text className="text-[24px] font-bold text-gray-900 text-center mb-3">Payment Received</Text>
                 <Text className="text-[14px] text-gray-500 text-center mb-3">
-                    Your payment (ID: {paymentId}) was successful, but we encountered a network error sending your order to the restaurant.
+                    Your payment (ID: {paymentId}) went through. We're confirming your order now — you'll get a notification shortly and it'll appear in My Orders. If it can't be completed, you'll be refunded automatically.
                 </Text>
                 {errorDiagnostic ? (
-                    <Text selectable className="text-[11px] font-mono text-red-600 text-center bg-red-50 p-3 rounded-lg mb-8">
-                        {errorDiagnostic}
+                    <Text selectable className="text-[11px] font-mono text-gray-400 text-center bg-gray-50 p-3 rounded-lg mb-8">
+                        Ref: {errorDiagnostic}
                     </Text>
                 ) : <View className="mb-8" />}
                 <TouchableOpacity onPress={handleBackToHome} className="w-full bg-[#B52725] rounded-2xl items-center justify-center" style={{ height: 56 }}>

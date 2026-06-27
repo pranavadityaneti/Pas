@@ -1,4 +1,10 @@
 // @lock — DO NOT EDIT WITHOUT EXPLICIT USER PERMISSION.
+//   2026-06-27 (approved + RE-LOCKED): B1 — lastKnownUserRef caches the user on mount
+//     (pre-WebView); handlePaymentSuccess falls back to it (soft-auth) instead of the
+//     "could not link it to your account" dead-end. C1 — post-payment failure screen
+//     reframed to "Payment Received / confirming your booking" (Clock icon) because the
+//     server payment.captured webhook backstop now guarantees the order or auto-refund.
+//     Lock REMAINS IN FORCE.
 //   2026-06-13 (approved): added automaticallyAdjustKeyboardInsets +
 //     keyboardShouldPersistTaps to the main ScrollView — iOS keyboard fix
 //     (Bug #16). No layout/footer change.
@@ -266,6 +272,21 @@ export default function DiningCheckoutScreen() {
     // before navigating back here). This screen reads appliedCoupon directly.
 
     const forceNav = useRef(false);
+    // B1 (2026-06-27, lock-approved): cache the authenticated user while the session
+    // is healthy (on mount, BEFORE the Razorpay WebView, which can evict the Supabase
+    // session on Android). handlePaymentSuccess falls back to this so it can still
+    // build the order payload + call POST /orders (soft-auth) instead of dead-ending
+    // with "could not link it to your account". The server webhook backstop is the
+    // deeper guarantee; this keeps the customer on the fast path.
+    const lastKnownUserRef = useRef<any>(null);
+    useEffect(() => {
+        (async () => {
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                if (session?.user) lastKnownUserRef.current = session.user;
+            } catch { /* best-effort cache */ }
+        })();
+    }, []);
 
     // Handle cancellation via API
     const executeCancelOrder = async () => {
@@ -590,10 +611,16 @@ export default function DiningCheckoutScreen() {
             // which is known to hang on this project (see supabase.ts:43-54). Use
             // getSession() instead and read user from the session object.
             const { data: { session: authSession } } = await supabase.auth.getSession();
-            const user = authSession?.user;
+            // B1 (2026-06-27): fall back to the pre-WebView snapshot when the live
+            // session was evicted (Android). POST /orders is soft-auth and trusts
+            // body.userId, so a valid cached id keeps the order on the fast path.
+            const user = authSession?.user || lastKnownUserRef.current;
             if (!user) {
-                console.error('[DiningCheckout] No auth session during payment success');
-                Alert.alert('Session Issue', 'Your payment succeeded but we could not link it to your account. Please contact support with this Payment ID: ' + id);
+                // Even the cache is empty (very rare). Don't tell the customer to
+                // "contact support" — the server webhook backstop will create the
+                // order from the payment notes (consumerUserId stamped at create-order),
+                // and the reframed screen reassures them. Order/refund follows server-side.
+                console.error('[DiningCheckout] No auth user resolvable at payment success — relying on server webhook backstop. Payment ID:', id);
                 setStep('error');
                 return;
             }
@@ -726,10 +753,10 @@ export default function DiningCheckoutScreen() {
     if (step === 'error') {
         return (
             <SafeAreaView className="flex-1 bg-white items-center justify-center p-8">
-                <XCircle size={60} color="#EF4444" className="mb-6" />
-                <Text className="text-[24px] font-bold text-gray-900 text-center mb-3">Order Sync Failed</Text>
+                <Clock size={60} color="#F59E0B" className="mb-6" />
+                <Text className="text-[24px] font-bold text-gray-900 text-center mb-3">Payment Received</Text>
                 <Text className="text-[14px] text-gray-500 text-center mb-8">
-                    Your payment (ID: {paymentId}) was successful, but we encountered a network error saving your order.
+                    Your payment (ID: {paymentId}) went through. We're confirming your booking now — you'll get a notification shortly and it'll appear in My Orders. If it can't be completed, you'll be refunded automatically.
                 </Text>
                 <TouchableOpacity onPress={handleBackToHome} className="w-full bg-[#B52725] rounded-2xl items-center justify-center" style={{ height: 56 }}>
                     <Text className="text-[15px] font-bold text-white">Back to Home</Text>

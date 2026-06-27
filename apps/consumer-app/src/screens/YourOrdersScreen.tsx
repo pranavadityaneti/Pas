@@ -128,10 +128,22 @@ export default function YourOrdersScreen() {
         const isDining = orderType === 'dine-in';
 
         if (normalized === 'PENDING') return { text: 'CONFIRMED', bg: 'bg-black', textClass: 'text-white' };
-        if (normalized === 'ACCEPTED' || normalized === 'READY') {
+        // 2026-06-27 fix: CONFIRMED (the status of a freshly-PAID order the merchant
+        // is preparing) was NOT handled here — on older bundles it fell through to the
+        // CANCELLED fallback, so a just-paid order showed the customer "CANCELLED".
+        // ACCEPTED is the brief pre-confirm window. Both → "preparing" / "reserved".
+        if (normalized === 'CONFIRMED' || normalized === 'ACCEPTED') {
             return isDining
                 ? { text: 'RESERVED', bg: 'bg-blue-100', textClass: 'text-blue-800' }
                 : { text: 'PREPARING', bg: 'bg-yellow-400', textClass: 'text-black' };
+        }
+        // 2026-06-27 fix: READY is its OWN state — the order is ready to collect — NOT
+        // "preparing". The prior code lumped READY in with ACCEPTED, so the customer
+        // never saw that the merchant had marked their order ready for pickup.
+        if (normalized === 'READY') {
+            return isDining
+                ? { text: 'TABLE READY', bg: 'bg-green-100', textClass: 'text-green-800' }
+                : { text: 'READY FOR PICKUP', bg: 'bg-green-100', textClass: 'text-green-800' };
         }
         if (normalized === 'COMPLETED' || normalized === 'DELIVERED') return { text: 'COMPLETED', bg: 'bg-green-100', textClass: 'text-green-800' };
 
