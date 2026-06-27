@@ -18,8 +18,12 @@ export default defineConfig({
     port: 3001,
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        // Default: a local API on :3000 (full-stack local dev). Override with
+        // VITE_API_PROXY=https://api.pickatstore.io to point local admin-web at
+        // the live API (e.g. to browse/log in without running the API locally).
+        target: process.env.VITE_API_PROXY || 'http://localhost:3000',
         changeOrigin: true,
+        secure: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
     }
