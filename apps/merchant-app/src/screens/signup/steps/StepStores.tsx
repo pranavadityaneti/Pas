@@ -226,9 +226,20 @@ export function StepStores() {
                                 components: 'country:in',
                             }}
                             styles={{
-                                container: { flex: 0 },
+                                // 2026-06-26 fix: `flex: 0` WITHOUT a width collapses the
+                                // dropdown to ~zero width. The library wraps every row in a
+                                // horizontal ScrollView sized to the container width, so the
+                                // prediction Text renders at zero width → blank rows (with
+                                // separators) even though predictions load fine. `width: '100%'`
+                                // (mirroring the proven settings/branches.tsx config) gives the
+                                // rows real width so the text shows. row/description/separator
+                                // also mirror branches for consistent, visible styling.
+                                container: { flex: 0, width: '100%' },
                                 textInput: styles.input,
                                 listView: { backgroundColor: '#FFFFFF', borderColor: '#E5E7EB', borderWidth: 1, borderRadius: 12, marginTop: 4 },
+                                row: { paddingVertical: 12, paddingHorizontal: 12 },
+                                description: { fontSize: 14, color: '#374151' },
+                                separator: { height: 1, backgroundColor: '#F3F4F6' },
                             }}
                             enablePoweredByContainer={false}
                             minLength={2}

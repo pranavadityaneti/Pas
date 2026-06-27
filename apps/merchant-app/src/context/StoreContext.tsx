@@ -43,6 +43,9 @@ export interface ParentStoreContext {
     // NOTE: this is the APPROVAL flag, distinct from the merchant's online/offline
     // availability toggle (merchant_branches.is_active).
     isApproved: boolean;
+    // 2026-06-26 strict payment gate: the merchant's kyc_status. 'draft' = signup
+    // not yet paid/submitted → routed back to the payment step (not "pending").
+    kycStatus?: string;
 }
 
 export const ROLE_PERMISSIONS = {
@@ -107,6 +110,9 @@ interface StoreContextType {
     // True only when the active merchant is admin-approved (Store.active=true).
     // The main app is gated on this; not-approved merchants are routed to /(auth)/pending.
     isApproved: boolean;
+    // 2026-06-26 strict payment gate: true when the merchant is still a 'draft'
+    // (signup not yet paid/submitted) → routed to the payment step, not "pending".
+    isDraft: boolean;
     switchBranch: (branchId: string) => void;
     switchContext: (context: ParentStoreContext) => Promise<void>;
     toggleStoreStatus: (newStatus: boolean) => Promise<{ success: boolean; error?: string }>;
@@ -174,7 +180,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             const phoneQuery = `phone.eq.${rawPhone},phone.eq.91${rawPhone},phone.eq.+91${rawPhone}`;
 
             // Step 1: Discover all relevant merchant IDs and branch IDs
-            const { data: ownerData } = await supabase.from('merchants').select('id, store_name, status, address').or(phoneQuery);
+            const { data: ownerData } = await supabase.from('merchants').select('id, store_name, status, address, kyc_status').or(phoneQuery);
             const { data: managerData } = await supabase.from('merchant_branches').select('id, branch_name, merchant_id, is_active, address').or(phoneQuery);
             const { data: staffRoles } = await supabase.from('store_staff').select('store_id, role').eq('user_id', user.id);
 
@@ -189,6 +195,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                         branches: [{ branchId: o.id, branchName: o.store_name || 'Main Store' }],
                         // Approval gate: only 'active' merchants are admin-approved.
                         isApproved: (o as any).status === 'active',
+                        kycStatus: (o as any).kyc_status ?? undefined,
                     });
                 });
             }
@@ -480,6 +487,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         availableContexts, activeContext, permissions,
         isSwitching, hasRealBranch,
         isApproved: activeContext?.isApproved ?? false,
+        isDraft: (activeContext?.kycStatus === 'draft'),
         switchBranch: (id) => {
             setActiveStoreId(id);
             AsyncStorage.setItem('active_branch_id', id).catch(console.error);

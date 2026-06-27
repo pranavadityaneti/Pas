@@ -145,9 +145,20 @@ function SignupScreenInner() {
         let orderId = '';
         try {
             const apiUrl = getApiUrl();
+            // 2026-06-26 fix: /payments/create-order runs requireUser for type:'merchant'
+            // (it stamps the authenticated user.id into Razorpay notes for webhook
+            // reconciliation), so it returns 401 without an Authorization header. This
+            // call was missing it — merchant-signup payment always failed to initialize.
+            // Send the session token, exactly like the draft-sync / consent calls do.
+            const { data: sessionData } = await supabase.auth.getSession();
+            const accessToken = sessionData?.session?.access_token;
+            if (!accessToken) {
+                Alert.alert('Session expired', 'Please sign out and sign in again, then retry the payment.');
+                return;
+            }
             const res = await fetch(`${apiUrl}/payments/create-order`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
                 body: JSON.stringify({
                     amount: subscriptionAmount,
                     type: 'merchant',
