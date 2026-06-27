@@ -518,7 +518,41 @@ app.post('/payments/create-order', async (req, res) => {
             // auto-refunds ONLY attributable consumer payments; everything
             // else is Sentry-flagged for manual review).
             enrichedNotes.paymentType = 'consumer_order';
-            if (userId && userId !== 'unknown') enrichedNotes.consumerUserId = String(userId);
+            if (userId && userId !== 'unknown') {
+                enrichedNotes.consumerUserId = String(userId);
+                // Change 2 (A1, 2026-06-27): record WHICH order_requests this payment
+                // covers, stamped into the Razorpay order notes, so the payment.captured
+                // webhook can create the order(s) SERVER-SIDE if the app dies after
+                // payment (Android Razorpay-WebView session eviction, crash, network
+                // death). Prefer a client-supplied list; otherwise snapshot the user's
+                // currently-ACCEPTED, non-expired requests — exactly the cart being
+                // paid for at this instant. This makes the webhook backstop work for
+                // the CURRENT consumer build with no app update required.
+                const rawIds = (notes as any)?.orderRequestIds;
+                let reqIds: string[] = Array.isArray(rawIds)
+                    ? rawIds.map((s: any) => String(s).trim()).filter(Boolean)
+                    : (typeof rawIds === 'string' ? rawIds.split(',').map((s) => s.trim()).filter(Boolean) : []);
+                if (reqIds.length === 0) {
+                    try {
+                        const accepted = await prisma.order_requests.findMany({
+                            where: { consumer_user_id: String(userId), status: 'ACCEPTED', expires_at: { gt: new Date() } },
+                            select: { id: true },
+                        });
+                        reqIds = accepted.map((r) => r.id);
+                    } catch (e: any) {
+                        console.warn('[create-order] could not snapshot ACCEPTED requests for webhook backstop:', e?.message || e);
+                    }
+                }
+                // Razorpay note values cap at 256 chars (~6 UUIDs). The client fast-path
+                // still creates EVERY order; this only bounds the webhook BACKSTOP, so
+                // log if we truncate rather than silently dropping coverage.
+                if (reqIds.length > 6) {
+                    console.warn(`[create-order] ${reqIds.length} ACCEPTED requests — capping webhook-backstop note to 6 (client fast-path still covers all). user=${userId}`);
+                    reqIds = reqIds.slice(0, 6);
+                }
+                if (reqIds.length) enrichedNotes.orderRequestIds = reqIds.join(',');
+                else delete enrichedNotes.orderRequestIds;
+            }
         }
 
         const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -782,6 +816,13 @@ app.post('/webhooks/razorpay', async (req, res) => {
             console.warn('[razorpay-webhook] payment.failed for paymentId=', payment.id,
                 'orderId=', payment.order_id, 'reason=', payment.error_description);
             await handlePaymentFailed(payment);
+        } else if (event === 'refund.processed') {
+            // B4 (2026-06-26): Razorpay confirms the refund has settled to the
+            // customer. Fire REFUND_CREDITED. Covers EVERY refund path (admin
+            // manual + order-reject + return/exchange + SLA-orphan) because they
+            // all refund order.metadata.razorpayPaymentId, which equals this
+            // event's refund.payment_id.
+            await handleRefundProcessed(req.body?.payload?.refund?.entity);
         } else {
             console.log('[razorpay-webhook] event ignored (no handler):', event);
         }
@@ -825,10 +866,18 @@ async function handlePaymentCaptured(payment: any) {
     const paymentType = notes.paymentType as string | undefined;
 
     if (!merchantId || paymentType !== 'merchant_signup') {
-        // Likely a consumer payment or an order from before the Phase 2.E3
-        // notes-enrichment landed. Log and skip — consumer flow has its own
-        // settlement path.
-        console.log('[razorpay-webhook] No merchant_signup notes on order',
+        // Change 2 (A3, 2026-06-27): consumer-order backstop. If the app captured the
+        // payment but never created the order (Android Razorpay-WebView session
+        // eviction, crash, network death), create it SERVER-SIDE here via the exact
+        // same POST /orders path. Idempotent — a no-op when the app already created
+        // the order(s). This is what makes "payment captured ⇒ order exists" a
+        // guarantee rather than something that depends on the app surviving.
+        if (paymentType === 'consumer_order') {
+            await reconcileConsumerOrderFromWebhook(payment, order, notes);
+            return;
+        }
+        // Unknown / legacy payment — log and skip; the orphan sweep is the final net.
+        console.log('[razorpay-webhook] No merchant_signup/consumer_order notes on order',
             orderId, '— skipping reconciliation. notes=', JSON.stringify(notes));
         return;
     }
@@ -863,6 +912,121 @@ async function handlePaymentCaptured(payment: any) {
     // row will be missing. That's an admin-reconciliation case — too risky
     // to auto-increment used_count from a webhook without the merchant
     // confirming via the app.
+}
+
+/**
+ * Change 2 (A3, 2026-06-27) — consumer-order webhook backstop.
+ * Razorpay confirms a consumer payment was captured. If the app never created the
+ * order(s) (Android session eviction / crash / network death after pay), we create
+ * them here through the EXACT same POST /orders path (postOrdersHandler), so a
+ * captured payment ALWAYS becomes an order rather than depending on the app
+ * surviving the payment screen.
+ *
+ * Idempotent + safe: a per-request order-existence check (plus the handler's own
+ * paymentId+storeId+orderRequestId idempotency) makes webhook re-deliveries and
+ * app-already-created orders no-ops. Per-store failures are isolated and logged so
+ * one bad store never blocks its siblings; a transient infra error BEFORE any
+ * creation propagates to the webhook (→ 500 → Razorpay re-delivers, idempotent on
+ * retry). The orphan-payments sweep remains the final money-safety net for anything
+ * this still can't place (e.g. store closed between pay and webhook).
+ */
+async function reconcileConsumerOrderFromWebhook(payment: any, rzpOrder: any, notes: Record<string, any>) {
+    const paymentId = String(payment?.id || '');
+    const userId = notes?.consumerUserId ? String(notes.consumerUserId) : null;
+    const idsRaw = notes?.orderRequestIds ? String(notes.orderRequestIds) : '';
+    const reqIds = idsRaw.split(',').map((s) => s.trim()).filter(Boolean);
+    if (!paymentId || !userId || reqIds.length === 0) {
+        console.log('[razorpay-webhook][consumer-backstop] missing paymentId/consumerUserId/orderRequestIds — skipping', { paymentId, userId, count: reqIds.length });
+        return;
+    }
+
+    const reqs = await prisma.order_requests.findMany({
+        where: { id: { in: reqIds } },
+        select: { id: true, status: true, consumer_user_id: true, store_id: true, branch_id: true, store_name: true, items: true, subtotal: true, arrival_time: true, order_type: true, guests_count: true },
+    });
+    if (reqs.length === 0) {
+        console.log('[razorpay-webhook][consumer-backstop] no order_requests found for', paymentId, '— skipping');
+        return;
+    }
+
+    // Pickup identity for the order snapshot (best-effort; the order shows in the
+    // customer's order list with its OTP regardless of these fields).
+    const usr = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, phone: true } }).catch(() => null);
+    const capturedInr = Number(payment?.amount || 0) / 100;
+    const totalSubtotal = reqs.reduce((s, r) => s + Number(r.subtotal || 0), 0) || 1;
+
+    let created = 0, skipped = 0, failed = 0;
+    for (const r of reqs) {
+        if (r.consumer_user_id !== userId) { console.warn(`[consumer-backstop] req ${r.id} belongs to a different user — skipping`); skipped++; continue; }
+
+        // Per-request idempotency (same key the handler uses): if the app already
+        // created this store's order, do nothing — don't re-run gates on it.
+        const exists = await prisma.order.findFirst({
+            where: { AND: [
+                { metadata: { path: ['razorpayPaymentId'], equals: paymentId } },
+                { storeId: r.store_id },
+                { metadata: { path: ['orderRequestId'], equals: r.id } },
+            ] },
+            select: { id: true },
+        });
+        if (exists) { skipped++; continue; }
+
+        // Split the captured amount across stores by subtotal (single-store == exact).
+        const storeTotal = reqs.length === 1
+            ? capturedInr
+            : Math.max(1, Math.round(capturedInr * (Number(r.subtotal || 0) / totalSubtotal)));
+        const itemsArr = Array.isArray(r.items) ? (r.items as any[]) : [];
+        const body = {
+            userId,
+            storeId: r.store_id,
+            branchId: r.branch_id,
+            totalAmount: storeTotal,
+            paid: true,
+            paymentId,
+            orderRequestId: r.id,
+            customerName: usr?.name ?? null,
+            customerPhone: usr?.phone ?? null,
+            storeName: r.store_name,
+            arrivalTime: r.arrival_time || 'ASAP',
+            orderType: r.order_type || 'pickup',
+            guestsCount: r.guests_count ?? undefined,
+            // otp omitted → postOrdersHandler generates one server-side.
+            items: itemsArr.map((it) => ({
+                name: it?.name,
+                quantity: it?.quantity,
+                price: it?.price,
+                storeProductId: it?.storeProductId || it?.id || null,
+            })),
+        };
+
+        // Invoke the REAL POST /orders handler with a response-capturing adapter.
+        // No Authorization header → softRequireUser soft-passes (user=null), so the
+        // impersonation guard is skipped exactly as for a legacy unauth client.
+        const captured: { status: number; json: any } = { status: 0, json: null };
+        const fakeReq: any = { body, headers: {}, path: '/orders', method: 'POST' };
+        const fakeRes: any = {
+            status(code: number) { captured.status = code; return this; },
+            json(obj: any) { captured.json = obj; return this; },
+        };
+        try {
+            await postOrdersHandler(fakeReq, fakeRes);
+            if (captured.status === 201 || captured.status === 200) {
+                created++;
+                console.log(`[razorpay-webhook][consumer-backstop] created order for req ${r.id} payment ${paymentId} (status ${captured.status})`);
+            } else {
+                failed++;
+                console.error(`[razorpay-webhook][consumer-backstop] handler returned ${captured.status} for req ${r.id}:`, JSON.stringify(captured.json));
+            }
+        } catch (e: any) {
+            failed++;
+            console.error(`[razorpay-webhook][consumer-backstop] exception creating order for req ${r.id}:`, e?.message || e);
+        }
+    }
+
+    console.log(`[razorpay-webhook][consumer-backstop] payment ${paymentId}: created=${created} skipped(existing)=${skipped} failed=${failed}`);
+    if (created > 0 || failed > 0) {
+        try { Sentry.captureMessage('consumer-order webhook backstop ran', { level: failed > 0 ? 'warning' : 'info', extra: { paymentId, created, skipped, failed } }); } catch {}
+    }
 }
 
 /**
@@ -912,6 +1076,68 @@ async function handlePaymentFailed(payment: any) {
         link: '/(main)/orders',
         metadata: { paymentId, orderId, reason: reason || null },
     });
+}
+
+/**
+ * Handler for Razorpay `refund.processed` events — the refund has settled and the
+ * money has reached (or is irreversibly on its way to) the customer's account.
+ * Fires a REFUND_CREDITED consumer notification. This is the credited counterpart
+ * to REFUND_INITIATED (sent when a refund is first issued).
+ *
+ * Covers EVERY refund path — admin manual (POST /admin/orders/:id/refund) and the
+ * processRazorpayRefund engine (order-reject / return / exchange / SLA-orphan) —
+ * because they all refund order.metadata.razorpayPaymentId, which is exactly this
+ * event's refund.payment_id. We map the refund back to OUR order via that key
+ * (the same JSON-path query used elsewhere for payment reconciliation).
+ *
+ * Idempotent: Razorpay retries webhooks, so we notify at most once per refund,
+ * keyed on the globally-unique refund id. Best-effort: an unmappable refund (no
+ * matching order) is logged and skipped, never thrown — Razorpay still gets 200.
+ */
+async function handleRefundProcessed(refund: any) {
+    const refundId = refund?.id as string | undefined;
+    const paymentId = refund?.payment_id as string | undefined;
+    if (!refundId || !paymentId) {
+        console.warn('[razorpay-webhook] refund.processed missing refundId/paymentId — skipping', { refundId, paymentId });
+        return;
+    }
+
+    // Map the refund back to our order via the Razorpay payment id stamped on the
+    // order at create-order time (metadata.razorpayPaymentId). Every refund path
+    // refunds this same payment id, so this single lookup covers them all.
+    const order = await prisma.order.findFirst({
+        where: { metadata: { path: ['razorpayPaymentId'], equals: paymentId } },
+        select: { id: true, userId: true, orderNumber: true, storeId: true },
+    });
+    if (!order || !order.userId) {
+        console.warn('[razorpay-webhook] refund.processed: no order for paymentId', paymentId, 'refundId', refundId, '— skipping');
+        return;
+    }
+
+    // Idempotency: notify at most once per refund (webhook re-delivery is a no-op).
+    const already = await prisma.notification.findFirst({
+        where: { userId: order.userId, type: 'REFUND_CREDITED', referenceId: refundId },
+        select: { id: true },
+    });
+    if (already) {
+        console.log('[razorpay-webhook] refund.processed already notified for', refundId, '— idempotent no-op');
+        return;
+    }
+
+    const amountInr = Math.round(Number(refund.amount || 0) / 100); // paise → rupees
+    await notificationService.sendConsumerNotification({
+        userId: order.userId,
+        title: 'Refund credited',
+        body: amountInr > 0
+            ? `Your refund of ₹${amountInr} for order #${order.orderNumber} has been credited to your account.`
+            : `Your refund for order #${order.orderNumber} has been credited to your account.`,
+        type: 'REFUND_CREDITED',
+        referenceId: refundId,
+        link: '/(main)/orders',
+        storeId: order.storeId,
+        metadata: { orderId: order.id, orderNumber: order.orderNumber, refundInr: amountInr, razorpayRefundId: refundId, razorpayPaymentId: paymentId, source: 'razorpay-webhook' },
+    });
+    console.log('[razorpay-webhook] REFUND_CREDITED notified consumer', order.userId, 'refund', refundId, '₹', amountInr);
 }
 
 /**
@@ -2713,7 +2939,15 @@ app.get('/consumer/products/search', async (req, res) => {
 // --- Order Routes ---
 
 // Create Order (for testing/Consumer App)
-app.post('/orders', async (req, res) => {
+// 2026-06-27 (Change 2, Part A2): the POST /orders logic is extracted into this
+// named handler — with ZERO behavior change — so the Razorpay `payment.captured`
+// webhook can create the order through the EXACT same path (validation, stock,
+// notifications, coupon, idempotency, orphan-refund) instead of a divergent copy.
+// The webhook calls it with a constructed body + a response-capturing adapter
+// (see handlePaymentCaptured). softRequireUser soft-passes (user=null) when there
+// is no Authorization header, which is the webhook's case — the impersonation
+// guard is then skipped, exactly as for a legacy unauth client.
+async function postOrdersHandler(req: any, res: any) {
     // Phase 2K hot-fix (2026-06-09): hoist `user` so the orphan-refund block in
     // the catch can do the ownership check (paymentId must belong to this user's
     // order, or no order exists for it). Stays null on softRequireUser-fail or
@@ -3058,24 +3292,51 @@ app.post('/orders', async (req, res) => {
         }
 
         // Option A patch #4 (2026-06-08): server-side TTL + status guard.
-        // Verify the order_request is still ACCEPTED and not expired before
-        // creating a paid order from it. Without this, an expired or non-ACCEPTED
-        // request can still produce an order that should have been refunded per
-        // business rules. Skip the check if no orderRequestId (legacy callers).
+        // 2026-06-26 hardening (payment-is-source-of-truth): the original gate
+        // hard-rejected a paid order whenever the order_request had lapsed past its
+        // (then 2-minute) TTL or been flipped to EXPIRED by the every-minute cron.
+        // Because a real Razorpay payment routinely outran that window, the customer
+        // was charged and THEN rejected here — money taken, no order, no OTP, and
+        // (since this was an early `return`, not a throw) the catch block's inline
+        // refund never fired. Fix: once `paid` is true (and the Phase 7B block above
+        // has already confirmed the payment is genuinely captured at Razorpay), the
+        // payment is the source of truth. We HONOR a paid order whose request was
+        // ACCEPTED or has since lapsed to EXPIRED — regardless of expires_at. Any
+        // state we genuinely cannot fulfil (request missing, never-accepted PENDING,
+        // or merchant-killed REJECTED/CANCELLED) THROWS on the paid path so the
+        // catch's ownership-checked, amount-capped inline refund runs immediately
+        // and returns a real money-safe message (never the bare no-message 4xx).
+        // The UNPAID path keeps the strict ACCEPTED + not-expired gate (no money at
+        // risk there). Skip entirely if no orderRequestId (legacy callers).
         if (orderRequestId) {
             const orq = await prisma.order_requests.findUnique({
                 where: { id: orderRequestId },
                 select: { status: true, expires_at: true }
             });
             if (!orq) {
+                if (paid) throw new Error(`ORDER_REQUEST_NOT_FOUND: ${orderRequestId} missing for a paid order`);
                 return res.status(404).json({ error: 'Order request not found' });
             }
-            if (orq.status !== 'ACCEPTED') {
-                return res.status(410).json({ error: `Order request is in state ${orq.status}, expected ACCEPTED` });
-            }
-            const expiresMs = new Date(orq.expires_at as any).getTime();
-            if (expiresMs < Date.now()) {
-                return res.status(410).json({ error: 'Order request has expired' });
+            // A request that WAS accepted and then lapsed shows as EXPIRED (the cron
+            // flips ACCEPTED→EXPIRED); the real consumer app only reaches payment
+            // for accepted requests, so EXPIRED-at-payment means "accepted, then the
+            // clock ran out mid-payment" — still fulfillable for a captured payment.
+            const fulfillable = orq.status === 'ACCEPTED' || orq.status === 'EXPIRED';
+            if (paid) {
+                if (!fulfillable) {
+                    // PENDING (never accepted) / REJECTED / CANCELLED with money taken
+                    // → cannot fulfil. Throw so the catch refunds immediately.
+                    throw new Error(`ORDER_REQUEST_UNFULFILLABLE: paid order for request in state ${orq.status}`);
+                }
+                // fulfillable + paid → honor regardless of expires_at; fall through.
+            } else {
+                if (orq.status !== 'ACCEPTED') {
+                    return res.status(410).json({ error: `Order request is in state ${orq.status}, expected ACCEPTED` });
+                }
+                const expiresMs = new Date(orq.expires_at as any).getTime();
+                if (expiresMs < Date.now()) {
+                    return res.status(410).json({ error: 'Order request has expired' });
+                }
             }
         }
 
@@ -3164,16 +3425,22 @@ app.post('/orders', async (req, res) => {
                 // updateMany with status + expires_at guards rolls the whole order
                 // back if the request transitioned during checkout — caller's
                 // outer catch returns ORDER_CREATE_FAILED + retryable=true.
+                // 2026-06-26: must mirror the outer paid-path gate (payment is the
+                // source of truth). For a paid order the atomic flip accepts either
+                // ACCEPTED or the lapsed EXPIRED state, with NO expires_at condition,
+                // so a request the cron expired mid-payment is still completed. count
+                // === 0 (request went REJECTED/CANCELLED/already COMPLETED in the
+                // race) still rolls the order back → catch → inline refund, so a
+                // killed or duplicate request can never fulfil or double-book. The
+                // unpaid path keeps the strict ACCEPTED + not-expired guard.
                 const updateResult = await tx.order_requests.updateMany({
-                    where: {
-                        id: orderRequestId,
-                        status: 'ACCEPTED',
-                        expires_at: { gt: new Date() },
-                    },
+                    where: paid
+                        ? { id: orderRequestId, status: { in: ['ACCEPTED', 'EXPIRED'] } }
+                        : { id: orderRequestId, status: 'ACCEPTED', expires_at: { gt: new Date() } },
                     data: { status: 'COMPLETED' },
                 });
                 if (updateResult.count === 0) {
-                    throw new Error(`ORDER_REQUEST_INVALID_STATE: ${orderRequestId} no longer ACCEPTED or has expired`);
+                    throw new Error(`ORDER_REQUEST_INVALID_STATE: ${orderRequestId} no longer fulfillable (paid=${!!paid})`);
                 }
                 console.log(`[POST /orders] Updated order_request ${orderRequestId} to COMPLETED`);
             }
@@ -3578,7 +3845,8 @@ app.post('/orders', async (req, res) => {
             retryable: !isStock,
         });
     }
-});
+}
+app.post('/orders', postOrdersHandler);
 // 2026-06-15: Server-side minimum-order floor. The consumer cart greys out
 // checkout below the admin-configured minimum (Global Config → platform_settings),
 // but that gate is client-side and bypassable. POST /order-requests is the FIRST
@@ -3688,19 +3956,29 @@ app.post('/order-requests', async (req, res) => {
             requests.flatMap((r: any) => r.items.map((it: any) => String(it.id))),
         )] as string[];
         if (reqProductIds.length > 0) {
-            const prods = await prisma.product.findMany({
+            // 2026-06-26 fix: the cart/order carries StoreProduct.id (the store's
+            // LISTING id — see consumer StorefrontScreen "product.id IS StoreProduct.id"),
+            // NOT the catalog Product.id. The earlier H-3 gate looked these up in
+            // prisma.product, but StoreProduct.id is never a Product.id (disjoint id
+            // spaces), so EVERY storefront order 400'd UNKNOWN_PRODUCT (ordering broke
+            // when H-3 shipped). Resolve the StoreProduct rows by the cart ids and join
+            // to Product for the category-visibility check. Every requested id MUST
+            // resolve to a real StoreProduct, or the gate has failed (fail-closed).
+            const sps = await prisma.storeProduct.findMany({
                 where: { id: { in: reqProductIds } },
                 select: {
-                    id: true, name: true, vertical_id: true, category_id: true,
-                    Vertical: { select: { is_active: true } },
-                    Tier2Category: { select: { active: true } },
+                    id: true,
+                    product: {
+                        select: {
+                            id: true, name: true, vertical_id: true, category_id: true,
+                            Vertical: { select: { is_active: true } },
+                            Tier2Category: { select: { active: true } },
+                        },
+                    },
                 },
             });
-            // H-3: every requested id MUST resolve to a real Product. Prisma's `in` silently
-            // returns fewer rows for unknown ids — same fail-open class as the prior `.filter(Boolean)`.
-            // Reject unknown ids before they can flow into the order transaction.
-            if (prods.length !== reqProductIds.length) {
-                const foundIds = new Set(prods.map((p) => p.id));
+            if (sps.length !== reqProductIds.length) {
+                const foundIds = new Set(sps.map((sp) => sp.id));
                 const missing = reqProductIds.filter((id) => !foundIds.has(id));
                 console.warn(`[POST /order-requests] 400 — Unknown product ids | missing=${missing.join(',')} user=${user.id}`);
                 return res.status(400).json({
@@ -3709,16 +3987,19 @@ app.post('/order-requests', async (req, res) => {
                     offenders: missing,
                 });
             }
-            const isVisible = (p: any) =>
-                (p.vertical_id == null || p.Vertical?.is_active === true) &&
-                (p.category_id == null || p.Tier2Category?.active === true);
-            const disabled = prods.filter((p) => !isVisible(p));
+            const isVisible = (sp: any) => {
+                const pr = sp.product;
+                return !!pr &&
+                    (pr.vertical_id == null || pr.Vertical?.is_active === true) &&
+                    (pr.category_id == null || pr.Tier2Category?.active === true);
+            };
+            const disabled = sps.filter((sp) => !isVisible(sp));
             if (disabled.length > 0) {
-                console.warn(`[POST /order-requests] 403 — Category disabled | products=${disabled.map((p) => p.id).join(',')} user=${user.id}`);
+                console.warn(`[POST /order-requests] 403 — Category disabled | storeProducts=${disabled.map((sp) => sp.id).join(',')} user=${user.id}`);
                 return res.status(403).json({
                     error: 'CATEGORY_UNAVAILABLE',
-                    message: `Some items are no longer available: ${disabled.map((p) => p.name).join(', ')}. Please remove them from your cart and try again.`,
-                    offenders: disabled.map((p) => p.id),
+                    message: `Some items are no longer available: ${disabled.map((sp) => sp.product?.name).filter(Boolean).join(', ')}. Please remove them from your cart and try again.`,
+                    offenders: disabled.map((sp) => sp.id),
                 });
             }
         }
@@ -3736,8 +4017,15 @@ app.post('/order-requests', async (req, res) => {
                 });
                 const customerName = profile?.fullName || 'Guest';
 
-                // Compute expires_at server-side to prevent client clock drift
-                const expiresAt = new Date(Date.now() + 2 * 60 * 1000); // 2 minutes from now
+                // Compute expires_at server-side to prevent client clock drift.
+                // 2026-06-26: widened 2min → 20min. The 2-minute window started at
+                // request creation — BEFORE the merchant-accept wait AND the Razorpay
+                // payment — so a normal UPI/card payment routinely outran it and the
+                // every-minute cron flipped the ACCEPTED request to EXPIRED mid-pay,
+                // stranding the charge. 20min comfortably covers accept + pay. Paid
+                // orders are ALSO honored past expiry now (see the POST /orders
+                // paid-path gate), so this is defense-in-depth, not the sole fix.
+                const expiresAt = new Date(Date.now() + 20 * 60 * 1000); // 20 minutes from now
 
                 // Parse the human-readable arrival_time into an absolute UTC timestamp for cron-based reminders.
                 // Returns null if format is unrecognized; that's fine — the order just won't get reminders.
@@ -6901,7 +7189,22 @@ app.get('/debug/list-users', async (req, res) => {
 // the fixed code 123456 (verify-otp). For app-store reviewers + internal signup-flow
 // testing when WhatsApp/Wati is unavailable. NOT real users; suffix-matched to
 // tolerate 91 / +91 prefixes. REMOVE post-testing (tracked in forlater.md).
-const OTP_BYPASS_PHONES = ['9959777027', '9100117027'];
+const OTP_BYPASS_PHONES = [
+    '9959777027', // Pranav
+    '9100117027', // Pranav (secondary)
+    // Founders' test team (added 2026-06-26) — default OTP 123456 for
+    // customer-app sign-in, merchant-app sign-in, and merchant-app signup.
+    // TODO(forlater): remove this test allowlist before production scale.
+    '9000916367', // Varsha
+    '8143249793', // Eekshith
+    '7989450764', // Akshaya
+    '8341496050', // Vasu
+    '9391790751', // Nikitha
+    '9676991599', // Anand
+    '8096805347', // Shiva
+    '8247285729', // Karthik
+    '7032857073', // Krishna (Founder — also has admin-dashboard access via isAdmin=true)
+];
 const OTP_BYPASS_CODE = '123456';
 function isOtpBypassPhone(phone: string): boolean {
     const digits = String(phone || '').replace(/\D/g, '');
@@ -7690,7 +7993,7 @@ app.post('/auth/merchant/draft', async (req, res) => {
                         email,
                         phone,
                         status: 'inactive',
-                        kycStatus: 'pending',
+                        kycStatus: 'draft',
                         storeName: null as any,
                         ...(verticalId ? { verticalId } : {})
                     }
@@ -7729,6 +8032,36 @@ app.patch('/auth/merchant/draft', async (req, res) => {
             }
         }
 
+        // STRICT payment gate #2 (2026-06-26): on finalize, verify the subscription
+        // payment is a REAL, captured Razorpay payment for THIS merchant BEFORE we
+        // record the subscription / mark the application submitted. The subscription
+        // row was previously trusted from client-supplied data — a crafted client
+        // could fake "paid". Done OUTSIDE the tx (network I/O). Coupon-covered
+        // (amount 0) signups skip this and are gated by server-side coupon re-validation.
+        if (payload.finalize && Number(payload.subscription?.amount || 0) > 0) {
+            const payId = String(payload.subscription?.paymentId || '');
+            let verified = false;
+            try {
+                if (razorpayInstance && payId) {
+                    const pay: any = await razorpayInstance.payments.fetch(payId);
+                    if (pay && pay.status === 'captured' && pay.order_id) {
+                        const ord: any = await razorpayInstance.orders.fetch(pay.order_id);
+                        const notes = (ord?.notes || {}) as Record<string, any>;
+                        verified = notes.merchantId === userId && notes.paymentType === 'merchant_signup';
+                    }
+                }
+            } catch (e: any) {
+                console.error('[auth/merchant/draft] payment verify error:', e?.message || e);
+            }
+            if (!verified) {
+                console.warn(`[auth/merchant/draft] BLOCKED unverified finalize — merchant ${userId}, payment ${payId}`);
+                return res.status(402).json({
+                    error: 'PAYMENT_NOT_VERIFIED',
+                    message: 'We could not verify your subscription payment. Submission is blocked until payment is confirmed.',
+                });
+            }
+        }
+
         await prisma.$transaction(async (tx) => {
             const updateData: any = {};
             if (payload.ownerName !== undefined) updateData.ownerName = payload.ownerName;
@@ -7745,7 +8078,10 @@ app.patch('/auth/merchant/draft', async (req, res) => {
             if (payload.latitude !== undefined) updateData.latitude = payload.latitude;
             if (payload.longitude !== undefined) updateData.longitude = payload.longitude;
             if (payload.hasBranches !== undefined) updateData.hasBranches = payload.hasBranches;
-            if (payload.kycStatus !== undefined) updateData.kycStatus = payload.kycStatus;
+            // STRICT state machine (2026-06-26): kyc_status is SERVER-controlled. A
+            // draft stays 'draft' (invisible to the admin KYC queue); only a
+            // verified-payment finalize (below) flips it to 'pending'. The client's
+            // kyc_status is intentionally ignored — submission can't be self-asserted.
             if (payload.panNumber !== undefined) updateData.panNumber = payload.panNumber;
             if (payload.aadharNumber !== undefined) updateData.aadharNumber = payload.aadharNumber;
             if (payload.msmeNumber !== undefined) updateData.msmeNumber = payload.msmeNumber;
@@ -7785,7 +8121,7 @@ app.patch('/auth/merchant/draft', async (req, res) => {
                         id: userId,
                         phone: updateData.phone || user.phone || '0000000000',
                         status: updateData.status || 'inactive',
-                        kycStatus: updateData.kycStatus || 'pending',
+                        kycStatus: updateData.kycStatus || 'draft',
                         ...updateData
                     }
                 });
@@ -7829,10 +8165,27 @@ app.patch('/auth/merchant/draft', async (req, res) => {
                     });
                 }
 
-                // Upsert each Store as a UUID-keyed MerchantBranch row. The
-                // frontend's Store.id is reused as MerchantBranch.id (text PK,
-                // accepts any UUID-shaped string).
+                // 2026-06-26 (signup conflict fix): the DB trigger
+                // auto_create_default_branch creates the MAIN branch keyed
+                // id=merchant_id. Reuse that SAME id for the FIRST store so this
+                // upsert UPDATES the trigger's row instead of inserting a SECOND
+                // branch with the same (merchant_id, branch_name) — the unique-
+                // constraint collision that broke KYC. Additional stores keep their
+                // own UUID id. Reject duplicate store names first (they map to the
+                // same unique key) with a clear message instead of a Prisma crash.
+                const seenBranchNames = new Set<string>();
                 for (const s of payload.stores) {
+                    const nm = String(s.name || 'Store').trim().toLowerCase();
+                    if (seenBranchNames.has(nm)) {
+                        throw new Error(`Two of your stores share the name "${String(s.name || 'Store').trim()}". Please give each store a unique name.`);
+                    }
+                    seenBranchNames.add(nm);
+                }
+                for (let sIdx = 0; sIdx < payload.stores.length; sIdx++) {
+                    const s = payload.stores[sIdx];
+                    // First store == the main branch (id == merchant_id), matching the
+                    // trigger-created row; additional stores keep their own UUID id.
+                    const branchId = sIdx === 0 ? userId : s.id;
                     const branchData = {
                         merchantId: userId,
                         // Phase 2 FINAL — F1 (2026-06-16): parent Store is created at
@@ -7853,21 +8206,20 @@ app.patch('/auth/merchant/draft', async (req, res) => {
                         branchPhotos: s.photos || [],
                     };
                     await tx.merchantBranch.upsert({
-                        where: { id: s.id },
+                        where: { id: branchId },
                         update: branchData,
-                        create: { id: s.id, ...branchData },
+                        create: { id: branchId, ...branchData },
                     });
                 }
 
                 // Delete any branches owned by this merchant that are NOT in the
-                // submitted stores[] list — handles store removal. Preserves the
-                // existing main-branch row (id == merchant_id) ONLY if it's not
-                // in the submitted list (so old merchants keep their main row).
-                const submittedIds = payload.stores.map((s: any) => s.id);
+                // current set — handles store removal. The first store is keyed
+                // id=merchant_id (the main branch); the rest by their own UUID.
+                const keepIds = payload.stores.map((s: any, idx: number) => (idx === 0 ? userId : s.id));
                 await tx.merchantBranch.deleteMany({
                     where: {
                         merchantId: userId,
-                        id: { notIn: submittedIds.concat([userId]) }
+                        id: { notIn: keepIds.length ? keepIds : [userId] }
                     }
                 });
             }
@@ -10518,6 +10870,30 @@ app.patch('/admin/merchants/:id', async (req, res) => {
         const id = req.params.id;
         const updates = pick(req.body, ADMIN_MERCHANT_COLS);
         if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No updatable fields provided' });
+
+        // STRICT payment gate (2026-06-26): a merchant can NOT be approved or
+        // activated without a paid subscription. Closes the go-live bypass where a
+        // draft (the merchant row is created at the KYC step, BEFORE payment) could
+        // be approved without paying. The subscription row (status='success') is the
+        // single source of truth for payment; it is written only by /payments
+        // finalize or the Razorpay webhook.
+        const activating =
+            String(updates.status || '').toLowerCase() === 'active' ||
+            ['approved', 'verified'].includes(String(updates.kyc_status || '').toLowerCase());
+        if (activating) {
+            const paid = await prisma.subscription.findFirst({
+                where: { merchantId: id, status: 'success' },
+                select: { id: true },
+            });
+            if (!paid) {
+                console.warn(`[admin/merchants] BLOCKED activation of unpaid merchant ${id} by admin ${admin.id}`);
+                return res.status(402).json({
+                    error: 'PAYMENT_REQUIRED',
+                    message: 'This merchant has not paid the subscription. Approval and activation are blocked until payment is confirmed.',
+                });
+            }
+        }
+
         updates.updated_at = new Date().toISOString();
         const { data, error } = await supabaseAdmin.from('merchants').update(updates).eq('id', id).select().single();
         if (error) throw new Error(error.message);
