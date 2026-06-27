@@ -4,6 +4,38 @@
 
 ---
 
+## Session: June 27, 2026 — "Order Sync Failed" root-caused + fixed once-and-for-all (Change 1 + webhook backstop + consumer OTA)
+
+### Problem
+Founders (Android) charged but got no order/OTP → "Order Sync Failed". Money taken, no order.
+
+### Root causes found
+- **2-min order_request TTL** (`index.ts`, create-order) — far shorter than "wait-for-merchant-accept + Razorpay pay". The every-minute cron flipped ACCEPTED→EXPIRED mid-payment; `POST /orders` then rejected post-payment with a **410 that had no `message`** → app showed its generic fallback. Server-side ⇒ identical on Android + iOS.
+- Those rejections were **early `return`s**, so they bypassed the catch-block inline refund (only thrown errors refund).
+- **`CRON_DRY_RUN=true` on prod** ⇒ the orphan-sweep + SLA-return refunds were **simulated, never issued**. Combined with the above, stranded payments weren't auto-refunded.
+- Consumer Orders status mapper: `CONFIRMED` fell through to the **CANCELLED** fallback on older bundles; `READY` was mislabelled "PREPARING".
+
+### Done + deployed
+- **Change 1 (API, deployed `app-260627_120208574890`):** paid orders are source-of-truth — honored past expiry/EXPIRED (TTL also raised 2→20min); un-fulfillable paid orders THROW into the inline (real) refund. `eb setenv CRON_DRY_RUN=false` shipped in the same chain (refund safety nets now real).
+- **Change 2 (API, deployed `app-260627_130906264321`):** `payment.captured` webhook **backstop** creates the order server-side if the app dies after pay. `postOrdersHandler` extracted (zero behaviour change) + reused via a response-capturing adapter (no duplicated logic = not a patch); idempotent on paymentId+storeId+orderRequestId. create-order stamps `orderRequestIds` into Razorpay notes (server-derived from the user's ACCEPTED requests, so it works for the current consumer build). Verified via Razorpay API that `payment.captured`/`payment.failed`/`refund.processed` are all subscribed (47 events, Enabled).
+- **B1 + C1 + status-mapper (consumer OTA, group `de062873-ce20-4da6-affa-3f0cdced7eff`, runtime 1.1.3, android+ios):** B1 — cache user pre-WebView, fall back in handlePaymentSuccess (soft-auth) instead of dead-ending on session eviction. C1 — post-payment screen "Payment Received / confirming your order" (not "Order Sync Failed"). Mapper — CONFIRMED→Preparing, READY→Ready for Pickup. CheckoutScreen + DiningCheckoutScreen hard-locks overridden (approved) + **relocked**.
+
+### Verified
+- Ajay karthik (7842687373) placed 7 orders post-Change-2: **7 payments → 7 orders, zero duplicates**, all COMPLETED. Backstop idempotency confirmed. The "Cancelled" he saw was a **display bug only** (DB never cancelled) → fixed in mapper, ships via OTA.
+- Stranded-payment scan: `pay_T6Hy2HbojcsP3Z` already refunded; all are ₹1 test amounts.
+
+### Open threads
+- Founders to **retest after the consumer OTA** (force-close+reopen ×2). If still "Cancelled" after two relaunches → they're on an **older build** (runtime ≠ 1.1.3) → need a fresh build.
+- **1 manual refund pending:** `pay_T1sXpZPrO9u34a` (₹1, Karthik 8247285729, Jun 15 — outside the 24h sweep window).
+- When `REQUIRE_ORDERS_AUTH` is later flipped true, B1's no-token path would 401 — ensure session recovery is solid first.
+- Coupon redemption ledger not written on the webhook-backstop path (rare fallback; total still = captured, admin-reconcilable).
+- Housekeeping: `apps/api/dist` + `node_modules/.prisma` are gitignored but still tracked (show M forever) — consider `git rm --cached` to fully clean. `.claude/` is NOT gitignored. Stray 5.6MB `src/assets/Admin Dashboard BG.png` (misplaced) left uncommitted — delete/relocate.
+
+### Commits (branch feat/consumer-global-config-wiring)
+`ee044dc8` API · `a610e760` consumer · `930ae0f5` merchant · `86f39bb7` admin-web · `321ba28a` docs.
+
+---
+
 ## Session: June 26, 2026 — Notifications hardening B1/B2/B3 (applied + deployed + audited)
 
 ### Done
