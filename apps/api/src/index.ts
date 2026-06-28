@@ -9850,7 +9850,11 @@ app.get('/admin/home/super-admin', async (req, res) => {
         const since = new Date(); since.setDate(since.getDate() - days);
 
         const [newCustomers, activeBranches, recentOrders, recentMerchants] = await Promise.all([
-            prisma.user.count({ where: { role: 'CONSUMER', createdAt: { gte: since } } }),
+            // role-model Phase 2 (2026-06-28): count dual-role customers too. The
+            // role='CONSUMER' filter undercounted a store owner who also shops (their
+            // role is flipped to MERCHANT). Mirror the customer LIST's definition
+            // (consumer OR has-placed-an-order), so the dashboard stops hiding them.
+            prisma.user.count({ where: { createdAt: { gte: since }, OR: [{ role: 'CONSUMER' }, { orders: { some: {} } }] } }),
             prisma.merchantBranch.count({ where: { isActive: true } }),
             prisma.order.findMany({
                 orderBy: { createdAt: 'desc' },
