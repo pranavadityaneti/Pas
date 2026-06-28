@@ -7821,6 +7821,25 @@ app.delete('/auth/delete-account', async (req, res) => {
 
         console.log(`[Account Deletion] Initiated for user: ${userId}`);
 
+        // GUARD (2026-06-28): block self-deletion for STORE OWNERS. A merchant carries
+        // paid subscriptions, KYC, and signed legal agreements, plus Merchant/Store/Branch
+        // rows keyed by this SAME id — and this consumer-flow deletion does NOT remove
+        // them. Previously it deleted the auth user anyway, stranding the store (no login,
+        // data orphaned — see tester 9391790751 / "Euphoria"). Merchant closure must be a
+        // deliberate, support-assisted process. (Apple 5.1.1(v) is satisfied: account
+        // deletion remains available — just routed through support for merchants.)
+        const ownedMerchant = await prisma.merchant.findUnique({
+            where: { id: userId },
+            select: { id: true, storeName: true },
+        });
+        if (ownedMerchant) {
+            console.warn(`[Account Deletion] BLOCKED — user ${userId} owns merchant "${ownedMerchant.storeName || ownedMerchant.id}"`);
+            return res.status(409).json({
+                error: 'MERCHANT_ACCOUNT',
+                message: 'This number is registered as a store on PAS. To protect your active subscription, KYC and signed agreements, a merchant account can only be closed by our support team. Please contact support.',
+            });
+        }
+
         // 2. Anonymize orders — keep financial data, strip PII
         const { error: orderError } = await supabaseAdmin
             .from('orders')
@@ -7867,14 +7886,19 @@ app.delete('/auth/delete-account', async (req, res) => {
             console.warn(`[Account Deletion] Favorites cleanup warning:`, favError.message);
         }
 
-        // 6. Delete Prisma user record (if exists)
+        // 6. Delete Prisma user record. If this fails for ANY reason other than
+        // "already gone" (P2025) — e.g. a lingering FK reference — ABORT here, BEFORE
+        // deleting the auth user below. Deleting auth while the User row survives is
+        // exactly what orphans an account (no login, data stranded). Fail loud, not silent.
         try {
             await prisma.user.delete({ where: { id: userId } });
         } catch (prismaErr: any) {
-            // P2025 = Record not found — safe to ignore
             if (prismaErr.code !== 'P2025') {
-                console.warn(`[Account Deletion] Prisma user cleanup warning:`, prismaErr.message);
+                console.error(`[Account Deletion] User row delete failed — ABORTING before auth deletion to avoid an orphan:`, prismaErr.message);
+                Sentry.captureException(prismaErr, { tags: { area: 'auth.delete-account.user-delete' }, extra: { userId } });
+                return res.status(500).json({ error: 'We could not finish deleting your account. Please contact support so we can complete it.' });
             }
+            // P2025 = already gone — safe to proceed to auth deletion.
         }
 
         // 7. Delete Supabase Auth record (FINAL — point of no return)

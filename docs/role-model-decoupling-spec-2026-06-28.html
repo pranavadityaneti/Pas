@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAS — Role-Model Decoupling Spec (2026-06-28)</title>
+<style>
+  :root { --ink:#1a1a1a; --muted:#5c5c5c; --line:#e3e3e3; --bg:#fff; --accent:#B52725; --good:#15803d; --warn:#b45309; --bad:#b91c1c; --code:#f6f7f9; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; color:var(--ink); background:var(--bg); line-height:1.55; max-width:920px; margin:0 auto; padding:32px 24px 80px; }
+  h1 { font-size:26px; margin:0 0 4px; }
+  h2 { font-size:20px; margin:34px 0 10px; padding-top:10px; border-top:2px solid var(--line); }
+  h3 { font-size:16px; margin:20px 0 6px; }
+  .sub { color:var(--muted); font-size:14px; margin:0 0 18px; }
+  code { background:var(--code); padding:1px 5px; border-radius:4px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px; }
+  pre { background:var(--code); border:1px solid var(--line); border-radius:8px; padding:12px 14px; overflow:auto; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; line-height:1.45; }
+  table { border-collapse:collapse; width:100%; margin:12px 0; font-size:14px; }
+  th,td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
+  th { background:#fafafa; }
+  .pill { display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; color:#fff; }
+  .p-bad{background:var(--bad)} .p-warn{background:var(--warn)} .p-good{background:var(--good)} .p-info{background:#374151}
+  .toc { background:#fafafa; border:1px solid var(--line); border-radius:8px; padding:12px 18px; font-size:14px; }
+  .toc a { color:var(--accent); text-decoration:none; } .toc a:hover{text-decoration:underline;}
+  .callout { border-left:4px solid var(--accent); background:#fdf3f3; padding:10px 14px; border-radius:0 8px 8px 0; margin:14px 0; }
+  .decision { border-left:4px solid var(--warn); background:#fffbeb; padding:10px 14px; border-radius:0 8px 8px 0; margin:10px 0; }
+  .file { color:var(--muted); font-family:ui-monospace,monospace; font-size:12px; }
+  ol.phases > li { margin:10px 0; }
+  @media print { body{max-width:none;padding:0;} h2{break-after:avoid;} pre,table{break-inside:avoid;} .toc{display:none;} }
+</style>
+</head>
+<body>
+
+<h1>Role-Model Decoupling — Design Spec</h1>
+<p class="sub">PAS · drafted 2026-06-28 · status: <strong>FOR REVIEW (no code yet, beyond the shipped deletion guard)</strong></p>
+
+<div class="callout">
+<strong>One sentence:</strong> PAS already treats a person as <em>one identity</em> (one phone → one login → one id shared by both apps), but <code>User.role</code> is a single mutually-exclusive label that the merchant paths <strong>overwrite to <code>MERCHANT</code> and never restore</strong> — so the system forgets a store-owner is also a customer. This spec replaces the either/or label with "everyone is a customer; owning a store is an additive capability."
+</div>
+
+<div class="toc">
+<strong>Contents</strong><br>
+<a href="#problem">1. The problem (what the scan found)</a><br>
+<a href="#impact">2. Impact today</a><br>
+<a href="#principle">3. Target model &amp; principle</a><br>
+<a href="#changes">4. Concrete changes by surface</a><br>
+<a href="#rollout">5. Phased rollout</a><br>
+<a href="#risks">6. Risks</a><br>
+<a href="#decisions">7. Open decisions for Pranav</a>
+</div>
+
+<h2 id="problem">1. The problem</h2>
+<p>From the 2026-06-28 codebase scan (evidence cited inline):</p>
+<ul>
+<li><strong>One identity by id.</strong> Both apps call the same phone-keyed <code>/auth/verify-otp</code>; <code>User.id == Merchant.id == Store.id == Branch.id</code> (the owner's auth UUID). <span class="file">index.ts:7321, 7998, 8173, 8217; schema.prisma:211</span></li>
+<li><strong>But <code>User.role</code> is a single scalar</strong> — <code>enum Role { SUPER_ADMIN, OPERATIONS, FINANCE, SUPPORT, MERCHANT, CONSUMER }</code>, <code>@default(CONSUMER)</code>. No "both". <span class="file">schema.prisma:131,1456</span></li>
+<li><strong>The merchant paths overwrite it in place and never restore it:</strong>
+  <ul>
+  <li>Every OTP login auto-flips role→<code>MERCHANT</code> if the phone matches any branch. <span class="file">index.ts:7463-7484</span></li>
+  <li>Merchant signup upserts role→<code>MERCHANT</code>. <span class="file">index.ts:7983 · 8592 ("user might exist as consumer")</span></li>
+  <li>The <code>sync_merchant_data_robust()</code> trigger re-stamps <code>MERCHANT</code> on every merchant write. <span class="file">fix_signup_sync_trigger_storename.sql:51,60</span></li>
+  </ul>
+</li>
+<li><strong>Precedent for the fix already exists:</strong> "is this person an admin?" was split off into a separate boolean <code>User.isAdmin</code> precisely so it survives role overwrites. <span class="file">schema.prisma:134; index.ts:7507</span> — merchant/consumer never got that treatment.</li>
+<li><strong>The one deliberate dual-role accommodation</strong> is notification <code>recipient_role</code> (separates a person's merchant vs customer inbox). <span class="file">schema.prisma:176; useNotifications.ts:54</span></li>
+</ul>
+
+<h2 id="impact">2. Impact today</h2>
+<table>
+<tr><th>#</th><th>Confusion</th><th>Sev</th><th>Effect</th></tr>
+<tr><td>1</td><td>Login auto-flips role→MERCHANT <span class="file">index.ts:7463</span></td><td><span class="pill p-bad">High</span></td><td>Store-owners-who-shop are tagged merchant → any <code>role='CONSUMER'</code> query drops them. <strong>Documented: "35/48 test orders (73%) were hidden"</strong> by exactly this. <span class="file">index.ts:9330</span></td></tr>
+<tr><td>2</td><td>Signup erases the consumer signal <span class="file">index.ts:7983</span></td><td><span class="pill p-bad">High</span></td><td>A customer who opens a store loses "customer" status permanently; no representation of "both".</td></tr>
+<tr><td>3</td><td>No "order from your own store" guard <span class="file">index.ts:2951, 4614</span></td><td><span class="pill p-warn">Med</span></td><td>An owner can order from their own store; that order's <code>customer_id == store.manager_id</code>, so permission/OTP/return/settlement checks can't tell customer from manager.</td></tr>
+<tr><td>4</td><td>Merchant app can't be a customer <span class="file">UserContext.tsx:82</span></td><td><span class="pill p-warn">Med</span></td><td>Types role as MERCHANT/ADMIN/STAFF only; defaults everyone to MERCHANT.</td></tr>
+<tr><td>5</td><td>Notifications split by hand-set <code>recipient_role</code></td><td><span class="pill p-warn">Med</span></td><td>Forget to set it once → a merchant alert lands in the customer inbox (same user_id).</td></tr>
+<tr><td>6</td><td>Email seam (real vs synthetic) <span class="file">index.ts:8588; sql:38</span></td><td><span class="pill p-warn">Med</span></td><td>If the store email ≠ the auto <code>&lt;phone&gt;@phone.pickatstore.app</code>, email-keyed upserts/trigger can rename/desync — the closest the system comes to splitting one person into two rows. (Plus the broken deletion = how tester 9391790751 got two rows.)</td></tr>
+<tr><td>7</td><td>Misc <code>role</code> gates <span class="file">index.ts:9820; CustomerDatabase.tsx:460</span></td><td><span class="pill p-info">Low</span></td><td>Admin "new consumers" count + customer-DB badges undercount/mislabel dual-role people.</td></tr>
+</table>
+
+<h2 id="principle">3. Target model &amp; principle</h2>
+<div class="callout"><strong>Principle:</strong> Identity is one row keyed by the auth id (already true). <strong>Everyone is a consumer by default and can always order.</strong> "Merchant" is a <em>capability</em> derived from <strong>owning a <code>merchants</code>/<code>Store</code> record</strong> — never a label that erases the consumer side. Mirror how <code>isAdmin</code> already works.</div>
+<p>Decision point: <strong>(a)</strong> derive merchant-ness on the fly from "does a <code>merchants</code> row exist for this id" (no schema change, just stop overwriting <code>role</code> and stop gating on it), or <strong>(b)</strong> add an explicit <code>User.isMerchant</code> boolean (cheap to query, survives, symmetrical with <code>isAdmin</code>). Recommendation: <strong>(b)</strong> — explicit, fast, and self-documenting; <code>role</code> then stays at its base value (<code>CONSUMER</code> for almost everyone).</p>
+
+<h2 id="changes">4. Concrete changes by surface</h2>
+
+<h3>A · Stop overwriting <code>role</code></h3>
+<ul>
+<li>JIT provisioning <span class="file">index.ts:7463-7484</span>: drop the <code>role:'MERCHANT'</code> upsert; instead set <code>isMerchant=true</code> (or simply do nothing — the <code>merchants</code> row is the source of truth). Keep linking branch managers via <code>store_staff</code>.</li>
+<li>Merchant signup upserts <span class="file">index.ts:7983, 8592</span> and the trigger <span class="file">fix_signup_sync_trigger_storename.sql:51,60</span>: set <code>isMerchant=true</code>, <strong>do not change <code>role</code></strong> (leave it CONSUMER).</li>
+</ul>
+
+<h3>B · Replace <code>role='CONSUMER'</code> gates with capability logic</h3>
+<ul>
+<li>Admin "new consumers" metric <span class="file">index.ts:9820</span> and customer DB UI <span class="file">CustomerDatabase.tsx:460</span>: define "customer" as <em>has placed an order</em> (or <code>NOT isMerchant-only</code>), not <code>role='CONSUMER'</code>.</li>
+<li>Audit every <code>role === 'CONSUMER'</code> / <code>role !== 'CONSUMER'</code> read repo-wide and re-express in capability terms.</li>
+</ul>
+
+<h3>C · Apps</h3>
+<ul>
+<li>Consumer app already ignores <code>User.role</code> (reads <code>profiles</code> only) — no change needed; a merchant ordering from another store "just works" once the role-gated <em>server</em> queries (B) are fixed.</li>
+<li>Merchant app derives owner/manager from <code>merchants</code>/<code>store_staff</code> at login <span class="file">login.tsx:90-162</span> — already capability-based; just widen <code>UserContext</code> typing so a non-merchant isn't defaulted to MERCHANT. <span class="file">UserContext.tsx:82</span></li>
+</ul>
+
+<h3>D · Self-order policy</h3>
+<div class="decision"><strong>Decision:</strong> when <code>consumer_user_id == branch.merchantId</code> (ordering from your own store): <strong>block</strong> it ("you can't order from your own store") <em>or</em> allow it but exclude from "new customer"/settlement attribution. Recommendation: <strong>block</strong> in <code>POST /order-requests</code> — simplest and avoids self-settlement/coupon-on-self math.</div>
+
+<h3>E · Email seam</h3>
+<ul>
+<li>Prefer id-keyed upserts over email-keyed ones in merchant signup <span class="file">index.ts:8588</span>; keep the auth/synthetic email stable and store the merchant's real/contact email in a <em>separate</em> field (e.g. <code>Merchant.contactEmail</code>) so it never collides with <code>User.email @unique</code>.</li>
+</ul>
+
+<h3>F · Notifications</h3>
+<ul>
+<li>Keep <code>recipient_role</code> (it's the right pattern) but add a server-side assertion/lint so no notification insert can omit it.</li>
+</ul>
+
+<h2 id="rollout">5. Phased rollout</h2>
+<ol class="phases">
+<li><strong>Phase 0 — stop the bleeding.</strong> <span class="pill p-good">DONE 2026-06-28</span> Deletion guard: merchants blocked from the consumer self-delete; consumer delete aborts (no auth-delete) if the User row can't be removed. <span class="file">index.ts /auth/delete-account</span></li>
+<li><strong>Phase 1 — add the capability flag.</strong> Migration: <code>User.isMerchant boolean default false</code>. Backfill <code>true</code> for every id that owns a <code>merchants</code> row. Stop the role overwrites (A) and set <code>isMerchant</code> instead. <em>No behaviour change yet for readers.</em></li>
+<li><strong>Phase 2 — flip the readers.</strong> Re-express the <code>role='CONSUMER'</code> gates (B) in capability terms. Now dual-role people appear correctly in customer lists/counts.</li>
+<li><strong>Phase 3 — restore the base role.</strong> One-time: set <code>role='CONSUMER'</code> for users currently <code>MERCHANT</code> who should be base-consumer (keep <code>isMerchant=true</code>). Verify no reader still depends on <code>role='MERCHANT'</code> for capability.</li>
+<li><strong>Phase 4 — self-order + email seam (C/D/E/F)</strong> as independent hardening.</li>
+<li><strong>Phase 5 — data cleanup.</strong> Repair the already-corrupted accounts (orphaned merchant Users from the old broken deletion; duplicate rows from the email seam) — separate one-off, gated.</li>
+</ol>
+
+<h2 id="risks">6. Risks</h2>
+<ul>
+<li><strong>Hidden readers of <code>role</code>.</strong> Some gate may rely on <code>role='MERCHANT'</code> for a real capability (e.g. an admin or merchant-only endpoint). Phase 1 keeps role intact while we add the flag, so we can migrate readers safely before Phase 3 restores the base value.</li>
+<li><strong>The merchants trigger</strong> is applied via Supabase SQL editor (not Prisma migrate) — must be re-edited in lock-step and re-applied to prod. <span class="file">fix_signup_sync_trigger_storename.sql</span></li>
+<li><strong>RBAC roles</strong> (SUPER_ADMIN/OPERATIONS/FINANCE/SUPPORT) also live on <code>role</code> — decoupling must not disturb staff/admin role handling (already partly shielded by <code>isAdmin</code>).</li>
+</ul>
+
+<h2 id="decisions">7. Open decisions for Pranav</h2>
+<div class="decision">D1 · Capability model: explicit <code>User.isMerchant</code> boolean (recommended) vs derive-from-<code>merchants</code>-row on the fly?</div>
+<div class="decision">D2 · Self-order: <strong>block</strong> ordering from your own store (recommended) vs allow-but-exclude-from-attribution?</div>
+<div class="decision">D3 · Scope/timing: do the full Phases 1–4 now, or just Phase 1–2 (the high-impact "stop hiding customers" part) and defer the rest?</div>
+<div class="decision">D4 · Data repair (Phase 5): blast-radius scan first, then a one-off cleanup script (gated) — go ahead to scan?</div>
+
+<p class="sub" style="margin-top:28px">End of spec. Companion: the shipped Phase-0 deletion guard in <code>apps/api/src/index.ts</code> (<code>DELETE /auth/delete-account</code>).</p>
+
+</body>
+</html>
