@@ -7201,18 +7201,11 @@ app.get('/debug/list-users', async (req, res) => {
 const OTP_BYPASS_PHONES = [
     '9959777027', // Pranav
     '9100117027', // Pranav (secondary)
-    // Founders' test team (added 2026-06-26) — default OTP 123456 for
-    // customer-app sign-in, merchant-app sign-in, and merchant-app signup.
-    // TODO(forlater): remove this test allowlist before production scale.
-    '9000916367', // Varsha
-    '8143249793', // Eekshith
-    '7989450764', // Akshaya
-    '8341496050', // Vasu
-    '9391790751', // Nikitha
-    '9676991599', // Anand
-    '8096805347', // Shiva
-    '8247285729', // Karthik
-    '7032857073', // Krishna (Founder — also has admin-dashboard access via isAdmin=true)
+    // 2026-06-28: the 9 founder test numbers were REMOVED from the 123456 bypass —
+    // the founders' team now signs in with real WhatsApp OTP (Wati reactivated).
+    // Only Pranav's two numbers keep the bypass (app-store review / emergency access).
+    // NB: Krishna's admin-dashboard access is via User.isAdmin=true and is UNAFFECTED
+    // by this removal.
 ];
 const OTP_BYPASS_CODE = '123456';
 function isOtpBypassPhone(phone: string): boolean {

@@ -4,6 +4,39 @@
 
 ---
 
+## Session: June 28, 2026 — Founder-bug triage, account-deletion guard, full role-model decoupling (Phases 0–3), OTP bypass removed
+
+### Founder issues (6) — triaged
+1. "Order sync failed" ordering as customer from same merchant → the consumer OTA (B1/C1 + backstop, shipped June 27) not yet pulled; the webhook backstop creates the order regardless.
+2+3. Deleted account → can't re-signup AND can't log into merchant app → ROOT CAUSE: `DELETE /auth/delete-account` swallowed the `prisma.user.delete` FK failure + never deleted merchant data, then deleted the auth user anyway → orphaned store (no login, data stranded). Same root cause both apps (shared phone).
+4. Merchant marks Ready, customer sees Preparing → YourOrdersScreen status mapper (READY lumped into "Preparing"; CONFIRMED → CANCELLED fallback on old bundles). Fixed in consumer OTA de062873 (June 27).
+5. WhatsApp OTP failed → Wati lapsed (Pranav reactivated).
+6. Notifications only when app open → background push not delivered → needs a native build (FCM/APNs creds).
+
+### Account-deletion guard (role-model Phase 0) — DEPLOYED
+`DELETE /auth/delete-account`: BLOCK store owners (a `merchants` row exists) with 409 "contact support"; if the User row can't be deleted, ABORT before deleting the auth user (no more orphans). app-260628_120311153717. Commit `75a45298`.
+
+### Dual-role identity scan (Explore agent) + spec
+ONE identity by id (auth id == User.id == Merchant/Store/Branch.id, phone-keyed, shared by both apps), BUT `User.role` is a single scalar the merchant paths OVERWRITE to MERCHANT and never restore → store-owners-who-shop hidden from every `role='CONSUMER'` query (a comment records "73% of test orders hidden"). Spec: `docs/role-model-decoupling-spec-2026-06-28.html`. Decisions: explicit `isMerchant` boolean; block self-order; high-impact phases first; scan blast radius.
+
+### Role-model Phases 1–3 — DEPLOYED + VERIFIED
+- Blast radius: 8 stores (1 orphaned = Euphoria, tester Nikitha 9391790751), 33 orphaned User rows, 11 phones with >1 User row, 7 hidden customers, 4 mangled emails — overwhelmingly TEST junk.
+- **P1**: added `User.isMerchant` (mirrors isAdmin) + backfill (8 owners) + trigger sets it; dual-write (role kept). `prisma/role_model_phase1_isMerchant.sql`. Commit `d6f48cab`. Verified 8 = 8.
+- **P2**: customer-count reader → `isMerchant`-aware → un-hid +3 (30d)/7 (all-time). (customer LIST was already widened to "has orders".)
+- **P3**: stopped ALL `role='MERCHANT'` overwrites (JIT/signup/trigger — also stops demoting an admin), migrated readers (legacy guard, customer-list `isMerchant`, merchant-app labels, admin-web "STORE OWNER" badge), restored base role (`UPDATE role='MERCHANT'→'CONSUMER'`). Coordinated rollout: API app-260628_150225558619 → merchant OTA `76dc0278` (rt 1.2.6) → SQL `prisma/role_model_phase3_restore.sql`. Commit `88feee83`. Verified: 0 MERCHANT roles, isMerchant=8.
+
+### OTP bypass trimmed
+`OTP_BYPASS_PHONES` → ONLY Pranav's `9959777027` + `9100117027`. The 9 founder numbers now use real WhatsApp OTP. Krishna's admin access (`isAdmin`) is unaffected.
+
+### Open threads
+- admin-web "STORE OWNER" badge + ALL admin-web changes ship when `feat/consumer-global-config-wiring` merges to **main** (Vercel).
+- **Needs a fresh EAS BUILD (both apps):** #6 background push (FCM/APNs), faster OTA pickup (`fallbackToCacheTimeout`), Sentry activation, and reaching founders on builds whose version ≠ runtime (consumer 1.1.3 / merchant 1.2.6).
+- Founder retest after pulling OTAs (force-close+reopen ×2). Founders now need real WhatsApp OTP to log in.
+- Phase 4 (self-order block + email-seam + notification assertion) + Phase 5 (test-junk data repair) — deferred.
+- 1 manual ₹1 refund: `pay_T1sXpZPrO9u34a` (Karthik, Jun 15).
+
+---
+
 ## Session: June 27, 2026 — "Order Sync Failed" root-caused + fixed once-and-for-all (Change 1 + webhook backstop + consumer OTA)
 
 ### Problem
