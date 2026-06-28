@@ -7470,6 +7470,13 @@ app.post('/auth/verify-otp', async (req, res) => {
             // Ensure the user exists in Prisma with the STAFF role
             await prisma.user.upsert({
                 where: { id: existingUser.id },
+                // role-model Phase 1: deliberately do NOT set isMerchant here. This JIT
+                // path fires for branch MANAGERS too (phone matches a sub-branch), and a
+                // manager does not OWN a store. isMerchant ("owns a merchants row") is set
+                // authoritatively by the sync_merchant_data_robust trigger + the signup
+                // paths + the backfill — so managers stay isMerchant=false and remain
+                // recognised as customers. (role='MERCHANT' is kept for merchant-app access
+                // until Phase 3.)
                 update: { role: 'MERCHANT', name: assignedBranch.managerName || undefined },
                 create: {
                     id: existingUser.id,
@@ -8004,11 +8011,11 @@ app.post('/auth/merchant/draft', async (req, res) => {
             if (existingUser) {
                 await tx.user.update({
                     where: { id: userId },
-                    data: { role: 'MERCHANT', name: ownerName, phone: phone }
+                    data: { role: 'MERCHANT', isMerchant: true, name: ownerName, phone: phone }
                 });
             } else {
                 await tx.user.create({
-                    data: { id: userId, email: email || `${phone}@phone.pickatstore.app`, name: ownerName, role: 'MERCHANT', passwordHash: 'sso_auth_active', phone: phone, updatedAt: new Date() }
+                    data: { id: userId, email: email || `${phone}@phone.pickatstore.app`, name: ownerName, role: 'MERCHANT', isMerchant: true, passwordHash: 'sso_auth_active', phone: phone, updatedAt: new Date() }
                 });
             }
 
@@ -8614,6 +8621,7 @@ app.post('/auth/merchant/signup', async (req, res) => {
                     update: {
                         id: userId,
                         role: 'MERCHANT',
+                        isMerchant: true,
                         name: payload.ownerName,
                         phone: payload.phone
                     },
@@ -8622,6 +8630,7 @@ app.post('/auth/merchant/signup', async (req, res) => {
                         email: payload.email,
                         name: payload.ownerName,
                         role: 'MERCHANT',
+                        isMerchant: true,
                         passwordHash: 'sso_auth_active',
                         phone: payload.phone,
                         updatedAt: new Date()
