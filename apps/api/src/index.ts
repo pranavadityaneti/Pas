@@ -520,6 +520,8 @@ app.post('/payments/create-order', async (req, res) => {
             enrichedNotes.paymentType = 'consumer_order';
             if (userId && userId !== 'unknown') {
                 enrichedNotes.consumerUserId = String(userId);
+                // @lock (2026-06-27) — the webhook backstop DEPENDS on this orderRequestIds
+                // stamping; do not remove/alter without explicit chat-confirmed approval.
                 // Change 2 (A1, 2026-06-27): record WHICH order_requests this payment
                 // covers, stamped into the Razorpay order notes, so the payment.captured
                 // webhook can create the order(s) SERVER-SIDE if the app dies after
@@ -915,6 +917,9 @@ async function handlePaymentCaptured(payment: any) {
 }
 
 /**
+ * @lock (2026-06-27) — MONEY PATH. The webhook order-creation backstop. Do not
+ * edit without explicit chat-confirmed approval from Pranav.
+ *
  * Change 2 (A3, 2026-06-27) — consumer-order webhook backstop.
  * Razorpay confirms a consumer payment was captured. If the app never created the
  * order(s) (Android session eviction / crash / network death after pay), we create
@@ -2939,6 +2944,10 @@ app.get('/consumer/products/search', async (req, res) => {
 // --- Order Routes ---
 
 // Create Order (for testing/Consumer App)
+// @lock (2026-06-27) — ORDER-CREATION MONEY PATH. Change 1 (paid orders honored
+// past the order_request TTL + the 20-min TTL) and Change 2 (webhook-backstop reuse)
+// live in this handler, its order_request gate, and its inner transaction guard.
+// Do not edit without explicit chat-confirmed approval from Pranav.
 // 2026-06-27 (Change 2, Part A2): the POST /orders logic is extracted into this
 // named handler — with ZERO behavior change — so the Razorpay `payment.captured`
 // webhook can create the order through the EXACT same path (validation, stock,

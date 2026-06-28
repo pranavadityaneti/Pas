@@ -4,7 +4,10 @@
 //   - The order card's onPress handler that opens InvoiceModal
 //   - The <InvoiceModal /> render at the bottom of the JSX tree
 //   - The `selectedOrder` / `invoiceVisible` state
-// Other parts of this screen (card layout, statuses, refresh logic) remain freely editable.
+// Other parts of this screen (card layout, refresh logic) remain freely editable.
+// @lock (2026-06-27) — getStatusDisplay (the order status->badge mapper) is LOCKED:
+// it must handle CONFIRMED (paid) and READY explicitly so a paid order never shows
+// "Cancelled", and READY shows "Ready for Pickup". Edit only with chat-confirmed approval.
 import React, { useEffect, useState } from 'react';
 import {
     View, Text, TouchableOpacity, ScrollView,

@@ -1,3 +1,6 @@
+// @lock (2026-06-27) — the draft-state surface (kycStatus + isDraft, consumed by
+// the merchant entry routing payment gate in app/index.tsx) must not be edited
+// without explicit chat-confirmed approval from Pranav. Other context logic is editable.
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import { supabase } from '../lib/supabase';

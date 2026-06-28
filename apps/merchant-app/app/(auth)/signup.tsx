@@ -8,6 +8,9 @@
 // Per-step UI lives in src/screens/signup/steps/Step{Identity,Store,Photos,
 // Branches,Kyc,Subscription,Review}.tsx — those are NOT locked. Edits to
 // THIS file require explicit chat-confirmed approval from Pranav.
+//   2026-06-27 (locked): handlePayment attaches the Supabase access token as
+//   `Authorization: Bearer` on POST /payments/create-order (the merchant
+//   subscription payment) — required by the server's auth gate.
 import React from 'react';
 import { View, Text, TouchableOpacity, Platform, ActivityIndicator, Alert } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';

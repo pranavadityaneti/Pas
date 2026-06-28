@@ -1,3 +1,7 @@
+// @lock (2026-06-27) — merchant entry routing + STRICT payment gate. Unpaid
+// 'draft' merchants are redirected to /(auth)/signup to resume at the payment
+// step; only approved merchants reach the dashboard. Do not edit this routing
+// without explicit chat-confirmed approval from Pranav.
 import { Redirect } from 'expo-router';
 import { View, ActivityIndicator } from 'react-native';
 import { Colors } from '../constants/Colors';

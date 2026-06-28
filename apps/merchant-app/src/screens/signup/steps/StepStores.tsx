@@ -1,3 +1,6 @@
+// @lock (2026-06-27) — the GooglePlacesAutocomplete address-capture styling and the
+// store/branch reconcile payload must not be edited without explicit chat-confirmed
+// approval from Pranav (the blank-dropdown-rows fix lives here).
 /**
  * StepStores — Step 3 of merchant signup (v2 CONSOLIDATED).
  *
