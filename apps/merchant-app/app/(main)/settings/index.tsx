@@ -68,7 +68,7 @@ export default function SettingsScreen() {
             // 1. Fetch User Data
             const { data: userData } = await supabase
                 .from('User')
-                .select('name, role')
+                .select('name, role, isMerchant')
                 .eq('id', authUser.id)
                 .single();
 
@@ -87,7 +87,7 @@ export default function SettingsScreen() {
 
             setUser({
                 name: userData?.name || 'Partner',
-                role: userData?.role === 'MERCHANT' ? 'Admin' : (userData?.role || 'Staff'),
+                role: userData?.isMerchant ? 'Store Owner' : (userData?.role || 'Staff'),
                 branch: storeName, // Default to store name
                 storeName: storeName
             });

@@ -457,12 +457,12 @@ export function CustomerDatabase() {
                           <div>
                             <p className={`font-semibold ${nameMuted ? 'text-gray-400 italic' : 'text-gray-900'}`}>
                               {displayName}
-                              {customer.role && customer.role !== 'CONSUMER' && (
+                              {customer.isMerchant && (
                                 <span
                                   className="ml-2 inline-block text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 align-middle"
-                                  title={`This buyer's account role is ${customer.role} — surfaced because they placed at least one order.`}
+                                  title="This customer also owns a store on PAS."
                                 >
-                                  {customer.role}
+                                  STORE OWNER
                                 </span>
                               )}
                               {/* Q2-C: duplicate hint badge */}

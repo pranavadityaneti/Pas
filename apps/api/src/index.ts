@@ -7470,19 +7470,18 @@ app.post('/auth/verify-otp', async (req, res) => {
             // Ensure the user exists in Prisma with the STAFF role
             await prisma.user.upsert({
                 where: { id: existingUser.id },
-                // role-model Phase 1: deliberately do NOT set isMerchant here. This JIT
-                // path fires for branch MANAGERS too (phone matches a sub-branch), and a
-                // manager does not OWN a store. isMerchant ("owns a merchants row") is set
-                // authoritatively by the sync_merchant_data_robust trigger + the signup
-                // paths + the backfill — so managers stay isMerchant=false and remain
-                // recognised as customers. (role='MERCHANT' is kept for merchant-app access
-                // until Phase 3.)
-                update: { role: 'MERCHANT', name: assignedBranch.managerName || undefined },
+                // role-model Phase 3: do NOT touch role here. This JIT path fires for branch
+                // managers AND owners (and could even match an admin's phone) — all are
+                // CONSUMERs who gain merchant-app access via store_staff/merchants (derived
+                // at login), not via the role scalar. Removing the overwrite also stops an
+                // admin from being silently demoted to MERCHANT. isMerchant is set
+                // authoritatively by the merchants trigger + signup paths + backfill.
+                update: { name: assignedBranch.managerName || undefined },
                 create: {
                     id: existingUser.id,
                     phone: formattedPhone,
                     email: existingUser.email || syntheticEmail,
-                    role: 'MERCHANT',
+                    role: 'CONSUMER',
                     name: assignedBranch.managerName || 'Branch Manager'
                 }
             });
@@ -8011,11 +8010,11 @@ app.post('/auth/merchant/draft', async (req, res) => {
             if (existingUser) {
                 await tx.user.update({
                     where: { id: userId },
-                    data: { role: 'MERCHANT', isMerchant: true, name: ownerName, phone: phone }
+                    data: { isMerchant: true, name: ownerName, phone: phone }   // role-model Phase 3: don't overwrite role; isMerchant marks the owner
                 });
             } else {
                 await tx.user.create({
-                    data: { id: userId, email: email || `${phone}@phone.pickatstore.app`, name: ownerName, role: 'MERCHANT', isMerchant: true, passwordHash: 'sso_auth_active', phone: phone, updatedAt: new Date() }
+                    data: { id: userId, email: email || `${phone}@phone.pickatstore.app`, name: ownerName, role: 'CONSUMER', isMerchant: true, passwordHash: 'sso_auth_active', phone: phone, updatedAt: new Date() }
                 });
             }
 
@@ -8582,7 +8581,7 @@ app.post('/auth/merchant/signup', async (req, res) => {
 
         // 3. Prevent duplicate creation
         const existingMerchant = await prisma.user.findUnique({ where: { id: userId } });
-        if (existingMerchant && existingMerchant.role === 'MERCHANT') {
+        if (existingMerchant && existingMerchant.isMerchant) {   // role-model Phase 3: was role==='MERCHANT'
             return res.status(409).json({ error: 'Merchant already registered' });
         }
 
@@ -8620,8 +8619,7 @@ app.post('/auth/merchant/signup', async (req, res) => {
                     where: { email: payload.email },
                     update: {
                         id: userId,
-                        role: 'MERCHANT',
-                        isMerchant: true,
+                        isMerchant: true,   // role-model Phase 3: don't overwrite role
                         name: payload.ownerName,
                         phone: payload.phone
                     },
@@ -8629,7 +8627,7 @@ app.post('/auth/merchant/signup', async (req, res) => {
                         id: userId,
                         email: payload.email,
                         name: payload.ownerName,
-                        role: 'MERCHANT',
+                        role: 'CONSUMER',
                         isMerchant: true,
                         passwordHash: 'sso_auth_active',
                         phone: payload.phone,
@@ -9385,6 +9383,7 @@ app.get('/admin/customers', async (req, res) => {
                     phone: true,
                     status: true,
                     role: true,
+                    isMerchant: true,   // role-model Phase 3: lets the admin "store owner" badge survive the role decoupling
                     createdAt: true,
                     orders: {
                         select: {

@@ -39,6 +39,8 @@ export type Customer = {
   status: 'active' | 'suspended';
   /** User.role — typically CONSUMER but MERCHANT-tier users who also placed orders surface here too. */
   role: string;
+  /** Owns a store (role-decoupled merchant flag). Drives the "Store owner" badge. */
+  isMerchant: boolean;
   avatar_url: string | null;
   created_at: string;
   order_count:            number;
@@ -136,6 +138,7 @@ export function useCustomers() {
           ltv,
           status:                (u.status === 'suspended' ? 'suspended' : 'active') as 'active' | 'suspended',
           role:                  u.role ?? 'CONSUMER',
+          isMerchant:            Boolean((u as any).isMerchant),
           avatar_url:            null,
           created_at:            u.createdAt,
           order_count:           orderCount,

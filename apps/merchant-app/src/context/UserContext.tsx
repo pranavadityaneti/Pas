@@ -8,6 +8,7 @@ type UserProfile = {
     phone: string; // The user's phone number as stored in 'User' table (or auth metadata)
     name: string | null;
     role: 'MERCHANT' | 'ADMIN' | 'STAFF';
+    isMerchant?: boolean;   // role-model: "owns a store", decoupled from the role scalar
     notification_preferences?: {
         newOrder: boolean;
         orderCancelled: boolean;
